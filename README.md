@@ -135,6 +135,10 @@ npm install
 npm run dev
 ```
 
+> Shortcut: a `Makefile` wraps the common commands — run `make help` to list
+> them (`make build`, `make test`, `make run-api`, `make seed`,
+> `make parsedemo DEMO=…`, `make steamcheck`, `make up`, …).
+
 ## Try the parser on a real demo
 
 No database required:
