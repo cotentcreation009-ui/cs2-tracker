@@ -75,8 +75,9 @@ func (s *Server) Router() http.Handler {
 		MaxAge:           300,
 	}))
 
-	// Prometheus metrics at the root (not under /api, so it isn't rate-limited).
+	// Prometheus metrics + the OpenAPI spec at the root (not rate-limited).
 	r.Get("/metrics", s.handleMetrics)
+	r.Get("/openapi.yaml", s.handleOpenAPI)
 
 	r.Route("/api", func(r chi.Router) {
 		if s.cfg.RateLimitRPS > 0 {
