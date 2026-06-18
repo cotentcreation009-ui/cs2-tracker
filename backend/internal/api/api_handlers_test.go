@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,14 @@ type fakeStore struct {
 	top      func(int) ([]models.LeaderboardEntry, error)
 	kills    func(int64) ([]models.Kill, error)
 	job      func(string) (models.IngestJob, error)
+	ping     func() error
+}
+
+func (f *fakeStore) Ping(context.Context) error {
+	if f.ping != nil {
+		return f.ping()
+	}
+	return nil
 }
 
 func (f *fakeStore) GetProfile(_ context.Context, id uint64) (models.PlayerProfile, error) {
@@ -195,5 +204,27 @@ func TestHandleJobNotFound(t *testing.T) {
 	w := doGET(routerWith(&fakeStore{}), "/api/jobs/zzz")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("code = %d, want 404", w.Code)
+	}
+}
+
+func TestHealthDBOK(t *testing.T) {
+	w := doGET(routerWith(&fakeStore{}), "/api/health")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", w.Code)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s["database"] != "ok" || s["status"] != "ok" {
+		t.Errorf("unexpected health: %+v", s)
+	}
+}
+
+func TestHealthDBDown(t *testing.T) {
+	store := &fakeStore{ping: func() error { return errors.New("connection refused") }}
+	w := doGET(routerWith(store), "/api/health")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("code = %d, want 503 when DB is down", w.Code)
 	}
 }

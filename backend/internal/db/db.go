@@ -49,6 +49,9 @@ func (d *DB) Close() {
 	}
 }
 
+// Ping verifies database connectivity (used by the API readiness check).
+func (d *DB) Ping(ctx context.Context) error { return d.Pool.Ping(ctx) }
+
 // Migrate applies any embedded migrations that have not yet run. Migrations are
 // applied in filename order and tracked in schema_migrations, so it is safe to
 // call on every service start.

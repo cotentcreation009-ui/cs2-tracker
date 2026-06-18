@@ -39,6 +39,7 @@ type Store interface {
 	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
 	InsertJob(ctx context.Context, j models.IngestJob) error
 	GetJob(ctx context.Context, id string) (models.IngestJob, error)
+	Ping(ctx context.Context) error
 }
 
 // Server holds the API dependencies.
@@ -102,8 +103,24 @@ func (s *Server) Router() http.Handler {
 // --- handlers ---------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// Readiness probe: a healthy API must be able to reach Postgres.
+	code := http.StatusOK
+	dbStatus := "unknown"
+	if s.db != nil {
+		if err := s.db.Ping(r.Context()); err != nil {
+			dbStatus = "down"
+			code = http.StatusServiceUnavailable
+		} else {
+			dbStatus = "ok"
+		}
+	}
+	overall := "ok"
+	if code != http.StatusOK {
+		overall = "degraded"
+	}
 	status := map[string]any{
-		"status":      "ok",
+		"status":      overall,
+		"database":    dbStatus,
 		"steamApiKey": s.cfg.HasSteamKey(),
 		"time":        time.Now().UTC(),
 	}
@@ -112,7 +129,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			status["queueDepth"] = depth
 		}
 	}
-	writeJSON(w, http.StatusOK, status)
+	writeJSON(w, code, status)
 }
 
 // handleResolve maps a vanity name or raw SteamID64 to a SteamID64.
