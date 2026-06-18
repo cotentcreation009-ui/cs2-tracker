@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ApiError, getMatch, getMatchKills } from "@/lib/api";
 import { Scoreboard } from "@/components/Scoreboard";
 import { RoundTimeline } from "@/components/RoundTimeline";
+import { EconomyStrip } from "@/components/EconomyStrip";
 import { Killfeed } from "@/components/Killfeed";
 import { FetchError } from "@/components/FetchError";
 import { BackButton } from "@/components/BackButton";
@@ -74,6 +75,8 @@ export default async function MatchPage({
       </section>
 
       <RoundTimeline rounds={rounds} />
+
+      <EconomyStrip rounds={rounds} />
 
       <Scoreboard
         players={players}

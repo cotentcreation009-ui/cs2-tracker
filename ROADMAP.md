@@ -14,6 +14,25 @@ edge over — Leetify and csgostats.gg. Each phase is shippable on its own.
 - Postgres schema + embedded migrations; Redis queue + cache.
 - Steam-mirroring `/id` and `/profiles` routes; polished profile + match pages.
 
+## ✅ Shipped since (milestones 2–13)
+
+Built and verified after the foundation (each commit build/test-checked and
+adversarially reviewed):
+
+- **Weapon analytics + match killfeed** (surfacing the stored kill events).
+- **Per-map performance breakdown** and **opening-duel / clutch-conversion**
+  profile metrics.
+- **Homepage leaderboard** (top tracked players by rating).
+- **Persisted parse-job status** (`jobs` table + pollable `GET /api/jobs/{id}`,
+  worker status transitions) and an **in-browser ingest UI** with live polling.
+- **Steam key verified live** + client **retry/backoff** with rate-limit handling.
+- **Round economy / buy-type classification** (eco/force/full/pistol per round;
+  thresholds heuristic, pending real-demo tuning).
+- **Frontend robustness**: error boundary, 404, loading skeletons, dynamic
+  per-page metadata.
+- **Per-IP API rate limiting**; **testable API layer** (Store interface + handler
+  tests); **GitHub Actions CI** (build/vet/gofmt/test, tsc, next build, images).
+
 ---
 
 ## Phase 2 — Automatic match ingestion (the "it's magic" moment)
@@ -30,9 +49,9 @@ The single biggest UX win Leetify has is: connect once, your matches just appear
    `GetNextMatchSharingCode` so new matchmaking games auto-enqueue.
 3. **Steam OpenID login.** Let users sign in with Steam so ingestion and "this is
    me" highlighting are tied to an account.
-4. **Idempotent ingest + retries.** Promote the queue from a plain list to
-   reliable delivery: visibility timeout, max-retries, dead-letter list, and a
-   `jobs` table for status the `/api/ingest` caller can poll.
+4. **Reliable delivery.** ✅ The `jobs` table + pollable status are shipped;
+   still to do: promote the plain-list queue to visibility timeouts, max-retries
+   and a dead-letter list.
 
 ## Phase 3 — Depth that pros actually want
 
@@ -41,8 +60,9 @@ The single biggest UX win Leetify has is: connect once, your matches just appear
   common smoke/flash lineups.
 - **Aim & mechanics analysis.** Time-to-damage, crosshair placement, spray
   control, counter-strafing %, preaim — derived from tick-level player/view data.
-- **Round economy & impact.** Eco/force/full-buy detection, impact rating
-  (weighting opening picks and clutches above filler frags), per-side splits.
+- **Impact rating.** ✅ Eco/force/full-buy detection is shipped; still to do: an
+  impact rating weighting opening picks and clutches above filler frags, per-side
+  splits, and real-demo tuning of the buy thresholds.
 - **Utility grading.** Flash assists, enemies blinded duration, HE/molly damage,
   smoke coverage quality.
 
@@ -69,13 +89,14 @@ The single biggest UX win Leetify has is: connect once, your matches just appear
 
 ## Cross-cutting engineering backlog
 
-- Integration tests against a throwaway Postgres (Testcontainers) for the `db`
-  and `api` layers; a small committed demo fixture for a parser golden test.
+- ✅ CI: GitHub Actions running `go test`, `go vet`, `gofmt`, `tsc`, `next build`
+  and building both images — shipped.
+- ✅ API handler tests via a fake `Store` — shipped. Still to do: integration
+  tests against a throwaway Postgres (Testcontainers) for the `db` layer, and a
+  small committed demo fixture for a parser golden test.
 - Observability: structured request logs (in place), plus metrics
   (parse duration, queue depth, cache hit rate) and tracing.
 - Rating model: validate Rating 1.0 against known matches, then add an
   impact-weighted Rating 2.0-style model with documented coefficients.
 - Robustness: handle reconnects/substitutes/coaches, surrendered matches, and
   non-MM formats (wingman, faceit knife rounds) in round detection.
-- CI: GitHub Actions running `go test`, `go vet`, `tsc`, `next build`, and
-  building both images on every push.
