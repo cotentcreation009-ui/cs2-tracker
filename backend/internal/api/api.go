@@ -32,6 +32,7 @@ type Store interface {
 	GetProfile(ctx context.Context, steamID uint64) (models.PlayerProfile, error)
 	UpsertPlayer(ctx context.Context, p models.Player) error
 	ListPlayerMatches(ctx context.Context, steamID uint64, limit, offset int) ([]models.PlayerMatchSummary, error)
+	CountPlayerMatches(ctx context.Context, steamID uint64) (int, error)
 	GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDetail, error)
 	GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error)
 	GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error)
@@ -282,7 +283,13 @@ func (s *Server) handlePlayerMatches(w http.ResponseWriter, r *http.Request) {
 	if matches == nil {
 		matches = []models.PlayerMatchSummary{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"matches": matches, "limit": limit, "offset": offset})
+	total, cerr := s.db.CountPlayerMatches(r.Context(), id)
+	if cerr != nil {
+		total = len(matches) + offset // best-effort fallback
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"matches": matches, "limit": limit, "offset": offset, "total": total,
+	})
 }
 
 func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {

@@ -29,6 +29,14 @@ type fakeStore struct {
 	kills    func(int64) ([]models.Kill, error)
 	job      func(string) (models.IngestJob, error)
 	ping     func() error
+	count    func(uint64) (int, error)
+}
+
+func (f *fakeStore) CountPlayerMatches(_ context.Context, id uint64) (int, error) {
+	if f.count != nil {
+		return f.count(id)
+	}
+	return 0, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error {
@@ -156,6 +164,29 @@ func TestHandleLeaderboard(t *testing.T) {
 	}
 	if len(resp.Players) != 1 || resp.Players[0].PersonaName != "a" {
 		t.Errorf("unexpected: %+v", resp.Players)
+	}
+}
+
+func TestHandlePlayerMatchesTotal(t *testing.T) {
+	store := &fakeStore{
+		matches: func(uint64, int, int) ([]models.PlayerMatchSummary, error) {
+			return []models.PlayerMatchSummary{{}, {}}, nil // 2 on this page
+		},
+		count: func(uint64) (int, error) { return 25, nil }, // 25 overall
+	}
+	w := doGET(routerWith(store), "/api/players/76561198000000001/matches?limit=2")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var resp struct {
+		Matches []models.PlayerMatchSummary `json:"matches"`
+		Total   int                         `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Matches) != 2 || resp.Total != 25 {
+		t.Errorf("matches=%d total=%d, want 2 and 25", len(resp.Matches), resp.Total)
 	}
 }
 

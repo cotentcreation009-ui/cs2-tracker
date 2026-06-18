@@ -47,17 +47,28 @@ func main() {
 		fail(err)
 	}
 
-	matches := []*models.ParsedMatch{
-		buildMatch("de_mirage", time.Now().Add(-26*time.Hour), 16, 12, 1),
-		buildMatch("de_inferno", time.Now().Add(-3*time.Hour), 13, 16, 2),
-		buildMatch("de_nuke", time.Now().Add(-50*time.Minute), 16, 9, 3),
+	// A spread of matches so the trend, form guide, map breakdown, leaderboard
+	// and pagination all have real depth to show.
+	maps := []string{
+		"de_mirage", "de_inferno", "de_nuke", "de_ancient",
+		"de_anubis", "de_overpass", "de_vertigo",
 	}
-	for _, m := range matches {
+	base := time.Now()
+	const numMatches = 24
+	for i := 0; i < numMatches; i++ {
+		won := i%3 != 0     // hero wins ~2/3
+		opp := 5 + (i*3)%11 // losing-side score 5..15
+		scoreA, scoreB := 16, opp
+		if !won {
+			scoreA, scoreB = opp, 16
+		}
+		playedAt := base.Add(-time.Duration(i*7) * time.Hour) // ~1 week back
+		m := buildMatch(maps[i%len(maps)], playedAt, scoreA, scoreB, uint64(i+1))
 		id, err := database.InsertParsedMatch(ctx, m)
 		if err != nil {
 			fail(err)
 		}
-		fmt.Printf("seeded %s -> match id %d\n", m.Match.Map, id)
+		fmt.Printf("seeded %-12s %2d-%2d -> match id %d\n", m.Match.Map, scoreA, scoreB, id)
 	}
 
 	fmt.Printf("\nDone. View the hero profile at:\n  GET /api/players/%d\n  http://localhost:3000/profiles/%d\n", heroID, heroID)

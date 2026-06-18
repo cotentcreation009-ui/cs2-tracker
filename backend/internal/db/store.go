@@ -98,6 +98,14 @@ func (d *DB) ListPlayerMatches(ctx context.Context, steamID uint64, limit, offse
 	return out, rows.Err()
 }
 
+// CountPlayerMatches returns how many matches a player has (for pagination).
+func (d *DB) CountPlayerMatches(ctx context.Context, steamID uint64) (int, error) {
+	var n int
+	err := d.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM match_players WHERE steam_id64=$1`, int64(steamID)).Scan(&n)
+	return n, err
+}
+
 // GetMatchDetail returns a single match with its full scoreboard and rounds.
 func (d *DB) GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDetail, error) {
 	var detail models.MatchDetail
