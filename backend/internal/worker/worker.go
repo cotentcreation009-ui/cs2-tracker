@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -18,6 +19,11 @@ import (
 	"github.com/cs2tracker/server/internal/parser"
 	"github.com/cs2tracker/server/internal/queue"
 )
+
+// Dequeuer is the queue surface the run loop needs (satisfied by *queue.Queue).
+type Dequeuer interface {
+	Dequeue(ctx context.Context, timeout time.Duration) (*queue.Job, error)
+}
 
 // Store is the persistence the worker needs.
 type Store interface {
@@ -58,8 +64,50 @@ func New(store Store, c *cache.Cache, workDir string, deleteRaw bool, jobTimeout
 	}
 }
 
-// Process runs one job to a terminal status (done | failed).
-func (w *Worker) Process(ctx context.Context, job *queue.Job) {
+// Run starts `concurrency` goroutines that each block-pop jobs and Process them
+// until ctx is cancelled, then waits for in-flight jobs to finish. This is the
+// per-worker parallelism knob for scaling parse throughput.
+func (w *Worker) Run(ctx context.Context, q Dequeuer, concurrency int) {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				job, err := q.Dequeue(ctx, 5*time.Second)
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					w.Log.Error("dequeue failed", "err", err)
+					select { // cancel-aware backoff on transient errors
+					case <-ctx.Done():
+						return
+					case <-time.After(time.Second):
+					}
+					continue
+				}
+				if job == nil {
+					continue // poll timeout
+				}
+				w.Process(job)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// Process runs one job to a terminal status (done | failed). It is independent
+// of any dequeue/shutdown context: an accepted job gets its own timeout and runs
+// to completion, so the run loop can stop taking new work on shutdown while
+// in-flight jobs drain.
+func (w *Worker) Process(job *queue.Job) {
 	log := w.Log.With("jobId", job.ID, "type", job.Type)
 	if job.Type != queue.JobParseDemo {
 		log.Warn("unknown job type, skipping")
@@ -68,7 +116,7 @@ func (w *Worker) Process(ctx context.Context, job *queue.Job) {
 	}
 
 	w.setStatus(job.ID, models.JobRunning, nil, "")
-	matchID, err := w.runParse(ctx, job, log)
+	matchID, err := w.runParse(job, log)
 	if err != nil {
 		log.Error("job failed", "err", err)
 		w.setStatus(job.ID, models.JobFailed, nil, err.Error())
@@ -77,8 +125,10 @@ func (w *Worker) Process(ctx context.Context, job *queue.Job) {
 	w.setStatus(job.ID, models.JobDone, &matchID, "")
 }
 
-func (w *Worker) runParse(ctx context.Context, job *queue.Job, log *slog.Logger) (int64, error) {
-	jobCtx, cancel := context.WithTimeout(ctx, w.JobTimeout)
+func (w *Worker) runParse(job *queue.Job, log *slog.Logger) (int64, error) {
+	// Rooted in Background (not the shutdown ctx) so an accepted job is not
+	// aborted mid-parse on shutdown; bounded only by JobTimeout.
+	jobCtx, cancel := context.WithTimeout(context.Background(), w.JobTimeout)
 	defer cancel()
 
 	res, err := w.Resolve(jobCtx, *job, w.WorkDir)

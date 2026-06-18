@@ -27,10 +27,11 @@ type Config struct {
 	SteamAPIKey string // key from https://steamcommunity.com/dev/apikey (optional until provided)
 
 	// Demo pipeline
-	DemoQueueKey  string        // redis list key used as the parse job queue
-	DemoWorkDir   string        // scratch dir where demos are downloaded/extracted before parsing
-	DeleteRawDemo bool          // delete the raw .dem after a successful parse (parse-once policy)
-	JobTimeout    time.Duration // max time a single parse job may run
+	DemoQueueKey      string        // redis list key used as the parse job queue
+	DemoWorkDir       string        // scratch dir where demos are downloaded/extracted before parsing
+	DeleteRawDemo     bool          // delete the raw .dem after a successful parse (parse-once policy)
+	JobTimeout        time.Duration // max time a single parse job may run
+	WorkerConcurrency int           // number of jobs a single worker parses in parallel
 
 	// Caching
 	CacheTTL time.Duration // TTL for cached aggregate payloads in redis
@@ -54,18 +55,19 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		HTTPAddr:       getEnv("HTTP_ADDR", ":8080"),
-		CORSOrigins:    splitAndTrim(getEnv("CORS_ORIGINS", "http://localhost:3000")),
-		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
-		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		SteamAPIKey:    getEnv("STEAM_API_KEY", ""),
-		DemoQueueKey:   getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
-		DemoWorkDir:    getEnv("DEMO_WORK_DIR", os.TempDir()),
-		DeleteRawDemo:  getBool("DELETE_RAW_DEMO", true),
-		JobTimeout:     getDuration("JOB_TIMEOUT", 10*time.Minute),
-		CacheTTL:       getDuration("CACHE_TTL", 5*time.Minute),
-		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 10),
-		RateLimitBurst: getInt("RATE_LIMIT_BURST", 20),
+		HTTPAddr:          getEnv("HTTP_ADDR", ":8080"),
+		CORSOrigins:       splitAndTrim(getEnv("CORS_ORIGINS", "http://localhost:3000")),
+		DatabaseURL:       getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
+		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
+		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
+		DemoWorkDir:       getEnv("DEMO_WORK_DIR", os.TempDir()),
+		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),
+		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
+		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
+		CacheTTL:          getDuration("CACHE_TTL", 5*time.Minute),
+		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
 	}
 
 	if cfg.DatabaseURL == "" {

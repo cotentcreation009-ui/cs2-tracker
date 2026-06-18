@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
@@ -69,28 +68,11 @@ func run(log *slog.Logger) error {
 	}
 
 	w := worker.New(database, c, workDir, cfg.DeleteRawDemo, cfg.JobTimeout, log)
-	log.Info("worker started", "queue", cfg.DemoQueueKey, "workDir", workDir)
+	log.Info("worker started",
+		"queue", cfg.DemoQueueKey, "workDir", workDir, "concurrency", cfg.WorkerConcurrency)
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("worker shutting down")
-			return nil
-		default:
-		}
-
-		job, err := q.Dequeue(ctx, 5*time.Second)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Error("dequeue failed", "err", err)
-			time.Sleep(time.Second) // brief backoff on transient Redis errors
-			continue
-		}
-		if job == nil {
-			continue // poll timeout, loop again
-		}
-		w.Process(ctx, job)
-	}
+	// Blocks until ctx is cancelled and in-flight jobs drain.
+	w.Run(ctx, q, cfg.WorkerConcurrency)
+	log.Info("worker shutting down")
+	return nil
 }

@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ type statusCall struct {
 }
 
 type fakeStore struct {
+	mu        sync.Mutex
 	statuses  []statusCall
 	matchID   int64
 	insertErr error
@@ -33,8 +36,33 @@ func (f *fakeStore) InsertParsedMatch(context.Context, *models.ParsedMatch) (int
 }
 
 func (f *fakeStore) SetJobStatus(_ context.Context, _ string, status string, matchID *int64, errMsg string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.statuses = append(f.statuses, statusCall{status, matchID, errMsg})
 	return nil
+}
+
+func (f *fakeStore) countStatus(status string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, s := range f.statuses {
+		if s.status == status {
+			n++
+		}
+	}
+	return n
+}
+
+type fakeQueue struct{ ch chan *queue.Job }
+
+func (f *fakeQueue) Dequeue(ctx context.Context, _ time.Duration) (*queue.Job, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case j := <-f.ch:
+		return j, nil
+	}
 }
 
 func testWorker(store Store, resolve Resolver, parse ParseFunc) *Worker {
@@ -61,7 +89,7 @@ func TestProcessSuccess(t *testing.T) {
 		return &models.ParsedMatch{Players: []models.MatchPlayer{{SteamID64: 1}}}, nil
 	})
 
-	w.Process(context.Background(), &queue.Job{ID: "j1", Type: queue.JobParseDemo})
+	w.Process(&queue.Job{ID: "j1", Type: queue.JobParseDemo})
 
 	if len(fs.statuses) != 2 {
 		t.Fatalf("expected running+done, got %+v", fs.statuses)
@@ -80,7 +108,7 @@ func TestProcessParseFailure(t *testing.T) {
 		return nil, errors.New("corrupt demo")
 	})
 
-	w.Process(context.Background(), &queue.Job{ID: "j2", Type: queue.JobParseDemo})
+	w.Process(&queue.Job{ID: "j2", Type: queue.JobParseDemo})
 
 	if len(fs.statuses) != 2 || fs.statuses[1].status != models.JobFailed {
 		t.Fatalf("expected running+failed, got %+v", fs.statuses)
@@ -101,7 +129,7 @@ func TestProcessResolveFailure(t *testing.T) {
 			return nil, nil
 		})
 
-	w.Process(context.Background(), &queue.Job{ID: "j3", Type: queue.JobParseDemo})
+	w.Process(&queue.Job{ID: "j3", Type: queue.JobParseDemo})
 
 	if len(fs.statuses) != 2 || fs.statuses[1].status != models.JobFailed {
 		t.Errorf("expected running+failed, got %+v", fs.statuses)
@@ -114,7 +142,7 @@ func TestProcessInsertFailure(t *testing.T) {
 		return &models.ParsedMatch{}, nil
 	})
 
-	w.Process(context.Background(), &queue.Job{ID: "j5", Type: queue.JobParseDemo})
+	w.Process(&queue.Job{ID: "j5", Type: queue.JobParseDemo})
 
 	if len(fs.statuses) != 2 || fs.statuses[1].status != models.JobFailed {
 		t.Errorf("expected running+failed on persist error, got %+v", fs.statuses)
@@ -127,9 +155,46 @@ func TestProcessUnknownType(t *testing.T) {
 		return &models.ParsedMatch{}, nil
 	})
 
-	w.Process(context.Background(), &queue.Job{ID: "j4", Type: "bogus"})
+	w.Process(&queue.Job{ID: "j4", Type: "bogus"})
 
 	if len(fs.statuses) != 1 || fs.statuses[0].status != models.JobFailed {
 		t.Errorf("expected a single failed status, got %+v", fs.statuses)
+	}
+}
+
+func TestRunProcessesAllJobs(t *testing.T) {
+	const n = 12
+	fs := &fakeStore{matchID: 1}
+	w := testWorker(fs, okResolve, func(string) (*models.ParsedMatch, error) {
+		return &models.ParsedMatch{}, nil
+	})
+
+	fq := &fakeQueue{ch: make(chan *queue.Job, n)}
+	for i := 0; i < n; i++ {
+		fq.ch <- &queue.Job{ID: fmt.Sprintf("j%d", i), Type: queue.JobParseDemo}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(ctx, fq, 4); close(done) }()
+
+	deadline := time.After(5 * time.Second)
+	for fs.countStatus(models.JobDone) < n {
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatalf("only %d/%d jobs done before timeout", fs.countStatus(models.JobDone), n)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancel")
+	}
+	if got := fs.countStatus(models.JobDone); got != n {
+		t.Errorf("done count = %d, want %d", got, n)
 	}
 }
