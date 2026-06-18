@@ -271,11 +271,11 @@ func (c *Client) getJSON(ctx context.Context, path string, q url.Values, dst any
 	switch resp.StatusCode {
 	case http.StatusOK:
 		// fall through
-	case http.StatusForbidden, http.StatusUnauthorized:
-		// Steam returns 403 for private profiles / bad key on stats calls.
-		return ErrNotFound
-	case http.StatusInternalServerError:
-		// GetUserStatsForGame answers 500 when a profile has no stats.
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError:
+		// Steam signals "no data for this user/app" on GetUserStatsForGame with
+		// 400 or 500 (profile private, or never played the game — confirmed live
+		// against an account with no CS2 stats), and rejects a bad key with
+		// 401/403. Treat them all as not-found so callers degrade gracefully.
 		return ErrNotFound
 	default:
 		return fmt.Errorf("steam: unexpected status %d for %s", resp.StatusCode, path)

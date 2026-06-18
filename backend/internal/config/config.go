@@ -40,8 +40,14 @@ type Config struct {
 // the services start cleanly in local development. It never fails on a missing
 // Steam key: that is provided later and validated at call time instead.
 func Load() (*Config, error) {
-	// Best-effort .env load. Missing file is fine — real env wins regardless.
-	_ = godotenv.Load(".env", "../.env", "../../.env")
+	// Best-effort .env load from the working dir and up to two parents. Each path
+	// is loaded independently because godotenv.Load stops at the first missing
+	// file (so passing all three at once would bail before reaching a parent).
+	// godotenv never overrides already-set environment variables, so real env
+	// still wins.
+	for _, p := range []string{".env", "../.env", "../../.env"} {
+		_ = godotenv.Load(p)
+	}
 
 	cfg := &Config{
 		HTTPAddr:      getEnv("HTTP_ADDR", ":8080"),

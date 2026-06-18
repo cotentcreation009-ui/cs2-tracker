@@ -74,6 +74,20 @@ func TestGetUserStatsForGame(t *testing.T) {
 	}
 }
 
+func TestGetUserStatsForGameNoStats(t *testing.T) {
+	// Steam returns 400 for an account that has no stats for the app (e.g. never
+	// played CS2). The client must surface ErrNotFound, not a hard error.
+	for _, code := range []int{400, 403, 500} {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(code)
+		})
+		_, err := c.GetUserStatsForGame(context.Background(), AppIDCS2, 76561197960287930)
+		if err != ErrNotFound {
+			t.Errorf("status %d: err = %v, want ErrNotFound", code, err)
+		}
+	}
+}
+
 func TestNoAPIKey(t *testing.T) {
 	c := New("")
 	if _, err := c.ResolveVanityURL(context.Background(), "x"); err != ErrNoAPIKey {
