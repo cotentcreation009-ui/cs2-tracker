@@ -16,6 +16,8 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(ww, r)
 
+		s.metrics.observe(ww.Status())
+
 		level := slog.LevelInfo
 		switch {
 		case ww.Status() >= 500:

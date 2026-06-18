@@ -196,6 +196,7 @@ It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
 | POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`); returns a pollable `jobId` |
 | GET  | `/api/jobs/{id}` | Parse-job status (`queued`/`running`/`done`/`failed`, with `matchId` on success) |
 | GET  | `/api/queue` | Pending job count |
+| GET  | `/metrics` | Prometheus HTTP request counters (root path, not rate-limited) |
 
 ## The steamcommunity-TLD redirect trick
 

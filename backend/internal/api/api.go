@@ -44,18 +44,19 @@ type Store interface {
 
 // Server holds the API dependencies.
 type Server struct {
-	cfg   *config.Config
-	db    Store
-	steam *steam.Client
-	queue *queue.Queue
-	cache *cache.Cache
-	log   *slog.Logger
+	cfg     *config.Config
+	db      Store
+	steam   *steam.Client
+	queue   *queue.Queue
+	cache   *cache.Cache
+	log     *slog.Logger
+	metrics *metrics
 }
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
 // degrade gracefully).
 func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: store, steam: steamClient, queue: q, cache: c, log: log}
+	return &Server{cfg: cfg, db: store, steam: steamClient, queue: q, cache: c, log: log, metrics: &metrics{}}
 }
 
 // Router builds the HTTP handler.
@@ -73,6 +74,9 @@ func (s *Server) Router() http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+
+	// Prometheus metrics at the root (not under /api, so it isn't rate-limited).
+	r.Get("/metrics", s.handleMetrics)
 
 	r.Route("/api", func(r chi.Router) {
 		if s.cfg.RateLimitRPS > 0 {
