@@ -7,6 +7,7 @@ import type {
 import { StatCard } from "@/components/StatCard";
 import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
+import { RecentForm } from "@/components/RecentForm";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import {
@@ -137,6 +138,8 @@ export function ProfileView({
               valueClass={tierColor(career.hsPct, 50, 40)}
             />
           </section>
+
+          {matches.length > 0 && <RecentForm matches={matches} />}
 
           {/* Secondary stats */}
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
