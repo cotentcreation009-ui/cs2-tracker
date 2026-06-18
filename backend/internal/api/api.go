@@ -59,6 +59,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
 		r.Get("/resolve", s.handleResolve)
+		r.Get("/leaderboard", s.handleLeaderboard)
 
 		r.Route("/players/{steamid}", func(r chi.Router) {
 			r.Get("/", s.handleProfile)
@@ -118,6 +119,19 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"steamId64": strconv.FormatUint(id, 10)})
+}
+
+func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	limit := clampInt(queryInt(r, "limit", 25), 1, 100)
+	players, err := s.db.ListTopPlayers(r.Context(), limit)
+	if err != nil {
+		s.serverError(w, "leaderboard", err)
+		return
+	}
+	if players == nil {
+		players = []models.LeaderboardEntry{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"players": players})
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {

@@ -32,6 +32,12 @@ export function ProfileView({
   const hasData = career.matches > 0;
   const multiKillRounds = career.k3 + career.k4 + career.k5;
 
+  const openTotal = career.openingKills + career.openingDeaths;
+  const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
+  const clutchTotal = career.clutchesWon + career.clutchesLost;
+  const clutchWinPct =
+    clutchTotal > 0 ? (career.clutchesWon / clutchTotal) * 100 : 0;
+
   return (
     <div className="space-y-5">
       {/* Identity + rating */}
@@ -136,14 +142,16 @@ export function ProfileView({
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
             <StatCard
-              label="Opening kills"
-              value={fmt(career.openingKills)}
-              sub={`${fmt(career.openingDeaths)} deaths`}
+              label="Opening duels"
+              value={`${openWinPct.toFixed(0)}%`}
+              valueClass={tierColor(openWinPct, 55, 45)}
+              sub={`${fmt(career.openingKills)}–${fmt(career.openingDeaths)}`}
             />
             <StatCard
-              label="Clutches won"
-              value={fmt(career.clutchesWon)}
-              sub={`${fmt(career.clutchesLost)} lost`}
+              label="Clutch win"
+              value={`${clutchWinPct.toFixed(0)}%`}
+              valueClass={tierColor(clutchWinPct, 50, 30)}
+              sub={`${fmt(career.clutchesWon)}/${fmt(clutchTotal)}`}
             />
             <StatCard label="Multi-kill rounds" value={fmt(multiKillRounds)} />
             <StatCard label="Assists" value={fmt(career.assists)} />

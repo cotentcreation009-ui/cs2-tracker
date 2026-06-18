@@ -184,6 +184,18 @@ type WeaponStat struct {
 	HSPct     float64 `json:"hsPct"`
 }
 
+// LeaderboardEntry is one row of the "top tracked players" board.
+type LeaderboardEntry struct {
+	SteamID64   uint64  `json:"steamId64,string"`
+	PersonaName string  `json:"personaName"`
+	AvatarURL   string  `json:"avatarUrl"`
+	Matches     int     `json:"matches"`
+	Rating      float64 `json:"rating"`
+	KD          float64 `json:"kd"`
+	ADR         float64 `json:"adr"`
+	WinRate     float64 `json:"winRate"`
+}
+
 // MapStat is a player's aggregate performance on a single map.
 type MapStat struct {
 	Map          string  `json:"map"`

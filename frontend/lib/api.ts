@@ -8,6 +8,7 @@
 
 import type {
   Kill,
+  LeaderboardEntry,
   MapStat,
   MatchDetail,
   PlayerMatchSummary,
@@ -89,6 +90,13 @@ export async function getMapStats(steamId: string): Promise<MapStat[]> {
 export async function getMatchKills(id: string | number): Promise<Kill[]> {
   const data = await getJSON<{ kills: Kill[] }>(`/api/matches/${id}/kills`);
   return data.kills ?? [];
+}
+
+export async function getLeaderboard(limit = 25): Promise<LeaderboardEntry[]> {
+  const data = await getJSON<{ players: LeaderboardEntry[] }>(
+    `/api/leaderboard?limit=${limit}`,
+  );
+  return data.players ?? [];
 }
 
 export async function resolveSteamId(query: string): Promise<string> {

@@ -1,4 +1,10 @@
 import { SearchBar } from "@/components/SearchBar";
+import { Leaderboard } from "@/components/Leaderboard";
+import { getLeaderboard } from "@/lib/api";
+
+// The leaderboard is live data; render per-request (and degrade gracefully when
+// the backend is unavailable).
+export const dynamic = "force-dynamic";
 
 const FEATURES = [
   {
@@ -15,7 +21,9 @@ const FEATURES = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const leaders = await getLeaderboard(10).catch(() => []);
+
   return (
     <div>
       <section className="card-2 relative overflow-hidden px-6 py-14 text-center sm:px-10">
@@ -56,6 +64,15 @@ export default function HomePage() {
           </div>
         ))}
       </section>
+
+      {leaders.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+            Top tracked players
+          </h2>
+          <Leaderboard players={leaders} />
+        </section>
+      )}
     </div>
   );
 }

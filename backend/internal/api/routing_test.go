@@ -26,6 +26,7 @@ func TestRoutesAreMatched(t *testing.T) {
 	cases := []struct{ method, path string }{
 		{"GET", "/api/health"},
 		{"GET", "/api/resolve?q=76561198000000001"},
+		{"GET", "/api/leaderboard"},
 		{"GET", "/api/players/76561198000000001"}, // no trailing slash — the chi gotcha
 		{"GET", "/api/players/76561198000000001/matches"},
 		{"GET", "/api/players/76561198000000001/weapons"},

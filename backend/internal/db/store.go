@@ -148,6 +148,32 @@ func (d *DB) GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDet
 	return detail, rrows.Err()
 }
 
+// ListTopPlayers returns the highest-rated tracked players for the leaderboard.
+func (d *DB) ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error) {
+	rows, err := d.Pool.Query(ctx, `
+		SELECT p.steam_id64, p.persona_name, p.avatar_url, pc.matches, pc.rating, pc.kd, pc.adr, pc.win_rate
+		FROM player_careers pc
+		JOIN players p ON p.steam_id64 = pc.steam_id64
+		WHERE pc.matches >= 1
+		ORDER BY pc.rating DESC, pc.matches DESC, p.steam_id64 ASC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.LeaderboardEntry
+	for rows.Next() {
+		var e models.LeaderboardEntry
+		if err := rows.Scan(&e.SteamID64, &e.PersonaName, &e.AvatarURL, &e.Matches,
+			&e.Rating, &e.KD, &e.ADR, &e.WinRate); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // --- Reads: killfeed-derived analytics --------------------------------------
 
 // GetWeaponStats returns a player's most-used weapons (by kills) across every

@@ -124,6 +124,17 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface LeaderboardEntry {
+  steamId64: string;
+  personaName: string;
+  avatarUrl: string;
+  matches: number;
+  rating: number;
+  kd: number;
+  adr: number;
+  winRate: number;
+}
+
 export interface MapStat {
   map: string;
   matches: number;
