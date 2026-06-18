@@ -159,6 +159,21 @@ automatically): `{"demoUrl":"https://.../match.dem.bz2"}`.
 
 ---
 
+## Verify your Steam API key
+
+Once you have a key (`STEAM_API_KEY`), confirm it works against the live API
+without needing the database, Redis or Docker:
+
+```bash
+cd backend
+STEAM_API_KEY=xxxxxxxx go run ./cmd/steamcheck                 # default public account
+STEAM_API_KEY=xxxxxxxx go run ./cmd/steamcheck gabelogannewell # a vanity name
+STEAM_API_KEY=xxxxxxxx go run ./cmd/steamcheck 7656119...      # a SteamID64
+```
+
+It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
+`GetUserStatsForGame` (App 730) and prints what it gets back.
+
 ## API reference
 
 | Method | Path | Description |
