@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/demosource"
+	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/parser"
 	"github.com/cs2tracker/server/internal/queue"
 )
@@ -109,16 +111,28 @@ func (w *worker) process(ctx context.Context, job *queue.Job) {
 	log := w.log.With("jobId", job.ID, "type", job.Type)
 	if job.Type != queue.JobParseDemo {
 		log.Warn("unknown job type, skipping")
+		w.setStatus(job.ID, models.JobFailed, nil, "unknown job type")
 		return
 	}
 
+	w.setStatus(job.ID, models.JobRunning, nil, "")
+	matchID, err := w.runParse(ctx, job, log)
+	if err != nil {
+		log.Error("job failed", "err", err)
+		w.setStatus(job.ID, models.JobFailed, nil, err.Error())
+		return
+	}
+	w.setStatus(job.ID, models.JobDone, &matchID, "")
+}
+
+// runParse resolves, parses and persists a demo, returning the new match id.
+func (w *worker) runParse(ctx context.Context, job *queue.Job, log *slog.Logger) (int64, error) {
 	jobCtx, cancel := context.WithTimeout(ctx, w.cfg.JobTimeout)
 	defer cancel()
 
 	res, err := demosource.Resolve(jobCtx, *job, w.workDir)
 	if err != nil {
-		log.Error("resolve demo failed", "err", err)
-		return
+		return 0, fmt.Errorf("resolve demo: %w", err)
 	}
 	// Always attempt to clean up a demo we downloaded.
 	defer func() {
@@ -132,8 +146,7 @@ func (w *worker) process(ctx context.Context, job *queue.Job) {
 	started := time.Now()
 	pm, err := parser.ParseFile(res.Path)
 	if err != nil {
-		log.Error("parse failed", "path", res.Path, "err", err)
-		return
+		return 0, fmt.Errorf("parse %s: %w", res.Path, err)
 	}
 
 	pm.Match.DemoSource = job.Source
@@ -144,8 +157,7 @@ func (w *worker) process(ctx context.Context, job *queue.Job) {
 
 	matchID, err := w.db.InsertParsedMatch(jobCtx, pm)
 	if err != nil {
-		log.Error("persist match failed", "err", err)
-		return
+		return 0, fmt.Errorf("persist match: %w", err)
 	}
 
 	// Invalidate caches for every player in the match so the next read recomputes.
@@ -164,4 +176,19 @@ func (w *worker) process(ctx context.Context, job *queue.Job) {
 		"players", len(pm.Players),
 		"took", time.Since(started).String(),
 	)
+	return matchID, nil
+}
+
+// setStatus records a job status transition. It uses its own short-lived context
+// so a failed/timed-out job is still recorded, and never fails the job over a
+// status-write error.
+func (w *worker) setStatus(id, status string, matchID *int64, errMsg string) {
+	if w.db == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := w.db.SetJobStatus(ctx, id, status, matchID, errMsg); err != nil {
+		w.log.Warn("could not update job status", "jobId", id, "err", err)
+	}
 }

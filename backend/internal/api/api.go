@@ -73,6 +73,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/matches/{id}", s.handleMatch)
 		r.Get("/matches/{id}/kills", s.handleMatchKills)
 		r.Post("/ingest/demo", s.handleIngest)
+		r.Get("/jobs/{id}", s.handleJob)
 		r.Get("/queue", s.handleQueueDepth)
 	})
 
@@ -349,7 +350,40 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "enqueue", err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"jobId": job.ID, "status": "queued"})
+
+	// Record the job so the caller can poll its status. Tracking is best-effort:
+	// a failed insert must not lose the already-queued work.
+	if err := s.db.InsertJob(r.Context(), models.IngestJob{
+		ID:        job.ID,
+		Type:      string(job.Type),
+		Status:    models.JobQueued,
+		Source:    source,
+		DemoPath:  req.DemoPath,
+		DemoURL:   req.DemoURL,
+		ShareCode: req.ShareCode,
+	}); err != nil {
+		s.log.Warn("could not record job", "jobId", job.ID, "err", err)
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"jobId":     job.ID,
+		"status":    models.JobQueued,
+		"statusUrl": "/api/jobs/" + job.ID,
+	})
+}
+
+func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	job, err := s.db.GetJob(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "get job", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
 }
 
 func (s *Server) handleQueueDepth(w http.ResponseWriter, r *http.Request) {

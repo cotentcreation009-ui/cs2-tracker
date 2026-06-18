@@ -276,6 +276,51 @@ func (d *DB) ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, 
 	return out, rows.Err()
 }
 
+// --- Jobs: durable parse-job status -----------------------------------------
+
+// InsertJob records a freshly-enqueued job in the 'queued' state.
+func (d *DB) InsertJob(ctx context.Context, j models.IngestJob) error {
+	_, err := d.Pool.Exec(ctx, `
+		INSERT INTO jobs (id, type, status, source, demo_path, demo_url, share_code)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO NOTHING`,
+		j.ID, j.Type, j.Status, j.Source, j.DemoPath, j.DemoURL, j.ShareCode)
+	return err
+}
+
+// SetJobStatus updates a job's status (upserting so a worker can record status
+// even for jobs that were enqueued without a prior InsertJob). matchID is set
+// when the job completes.
+func (d *DB) SetJobStatus(ctx context.Context, id, status string, matchID *int64, errMsg string) error {
+	_, err := d.Pool.Exec(ctx, `
+		INSERT INTO jobs (id, status, match_id, error, updated_at)
+		VALUES ($1,$2,$3,$4, now())
+		ON CONFLICT (id) DO UPDATE SET
+			status   = EXCLUDED.status,
+			match_id = COALESCE(EXCLUDED.match_id, jobs.match_id),
+			error    = EXCLUDED.error,
+			updated_at = now()`,
+		id, status, matchID, errMsg)
+	return err
+}
+
+// GetJob returns a job's current status. Returns ErrNotFound when unknown.
+func (d *DB) GetJob(ctx context.Context, id string) (models.IngestJob, error) {
+	var j models.IngestJob
+	err := d.Pool.QueryRow(ctx, `
+		SELECT id, type, status, source, demo_path, demo_url, share_code, match_id, error, created_at, updated_at
+		FROM jobs WHERE id=$1`, id).
+		Scan(&j.ID, &j.Type, &j.Status, &j.Source, &j.DemoPath, &j.DemoURL, &j.ShareCode,
+			&j.MatchID, &j.Error, &j.CreatedAt, &j.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return j, ErrNotFound
+	}
+	if err != nil {
+		return j, err
+	}
+	return j, nil
+}
+
 // --- Writes: persist a parsed match -----------------------------------------
 
 // InsertParsedMatch persists a fully-parsed match transactionally: the match

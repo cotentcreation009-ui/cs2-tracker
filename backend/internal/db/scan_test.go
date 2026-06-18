@@ -32,4 +32,20 @@ func TestPgxScanCompatibility(t *testing.T) {
 	if side != models.SideCT {
 		t.Errorf("Side scan = %q, want CT", side)
 	}
+
+	// Nullable BIGINT -> *int64 (used by GetJob's match_id). NULL must scan to
+	// nil; a value must allocate. The scan target is therefore **int64.
+	var mid *int64
+	if err := m.Scan(pgtype.Int8OID, pgtype.BinaryFormatCode, nil, &mid); err != nil {
+		t.Fatalf("scan NULL BIGINT into *int64: %v", err)
+	}
+	if mid != nil {
+		t.Errorf("NULL should scan to nil, got %d", *mid)
+	}
+	if err := m.Scan(pgtype.Int8OID, pgtype.BinaryFormatCode, []byte{0, 0, 0, 0, 0, 0, 0, 7}, &mid); err != nil {
+		t.Fatalf("scan BIGINT value into *int64: %v", err)
+	}
+	if mid == nil || *mid != 7 {
+		t.Errorf("value scan = %v, want 7", mid)
+	}
 }

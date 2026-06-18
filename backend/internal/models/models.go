@@ -184,6 +184,30 @@ type WeaponStat struct {
 	HSPct     float64 `json:"hsPct"`
 }
 
+// Job status values for the durable jobs record.
+const (
+	JobQueued  = "queued"
+	JobRunning = "running"
+	JobDone    = "done"
+	JobFailed  = "failed"
+)
+
+// IngestJob is the durable status record for a demo-parse job, pollable via the
+// API after ingest.
+type IngestJob struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Status    string    `json:"status"`
+	Source    string    `json:"source,omitempty"`
+	DemoPath  string    `json:"demoPath,omitempty"`
+	DemoURL   string    `json:"demoUrl,omitempty"`
+	ShareCode string    `json:"shareCode,omitempty"`
+	MatchID   *int64    `json:"matchId,omitempty"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // LeaderboardEntry is one row of the "top tracked players" board.
 type LeaderboardEntry struct {
 	SteamID64   uint64  `json:"steamId64,string"`

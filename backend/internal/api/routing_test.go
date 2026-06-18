@@ -34,6 +34,7 @@ func TestRoutesAreMatched(t *testing.T) {
 		{"GET", "/api/players/76561198000000001/steam-stats"},
 		{"GET", "/api/matches/5"},
 		{"GET", "/api/matches/5/kills"},
+		{"GET", "/api/jobs/abc123"},
 		{"GET", "/api/queue"},
 	}
 	for _, c := range cases {
