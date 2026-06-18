@@ -41,6 +41,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+	if h, err := parser.HashFile(path); err == nil {
+		pm.Match.DemoHash = h // so -db dedupes a re-parsed demo
+	}
 
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)

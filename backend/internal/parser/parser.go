@@ -9,6 +9,8 @@
 package parser
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +22,21 @@ import (
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
 )
+
+// HashFile returns the hex-encoded SHA-256 of a file. The worker stamps this on
+// a match so re-ingesting the identical demo is deduplicated (parse-once).
+func HashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 
 // tradeWindow is how long after a death a kill still counts as a trade.
 const tradeWindow = 5 * time.Second

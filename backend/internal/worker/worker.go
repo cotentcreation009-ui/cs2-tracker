@@ -154,6 +154,12 @@ func (w *Worker) runParse(job *queue.Job, log *slog.Logger) (int64, error) {
 	if pm.Match.PlayedAt.IsZero() {
 		pm.Match.PlayedAt = job.EnqueuedAt
 	}
+	// Stamp the demo's content hash so re-ingesting the same file is deduped.
+	if h, err := parser.HashFile(res.Path); err == nil {
+		pm.Match.DemoHash = h
+	} else {
+		log.Warn("could not hash demo for dedup", "path", res.Path, "err", err)
+	}
 
 	matchID, err := w.Store.InsertParsedMatch(jobCtx, pm)
 	if err != nil {

@@ -33,7 +33,8 @@ type Player struct {
 type Match struct {
 	ID          int64     `json:"id"`
 	ShareCode   string    `json:"shareCode,omitempty"`
-	DemoSource  string    `json:"demoSource"` // "local" | "valve" | "faceit" | ...
+	DemoHash    string    `json:"demoHash,omitempty"` // sha256 of the demo, for parse-once dedup
+	DemoSource  string    `json:"demoSource"`         // "local" | "valve" | "faceit" | ...
 	Map         string    `json:"map"`
 	GameMode    string    `json:"gameMode,omitempty"`
 	PlayedAt    time.Time `json:"playedAt"`

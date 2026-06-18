@@ -334,6 +334,19 @@ func (d *DB) InsertParsedMatch(ctx context.Context, pm *models.ParsedMatch) (int
 
 	var matchID int64
 	err := withTx(ctx, d.Pool, func(tx pgx.Tx) error {
+		// Parse-once: if this exact demo was already ingested, reuse the match.
+		if pm.Match.DemoHash != "" {
+			var existing int64
+			e := tx.QueryRow(ctx, `SELECT id FROM matches WHERE demo_hash=$1`, pm.Match.DemoHash).Scan(&existing)
+			if e == nil {
+				matchID = existing
+				return nil
+			}
+			if !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
+
 		var shareCode *string
 		if pm.Match.ShareCode != "" {
 			shareCode = &pm.Match.ShareCode
@@ -341,12 +354,12 @@ func (d *DB) InsertParsedMatch(ctx context.Context, pm *models.ParsedMatch) (int
 
 		// Insert the match; if the share code already exists, reuse that match.
 		err := tx.QueryRow(ctx, `
-			INSERT INTO matches (share_code, demo_source, map, game_mode, played_at, duration_s, rounds_total, team_a_score, team_b_score, tick_rate, parsed_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+			INSERT INTO matches (share_code, demo_source, map, game_mode, played_at, duration_s, rounds_total, team_a_score, team_b_score, tick_rate, demo_hash, parsed_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
 			ON CONFLICT (share_code) DO NOTHING
 			RETURNING id`,
 			shareCode, pm.Match.DemoSource, pm.Match.Map, pm.Match.GameMode, pm.Match.PlayedAt,
-			pm.Match.DurationS, pm.Match.RoundsTotal, pm.Match.TeamAScore, pm.Match.TeamBScore, pm.Match.TickRate,
+			pm.Match.DurationS, pm.Match.RoundsTotal, pm.Match.TeamAScore, pm.Match.TeamBScore, pm.Match.TickRate, pm.Match.DemoHash,
 		).Scan(&matchID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Conflict on share_code: match already ingested.
