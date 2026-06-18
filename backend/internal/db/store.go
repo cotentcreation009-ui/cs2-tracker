@@ -179,6 +179,54 @@ func (d *DB) GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]m
 	return out, rows.Err()
 }
 
+// GetMapStats returns a player's per-map career aggregates. Derived metrics are
+// computed through the same stats helpers as the overall career so the numbers
+// stay consistent.
+func (d *DB) GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error) {
+	rows, err := d.Pool.Query(ctx, `
+		SELECT m.map,
+			COUNT(*) AS matches,
+			COUNT(*) FILTER (WHERE mp.won) AS wins,
+			COALESCE(SUM(mp.rounds_played),0), COALESCE(SUM(mp.kills),0), COALESCE(SUM(mp.deaths),0),
+			COALESCE(SUM(mp.damage),0), COALESCE(SUM(mp.kast_rounds),0), COALESCE(SUM(mp.headshot_kills),0),
+			COALESCE(SUM(mp.k1),0), COALESCE(SUM(mp.k2),0), COALESCE(SUM(mp.k3),0), COALESCE(SUM(mp.k4),0), COALESCE(SUM(mp.k5),0)
+		FROM match_players mp
+		JOIN matches m ON m.id = mp.match_id
+		WHERE mp.steam_id64 = $1
+		GROUP BY m.map
+		ORDER BY matches DESC, m.map ASC`, int64(steamID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.MapStat
+	for rows.Next() {
+		var mapName string
+		// Reuse PlayerCareer + FillCareerDerived for identical rating/ADR math.
+		var c models.PlayerCareer
+		if err := rows.Scan(&mapName, &c.Matches, &c.Wins, &c.RoundsPlayed, &c.Kills, &c.Deaths,
+			&c.Damage, &c.KASTRounds, &c.HeadshotKills, &c.K1, &c.K2, &c.K3, &c.K4, &c.K5); err != nil {
+			return nil, err
+		}
+		c.Losses = c.Matches - c.Wins
+		stats.FillCareerDerived(&c)
+		out = append(out, models.MapStat{
+			Map:          mapName,
+			Matches:      c.Matches,
+			Wins:         c.Wins,
+			Losses:       c.Losses,
+			WinRate:      c.WinRate,
+			RoundsPlayed: c.RoundsPlayed,
+			Rating:       c.Rating,
+			ADR:          c.ADR,
+			KD:           c.KD,
+			HSPct:        c.HSPct,
+		})
+	}
+	return out, rows.Err()
+}
+
 // ListMatchKills returns the ordered killfeed for a match.
 func (d *DB) ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error) {
 	rows, err := d.Pool.Query(ctx, `

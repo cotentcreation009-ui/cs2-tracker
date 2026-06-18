@@ -8,6 +8,7 @@
 
 import type {
   Kill,
+  MapStat,
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
@@ -76,6 +77,13 @@ export async function getWeaponStats(
     `/api/players/${steamId}/weapons?limit=${limit}`,
   );
   return data.weapons ?? [];
+}
+
+export async function getMapStats(steamId: string): Promise<MapStat[]> {
+  const data = await getJSON<{ maps: MapStat[] }>(
+    `/api/players/${steamId}/maps`,
+  );
+  return data.maps ?? [];
 }
 
 export async function getMatchKills(id: string | number): Promise<Kill[]> {

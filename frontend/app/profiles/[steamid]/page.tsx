@@ -1,5 +1,6 @@
 import {
   ApiError,
+  getMapStats,
   getPlayerMatches,
   getProfile,
   getWeaponStats,
@@ -21,13 +22,19 @@ export default async function ProfileBySteamID({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, matches, weapons] = await Promise.all([
+    const [profile, matches, weapons, maps] = await Promise.all([
       getProfile(steamid),
       getPlayerMatches(steamid),
       getWeaponStats(steamid).catch(() => []),
+      getMapStats(steamid).catch(() => []),
     ]);
     return (
-      <ProfileView profile={profile} matches={matches} weapons={weapons} />
+      <ProfileView
+        profile={profile}
+        matches={matches}
+        weapons={weapons}
+        maps={maps}
+      />
     );
   } catch (e) {
     if (e instanceof ApiError) {

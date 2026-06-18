@@ -1,4 +1,5 @@
 import type {
+  MapStat,
   PlayerMatchSummary,
   PlayerProfile,
   WeaponStat,
@@ -7,6 +8,7 @@ import { StatCard } from "@/components/StatCard";
 import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
 import { WeaponStats } from "@/components/WeaponStats";
+import { MapStats } from "@/components/MapStats";
 import {
   flag,
   fmt,
@@ -19,10 +21,12 @@ export function ProfileView({
   profile,
   matches,
   weapons = [],
+  maps = [],
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
   weapons?: WeaponStat[];
+  maps?: MapStat[];
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -158,14 +162,24 @@ export function ProfileView({
               </h2>
               <RecentMatches matches={matches} />
             </div>
-            {weapons.length > 0 && (
-              <div>
-                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-                  Top weapons
-                </h2>
-                <WeaponStats weapons={weapons} />
-              </div>
-            )}
+            <div className="space-y-5">
+              {maps.length > 0 && (
+                <div>
+                  <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+                    Maps
+                  </h2>
+                  <MapStats maps={maps} />
+                </div>
+              )}
+              {weapons.length > 0 && (
+                <div>
+                  <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+                    Top weapons
+                  </h2>
+                  <WeaponStats weapons={weapons} />
+                </div>
+              )}
+            </div>
           </section>
         </>
       )}

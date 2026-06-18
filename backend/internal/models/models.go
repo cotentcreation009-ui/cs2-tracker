@@ -183,3 +183,17 @@ type WeaponStat struct {
 	Headshots int     `json:"headshots"`
 	HSPct     float64 `json:"hsPct"`
 }
+
+// MapStat is a player's aggregate performance on a single map.
+type MapStat struct {
+	Map          string  `json:"map"`
+	Matches      int     `json:"matches"`
+	Wins         int     `json:"wins"`
+	Losses       int     `json:"losses"`
+	WinRate      float64 `json:"winRate"`
+	RoundsPlayed int     `json:"roundsPlayed"`
+	Rating       float64 `json:"rating"`
+	ADR          float64 `json:"adr"`
+	KD           float64 `json:"kd"`
+	HSPct        float64 `json:"hsPct"`
+}

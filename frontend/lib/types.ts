@@ -124,6 +124,19 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface MapStat {
+  map: string;
+  matches: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  roundsPlayed: number;
+  rating: number;
+  adr: number;
+  kd: number;
+  hsPct: number;
+}
+
 export interface Kill {
   matchId: number;
   round: number;

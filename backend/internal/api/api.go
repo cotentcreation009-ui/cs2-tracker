@@ -65,6 +65,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/refresh", s.handleRefresh)
 			r.Get("/matches", s.handlePlayerMatches)
 			r.Get("/weapons", s.handleWeapons)
+			r.Get("/maps", s.handleMaps)
 			r.Get("/steam-stats", s.handleSteamStats)
 		})
 
@@ -243,6 +244,23 @@ func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
 		weapons = []models.WeaponStat{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
+}
+
+func (s *Server) handleMaps(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	maps, err := s.db.GetMapStats(r.Context(), id)
+	if err != nil {
+		s.serverError(w, "map stats", err)
+		return
+	}
+	if maps == nil {
+		maps = []models.MapStat{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"maps": maps})
 }
 
 func (s *Server) handleMatchKills(w http.ResponseWriter, r *http.Request) {
