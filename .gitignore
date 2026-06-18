@@ -1,0 +1,33 @@
+# Secrets / env
+.env
+.env.local
+*.local
+
+# Demo files (can be large; never commit)
+*.dem
+*.dem.bz2
+testdata/*.dem
+testdata/*.dem.bz2
+
+# Go
+/backend/bin/
+*.test
+*.out
+
+# Node / Next
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# Claude Code local settings
+.claude/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,157 @@
+import type { PlayerMatchSummary, PlayerProfile } from "@/lib/types";
+import { StatCard } from "@/components/StatCard";
+import { RatingRing } from "@/components/RatingRing";
+import { RecentMatches } from "@/components/RecentMatches";
+import {
+  flag,
+  fmt,
+  kdColor,
+  ratingColor,
+  tierColor,
+} from "@/lib/format";
+
+export function ProfileView({
+  profile,
+  matches,
+}: {
+  profile: PlayerProfile;
+  matches: PlayerMatchSummary[];
+}) {
+  const { player, career } = profile;
+  const hasData = career.matches > 0;
+  const multiKillRounds = career.k3 + career.k4 + career.k5;
+
+  return (
+    <div className="space-y-5">
+      {/* Identity + rating */}
+      <section className="card-2 flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          {player.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={player.avatarUrl}
+              alt={player.personaName}
+              className="h-20 w-20 rounded-xl border border-line object-cover"
+            />
+          ) : (
+            <div className="grid h-20 w-20 place-items-center rounded-xl border border-line bg-panel text-2xl font-bold text-faint">
+              {(player.personaName || "?").slice(0, 1).toUpperCase()}
+            </div>
+          )}
+          <div>
+            <h1 className="text-2xl font-bold leading-tight">
+              {player.personaName || player.steamId64}
+            </h1>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+              {player.countryCode && (
+                <span>
+                  {flag(player.countryCode)} {player.countryCode}
+                </span>
+              )}
+              <span className="font-mono text-xs text-faint">
+                {player.steamId64}
+              </span>
+              {player.profileUrl && (
+                <a
+                  href={player.profileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="link-muted underline-offset-2 hover:underline"
+                >
+                  View on Steam ↗
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {hasData && <RatingRing rating={career.rating} />}
+      </section>
+
+      {!hasData && (
+        <div className="card px-5 py-6 text-sm text-muted">
+          We know this player&apos;s Steam identity, but no demos have been
+          parsed for them yet. Ingest a demo via{" "}
+          <code className="rounded bg-panel px-1.5 py-0.5 text-xs text-ink">
+            POST /api/ingest/demo
+          </code>{" "}
+          to populate career stats and match history.
+        </div>
+      )}
+
+      {hasData && (
+        <>
+          {/* Headline stats */}
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <StatCard
+              label="Matches"
+              value={fmt(career.matches)}
+              sub={
+                <span>
+                  <span className="text-good">{career.wins}W</span>{" "}
+                  <span className="text-bad">{career.losses}L</span>
+                </span>
+              }
+            />
+            <StatCard
+              label="Win rate"
+              value={`${career.winRate.toFixed(0)}%`}
+              valueClass={tierColor(career.winRate, 55, 45)}
+            />
+            <StatCard
+              label="K / D"
+              value={career.kd.toFixed(2)}
+              valueClass={kdColor(career.kd)}
+              sub={`${fmt(career.kills)} / ${fmt(career.deaths)}`}
+            />
+            <StatCard
+              label="ADR"
+              value={career.adr.toFixed(0)}
+              valueClass={tierColor(career.adr, 80, 65)}
+            />
+            <StatCard
+              label="KAST"
+              value={`${career.kastPct.toFixed(0)}%`}
+              valueClass={tierColor(career.kastPct, 72, 65)}
+            />
+            <StatCard
+              label="Headshot %"
+              value={`${career.hsPct.toFixed(0)}%`}
+              valueClass={tierColor(career.hsPct, 50, 40)}
+            />
+          </section>
+
+          {/* Secondary stats */}
+          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
+            <StatCard
+              label="Opening kills"
+              value={fmt(career.openingKills)}
+              sub={`${fmt(career.openingDeaths)} deaths`}
+            />
+            <StatCard
+              label="Clutches won"
+              value={fmt(career.clutchesWon)}
+              sub={`${fmt(career.clutchesLost)} lost`}
+            />
+            <StatCard label="Multi-kill rounds" value={fmt(multiKillRounds)} />
+            <StatCard label="Assists" value={fmt(career.assists)} />
+            <StatCard
+              label="Career rating"
+              value={career.rating.toFixed(2)}
+              valueClass={ratingColor(career.rating)}
+            />
+          </section>
+
+          {/* Recent matches */}
+          <section>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+              Recent matches
+            </h2>
+            <RecentMatches matches={matches} />
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
