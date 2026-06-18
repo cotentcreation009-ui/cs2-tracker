@@ -29,6 +29,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <SearchBar />
               </div>
               <Link
+                href="/compare"
+                className="link-muted shrink-0 text-sm font-medium"
+              >
+                Compare
+              </Link>
+              <Link
                 href="/ingest"
                 className="link-muted shrink-0 text-sm font-medium"
               >
