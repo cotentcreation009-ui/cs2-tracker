@@ -25,10 +25,26 @@ import (
 	"github.com/go-chi/cors"
 )
 
+// Store is the persistence surface the HTTP handlers depend on. *db.DB satisfies
+// it; depending on the interface (not the concrete type) lets the handlers be
+// unit-tested with a fake, no Postgres required.
+type Store interface {
+	GetProfile(ctx context.Context, steamID uint64) (models.PlayerProfile, error)
+	UpsertPlayer(ctx context.Context, p models.Player) error
+	ListPlayerMatches(ctx context.Context, steamID uint64, limit, offset int) ([]models.PlayerMatchSummary, error)
+	GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDetail, error)
+	GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error)
+	GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error)
+	ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error)
+	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
+	InsertJob(ctx context.Context, j models.IngestJob) error
+	GetJob(ctx context.Context, id string) (models.IngestJob, error)
+}
+
 // Server holds the API dependencies.
 type Server struct {
 	cfg   *config.Config
-	db    *db.DB
+	db    Store
 	steam *steam.Client
 	queue *queue.Queue
 	cache *cache.Cache
@@ -37,8 +53,8 @@ type Server struct {
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
 // degrade gracefully).
-func NewServer(cfg *config.Config, database *db.DB, steamClient *steam.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: database, steam: steamClient, queue: q, cache: c, log: log}
+func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, db: store, steam: steamClient, queue: q, cache: c, log: log}
 }
 
 // Router builds the HTTP handler.
