@@ -24,8 +24,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 Tracker<span className="text-brand">.gg</span>
               </span>
             </Link>
-            <div className="ml-auto w-full max-w-md">
-              <SearchBar />
+            <div className="ml-auto flex items-center gap-3">
+              <div className="w-full max-w-md">
+                <SearchBar />
+              </div>
+              <Link
+                href="/ingest"
+                className="link-muted shrink-0 text-sm font-medium"
+              >
+                Ingest
+              </Link>
             </div>
           </div>
         </header>

@@ -124,6 +124,20 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface IngestJob {
+  id: string;
+  type: string;
+  status: "queued" | "running" | "done" | "failed" | string;
+  source?: string;
+  demoPath?: string;
+  demoUrl?: string;
+  shareCode?: string;
+  matchId?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LeaderboardEntry {
   steamId64: string;
   personaName: string;
