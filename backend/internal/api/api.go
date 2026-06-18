@@ -73,6 +73,9 @@ func (s *Server) Router() http.Handler {
 	}))
 
 	r.Route("/api", func(r chi.Router) {
+		if s.cfg.RateLimitRPS > 0 {
+			r.Use(newRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst).middleware)
+		}
 		r.Get("/health", s.handleHealth)
 		r.Get("/resolve", s.handleResolve)
 		r.Get("/leaderboard", s.handleLeaderboard)

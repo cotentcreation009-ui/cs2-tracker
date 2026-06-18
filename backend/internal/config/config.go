@@ -34,6 +34,10 @@ type Config struct {
 
 	// Caching
 	CacheTTL time.Duration // TTL for cached aggregate payloads in redis
+
+	// Rate limiting (per client IP). RateLimitRPS <= 0 disables it.
+	RateLimitRPS   float64 // sustained requests per second
+	RateLimitBurst int     // burst capacity
 }
 
 // Load reads configuration from the environment, applying sensible defaults so
@@ -50,16 +54,18 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		HTTPAddr:      getEnv("HTTP_ADDR", ":8080"),
-		CORSOrigins:   splitAndTrim(getEnv("CORS_ORIGINS", "http://localhost:3000")),
-		DatabaseURL:   getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
-		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		SteamAPIKey:   getEnv("STEAM_API_KEY", ""),
-		DemoQueueKey:  getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
-		DemoWorkDir:   getEnv("DEMO_WORK_DIR", os.TempDir()),
-		DeleteRawDemo: getBool("DELETE_RAW_DEMO", true),
-		JobTimeout:    getDuration("JOB_TIMEOUT", 10*time.Minute),
-		CacheTTL:      getDuration("CACHE_TTL", 5*time.Minute),
+		HTTPAddr:       getEnv("HTTP_ADDR", ":8080"),
+		CORSOrigins:    splitAndTrim(getEnv("CORS_ORIGINS", "http://localhost:3000")),
+		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		SteamAPIKey:    getEnv("STEAM_API_KEY", ""),
+		DemoQueueKey:   getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
+		DemoWorkDir:    getEnv("DEMO_WORK_DIR", os.TempDir()),
+		DeleteRawDemo:  getBool("DELETE_RAW_DEMO", true),
+		JobTimeout:     getDuration("JOB_TIMEOUT", 10*time.Minute),
+		CacheTTL:       getDuration("CACHE_TTL", 5*time.Minute),
+		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst: getInt("RATE_LIMIT_BURST", 20),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -84,6 +90,24 @@ func getBool(key string, fallback bool) bool {
 		b, err := strconv.ParseBool(v)
 		if err == nil {
 			return b
+		}
+	}
+	return fallback
+}
+
+func getFloat(key string, fallback float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
+}
+
+func getInt(key string, fallback int) int {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
 	}
 	return fallback

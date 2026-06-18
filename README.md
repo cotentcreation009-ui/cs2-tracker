@@ -207,7 +207,9 @@ are resolved through the backend's `ResolveVanityURL` call.
 
 All config is environment-driven (see [`.env.example`](.env.example)). Notable
 vars: `STEAM_API_KEY`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`,
-`DELETE_RAW_DEMO`, `JOB_TIMEOUT`, `CACHE_TTL`, and `API_INTERNAL_URL` (frontend).
+`DELETE_RAW_DEMO`, `JOB_TIMEOUT`, `CACHE_TTL`, `RATE_LIMIT_RPS` /
+`RATE_LIMIT_BURST` (per-IP API rate limit; RPS 0 disables), and
+`API_INTERNAL_URL` (frontend).
 
 ## How the advanced stats are computed
 
