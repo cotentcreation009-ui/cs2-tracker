@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   ApiError,
   getMapStats,
@@ -10,6 +11,27 @@ import { FetchError } from "@/components/FetchError";
 
 // Profiles depend on live backend data, so render per-request.
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ steamid: string }>;
+}): Promise<Metadata> {
+  const { steamid } = await params;
+  try {
+    const { player, career } = await getProfile(steamid);
+    const name = player.personaName || steamid;
+    return {
+      title: `${name} — CS2 Tracker`,
+      description:
+        career.matches > 0
+          ? `${name}: ${career.rating} rating, ${career.kd} K/D over ${career.matches} matches.`
+          : `${name} on CS2 Tracker.`,
+    };
+  } catch {
+    return { title: "Player — CS2 Tracker" };
+  }
+}
 
 /**
  * /profiles/<steamID64> mirrors Steam's own profile URL path. Point a

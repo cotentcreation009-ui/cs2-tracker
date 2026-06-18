@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ApiError, getMatch, getMatchKills } from "@/lib/api";
 import { Scoreboard } from "@/components/Scoreboard";
 import { RoundTimeline } from "@/components/RoundTimeline";
@@ -7,6 +8,22 @@ import { BackButton } from "@/components/BackButton";
 import { mapLabel, timeAgo } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  try {
+    const { match } = await getMatch(id);
+    return {
+      title: `${mapLabel(match.map)} ${match.teamAScore}-${match.teamBScore} — CS2 Tracker`,
+    };
+  } catch {
+    return { title: "Match — CS2 Tracker" };
+  }
+}
 
 export default async function MatchPage({
   params,
