@@ -1,4 +1,9 @@
-import { ApiError, getPlayerMatches, getProfile } from "@/lib/api";
+import {
+  ApiError,
+  getPlayerMatches,
+  getProfile,
+  getWeaponStats,
+} from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
 
@@ -16,11 +21,14 @@ export default async function ProfileBySteamID({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, matches] = await Promise.all([
+    const [profile, matches, weapons] = await Promise.all([
       getProfile(steamid),
       getPlayerMatches(steamid),
+      getWeaponStats(steamid).catch(() => []),
     ]);
-    return <ProfileView profile={profile} matches={matches} />;
+    return (
+      <ProfileView profile={profile} matches={matches} weapons={weapons} />
+    );
   } catch (e) {
     if (e instanceof ApiError) {
       return <FetchError status={e.status} message={e.message} />;

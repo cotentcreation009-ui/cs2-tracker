@@ -174,3 +174,12 @@ type MatchDetail struct {
 	Players []MatchPlayer `json:"players"`
 	Rounds  []Round       `json:"rounds"`
 }
+
+// WeaponStat is a player's aggregate performance with a single weapon, derived
+// from the stored killfeed.
+type WeaponStat struct {
+	Weapon    string  `json:"weapon"`
+	Kills     int     `json:"kills"`
+	Headshots int     `json:"headshots"`
+	HSPct     float64 `json:"hsPct"`
+}

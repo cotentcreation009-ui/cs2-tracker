@@ -168,8 +168,10 @@ automatically): `{"demoUrl":"https://.../match.dem.bz2"}`.
 | GET  | `/api/players/{steamid}` | Profile: identity + rolling career aggregate (cached) |
 | POST | `/api/players/{steamid}/refresh` | Re-fetch identity from Steam (needs key) |
 | GET  | `/api/players/{steamid}/matches?limit=&offset=` | Recent matches with the player's line |
+| GET  | `/api/players/{steamid}/weapons?limit=` | Per-weapon kills + headshot % from the killfeed |
 | GET  | `/api/players/{steamid}/steam-stats` | Raw App 730 lifetime stats (needs key) |
 | GET  | `/api/matches/{id}` | Full match detail: scoreboard + rounds |
+| GET  | `/api/matches/{id}/kills` | Ordered killfeed for a match |
 | POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`) |
 | GET  | `/api/queue` | Pending job count |
 

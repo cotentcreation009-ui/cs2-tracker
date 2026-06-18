@@ -116,3 +116,23 @@ export interface MatchDetail {
   players: MatchPlayer[];
   rounds: Round[];
 }
+
+export interface WeaponStat {
+  weapon: string;
+  kills: number;
+  headshots: number;
+  hsPct: number;
+}
+
+export interface Kill {
+  matchId: number;
+  round: number;
+  timeSeconds: number;
+  killerId: string;
+  victimId: string;
+  assisterId?: string;
+  weapon: string;
+  headshot: boolean;
+  opening: boolean;
+  trade: boolean;
+}

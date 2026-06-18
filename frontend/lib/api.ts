@@ -7,9 +7,11 @@
 //   - local dev:       http://localhost:8080
 
 import type {
+  Kill,
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
+  WeaponStat,
 } from "./types";
 
 export const API_BASE =
@@ -64,6 +66,21 @@ export async function getPlayerMatches(
 
 export function getMatch(id: string | number): Promise<MatchDetail> {
   return getJSON<MatchDetail>(`/api/matches/${id}`);
+}
+
+export async function getWeaponStats(
+  steamId: string,
+  limit = 12,
+): Promise<WeaponStat[]> {
+  const data = await getJSON<{ weapons: WeaponStat[] }>(
+    `/api/players/${steamId}/weapons?limit=${limit}`,
+  );
+  return data.weapons ?? [];
+}
+
+export async function getMatchKills(id: string | number): Promise<Kill[]> {
+  const data = await getJSON<{ kills: Kill[] }>(`/api/matches/${id}/kills`);
+  return data.kills ?? [];
 }
 
 export async function resolveSteamId(query: string): Promise<string> {

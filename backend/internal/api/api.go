@@ -64,10 +64,12 @@ func (s *Server) Router() http.Handler {
 			r.Get("/", s.handleProfile)
 			r.Post("/refresh", s.handleRefresh)
 			r.Get("/matches", s.handlePlayerMatches)
+			r.Get("/weapons", s.handleWeapons)
 			r.Get("/steam-stats", s.handleSteamStats)
 		})
 
 		r.Get("/matches/{id}", s.handleMatch)
+		r.Get("/matches/{id}/kills", s.handleMatchKills)
 		r.Post("/ingest/demo", s.handleIngest)
 		r.Get("/queue", s.handleQueueDepth)
 	})
@@ -223,6 +225,41 @@ func (s *Server) handlePlayerMatches(w http.ResponseWriter, r *http.Request) {
 		matches = []models.PlayerMatchSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"matches": matches, "limit": limit, "offset": offset})
+}
+
+func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	limit := clampInt(queryInt(r, "limit", 12), 1, 50)
+	weapons, err := s.db.GetWeaponStats(r.Context(), id, limit)
+	if err != nil {
+		s.serverError(w, "weapon stats", err)
+		return
+	}
+	if weapons == nil {
+		weapons = []models.WeaponStat{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
+}
+
+func (s *Server) handleMatchKills(w http.ResponseWriter, r *http.Request) {
+	mid, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid match id")
+		return
+	}
+	kills, err := s.db.ListMatchKills(r.Context(), mid)
+	if err != nil {
+		s.serverError(w, "match kills", err)
+		return
+	}
+	if kills == nil {
+		kills = []models.Kill{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"kills": kills})
 }
 
 func (s *Server) handleMatch(w http.ResponseWriter, r *http.Request) {

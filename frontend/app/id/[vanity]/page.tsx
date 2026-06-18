@@ -2,6 +2,7 @@ import {
   ApiError,
   getPlayerMatches,
   getProfile,
+  getWeaponStats,
   resolveSteamId,
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
@@ -22,11 +23,14 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches] = await Promise.all([
+    const [profile, matches, weapons] = await Promise.all([
       getProfile(steamId),
       getPlayerMatches(steamId),
+      getWeaponStats(steamId).catch(() => []),
     ]);
-    return <ProfileView profile={profile} matches={matches} />;
+    return (
+      <ProfileView profile={profile} matches={matches} weapons={weapons} />
+    );
   } catch (e) {
     if (e instanceof ApiError) {
       return <FetchError status={e.status} message={e.message} />;

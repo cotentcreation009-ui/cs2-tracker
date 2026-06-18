@@ -1,6 +1,7 @@
-import { ApiError, getMatch } from "@/lib/api";
+import { ApiError, getMatch, getMatchKills } from "@/lib/api";
 import { Scoreboard } from "@/components/Scoreboard";
 import { RoundTimeline } from "@/components/RoundTimeline";
+import { Killfeed } from "@/components/Killfeed";
 import { FetchError } from "@/components/FetchError";
 import { BackButton } from "@/components/BackButton";
 import { mapLabel, timeAgo } from "@/lib/format";
@@ -14,8 +15,12 @@ export default async function MatchPage({
 }) {
   const { id } = await params;
   let detail;
+  let kills;
   try {
-    detail = await getMatch(id);
+    [detail, kills] = await Promise.all([
+      getMatch(id),
+      getMatchKills(id).catch(() => []),
+    ]);
   } catch (e) {
     if (e instanceof ApiError) {
       return <FetchError status={e.status} message={e.message} />;
@@ -25,6 +30,9 @@ export default async function MatchPage({
 
   const { match, players, rounds } = detail;
   const mins = Math.round(match.durationSeconds / 60);
+
+  const names = new Map(players.map((p) => [p.steamId64, p.personaName]));
+  const nameOf = (sid: string) => names.get(sid) || sid || "—";
 
   return (
     <div className="space-y-5">
@@ -55,6 +63,8 @@ export default async function MatchPage({
         teamAScore={match.teamAScore}
         teamBScore={match.teamBScore}
       />
+
+      <Killfeed kills={kills} nameOf={nameOf} />
     </div>
   );
 }

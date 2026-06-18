@@ -28,8 +28,10 @@ func TestRoutesAreMatched(t *testing.T) {
 		{"GET", "/api/resolve?q=76561198000000001"},
 		{"GET", "/api/players/76561198000000001"}, // no trailing slash — the chi gotcha
 		{"GET", "/api/players/76561198000000001/matches"},
+		{"GET", "/api/players/76561198000000001/weapons"},
 		{"GET", "/api/players/76561198000000001/steam-stats"},
 		{"GET", "/api/matches/5"},
+		{"GET", "/api/matches/5/kills"},
 		{"GET", "/api/queue"},
 	}
 	for _, c := range cases {

@@ -1,7 +1,12 @@
-import type { PlayerMatchSummary, PlayerProfile } from "@/lib/types";
+import type {
+  PlayerMatchSummary,
+  PlayerProfile,
+  WeaponStat,
+} from "@/lib/types";
 import { StatCard } from "@/components/StatCard";
 import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
+import { WeaponStats } from "@/components/WeaponStats";
 import {
   flag,
   fmt,
@@ -13,9 +18,11 @@ import {
 export function ProfileView({
   profile,
   matches,
+  weapons = [],
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
+  weapons?: WeaponStat[];
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -143,12 +150,22 @@ export function ProfileView({
             />
           </section>
 
-          {/* Recent matches */}
-          <section>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-              Recent matches
-            </h2>
-            <RecentMatches matches={matches} />
+          {/* Recent matches + weapons */}
+          <section className="grid gap-5 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+                Recent matches
+              </h2>
+              <RecentMatches matches={matches} />
+            </div>
+            {weapons.length > 0 && (
+              <div>
+                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+                  Top weapons
+                </h2>
+                <WeaponStats weapons={weapons} />
+              </div>
+            )}
           </section>
         </>
       )}

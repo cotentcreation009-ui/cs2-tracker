@@ -48,9 +48,9 @@ func main() {
 	}
 
 	matches := []*models.ParsedMatch{
-		buildMatch("de_mirage", time.Now().Add(-26*time.Hour), 16, 12, true),
-		buildMatch("de_inferno", time.Now().Add(-3*time.Hour), 13, 16, false),
-		buildMatch("de_nuke", time.Now().Add(-50*time.Minute), 16, 9, true),
+		buildMatch("de_mirage", time.Now().Add(-26*time.Hour), 16, 12, 1),
+		buildMatch("de_inferno", time.Now().Add(-3*time.Hour), 13, 16, 2),
+		buildMatch("de_nuke", time.Now().Add(-50*time.Minute), 16, 9, 3),
 	}
 	for _, m := range matches {
 		id, err := database.InsertParsedMatch(ctx, m)
@@ -75,7 +75,7 @@ type lineSpec struct {
 
 // buildMatch fabricates a 10-player match. Roster A starts on T (ids x1-x5),
 // roster B starts on CT (ids x6-x10). heroWonA decides the winner via the score.
-func buildMatch(mapName string, playedAt time.Time, scoreA, scoreB int, heroWonA bool) *models.ParsedMatch {
+func buildMatch(mapName string, playedAt time.Time, scoreA, scoreB int, seed uint64) *models.ParsedMatch {
 	rounds := scoreA + scoreB
 
 	// Roster A (T start) — the hero leads this team.
@@ -113,6 +113,9 @@ func buildMatch(mapName string, playedAt time.Time, scoreA, scoreB int, heroWonA
 		roundsList[i] = models.Round{Number: i + 1, WinnerSide: side, EndReason: "ct_elimination"}
 	}
 
+	idsA := []uint64{rosterA[0].id, rosterA[1].id, rosterA[2].id, rosterA[3].id, rosterA[4].id}
+	idsB := []uint64{rosterB[0].id, rosterB[1].id, rosterB[2].id, rosterB[3].id, rosterB[4].id}
+
 	return &models.ParsedMatch{
 		Match: models.Match{
 			Map:         mapName,
@@ -127,7 +130,51 @@ func buildMatch(mapName string, playedAt time.Time, scoreA, scoreB int, heroWonA
 		},
 		Players: players,
 		Rounds:  roundsList,
+		Kills:   genKills(idsA, idsB, rounds, seed),
 	}
+}
+
+var seedWeapons = []string{
+	"AK-47", "M4A4", "AWP", "Desert Eagle", "M4A1-S",
+	"USP-S", "Glock-18", "Galil AR", "MP9", "FAMAS",
+}
+
+// genKills fabricates a plausible killfeed so the weapon panel and match
+// killfeed have data. It is deterministic per seed (no rand: the package forbids
+// it and we want reproducible demo data) and biases the hero (teamA[0]) toward a
+// realistic share of kills across varied weapons.
+func genKills(teamA, teamB []uint64, rounds int, seed uint64) []models.Kill {
+	rng := seed*2654435761 + 1
+	next := func(n int) int {
+		rng = rng*6364136223846793005 + 1442695040888963407
+		return int((rng >> 33) % uint64(n))
+	}
+
+	var kills []models.Kill
+	for r := 1; r <= rounds; r++ {
+		nk := 5 + next(4) // 5..8 kills per round
+		for i := 0; i < nk; i++ {
+			aAttacks := (r+i)%2 == 0
+			killers, victims := teamB, teamA
+			if aAttacks {
+				killers, victims = teamA, teamB
+			}
+			killer := killers[next(len(killers))]
+			if aAttacks && i%2 == 0 {
+				killer = teamA[0] // bias the hero toward entry frags
+			}
+			kills = append(kills, models.Kill{
+				Round:       r,
+				TimeSeconds: float64(r*105 + i*9),
+				KillerID:    killer,
+				VictimID:    victims[next(len(victims))],
+				Weapon:      seedWeapons[next(len(seedWeapons))],
+				Headshot:    next(100) < 45,
+				Opening:     i == 0,
+			})
+		}
+	}
+	return kills
 }
 
 func makeLine(ls lineSpec, side models.Side, won bool, rounds int) models.MatchPlayer {

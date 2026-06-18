@@ -148,6 +148,60 @@ func (d *DB) GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDet
 	return detail, rrows.Err()
 }
 
+// --- Reads: killfeed-derived analytics --------------------------------------
+
+// GetWeaponStats returns a player's most-used weapons (by kills) across every
+// stored match, with headshot counts. Derived from the killfeed.
+func (d *DB) GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error) {
+	rows, err := d.Pool.Query(ctx, `
+		SELECT weapon, COUNT(*) AS kills, COUNT(*) FILTER (WHERE headshot) AS hs
+		FROM kills
+		WHERE killer_id = $1 AND weapon <> ''
+		GROUP BY weapon
+		ORDER BY kills DESC, weapon ASC
+		LIMIT $2`, int64(steamID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.WeaponStat
+	for rows.Next() {
+		var w models.WeaponStat
+		if err := rows.Scan(&w.Weapon, &w.Kills, &w.Headshots); err != nil {
+			return nil, err
+		}
+		if w.Kills > 0 {
+			w.HSPct = float64(int(float64(w.Headshots)/float64(w.Kills)*1000+0.5)) / 10
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// ListMatchKills returns the ordered killfeed for a match.
+func (d *DB) ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error) {
+	rows, err := d.Pool.Query(ctx, `
+		SELECT round, time_seconds, COALESCE(killer_id,0), COALESCE(victim_id,0), COALESCE(assister_id,0),
+			weapon, headshot, opening, trade
+		FROM kills WHERE match_id=$1 ORDER BY round, time_seconds`, matchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.Kill
+	for rows.Next() {
+		k := models.Kill{MatchID: matchID}
+		if err := rows.Scan(&k.Round, &k.TimeSeconds, &k.KillerID, &k.VictimID, &k.AssisterID,
+			&k.Weapon, &k.Headshot, &k.Opening, &k.Trade); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // --- Writes: persist a parsed match -----------------------------------------
 
 // InsertParsedMatch persists a fully-parsed match transactionally: the match
