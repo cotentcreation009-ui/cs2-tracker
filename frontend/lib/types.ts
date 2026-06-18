@@ -109,6 +109,10 @@ export interface Round {
   number: number;
   winnerSide: Side;
   endReason: string;
+  ctBuy?: string;
+  tBuy?: string;
+  ctEquipValue: number;
+  tEquipValue: number;
 }
 
 export interface MatchDetail {

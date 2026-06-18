@@ -66,6 +66,38 @@ func FillMatchPlayerDerived(mp *models.MatchPlayer) {
 	mp.Rating = round2(Rating1(mp.Kills, mp.Deaths, rounds, mp.K1, mp.K2, mp.K3, mp.K4, mp.K5))
 }
 
+// Team-level (5-player cumulative) freeze-time-end equipment-value thresholds
+// for buy classification. These are heuristics approximating the standard
+// eco / force-buy / full-buy categories and are intended to be tuned against
+// real demos.
+const (
+	forceBuyMin = 5000
+	fullBuyMin  = 17000
+)
+
+// Buy type labels.
+const (
+	BuyPistol = "pistol"
+	BuyEco    = "eco"
+	BuyForce  = "force"
+	BuyFull   = "full"
+)
+
+// ClassifyBuy categorises a team's round buy from its team-cumulative
+// freeze-time-end equipment value. pistol marks the first round of each half.
+func ClassifyBuy(equipValue int, pistol bool) string {
+	switch {
+	case pistol:
+		return BuyPistol
+	case equipValue >= fullBuyMin:
+		return BuyFull
+	case equipValue >= forceBuyMin:
+		return BuyForce
+	default:
+		return BuyEco
+	}
+}
+
 // FillCareerDerived computes the rolling-career derived metrics from the
 // aggregate counts.
 func FillCareerDerived(c *models.PlayerCareer) {

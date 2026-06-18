@@ -55,6 +55,7 @@ func Parse(r io.Reader) (result *models.ParsedMatch, err error) {
 
 	p.RegisterEventHandler(c.onMatchStart)
 	p.RegisterEventHandler(c.onRoundStart)
+	p.RegisterEventHandler(c.onFreezeEnd)
 	p.RegisterEventHandler(c.onKill)
 	p.RegisterEventHandler(c.onPlayerHurt)
 	p.RegisterEventHandler(c.onPlayerFlashed)
@@ -81,6 +82,12 @@ type collector struct {
 	teamAScore int // roster that started on T
 	teamBScore int // roster that started on CT
 
+	// Per-round economy, captured at freeze-time end.
+	curCTEquip   int
+	curTEquip    int
+	curPistol    bool
+	prevCTRoster int // roster on CT last round, for half-swap pistol detection
+
 	rounds []models.Round
 	kills  []models.Kill
 }
@@ -105,6 +112,7 @@ func (c *collector) onMatchStart(events.MatchStart) {
 	c.rosterOf = map[uint64]int{}
 	c.teamAScore = 0
 	c.teamBScore = 0
+	c.prevCTRoster = 0
 	c.rounds = nil
 	c.kills = nil
 }
@@ -113,6 +121,7 @@ func (c *collector) onRoundStart(events.RoundStart) {
 	if !c.matchStarted || c.p.GameState().IsWarmupPeriod() {
 		return
 	}
+	c.curCTEquip, c.curTEquip, c.curPistol = 0, 0, false
 	c.rt = NewRoundTracker(tradeWindow)
 	for _, pl := range c.p.GameState().Participants().Playing() {
 		if pl == nil || pl.SteamID64 == 0 {
@@ -132,6 +141,45 @@ func (c *collector) onRoundStart(events.RoundStart) {
 			mp.StartSide = sideOf(team)
 		}
 	}
+}
+
+// onFreezeEnd captures each team's equipment value the instant buy time ends —
+// i.e. what they bought this round — and detects pistol rounds (round 1, or the
+// first round after the halftime side swap).
+func (c *collector) onFreezeEnd(events.RoundFreezetimeEnd) {
+	if !c.matchStarted || c.rt == nil || c.p.GameState().IsWarmupPeriod() {
+		return
+	}
+	gs := c.p.GameState()
+	c.curCTEquip = gs.TeamCounterTerrorists().CurrentEquipmentValue()
+	c.curTEquip = gs.TeamTerrorists().CurrentEquipmentValue()
+
+	ctRoster := c.majorityRoster(teamCT)
+	c.curPistol = c.roundNum == 0 || (c.prevCTRoster != 0 && ctRoster != c.prevCTRoster)
+	if ctRoster != 0 {
+		c.prevCTRoster = ctRoster
+	}
+}
+
+// majorityRoster returns the roster identity (starting team) that most of the
+// players currently on the given side belong to.
+func (c *collector) majorityRoster(side int) int {
+	counts := map[int]int{}
+	for _, pl := range c.p.GameState().Participants().Playing() {
+		if pl == nil || pl.SteamID64 == 0 || int(pl.Team) != side {
+			continue
+		}
+		if r, ok := c.rosterOf[pl.SteamID64]; ok {
+			counts[r]++
+		}
+	}
+	best, roster := -1, 0
+	for r, n := range counts {
+		if n > best {
+			best, roster = n, r
+		}
+	}
+	return roster
 }
 
 func (c *collector) onKill(e events.Kill) {
@@ -304,9 +352,13 @@ func (c *collector) onRoundEnd(e events.RoundEnd) {
 	}
 
 	c.rounds = append(c.rounds, models.Round{
-		Number:     c.roundNum + 1,
-		WinnerSide: sideOf(winner),
-		EndReason:  reasonString(e.Reason),
+		Number:       c.roundNum + 1,
+		WinnerSide:   sideOf(winner),
+		EndReason:    reasonString(e.Reason),
+		CTBuy:        stats.ClassifyBuy(c.curCTEquip, c.curPistol),
+		TBuy:         stats.ClassifyBuy(c.curTEquip, c.curPistol),
+		CTEquipValue: c.curCTEquip,
+		TEquipValue:  c.curTEquip,
 	})
 	c.addRoundWinToRoster(winner)
 	c.roundNum++
@@ -319,22 +371,7 @@ func (c *collector) addRoundWinToRoster(winner int) {
 	if winner != teamT && winner != teamCT {
 		return // draw / unknown
 	}
-	counts := map[int]int{}
-	for _, pl := range c.p.GameState().Participants().Playing() {
-		if pl == nil || pl.SteamID64 == 0 || int(pl.Team) != winner {
-			continue
-		}
-		if r, ok := c.rosterOf[pl.SteamID64]; ok {
-			counts[r]++
-		}
-	}
-	roster, best := 0, -1
-	for r, n := range counts {
-		if n > best {
-			best, roster = n, r
-		}
-	}
-	switch roster {
+	switch c.majorityRoster(winner) {
 	case teamT:
 		c.teamAScore++
 	case teamCT:

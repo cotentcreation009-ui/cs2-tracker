@@ -41,6 +41,28 @@ func TestRating1ZeroRounds(t *testing.T) {
 	}
 }
 
+func TestClassifyBuy(t *testing.T) {
+	cases := []struct {
+		equip  int
+		pistol bool
+		want   string
+	}{
+		{800, true, "pistol"},
+		{25000, true, "pistol"}, // pistol overrides value
+		{22000, false, "full"},
+		{17000, false, "full"},
+		{16999, false, "force"},
+		{5000, false, "force"},
+		{4999, false, "eco"},
+		{0, false, "eco"},
+	}
+	for _, c := range cases {
+		if got := ClassifyBuy(c.equip, c.pistol); got != c.want {
+			t.Errorf("ClassifyBuy(%d, %v) = %q, want %q", c.equip, c.pistol, got, c.want)
+		}
+	}
+}
+
 func TestFillCareerDerivedNoDivByZero(t *testing.T) {
 	c := &models.PlayerCareer{} // all zero
 	FillCareerDerived(c)

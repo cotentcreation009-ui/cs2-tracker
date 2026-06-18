@@ -106,11 +106,33 @@ func buildMatch(mapName string, playedAt time.Time, scoreA, scoreB int, seed uin
 
 	roundsList := make([]models.Round, rounds)
 	for i := 0; i < rounds; i++ {
+		n := i + 1
 		side := models.SideT
 		if i%2 == 0 {
 			side = models.SideCT
 		}
-		roundsList[i] = models.Round{Number: i + 1, WinnerSide: side, EndReason: "ct_elimination"}
+		pistol := n == 1 || n == 16 // MR15 pistol rounds
+		ctEquip, tEquip := 23000, 22000
+		switch {
+		case pistol:
+			ctEquip, tEquip = 800, 800
+		default:
+			if i%5 == 0 {
+				tEquip = 2400 // occasional T eco
+			}
+			if i%6 == 0 {
+				ctEquip = 6500 // occasional CT force
+			}
+		}
+		roundsList[i] = models.Round{
+			Number:       n,
+			WinnerSide:   side,
+			EndReason:    "ct_elimination",
+			CTBuy:        stats.ClassifyBuy(ctEquip, pistol),
+			TBuy:         stats.ClassifyBuy(tEquip, pistol),
+			CTEquipValue: ctEquip,
+			TEquipValue:  tEquip,
+		}
 	}
 
 	idsA := []uint64{rosterA[0].id, rosterA[1].id, rosterA[2].id, rosterA[3].id, rosterA[4].id}

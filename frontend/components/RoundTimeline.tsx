@@ -9,10 +9,12 @@ export function RoundTimeline({ rounds }: { rounds: Round[] }) {
       <div className="flex flex-wrap gap-1">
         {rounds.map((r) => {
           const ct = r.winnerSide === "CT";
+          const econ =
+            r.ctBuy && r.tBuy ? ` · CT ${r.ctBuy} · T ${r.tBuy}` : "";
           return (
             <div
               key={r.number}
-              title={`Round ${r.number}: ${r.winnerSide} (${r.endReason})`}
+              title={`Round ${r.number}: ${r.winnerSide} (${r.endReason})${econ}`}
               className={`grid h-6 w-6 place-items-center rounded text-[10px] font-semibold tabular-nums ${
                 ct ? "bg-brand/20 text-brand" : "bg-mid/20 text-mid"
               }`}

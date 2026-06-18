@@ -86,12 +86,16 @@ type MatchPlayer struct {
 	Won     bool    `json:"won"`
 }
 
-// Round is one round outcome inside a match.
+// Round is one round outcome inside a match, including each team's buy.
 type Round struct {
-	MatchID    int64  `json:"matchId"`
-	Number     int    `json:"number"`
-	WinnerSide Side   `json:"winnerSide"`
-	EndReason  string `json:"endReason"`
+	MatchID      int64  `json:"matchId"`
+	Number       int    `json:"number"`
+	WinnerSide   Side   `json:"winnerSide"`
+	EndReason    string `json:"endReason"`
+	CTBuy        string `json:"ctBuy,omitempty"`
+	TBuy         string `json:"tBuy,omitempty"`
+	CTEquipValue int    `json:"ctEquipValue"`
+	TEquipValue  int    `json:"tEquipValue"`
 }
 
 // Kill is a single kill event, kept for match-detail killfeeds and future

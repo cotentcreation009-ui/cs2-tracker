@@ -128,21 +128,20 @@ func (d *DB) GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDet
 	}
 
 	rrows, err := d.Pool.Query(ctx,
-		`SELECT match_id, number, winner_side, end_reason FROM rounds WHERE match_id=$1 ORDER BY number`, matchID)
+		`SELECT match_id, number, winner_side, end_reason, ct_buy, t_buy, ct_equip_value, t_equip_value
+		 FROM rounds WHERE match_id=$1 ORDER BY number`, matchID)
 	if err != nil {
 		return detail, err
 	}
 	defer rrows.Close()
 	for rrows.Next() {
 		var r models.Round
-		var mid int64
-		var ws, reason string
-		if err := rrows.Scan(&mid, &r.Number, &ws, &reason); err != nil {
+		var ws string
+		if err := rrows.Scan(&r.MatchID, &r.Number, &ws, &r.EndReason,
+			&r.CTBuy, &r.TBuy, &r.CTEquipValue, &r.TEquipValue); err != nil {
 			return detail, err
 		}
-		r.MatchID = mid
 		r.WinnerSide = models.Side(ws)
-		r.EndReason = reason
 		detail.Rounds = append(detail.Rounds, r)
 	}
 	return detail, rrows.Err()
@@ -368,9 +367,11 @@ func (d *DB) InsertParsedMatch(ctx context.Context, pm *models.ParsedMatch) (int
 
 		for _, r := range pm.Rounds {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO rounds (match_id, number, winner_side, end_reason) VALUES ($1,$2,$3,$4)
+				`INSERT INTO rounds (match_id, number, winner_side, end_reason, ct_buy, t_buy, ct_equip_value, t_equip_value)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 				 ON CONFLICT (match_id, number) DO NOTHING`,
-				matchID, r.Number, string(r.WinnerSide), r.EndReason); err != nil {
+				matchID, r.Number, string(r.WinnerSide), r.EndReason,
+				r.CTBuy, r.TBuy, r.CTEquipValue, r.TEquipValue); err != nil {
 				return err
 			}
 		}
