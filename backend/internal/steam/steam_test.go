@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
@@ -92,6 +94,42 @@ func TestNoAPIKey(t *testing.T) {
 	c := New("")
 	if _, err := c.ResolveVanityURL(context.Background(), "x"); err != ErrNoAPIKey {
 		t.Errorf("err = %v, want ErrNoAPIKey", err)
+	}
+}
+
+func TestRetryThenSuccess(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) <= 2 {
+			w.WriteHeader(http.StatusTooManyRequests) // rate-limited twice
+			return
+		}
+		w.Write([]byte(`{"response":{"steamid":"76561197960287930","success":1}}`))
+	}))
+	defer srv.Close()
+	c := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithRetryBase(time.Millisecond))
+
+	id, err := c.ResolveVanityURL(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if id != 76561197960287930 {
+		t.Errorf("id = %d", id)
+	}
+	if n := atomic.LoadInt32(&calls); n != 3 {
+		t.Errorf("calls = %d, want 3 (2 retried + 1 success)", n)
+	}
+}
+
+func TestPersistentRateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithRetryBase(time.Millisecond))
+
+	if _, err := c.ResolveVanityURL(context.Background(), "x"); err != ErrRateLimited {
+		t.Errorf("err = %v, want ErrRateLimited", err)
 	}
 }
 

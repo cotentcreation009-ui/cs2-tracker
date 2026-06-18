@@ -27,13 +27,17 @@ var (
 	ErrNoAPIKey = errors.New("steam: no API key configured")
 	// ErrNotFound is returned when a vanity URL or profile cannot be resolved.
 	ErrNotFound = errors.New("steam: not found")
+	// ErrRateLimited is returned when Steam keeps rate-limiting after retries.
+	ErrRateLimited = errors.New("steam: rate limited")
 )
 
 // Client talks to the Steam Web API.
 type Client struct {
-	apiKey  string
-	baseURL string
-	http    *http.Client
+	apiKey    string
+	baseURL   string
+	http      *http.Client
+	retries   int           // max retries on rate-limit / transient errors
+	retryBase time.Duration // base backoff (doubles each attempt)
 }
 
 // Option customises a Client.
@@ -45,13 +49,18 @@ func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = strings
 // WithHTTPClient injects a custom *http.Client.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
+// WithRetryBase sets the base backoff between retries (mainly for tests).
+func WithRetryBase(d time.Duration) Option { return func(c *Client) { c.retryBase = d } }
+
 // New constructs a Client. apiKey may be empty; key-requiring calls then return
 // ErrNoAPIKey.
 func New(apiKey string, opts ...Option) *Client {
 	c := &Client{
-		apiKey:  apiKey,
-		baseURL: defaultBaseURL,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		apiKey:    apiKey,
+		baseURL:   defaultBaseURL,
+		http:      &http.Client{Timeout: 10 * time.Second},
+		retries:   3,
+		retryBase: 300 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
@@ -83,7 +92,8 @@ func (c *Client) ResolveVanityURL(ctx context.Context, vanity string) (uint64, e
 	q.Set("vanityurl", vanity)
 
 	var out resolveResponse
-	if err := c.getJSON(ctx, "/ISteamUser/ResolveVanityURL/v1/", q, &out); err != nil {
+	if err := c.getJSON(ctx, "/ISteamUser/ResolveVanityURL/v1/", q, &out,
+		http.StatusUnauthorized, http.StatusForbidden); err != nil {
 		return 0, err
 	}
 	if out.Response.Success != 1 {
@@ -148,7 +158,8 @@ func (c *Client) GetPlayerSummaries(ctx context.Context, ids ...uint64) ([]Playe
 	q.Set("steamids", strings.Join(parts, ","))
 
 	var out playerSummariesResponse
-	if err := c.getJSON(ctx, "/ISteamUser/GetPlayerSummaries/v2/", q, &out); err != nil {
+	if err := c.getJSON(ctx, "/ISteamUser/GetPlayerSummaries/v2/", q, &out,
+		http.StatusUnauthorized, http.StatusForbidden); err != nil {
 		return nil, err
 	}
 	summaries := make([]PlayerSummary, 0, len(out.Response.Players))
@@ -211,7 +222,10 @@ func (c *Client) GetUserStatsForGame(ctx context.Context, appID int, steamID uin
 	q.Set("steamid", strconv.FormatUint(steamID, 10))
 
 	var out userStatsResponse
-	if err := c.getJSON(ctx, "/ISteamUserStats/GetUserStatsForGame/v2/", q, &out); err != nil {
+	// CS2 reports "no stats for this user" via 400/403/500 (confirmed live).
+	if err := c.getJSON(ctx, "/ISteamUserStats/GetUserStatsForGame/v2/", q, &out,
+		http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden,
+		http.StatusInternalServerError); err != nil {
 		return GameStats{}, err
 	}
 	gs := GameStats{
@@ -256,33 +270,102 @@ func ParseSteamID64(s string) (uint64, bool) {
 
 // --- internal ---------------------------------------------------------------
 
-func (c *Client) getJSON(ctx context.Context, path string, q url.Values, dst any) error {
+// getJSON performs a GET with bounded retry/backoff on rate-limit (429) and
+// transient gateway errors (502/503/504), honoring Retry-After. Any status in
+// notFound is mapped to ErrNotFound — Steam overloads 4xx/500 to mean "no data
+// for this user/app", and those must not be retried.
+func (c *Client) getJSON(ctx context.Context, path string, q url.Values, dst any, notFound ...int) error {
 	u := c.baseURL + path + "?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("steam: request failed: %w", err)
-	}
-	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-		// fall through
-	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError:
-		// Steam signals "no data for this user/app" on GetUserStatsForGame with
-		// 400 or 500 (profile private, or never played the game — confirmed live
-		// against an account with no CS2 stats), and rejects a bad key with
-		// 401/403. Treat them all as not-found so callers degrade gracefully.
-		return ErrNotFound
-	default:
-		return fmt.Errorf("steam: unexpected status %d for %s", resp.StatusCode, path)
-	}
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return fmt.Errorf("steam: request failed: %w", err)
+		}
 
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		return fmt.Errorf("steam: decode response: %w", err)
+		switch {
+		case resp.StatusCode == http.StatusOK:
+			err := json.NewDecoder(resp.Body).Decode(dst)
+			resp.Body.Close()
+			if err != nil {
+				return fmt.Errorf("steam: decode response: %w", err)
+			}
+			return nil
+
+		case containsInt(notFound, resp.StatusCode):
+			resp.Body.Close()
+			return ErrNotFound
+
+		case isTransient(resp.StatusCode):
+			wait := c.backoff(attempt, resp.Header.Get("Retry-After"))
+			status := resp.StatusCode
+			resp.Body.Close()
+			if attempt >= c.retries {
+				if status == http.StatusTooManyRequests {
+					return ErrRateLimited
+				}
+				return fmt.Errorf("steam: status %d after %d retries for %s", status, c.retries, path)
+			}
+			if err := sleepCtx(ctx, wait); err != nil {
+				return err
+			}
+			continue
+
+		default:
+			status := resp.StatusCode
+			resp.Body.Close()
+			return fmt.Errorf("steam: unexpected status %d for %s", status, path)
+		}
 	}
-	return nil
+}
+
+func isTransient(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// backoff returns the wait before the next attempt, honoring a Retry-After
+// header (in seconds) when present, otherwise exponential from retryBase.
+func (c *Client) backoff(attempt int, retryAfter string) time.Duration {
+	if retryAfter != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && secs >= 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	d := c.retryBase << attempt // base * 2^attempt
+	if limit := 5 * time.Second; d > limit {
+		d = limit
+	}
+	return d
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func containsInt(s []int, v int) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
