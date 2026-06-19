@@ -17,6 +17,7 @@ import (
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
 )
@@ -53,6 +54,8 @@ func run(log *slog.Logger) error {
 		log.Warn("no STEAM_API_KEY set — vanity resolution and identity hydration are disabled until provided")
 	}
 
+	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey)
+
 	// Redis-backed queue + cache are best-effort: the API still serves reads if
 	// Redis is down, just without ingest/caching.
 	var q *queue.Queue
@@ -74,7 +77,7 @@ func run(log *slog.Logger) error {
 		defer c.Close()
 	}
 
-	srv := api.NewServer(cfg, database, steamClient, q, c, log)
+	srv := api.NewServer(cfg, database, steamClient, leetifyClient, q, c, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

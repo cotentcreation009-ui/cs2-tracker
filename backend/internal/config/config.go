@@ -26,6 +26,10 @@ type Config struct {
 	// Steam Web API
 	SteamAPIKey string // key from https://steamcommunity.com/dev/apikey (optional until provided)
 
+	// Leetify public API (keyless; key optional for higher rate limits)
+	LeetifyBaseURL string
+	LeetifyAPIKey  string
+
 	// Demo pipeline
 	DemoQueueKey      string        // redis list key used as the parse job queue
 	DemoWorkDir       string        // scratch dir where demos are downloaded/extracted before parsing
@@ -60,6 +64,8 @@ func Load() (*Config, error) {
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
 		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
+		LeetifyBaseURL:    getEnv("LEETIFY_BASE_URL", "https://api-public.cs-prod.leetify.com"),
+		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
 		DemoWorkDir:       getEnv("DEMO_WORK_DIR", os.TempDir()),
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),

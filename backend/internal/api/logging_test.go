@@ -15,7 +15,7 @@ import (
 func TestRequestLogging(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
-	s := NewServer(cfg, &fakeStore{}, steam.New(""), nil, nil,
+	s := NewServer(cfg, &fakeStore{}, steam.New(""), nil, nil, nil,
 		slog.New(slog.NewTextHandler(&buf, nil)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)

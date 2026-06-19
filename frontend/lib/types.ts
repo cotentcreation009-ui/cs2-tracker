@@ -128,6 +128,39 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface LeetifyProfile {
+  name: string;
+  steam64_id: string;
+  total_matches: number;
+  winrate: number; // 0..1
+  privacy_mode: string;
+  rating: {
+    aim: number;
+    positioning: number;
+    utility: number;
+    clutch: number;
+    opening: number;
+    ct_leetify: number;
+    t_leetify: number;
+  };
+  stats: {
+    accuracy_head: number;
+    preaim: number;
+    reaction_time_ms: number;
+    spray_accuracy: number;
+    ct_opening_duel_success_percentage: number;
+    t_opening_duel_success_percentage: number;
+    trade_kills_success_percentage: number;
+  };
+  ranks: {
+    leetify?: number;
+    premier?: number;
+    faceit?: number;
+    faceit_elo?: number;
+    wingman?: number;
+  };
+}
+
 export interface IngestJob {
   id: string;
   type: string;

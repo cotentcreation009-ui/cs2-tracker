@@ -1,4 +1,5 @@
 import type {
+  LeetifyProfile,
   MapStat,
   PlayerMatchSummary,
   PlayerProfile,
@@ -11,6 +12,7 @@ import { RecentForm } from "@/components/RecentForm";
 import { RatingTrend } from "@/components/RatingTrend";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
+import { LeetifyPanel } from "@/components/LeetifyPanel";
 import {
   flag,
   fmt,
@@ -24,11 +26,13 @@ export function ProfileView({
   matches,
   weapons = [],
   maps = [],
+  leetify = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
   weapons?: WeaponStat[];
   maps?: MapStat[];
+  leetify?: LeetifyProfile | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -87,7 +91,9 @@ export function ProfileView({
         {hasData && <RatingRing rating={career.rating} />}
       </section>
 
-      {!hasData && (
+      {leetify && <LeetifyPanel profile={leetify} />}
+
+      {!hasData && !leetify && (
         <div className="card px-5 py-6 text-sm text-muted">
           We know this player&apos;s Steam identity, but no demos have been
           parsed for them yet. Ingest a demo via{" "}

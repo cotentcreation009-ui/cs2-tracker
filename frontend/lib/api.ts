@@ -9,6 +9,7 @@
 import type {
   Kill,
   LeaderboardEntry,
+  LeetifyProfile,
   MapStat,
   MatchDetail,
   PlayerMatchSummary,
@@ -78,6 +79,19 @@ export async function getWeaponStats(
     `/api/players/${steamId}/weapons?limit=${limit}`,
   );
   return data.weapons ?? [];
+}
+
+// getLeetify fetches a player's live Leetify profile. It is supplementary, so
+// any failure (no profile, unreachable, not configured) just returns null and
+// the panel is hidden.
+export async function getLeetify(
+  steamId: string,
+): Promise<LeetifyProfile | null> {
+  try {
+    return await getJSON<LeetifyProfile>(`/api/players/${steamId}/leetify`);
+  } catch {
+    return null;
+  }
 }
 
 export async function getMapStats(steamId: string): Promise<MapStat[]> {

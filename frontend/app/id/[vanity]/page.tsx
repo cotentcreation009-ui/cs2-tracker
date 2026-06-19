@@ -1,5 +1,6 @@
 import {
   ApiError,
+  getLeetify,
   getMapStats,
   getPlayerMatches,
   getProfile,
@@ -24,11 +25,12 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps] = await Promise.all([
+    const [profile, matches, weapons, maps, leetify] = await Promise.all([
       getProfile(steamId),
       getPlayerMatches(steamId),
       getWeaponStats(steamId).catch(() => []),
       getMapStats(steamId).catch(() => []),
+      getLeetify(steamId),
     ]);
     return (
       <ProfileView
@@ -36,6 +38,7 @@ export default async function ProfileByVanity({
         matches={matches}
         weapons={weapons}
         maps={maps}
+        leetify={leetify}
       />
     );
   } catch (e) {

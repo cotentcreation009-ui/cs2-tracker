@@ -17,7 +17,7 @@ import (
 // catches chi trailing-slash mistakes in the route tree.
 func testRouter() http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
-	s := NewServer(cfg, nil, steam.New(""), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewServer(cfg, nil, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
 
@@ -31,6 +31,7 @@ func TestRoutesAreMatched(t *testing.T) {
 		{"GET", "/api/players/76561198000000001/matches"},
 		{"GET", "/api/players/76561198000000001/weapons"},
 		{"GET", "/api/players/76561198000000001/maps"},
+		{"GET", "/api/players/76561198000000001/leetify"},
 		{"GET", "/api/players/76561198000000001/steam-stats"},
 		{"GET", "/api/matches/5"},
 		{"GET", "/api/matches/5/kills"},

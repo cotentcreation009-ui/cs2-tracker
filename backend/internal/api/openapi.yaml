@@ -145,6 +145,14 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/MapStat" }
 
+  /api/players/{steamid}/leetify:
+    get:
+      summary: Live Leetify profile (fetched real-time; attributed to Leetify)
+      parameters: [{ $ref: "#/components/parameters/SteamID" }]
+      responses:
+        "200": { description: Leetify profile (ratings, ranks, stats) }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/players/{steamid}/steam-stats:
     get:
       summary: Raw Steam App 730 lifetime stats (needs key)

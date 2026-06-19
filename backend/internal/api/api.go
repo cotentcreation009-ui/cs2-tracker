@@ -17,6 +17,7 @@ import (
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
@@ -48,6 +49,7 @@ type Server struct {
 	cfg     *config.Config
 	db      Store
 	steam   *steam.Client
+	leetify *leetify.Client
 	queue   *queue.Queue
 	cache   *cache.Cache
 	log     *slog.Logger
@@ -56,8 +58,8 @@ type Server struct {
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
 // degrade gracefully).
-func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: store, steam: steamClient, queue: q, cache: c, log: log, metrics: &metrics{}}
+func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, queue: q, cache: c, log: log, metrics: &metrics{}}
 }
 
 // Router builds the HTTP handler.
@@ -94,6 +96,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/matches", s.handlePlayerMatches)
 			r.Get("/weapons", s.handleWeapons)
 			r.Get("/maps", s.handleMaps)
+			r.Get("/leetify", s.handleLeetify)
 			r.Get("/steam-stats", s.handleSteamStats)
 		})
 
@@ -308,6 +311,30 @@ func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
 		weapons = []models.WeaponStat{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
+}
+
+// handleLeetify fetches a player's Leetify profile live (never stored, per
+// Leetify's terms). The frontend renders it with the required attribution.
+func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	if s.leetify == nil {
+		writeError(w, http.StatusServiceUnavailable, "leetify integration not configured")
+		return
+	}
+	prof, err := s.leetify.GetProfile(r.Context(), id)
+	if errors.Is(err, leetify.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "leetify profile", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prof)
 }
 
 func (s *Server) handleMaps(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
   ApiError,
+  getLeetify,
   getMapStats,
   getPlayerMatches,
   getProfile,
@@ -44,11 +45,12 @@ export default async function ProfileBySteamID({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, matches, weapons, maps] = await Promise.all([
+    const [profile, matches, weapons, maps, leetify] = await Promise.all([
       getProfile(steamid),
       getPlayerMatches(steamid),
       getWeaponStats(steamid).catch(() => []),
       getMapStats(steamid).catch(() => []),
+      getLeetify(steamid),
     ]);
     return (
       <ProfileView
@@ -56,6 +58,7 @@ export default async function ProfileBySteamID({
         matches={matches}
         weapons={weapons}
         maps={maps}
+        leetify={leetify}
       />
     );
   } catch (e) {
