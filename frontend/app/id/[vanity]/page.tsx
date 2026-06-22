@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -25,13 +26,15 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps, leetify] = await Promise.all([
-      getProfile(steamId),
-      getPlayerMatches(steamId),
-      getWeaponStats(steamId).catch(() => []),
-      getMapStats(steamId).catch(() => []),
-      getLeetify(steamId),
-    ]);
+    const [profile, matches, weapons, maps, leetify, session] =
+      await Promise.all([
+        getProfile(steamId),
+        getPlayerMatches(steamId),
+        getWeaponStats(steamId).catch(() => []),
+        getMapStats(steamId).catch(() => []),
+        getLeetify(steamId),
+        getSession(),
+      ]);
     return (
       <ProfileView
         profile={profile}
@@ -39,6 +42,7 @@ export default async function ProfileByVanity({
         weapons={weapons}
         maps={maps}
         leetify={leetify}
+        isSelf={session?.steamId64 === profile.player.steamId64}
       />
     );
   } catch (e) {

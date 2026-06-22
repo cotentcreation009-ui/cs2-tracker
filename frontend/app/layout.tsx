@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
+import { AuthControls } from "@/components/AuthControls";
 
 export const metadata: Metadata = {
   title: "CS2 Tracker — advanced Counter-Strike 2 stats",
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               >
                 Ingest
               </Link>
+              <AuthControls />
             </div>
           </div>
         </header>

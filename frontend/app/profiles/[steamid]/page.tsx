@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
+import { getSession } from "@/lib/session";
 
 // Profiles depend on live backend data, so render per-request.
 export const dynamic = "force-dynamic";
@@ -45,13 +46,15 @@ export default async function ProfileBySteamID({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, matches, weapons, maps, leetify] = await Promise.all([
-      getProfile(steamid),
-      getPlayerMatches(steamid),
-      getWeaponStats(steamid).catch(() => []),
-      getMapStats(steamid).catch(() => []),
-      getLeetify(steamid),
-    ]);
+    const [profile, matches, weapons, maps, leetify, session] =
+      await Promise.all([
+        getProfile(steamid),
+        getPlayerMatches(steamid),
+        getWeaponStats(steamid).catch(() => []),
+        getMapStats(steamid).catch(() => []),
+        getLeetify(steamid),
+        getSession(),
+      ]);
     return (
       <ProfileView
         profile={profile}
@@ -59,6 +62,7 @@ export default async function ProfileBySteamID({
         weapons={weapons}
         maps={maps}
         leetify={leetify}
+        isSelf={session?.steamId64 === profile.player.steamId64}
       />
     );
   } catch (e) {

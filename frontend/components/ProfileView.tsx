@@ -27,12 +27,14 @@ export function ProfileView({
   weapons = [],
   maps = [],
   leetify = null,
+  isSelf = false,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
   weapons?: WeaponStat[];
   maps?: MapStat[];
   leetify?: LeetifyProfile | null;
+  isSelf?: boolean;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -62,8 +64,13 @@ export function ProfileView({
             </div>
           )}
           <div>
-            <h1 className="text-2xl font-bold leading-tight">
+            <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold leading-tight">
               {player.personaName || player.steamId64}
+              {isSelf && (
+                <span className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand">
+                  This is you
+                </span>
+              )}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
               {player.countryCode && (
