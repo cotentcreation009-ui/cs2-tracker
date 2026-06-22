@@ -29,5 +29,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
 *.swp
+# .vscode/ is committed (shared tasks/launch/extensions); ignore only local user files
+.vscode/*.log

@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug API",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/backend/cmd/api",
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Debug worker",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/backend/cmd/worker",
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Debug parsedemo",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/backend/cmd/parsedemo",
+      "cwd": "${workspaceFolder}/backend",
+      "args": ["${input:demoPath}"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "demoPath",
+      "type": "promptString",
+      "description": "Path to a .dem (relative to backend/)",
+      "default": "../testdata/match.dem"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "golang.go",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker",
+    "editorconfig.editorconfig"
+  ]
+}

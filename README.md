@@ -88,6 +88,11 @@ cs2-tracker/
 
 ---
 
+> **Continuing in VS Code?** See **[docs/DEVELOPING.md](docs/DEVELOPING.md)** —
+> prerequisites, the bundled `.vscode` tasks/debug configs, how to start the
+> portable Postgres, and how to run everything. Deploy + the steamcommunity-TLD
+> mirror trick: **[docs/MIRROR-AND-DEPLOY.md](docs/MIRROR-AND-DEPLOY.md)**.
+
 ## Quick start (Docker)
 
 > Needs a healthy Docker engine. **On this machine the WSL2/Hyper-V backend is

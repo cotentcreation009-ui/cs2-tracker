@@ -1,0 +1,24 @@
+{
+  "go.useLanguageServer": true,
+  "go.toolsManagement.autoUpdate": true,
+  "[go]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "golang.go"
+  },
+  "gopls": {
+    "ui.semanticTokens": true
+  },
+  "[typescript]": { "editor.tabSize": 2 },
+  "[typescriptreact]": { "editor.tabSize": 2 },
+  "[css]": { "editor.tabSize": 2 },
+  "css.validate": false,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/backend/bin": true
+  },
+  "files.watcherExclude": {
+    "**/.next/**": true,
+    "**/node_modules/**": true
+  }
+}

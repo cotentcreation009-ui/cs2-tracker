@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: build",
+      "type": "shell",
+      "command": "go build ./...",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "backend: test",
+      "type": "shell",
+      "command": "go test ./...",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "backend: vet",
+      "type": "shell",
+      "command": "go vet ./...",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "run: api",
+      "detail": "Start the HTTP API on :8080 (reads ../.env)",
+      "type": "shell",
+      "command": "go run ./cmd/api",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "run: worker",
+      "detail": "Start the parse worker",
+      "type": "shell",
+      "command": "go run ./cmd/worker",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "run: seed",
+      "detail": "Load synthetic demo data into Postgres",
+      "type": "shell",
+      "command": "go run ./cmd/seed",
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: dev",
+      "detail": "Next.js dev server on :3000",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": []
+    }
+  ]
+}
