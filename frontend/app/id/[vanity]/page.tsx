@@ -5,6 +5,7 @@ import {
   getMapStats,
   getPlayerMatches,
   getProfile,
+  getSteamExtras,
   getWeaponStats,
   resolveSteamId,
 } from "@/lib/api";
@@ -26,7 +27,7 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps, leetify, faceit] =
+    const [profile, matches, weapons, maps, leetify, faceit, steamExtras] =
       await Promise.all([
         getProfile(steamId),
         getPlayerMatches(steamId),
@@ -34,6 +35,7 @@ export default async function ProfileByVanity({
         getMapStats(steamId).catch(() => []),
         getLeetify(steamId),
         getFaceit(steamId),
+        getSteamExtras(steamId),
       ]);
     return (
       <ProfileView
@@ -43,6 +45,7 @@ export default async function ProfileByVanity({
         maps={maps}
         leetify={leetify}
         faceit={faceit}
+        steamExtras={steamExtras}
       />
     );
   } catch (e) {

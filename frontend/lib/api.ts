@@ -12,6 +12,7 @@ import type {
   LeaderboardEntry,
   LeetifyProfile,
   MapStat,
+  SteamExtras,
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
@@ -103,6 +104,18 @@ export async function getFaceit(
 ): Promise<FaceitProfile | null> {
   try {
     return await getJSON<FaceitProfile>(`/api/players/${steamId}/faceit`);
+  } catch {
+    return null;
+  }
+}
+
+// getSteamExtras fetches the CS2 friend code (+ best-effort friends/level).
+// Supplementary, so failures return null.
+export async function getSteamExtras(
+  steamId: string,
+): Promise<SteamExtras | null> {
+  try {
+    return await getJSON<SteamExtras>(`/api/players/${steamId}/steam-extras`);
   } catch {
     return null;
   }

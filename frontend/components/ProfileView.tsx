@@ -4,6 +4,7 @@ import type {
   MapStat,
   PlayerMatchSummary,
   PlayerProfile,
+  SteamExtras,
   WeaponStat,
 } from "@/lib/types";
 import { StatCard } from "@/components/StatCard";
@@ -30,6 +31,7 @@ export function ProfileView({
   maps = [],
   leetify = null,
   faceit = null,
+  steamExtras = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -37,6 +39,7 @@ export function ProfileView({
   maps?: MapStat[];
   leetify?: LeetifyProfile | null;
   faceit?: FaceitProfile | null;
+  steamExtras?: SteamExtras | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -101,6 +104,30 @@ export function ProfileView({
                     {accountAgeYears.toFixed(1)}y
                   </span>{" "}
                   · since {steamCreated.getFullYear()}
+                </span>
+              )}
+              {steamExtras?.friendCode && (
+                <span>
+                  Friend code{" "}
+                  <span className="font-mono text-xs text-ink">
+                    {steamExtras.friendCode}
+                  </span>
+                </span>
+              )}
+              {steamExtras != null && steamExtras.friends > 0 && (
+                <span>
+                  <span className="font-medium text-ink">
+                    {steamExtras.friends.toLocaleString("en-US")}
+                  </span>{" "}
+                  friends
+                </span>
+              )}
+              {steamExtras != null && steamExtras.steamLevel > 0 && (
+                <span>
+                  Steam{" "}
+                  <span className="font-medium text-ink">
+                    lvl {steamExtras.steamLevel}
+                  </span>
                 </span>
               )}
               {player.profileUrl && (

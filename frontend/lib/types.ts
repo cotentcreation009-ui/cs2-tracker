@@ -205,6 +205,13 @@ export interface FaceitProfile {
   recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
 }
 
+export interface SteamExtras {
+  steamId64: string;
+  friendCode: string; // CS2 in-game friend code, e.g. "ADWZF-L9AL"
+  friends: number; // 0 when the friends list is private / no key
+  steamLevel: number; // 0 when hidden / no key
+}
+
 export interface IngestJob {
   id: string;
   type: string;

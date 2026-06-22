@@ -102,6 +102,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/leetify", s.handleLeetify)
 			r.Get("/faceit", s.handleFaceit)
 			r.Get("/steam-stats", s.handleSteamStats)
+			r.Get("/steam-extras", s.handleSteamExtras)
 		})
 
 		r.Get("/matches/{id}", s.handleMatch)
@@ -271,6 +272,32 @@ func (s *Server) handleSteamStats(w http.ResponseWriter, r *http.Request) {
 		"gameName":  gs.GameName,
 		"stats":     gs.Stats,
 	})
+}
+
+// handleSteamExtras returns the CS2 friend code (deterministic from the id, no
+// key needed) plus best-effort friends count and Steam level (require a key and
+// a public profile/friends list; 0 otherwise).
+func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	out := map[string]any{
+		"steamId64":  strconv.FormatUint(id, 10),
+		"friendCode": steam.FriendCode(id),
+		"friends":    0,
+		"steamLevel": 0,
+	}
+	if s.steam.HasKey() {
+		if n, err := s.steam.GetFriendCount(r.Context(), id); err == nil {
+			out["friends"] = n
+		}
+		if lvl, err := s.steam.GetSteamLevel(r.Context(), id); err == nil {
+			out["steamLevel"] = lvl
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handlePlayerMatches(w http.ResponseWriter, r *http.Request) {

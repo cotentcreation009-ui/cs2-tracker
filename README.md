@@ -198,6 +198,7 @@ It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
 | GET  | `/api/players/{steamid}/leetify` | Live Leetify profile (ratings, ranks, stats) — fetched real-time, attributed |
 | GET  | `/api/players/{steamid}/faceit` | Live FACEIT profile (CS2 skill level, ELO, lifetime stats) — fetched real-time, attributed (needs `FACEIT_API_KEY`) |
 | GET  | `/api/players/{steamid}/steam-stats` | Raw App 730 lifetime stats (needs key) |
+| GET  | `/api/players/{steamid}/steam-extras` | CS2 friend code (computed, always) + best-effort friends count & Steam level (needs key + public profile) |
 | GET  | `/api/matches/{id}` | Full match detail: scoreboard + rounds |
 | GET  | `/api/matches/{id}/kills` | Ordered killfeed for a match |
 | POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`); returns a pollable `jobId` |

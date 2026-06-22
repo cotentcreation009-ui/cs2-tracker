@@ -239,6 +239,58 @@ func (c *Client) GetUserStatsForGame(ctx context.Context, appID int, steamID uin
 	return gs, nil
 }
 
+// --- GetFriendList / GetSteamLevel ------------------------------------------
+
+type friendListResponse struct {
+	FriendsList struct {
+		Friends []struct {
+			SteamID string `json:"steamid"`
+		} `json:"friends"`
+	} `json:"friendslist"`
+}
+
+// GetFriendCount returns a player's friend count. Requires a public friends
+// list; a private list answers 401/403, mapped to ErrNotFound.
+func (c *Client) GetFriendCount(ctx context.Context, steamID uint64) (int, error) {
+	if c.apiKey == "" {
+		return 0, ErrNoAPIKey
+	}
+	q := url.Values{}
+	q.Set("key", c.apiKey)
+	q.Set("steamid", strconv.FormatUint(steamID, 10))
+	q.Set("relationship", "friend")
+
+	var out friendListResponse
+	if err := c.getJSON(ctx, "/ISteamUser/GetFriendList/v1/", q, &out,
+		http.StatusUnauthorized, http.StatusForbidden); err != nil {
+		return 0, err
+	}
+	return len(out.FriendsList.Friends), nil
+}
+
+type steamLevelResponse struct {
+	Response struct {
+		PlayerLevel int `json:"player_level"`
+	} `json:"response"`
+}
+
+// GetSteamLevel returns a player's Steam Community level (0 when hidden).
+func (c *Client) GetSteamLevel(ctx context.Context, steamID uint64) (int, error) {
+	if c.apiKey == "" {
+		return 0, ErrNoAPIKey
+	}
+	q := url.Values{}
+	q.Set("key", c.apiKey)
+	q.Set("steamid", strconv.FormatUint(steamID, 10))
+
+	var out steamLevelResponse
+	if err := c.getJSON(ctx, "/IPlayerService/GetSteamLevel/v1/", q, &out,
+		http.StatusUnauthorized, http.StatusForbidden); err != nil {
+		return 0, err
+	}
+	return out.Response.PlayerLevel, nil
+}
+
 // --- ResolveSteamID convenience --------------------------------------------
 
 // ResolveSteamID accepts either a raw SteamID64 (17-digit numeric string) or a

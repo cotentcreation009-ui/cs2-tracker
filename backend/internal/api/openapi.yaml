@@ -171,6 +171,23 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Steam API key not configured }
 
+  /api/players/{steamid}/steam-extras:
+    get:
+      summary: CS2 friend code (always) + best-effort friends count & Steam level
+      parameters: [{ $ref: "#/components/parameters/SteamID" }]
+      responses:
+        "200":
+          description: Steam extras
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  steamId64: { type: string }
+                  friendCode: { type: string }
+                  friends: { type: integer }
+                  steamLevel: { type: integer }
+
   /api/matches/{id}:
     get:
       summary: Full match detail (scoreboard + rounds)
