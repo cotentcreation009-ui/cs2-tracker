@@ -10,6 +10,7 @@ export interface Player {
   profileUrl: string;
   vanityUrl?: string;
   countryCode?: string;
+  steamCreatedAt?: string; // Steam account creation time (public profiles only)
   createdAt: string;
   updatedAt: string;
 }
@@ -131,12 +132,24 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface LeetifyRecentMatch {
+  id: string;
+  finished_at: string;
+  data_source: string; // matchmaking | premier | faceit | ...
+  outcome: string; // win | loss | tie
+  map_name: string;
+  leetify_rating: number;
+  score: number[]; // [team, enemy]
+}
+
 export interface LeetifyProfile {
   name: string;
   steam64_id: string;
   total_matches: number;
   winrate: number; // 0..1
   privacy_mode: string;
+  first_match_date?: string;
+  bans?: unknown[];
   rating: {
     aim: number;
     positioning: number;
@@ -148,12 +161,20 @@ export interface LeetifyProfile {
   };
   stats: {
     accuracy_head: number;
+    accuracy_enemy_spotted: number;
     preaim: number;
     reaction_time_ms: number;
     spray_accuracy: number;
+    counter_strafing_good_shots_ratio: number;
     ct_opening_duel_success_percentage: number;
     t_opening_duel_success_percentage: number;
     trade_kills_success_percentage: number;
+    traded_deaths_success_percentage: number;
+    trade_kill_opportunities_per_round: number;
+    flashbang_hit_foe_per_flashbang: number;
+    flashbang_leading_to_kill: number;
+    he_foes_damage_avg: number;
+    utility_on_death_avg: number;
   };
   ranks: {
     leetify?: number;
@@ -162,6 +183,7 @@ export interface LeetifyProfile {
     faceit_elo?: number;
     wingman?: number;
   };
+  recent_matches?: LeetifyRecentMatch[];
 }
 
 export interface FaceitProfile {

@@ -528,6 +528,11 @@ func (s *Server) hydrateFromSteam(ctx context.Context, id uint64) (models.Player
 		ProfileURL:  su.ProfileURL,
 		CountryCode: su.LocCountryCode,
 	}
+	// timecreated is only present for public profiles.
+	if !su.TimeCreated.IsZero() {
+		t := su.TimeCreated
+		player.SteamCreatedAt = &t
+	}
 	if err := s.db.UpsertPlayer(ctx, player); err != nil {
 		return models.PlayerProfile{}, err
 	}

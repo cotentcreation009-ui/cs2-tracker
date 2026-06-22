@@ -42,6 +42,14 @@ export function ProfileView({
   const hasData = career.matches > 0;
   const multiKillRounds = career.k3 + career.k4 + career.k5;
 
+  // Steam account age (public profiles only).
+  const steamCreated = player.steamCreatedAt
+    ? new Date(player.steamCreatedAt)
+    : null;
+  const accountAgeYears = steamCreated
+    ? (Date.now() - steamCreated.getTime()) / (365.25 * 24 * 3600 * 1000)
+    : null;
+
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career.clutchesWon + career.clutchesLost;
@@ -86,6 +94,15 @@ export function ProfileView({
               <span className="font-mono text-xs text-faint">
                 {player.steamId64}
               </span>
+              {steamCreated && accountAgeYears != null && (
+                <span title={`Steam account created ${steamCreated.toLocaleDateString()}`}>
+                  Account{" "}
+                  <span className="font-medium text-ink">
+                    {accountAgeYears.toFixed(1)}y
+                  </span>{" "}
+                  · since {steamCreated.getFullYear()}
+                </span>
+              )}
               {player.profileUrl && (
                 <a
                   href={player.profileUrl}

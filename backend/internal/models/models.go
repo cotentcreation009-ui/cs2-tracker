@@ -18,14 +18,17 @@ const (
 // Player is a Steam account we know about. The SteamID64 is the source of truth;
 // profile fields are hydrated from the Steam Web API when a key is available.
 type Player struct {
-	SteamID64   uint64    `json:"steamId64,string"`
-	PersonaName string    `json:"personaName"`
-	AvatarURL   string    `json:"avatarUrl"`
-	ProfileURL  string    `json:"profileUrl"`
-	VanityURL   string    `json:"vanityUrl,omitempty"`
-	CountryCode string    `json:"countryCode,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	SteamID64   uint64 `json:"steamId64,string"`
+	PersonaName string `json:"personaName"`
+	AvatarURL   string `json:"avatarUrl"`
+	ProfileURL  string `json:"profileUrl"`
+	VanityURL   string `json:"vanityUrl,omitempty"`
+	CountryCode string `json:"countryCode,omitempty"`
+	// SteamCreatedAt is the Steam account creation time (public profiles only);
+	// nil when unknown.
+	SteamCreatedAt *time.Time `json:"steamCreatedAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // Match is one parsed game. share_code is unique when the match was ingested via

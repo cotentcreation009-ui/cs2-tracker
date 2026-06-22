@@ -27,16 +27,17 @@ const matchPlayerCols = `match_id, steam_id64, persona_name, start_side,
 // UpsertPlayer writes the Steam-sourced identity for a player.
 func (d *DB) UpsertPlayer(ctx context.Context, p models.Player) error {
 	_, err := d.Pool.Exec(ctx, `
-		INSERT INTO players (steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6, now())
+		INSERT INTO players (steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, steam_created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7, now())
 		ON CONFLICT (steam_id64) DO UPDATE SET
 			persona_name = EXCLUDED.persona_name,
 			avatar_url   = EXCLUDED.avatar_url,
 			profile_url  = EXCLUDED.profile_url,
 			vanity_url   = CASE WHEN EXCLUDED.vanity_url <> '' THEN EXCLUDED.vanity_url ELSE players.vanity_url END,
 			country_code = EXCLUDED.country_code,
+			steam_created_at = COALESCE(EXCLUDED.steam_created_at, players.steam_created_at),
 			updated_at   = now()`,
-		int64(p.SteamID64), p.PersonaName, p.AvatarURL, p.ProfileURL, p.VanityURL, p.CountryCode)
+		int64(p.SteamID64), p.PersonaName, p.AvatarURL, p.ProfileURL, p.VanityURL, p.CountryCode, p.SteamCreatedAt)
 	return err
 }
 
@@ -46,10 +47,11 @@ func (d *DB) GetProfile(ctx context.Context, steamID uint64) (models.PlayerProfi
 	var prof models.PlayerProfile
 	var id int64
 	err := d.Pool.QueryRow(ctx, `
-		SELECT steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, created_at, updated_at
+		SELECT steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, steam_created_at, created_at, updated_at
 		FROM players WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&id, &prof.Player.PersonaName, &prof.Player.AvatarURL, &prof.Player.ProfileURL,
-			&prof.Player.VanityURL, &prof.Player.CountryCode, &prof.Player.CreatedAt, &prof.Player.UpdatedAt)
+			&prof.Player.VanityURL, &prof.Player.CountryCode, &prof.Player.SteamCreatedAt,
+			&prof.Player.CreatedAt, &prof.Player.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return prof, ErrNotFound
 	}
