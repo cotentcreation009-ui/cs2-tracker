@@ -164,6 +164,25 @@ export interface LeetifyProfile {
   };
 }
 
+export interface FaceitProfile {
+  playerId: string;
+  nickname: string;
+  country: string;
+  avatar: string;
+  faceitUrl: string;
+  region: string;
+  skillLevel: number;
+  elo: number;
+  matches: number;
+  winRatePct: number;
+  kdRatio: number;
+  hsPct: number;
+  avgKills: number;
+  currentWinStreak: number;
+  longestWinStreak: number;
+  recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
+}
+
 export interface IngestJob {
   id: string;
   type: string;

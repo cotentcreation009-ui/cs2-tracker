@@ -17,6 +17,7 @@ import (
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
@@ -50,6 +51,7 @@ type Server struct {
 	db      Store
 	steam   *steam.Client
 	leetify *leetify.Client
+	faceit  *faceit.Client
 	queue   *queue.Queue
 	cache   *cache.Cache
 	log     *slog.Logger
@@ -57,9 +59,10 @@ type Server struct {
 }
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
-// degrade gracefully).
-func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, queue: q, cache: c, log: log, metrics: &metrics{}}
+// degrade gracefully); leetify/faceit clients may be nil or keyless (their
+// panels are simply hidden).
+func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, faceitClient *faceit.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}}
 }
 
 // Router builds the HTTP handler.
@@ -97,6 +100,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/weapons", s.handleWeapons)
 			r.Get("/maps", s.handleMaps)
 			r.Get("/leetify", s.handleLeetify)
+			r.Get("/faceit", s.handleFaceit)
 			r.Get("/steam-stats", s.handleSteamStats)
 		})
 
@@ -332,6 +336,35 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.serverError(w, "leetify profile", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prof)
+}
+
+// handleFaceit fetches a player's live FACEIT profile (CS2 skill level, elo and
+// lifetime stats). Like Leetify it is fetched real-time and never stored; the
+// FaceitPanel renders it with attribution. Needs FACEIT_API_KEY.
+func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	if s.faceit == nil || !s.faceit.HasKey() {
+		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
+		return
+	}
+	prof, err := s.faceit.GetProfile(r.Context(), id)
+	if errors.Is(err, faceit.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no FACEIT profile for this player")
+		return
+	}
+	if errors.Is(err, faceit.ErrNoAPIKey) {
+		writeError(w, http.StatusServiceUnavailable, "FACEIT API key not configured")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "faceit profile", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, prof)

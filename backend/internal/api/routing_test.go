@@ -17,7 +17,7 @@ import (
 // catches chi trailing-slash mistakes in the route tree.
 func testRouter() http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
-	s := NewServer(cfg, nil, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewServer(cfg, nil, steam.New(""), nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
 

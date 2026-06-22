@@ -99,7 +99,7 @@ func (f *fakeStore) GetJob(_ context.Context, id string) (models.IngestJob, erro
 
 func routerWith(store Store) http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
-	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
 

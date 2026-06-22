@@ -7,6 +7,7 @@
 //   - local dev:       http://localhost:8080
 
 import type {
+  FaceitProfile,
   Kill,
   LeaderboardEntry,
   LeetifyProfile,
@@ -89,6 +90,19 @@ export async function getLeetify(
 ): Promise<LeetifyProfile | null> {
   try {
     return await getJSON<LeetifyProfile>(`/api/players/${steamId}/leetify`);
+  } catch {
+    return null;
+  }
+}
+
+// getFaceit fetches a player's live FACEIT profile. Supplementary, so any
+// failure (no key configured, no FACEIT account, unreachable) returns null and
+// the panel is hidden.
+export async function getFaceit(
+  steamId: string,
+): Promise<FaceitProfile | null> {
+  try {
+    return await getJSON<FaceitProfile>(`/api/players/${steamId}/faceit`);
   } catch {
     return null;
   }

@@ -17,6 +17,7 @@ import (
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
@@ -56,6 +57,11 @@ func run(log *slog.Logger) error {
 
 	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey)
 
+	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey)
+	if !faceitClient.HasKey() {
+		log.Warn("no FACEIT_API_KEY set — the FACEIT panel is disabled until provided")
+	}
+
 	// Redis-backed queue + cache are best-effort: the API still serves reads if
 	// Redis is down, just without ingest/caching.
 	var q *queue.Queue
@@ -77,7 +83,7 @@ func run(log *slog.Logger) error {
 		defer c.Close()
 	}
 
-	srv := api.NewServer(cfg, database, steamClient, leetifyClient, q, c, log)
+	srv := api.NewServer(cfg, database, steamClient, leetifyClient, faceitClient, q, c, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

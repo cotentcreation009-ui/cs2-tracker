@@ -30,6 +30,10 @@ type Config struct {
 	LeetifyBaseURL string
 	LeetifyAPIKey  string
 
+	// FACEIT Data API (requires a free key from https://developers.faceit.com)
+	FaceitBaseURL string
+	FaceitAPIKey  string
+
 	// Demo pipeline
 	DemoQueueKey      string        // redis list key used as the parse job queue
 	DemoWorkDir       string        // scratch dir where demos are downloaded/extracted before parsing
@@ -66,6 +70,8 @@ func Load() (*Config, error) {
 		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
 		LeetifyBaseURL:    getEnv("LEETIFY_BASE_URL", "https://api-public.cs-prod.leetify.com"),
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
+		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
+		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
 		DemoWorkDir:       getEnv("DEMO_WORK_DIR", os.TempDir()),
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),

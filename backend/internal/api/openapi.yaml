@@ -153,6 +153,15 @@ paths:
         "200": { description: Leetify profile (ratings, ranks, stats) }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/players/{steamid}/faceit:
+    get:
+      summary: Live FACEIT profile (CS2 skill level, ELO, lifetime stats; needs FACEIT_API_KEY)
+      parameters: [{ $ref: "#/components/parameters/SteamID" }]
+      responses:
+        "200": { description: FACEIT profile }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: FACEIT integration not configured }
+
   /api/players/{steamid}/steam-stats:
     get:
       summary: Raw Steam App 730 lifetime stats (needs key)
