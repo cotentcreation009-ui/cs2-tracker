@@ -287,6 +287,9 @@ components:
         roundsPlayed: { type: integer }
         kills: { type: integer, format: int64 }
         deaths: { type: integer, format: int64 }
+        utilityDamage: { type: integer, format: int64 }
+        enemiesFlashed: { type: integer, format: int64 }
+        mvps: { type: integer, format: int64 }
         rating: { type: number }
         adr: { type: number }
         kastPct: { type: number }

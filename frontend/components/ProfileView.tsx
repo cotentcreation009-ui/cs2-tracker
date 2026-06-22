@@ -44,6 +44,14 @@ export function ProfileView({
   const clutchWinPct =
     clutchTotal > 0 ? (career.clutchesWon / clutchTotal) * 100 : 0;
 
+  // Per-round rates derived from the career sums (no extra stored columns).
+  const rounds = career.roundsPlayed;
+  const kpr = rounds > 0 ? career.kills / rounds : 0;
+  const dpr = rounds > 0 ? career.deaths / rounds : 0;
+  const udPerRound = rounds > 0 ? career.utilityDamage / rounds : 0;
+  const flashesPerRound = rounds > 0 ? career.enemiesFlashed / rounds : 0;
+  const mvpsPerMatch = career.matches > 0 ? career.mvps / career.matches : 0;
+
   return (
     <div className="space-y-5">
       {/* Identity + rating */}
@@ -175,6 +183,38 @@ export function ProfileView({
               value={career.rating.toFixed(2)}
               valueClass={ratingColor(career.rating)}
             />
+          </section>
+
+          {/* Utility & impact */}
+          <section>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+              Utility &amp; impact
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <StatCard
+                label="Kills / round"
+                value={kpr.toFixed(2)}
+                valueClass={tierColor(kpr, 0.75, 0.6)}
+              />
+              <StatCard label="Deaths / round" value={dpr.toFixed(2)} />
+              <StatCard
+                label="Utility dmg / round"
+                value={udPerRound.toFixed(1)}
+                valueClass={tierColor(udPerRound, 8, 5)}
+                sub={`${fmt(career.utilityDamage)} total`}
+              />
+              <StatCard
+                label="Flashes / round"
+                value={flashesPerRound.toFixed(2)}
+                valueClass={tierColor(flashesPerRound, 1, 0.6)}
+                sub={`${fmt(career.enemiesFlashed)} enemies`}
+              />
+              <StatCard
+                label="MVPs"
+                value={fmt(career.mvps)}
+                sub={`${mvpsPerMatch.toFixed(1)} / match`}
+              />
+            </div>
           </section>
 
           {/* Recent matches + weapons */}

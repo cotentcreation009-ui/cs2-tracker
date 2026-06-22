@@ -30,6 +30,9 @@ export interface PlayerCareer {
   openingDeaths: number;
   clutchesWon: number;
   clutchesLost: number;
+  utilityDamage: number;
+  enemiesFlashed: number;
+  mvps: number;
   k1: number;
   k2: number;
   k3: number;

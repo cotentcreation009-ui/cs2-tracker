@@ -476,12 +476,14 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 			COALESCE(SUM(kills),0), COALESCE(SUM(deaths),0), COALESCE(SUM(assists),0), COALESCE(SUM(headshot_kills),0),
 			COALESCE(SUM(damage),0), COALESCE(SUM(kast_rounds),0), COALESCE(SUM(opening_kills),0), COALESCE(SUM(opening_deaths),0),
 			COALESCE(SUM(clutches_won),0), COALESCE(SUM(clutches_lost),0),
+			COALESCE(SUM(utility_damage),0), COALESCE(SUM(enemies_flashed),0), COALESCE(SUM(mvps),0),
 			COALESCE(SUM(k1),0), COALESCE(SUM(k2),0), COALESCE(SUM(k3),0), COALESCE(SUM(k4),0), COALESCE(SUM(k5),0)
 		FROM match_players WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&c.Matches, &c.Wins, &c.Losses, &c.RoundsPlayed,
 			&c.Kills, &c.Deaths, &c.Assists, &c.HeadshotKills,
 			&c.Damage, &c.KASTRounds, &c.OpeningKills, &c.OpeningDeaths,
 			&c.ClutchesWon, &c.ClutchesLost,
+			&c.UtilityDamage, &c.EnemiesFlashed, &c.MVPs,
 			&c.K1, &c.K2, &c.K3, &c.K4, &c.K5)
 	if err != nil {
 		return err
@@ -491,8 +493,9 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO player_careers (steam_id64, matches, wins, losses, rounds_played, kills, deaths, assists,
 			headshot_kills, damage, kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost,
-			k1, k2, k3, k4, k5, kd, adr, kast_pct, hs_pct, rating, win_rate, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26, now())
+			k1, k2, k3, k4, k5, kd, adr, kast_pct, hs_pct, rating, win_rate,
+			utility_damage, enemies_flashed, mvps, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29, now())
 		ON CONFLICT (steam_id64) DO UPDATE SET
 			matches=EXCLUDED.matches, wins=EXCLUDED.wins, losses=EXCLUDED.losses, rounds_played=EXCLUDED.rounds_played,
 			kills=EXCLUDED.kills, deaths=EXCLUDED.deaths, assists=EXCLUDED.assists, headshot_kills=EXCLUDED.headshot_kills,
@@ -500,10 +503,13 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 			opening_deaths=EXCLUDED.opening_deaths, clutches_won=EXCLUDED.clutches_won, clutches_lost=EXCLUDED.clutches_lost,
 			k1=EXCLUDED.k1, k2=EXCLUDED.k2, k3=EXCLUDED.k3, k4=EXCLUDED.k4, k5=EXCLUDED.k5,
 			kd=EXCLUDED.kd, adr=EXCLUDED.adr, kast_pct=EXCLUDED.kast_pct, hs_pct=EXCLUDED.hs_pct,
-			rating=EXCLUDED.rating, win_rate=EXCLUDED.win_rate, updated_at=now()`,
+			rating=EXCLUDED.rating, win_rate=EXCLUDED.win_rate,
+			utility_damage=EXCLUDED.utility_damage, enemies_flashed=EXCLUDED.enemies_flashed, mvps=EXCLUDED.mvps,
+			updated_at=now()`,
 		int64(c.SteamID64), c.Matches, c.Wins, c.Losses, c.RoundsPlayed, c.Kills, c.Deaths, c.Assists,
 		c.HeadshotKills, c.Damage, c.KASTRounds, c.OpeningKills, c.OpeningDeaths, c.ClutchesWon, c.ClutchesLost,
-		c.K1, c.K2, c.K3, c.K4, c.K5, c.KD, c.ADR, c.KASTPct, c.HSPct, c.Rating, c.WinRate)
+		c.K1, c.K2, c.K3, c.K4, c.K5, c.KD, c.ADR, c.KASTPct, c.HSPct, c.Rating, c.WinRate,
+		c.UtilityDamage, c.EnemiesFlashed, c.MVPs)
 	return err
 }
 
@@ -512,12 +518,14 @@ func (d *DB) getCareer(ctx context.Context, q pgxQuerier, steamID uint64) (model
 	var id int64
 	err := q.QueryRow(ctx, `
 		SELECT steam_id64, matches, wins, losses, rounds_played, kills, deaths, assists, headshot_kills, damage,
-			kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost, k1, k2, k3, k4, k5,
+			kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost,
+			utility_damage, enemies_flashed, mvps, k1, k2, k3, k4, k5,
 			kd, adr, kast_pct, hs_pct, rating, win_rate, updated_at
 		FROM player_careers WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&id, &c.Matches, &c.Wins, &c.Losses, &c.RoundsPlayed, &c.Kills, &c.Deaths, &c.Assists,
 			&c.HeadshotKills, &c.Damage, &c.KASTRounds, &c.OpeningKills, &c.OpeningDeaths, &c.ClutchesWon,
-			&c.ClutchesLost, &c.K1, &c.K2, &c.K3, &c.K4, &c.K5, &c.KD, &c.ADR, &c.KASTPct, &c.HSPct,
+			&c.ClutchesLost, &c.UtilityDamage, &c.EnemiesFlashed, &c.MVPs,
+			&c.K1, &c.K2, &c.K3, &c.K4, &c.K5, &c.KD, &c.ADR, &c.KASTPct, &c.HSPct,
 			&c.Rating, &c.WinRate, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound

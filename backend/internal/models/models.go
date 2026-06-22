@@ -126,26 +126,29 @@ type ParsedMatch struct {
 // PlayerCareer is the rolling aggregate across every match we have for a player.
 // It is recomputed on write (aggregate-on-write) so profile reads are cheap.
 type PlayerCareer struct {
-	SteamID64     uint64 `json:"steamId64,string"`
-	Matches       int    `json:"matches"`
-	Wins          int    `json:"wins"`
-	Losses        int    `json:"losses"`
-	RoundsPlayed  int    `json:"roundsPlayed"`
-	Kills         int64  `json:"kills"`
-	Deaths        int64  `json:"deaths"`
-	Assists       int64  `json:"assists"`
-	HeadshotKills int64  `json:"headshotKills"`
-	Damage        int64  `json:"damage"`
-	KASTRounds    int64  `json:"kastRounds"`
-	OpeningKills  int64  `json:"openingKills"`
-	OpeningDeaths int64  `json:"openingDeaths"`
-	ClutchesWon   int64  `json:"clutchesWon"`
-	ClutchesLost  int64  `json:"clutchesLost"`
-	K1            int64  `json:"k1"`
-	K2            int64  `json:"k2"`
-	K3            int64  `json:"k3"`
-	K4            int64  `json:"k4"`
-	K5            int64  `json:"k5"`
+	SteamID64      uint64 `json:"steamId64,string"`
+	Matches        int    `json:"matches"`
+	Wins           int    `json:"wins"`
+	Losses         int    `json:"losses"`
+	RoundsPlayed   int    `json:"roundsPlayed"`
+	Kills          int64  `json:"kills"`
+	Deaths         int64  `json:"deaths"`
+	Assists        int64  `json:"assists"`
+	HeadshotKills  int64  `json:"headshotKills"`
+	Damage         int64  `json:"damage"`
+	KASTRounds     int64  `json:"kastRounds"`
+	OpeningKills   int64  `json:"openingKills"`
+	OpeningDeaths  int64  `json:"openingDeaths"`
+	ClutchesWon    int64  `json:"clutchesWon"`
+	ClutchesLost   int64  `json:"clutchesLost"`
+	UtilityDamage  int64  `json:"utilityDamage"`
+	EnemiesFlashed int64  `json:"enemiesFlashed"`
+	MVPs           int64  `json:"mvps"`
+	K1             int64  `json:"k1"`
+	K2             int64  `json:"k2"`
+	K3             int64  `json:"k3"`
+	K4             int64  `json:"k4"`
+	K5             int64  `json:"k5"`
 
 	// Derived
 	KD        float64   `json:"kd"`
