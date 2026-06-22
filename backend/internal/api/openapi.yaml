@@ -193,6 +193,16 @@ paths:
   /api/ingest/demo:
     post:
       summary: Enqueue a demo parse job
+      parameters:
+        - name: X-CS2-Session
+          in: header
+          required: false
+          description: >-
+            Signed "Sign in through Steam" session token, forwarded server-side
+            by the frontend proxy from the httpOnly cookie. The backend verifies
+            its HMAC against the shared secret and records the SteamID64 it
+            carries as the submitter. Missing/invalid tokens are ignored (anonymous).
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -396,6 +406,7 @@ components:
         id: { type: string }
         type: { type: string }
         status: { type: string, enum: [queued, running, done, failed] }
+        submittedBy: { type: string, description: "SteamID64 of the signed-in submitter; omitted when anonymous" }
         matchId: { type: integer, format: int64 }
         error: { type: string }
         createdAt: { type: string, format: date-time }

@@ -47,8 +47,10 @@ The single biggest UX win Leetify has is: connect once, your matches just appear
 2. **Share-code history sync.** Store a user's
    `authentication_code` + last known share code and poll
    `GetNextMatchSharingCode` so new matchmaking games auto-enqueue.
-3. **Steam OpenID login.** Let users sign in with Steam so ingestion and "this is
-   me" highlighting are tied to an account.
+3. **Steam OpenID login.** ✅ "Sign in through Steam" (keyless OpenID 2.0) is
+   shipped frontend-side: signed httpOnly session cookie, header account chip,
+   and a "This is you" badge on your own profile. Still to do: tie *ingestion* to
+   the signed-in account (the backend doesn't yet read the session).
 4. **Reliable delivery.** ✅ The `jobs` table + pollable status are shipped;
    still to do: promote the plain-list queue to visibility timeouts, max-retries
    and a dead-letter list.

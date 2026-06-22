@@ -285,13 +285,19 @@ func (d *DB) ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, 
 
 // --- Jobs: durable parse-job status -----------------------------------------
 
-// InsertJob records a freshly-enqueued job in the 'queued' state.
+// InsertJob records a freshly-enqueued job in the 'queued' state. Enqueue is
+// best-effort and happens before this call, so a fast worker can create the row
+// first (via SetJobStatus) with the default empty submitted_by. To avoid losing
+// attribution in that race, backfill submitted_by on conflict — but only when
+// the existing row is still anonymous, so a real value is never clobbered and no
+// other column the worker set is touched.
 func (d *DB) InsertJob(ctx context.Context, j models.IngestJob) error {
 	_, err := d.Pool.Exec(ctx, `
-		INSERT INTO jobs (id, type, status, source, demo_path, demo_url, share_code)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
-		ON CONFLICT (id) DO NOTHING`,
-		j.ID, j.Type, j.Status, j.Source, j.DemoPath, j.DemoURL, j.ShareCode)
+		INSERT INTO jobs (id, type, status, source, demo_path, demo_url, share_code, submitted_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (id) DO UPDATE SET submitted_by = EXCLUDED.submitted_by
+			WHERE jobs.submitted_by = '' AND EXCLUDED.submitted_by <> ''`,
+		j.ID, j.Type, j.Status, j.Source, j.DemoPath, j.DemoURL, j.ShareCode, j.SubmittedBy)
 	return err
 }
 
@@ -315,10 +321,10 @@ func (d *DB) SetJobStatus(ctx context.Context, id, status string, matchID *int64
 func (d *DB) GetJob(ctx context.Context, id string) (models.IngestJob, error) {
 	var j models.IngestJob
 	err := d.Pool.QueryRow(ctx, `
-		SELECT id, type, status, source, demo_path, demo_url, share_code, match_id, error, created_at, updated_at
+		SELECT id, type, status, source, demo_path, demo_url, share_code, submitted_by, match_id, error, created_at, updated_at
 		FROM jobs WHERE id=$1`, id).
 		Scan(&j.ID, &j.Type, &j.Status, &j.Source, &j.DemoPath, &j.DemoURL, &j.ShareCode,
-			&j.MatchID, &j.Error, &j.CreatedAt, &j.UpdatedAt)
+			&j.SubmittedBy, &j.MatchID, &j.Error, &j.CreatedAt, &j.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return j, ErrNotFound
 	}

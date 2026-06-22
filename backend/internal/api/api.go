@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -20,6 +21,7 @@ import (
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
+	"github.com/cs2tracker/server/internal/session"
 	"github.com/cs2tracker/server/internal/steam"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -430,13 +432,14 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	// Record the job so the caller can poll its status. Tracking is best-effort:
 	// a failed insert must not lose the already-queued work.
 	if err := s.db.InsertJob(r.Context(), models.IngestJob{
-		ID:        job.ID,
-		Type:      string(job.Type),
-		Status:    models.JobQueued,
-		Source:    source,
-		DemoPath:  req.DemoPath,
-		DemoURL:   req.DemoURL,
-		ShareCode: req.ShareCode,
+		ID:          job.ID,
+		Type:        string(job.Type),
+		Status:      models.JobQueued,
+		Source:      source,
+		DemoPath:    req.DemoPath,
+		DemoURL:     req.DemoURL,
+		ShareCode:   req.ShareCode,
+		SubmittedBy: s.submitterFromRequest(r),
 	}); err != nil {
 		s.log.Warn("could not record job", "jobId", job.ID, "err", err)
 	}
@@ -508,6 +511,20 @@ func (s *Server) serverError(w http.ResponseWriter, op string, err error) {
 
 func steamIDParam(r *http.Request) (uint64, bool) {
 	return steam.ParseSteamID64(chi.URLParam(r, "steamid"))
+}
+
+// submitterFromRequest returns the SteamID64 (decimal string) the ingest is
+// attributed to, or "" when anonymous. Identity is taken from the X-CS2-Session
+// token (the frontend-issued session cookie, forwarded by the Next.js proxy) and
+// cryptographically verified here against the shared SessionSecret — so the
+// backend establishes identity itself rather than trusting a plaintext header.
+func (s *Server) submitterFromRequest(r *http.Request) string {
+	token := strings.TrimSpace(r.Header.Get("X-CS2-Session"))
+	id, ok := session.Verify(token, s.cfg.SessionSecret)
+	if !ok {
+		return ""
+	}
+	return strconv.FormatUint(id, 10)
 }
 
 func queryInt(r *http.Request, key string, def int) int {

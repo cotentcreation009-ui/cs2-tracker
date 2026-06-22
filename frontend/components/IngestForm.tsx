@@ -19,7 +19,11 @@ const statusTone: Record<string, string> = {
   failed: "bg-bad/15 text-bad",
 };
 
-export function IngestForm() {
+export function IngestForm({
+  signedInAs = null,
+}: {
+  signedInAs?: string | null;
+}) {
   const [mode, setMode] = useState<Mode>("demoPath");
   const [value, setValue] = useState("");
   const [source, setSource] = useState("local");
@@ -141,6 +145,19 @@ export function IngestForm() {
           <p className="text-xs text-faint">
             Share-code ingest needs the Game Coordinator client (roadmap). Use a
             file path or URL for now.
+          </p>
+        )}
+        {signedInAs ? (
+          <p className="text-xs text-faint">
+            Attributed to{" "}
+            <span className="font-medium text-muted">{signedInAs}</span>.
+          </p>
+        ) : (
+          <p className="text-xs text-faint">
+            <a href="/api/auth/steam/login" className="text-brand hover:underline">
+              Sign in through Steam
+            </a>{" "}
+            to attribute ingests to your profile.
           </p>
         )}
         {error && <p className="text-sm text-bad">{error}</p>}

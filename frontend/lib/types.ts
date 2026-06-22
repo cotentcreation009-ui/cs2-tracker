@@ -169,6 +169,7 @@ export interface IngestJob {
   demoPath?: string;
   demoUrl?: string;
   shareCode?: string;
+  submittedBy?: string; // SteamID64 of the signed-in submitter, if attributed
   matchId?: number;
   error?: string;
   createdAt: string;

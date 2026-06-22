@@ -13,6 +13,7 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/models"
+	"github.com/cs2tracker/server/internal/session"
 	"github.com/cs2tracker/server/internal/steam"
 )
 
@@ -98,7 +99,7 @@ func (f *fakeStore) GetJob(_ context.Context, id string) (models.IngestJob, erro
 }
 
 func routerWith(store Store) http.Handler {
-	cfg := &config.Config{CORSOrigins: []string{"*"}}
+	cfg := &config.Config{CORSOrigins: []string{"*"}, SessionSecret: config.DevSessionSecret}
 	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
@@ -235,6 +236,52 @@ func TestHandleJobNotFound(t *testing.T) {
 	w := doGET(routerWith(&fakeStore{}), "/api/jobs/zzz")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("code = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleJobSubmittedBy(t *testing.T) {
+	store := &fakeStore{job: func(id string) (models.IngestJob, error) {
+		return models.IngestJob{ID: id, Status: "done", SubmittedBy: "76561198000000001"}, nil
+	}}
+	w := doGET(routerWith(store), "/api/jobs/abc")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var j models.IngestJob
+	if err := json.Unmarshal(w.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.SubmittedBy != "76561198000000001" {
+		t.Errorf("submittedBy = %q, want round-tripped SteamID64", j.SubmittedBy)
+	}
+}
+
+func TestSubmitterFromRequest(t *testing.T) {
+	secret := config.DevSessionSecret
+	s := NewServer(&config.Config{SessionSecret: secret}, &fakeStore{}, steam.New(""),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	valid := session.Encode("76561198000000001", secret)
+	cases := []struct {
+		name, header, want string
+	}{
+		{"valid token", valid, "76561198000000001"},
+		{"empty", "", ""},
+		{"whitespace trimmed", "  " + valid + "  ", "76561198000000001"},
+		{"tampered signature", valid[:len(valid)-2] + "AA", ""},
+		{"wrong secret", session.Encode("76561198000000001", "other-secret"), ""},
+		{"garbage", "not-a-token", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/ingest/demo", nil)
+			if c.header != "" {
+				req.Header.Set("X-CS2-Session", c.header)
+			}
+			if got := s.submitterFromRequest(req); got != c.want {
+				t.Errorf("submitterFromRequest(%q) = %q, want %q", c.header, got, c.want)
+			}
+		})
 	}
 }
 
