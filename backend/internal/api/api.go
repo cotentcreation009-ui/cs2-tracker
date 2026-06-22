@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -430,13 +431,14 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	// Record the job so the caller can poll its status. Tracking is best-effort:
 	// a failed insert must not lose the already-queued work.
 	if err := s.db.InsertJob(r.Context(), models.IngestJob{
-		ID:        job.ID,
-		Type:      string(job.Type),
-		Status:    models.JobQueued,
-		Source:    source,
-		DemoPath:  req.DemoPath,
-		DemoURL:   req.DemoURL,
-		ShareCode: req.ShareCode,
+		ID:          job.ID,
+		Type:        string(job.Type),
+		Status:      models.JobQueued,
+		Source:      source,
+		DemoPath:    req.DemoPath,
+		DemoURL:     req.DemoURL,
+		ShareCode:   req.ShareCode,
+		SubmittedBy: submitterFromRequest(r),
 	}); err != nil {
 		s.log.Warn("could not record job", "jobId", job.ID, "err", err)
 	}
@@ -508,6 +510,19 @@ func (s *Server) serverError(w http.ResponseWriter, op string, err error) {
 
 func steamIDParam(r *http.Request) (uint64, bool) {
 	return steam.ParseSteamID64(chi.URLParam(r, "steamid"))
+}
+
+// submitterFromRequest returns the SteamID64 (decimal string) the ingest is
+// attributed to, taken from the X-CS2-User header, or "" when anonymous. The
+// header is trusted only because the backend is not browser-reachable: the
+// Next.js proxy is the sole caller and sets this from the *verified* session
+// (never from client input). Any missing or malformed value is ignored.
+func submitterFromRequest(r *http.Request) string {
+	id, ok := steam.ParseSteamID64(strings.TrimSpace(r.Header.Get("X-CS2-User")))
+	if !ok {
+		return ""
+	}
+	return strconv.FormatUint(id, 10)
 }
 
 func queryInt(r *http.Request, key string, def int) int {

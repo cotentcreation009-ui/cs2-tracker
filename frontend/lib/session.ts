@@ -21,6 +21,15 @@ const SECRET =
 export const SESSION_COOKIE = COOKIE;
 export const SESSION_MAX_AGE = MAX_AGE_SEC;
 
+// Short-lived cookie holding the OpenID anti-CSRF state nonce between /login and
+// /callback.
+export const OAUTH_STATE_COOKIE = "cs2_oauth_state";
+
+// Mark auth cookies Secure in production. Deriving this from the (Host-derived)
+// request origin would let a misconfigured/HTTP-forwarded proxy silently
+// downgrade the cookie, so key it off the build environment instead.
+export const COOKIE_SECURE = process.env.NODE_ENV === "production";
+
 export interface SessionUser {
   steamId64: string;
   personaName: string;

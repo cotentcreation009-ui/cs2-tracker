@@ -200,17 +200,20 @@ const (
 // IngestJob is the durable status record for a demo-parse job, pollable via the
 // API after ingest.
 type IngestJob struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	Status    string    `json:"status"`
-	Source    string    `json:"source,omitempty"`
-	DemoPath  string    `json:"demoPath,omitempty"`
-	DemoURL   string    `json:"demoUrl,omitempty"`
-	ShareCode string    `json:"shareCode,omitempty"`
-	MatchID   *int64    `json:"matchId,omitempty"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Status    string `json:"status"`
+	Source    string `json:"source,omitempty"`
+	DemoPath  string `json:"demoPath,omitempty"`
+	DemoURL   string `json:"demoUrl,omitempty"`
+	ShareCode string `json:"shareCode,omitempty"`
+	// SubmittedBy is the SteamID64 of the signed-in user this ingest is
+	// attributed to (via "Sign in through Steam"), or "" when anonymous.
+	SubmittedBy string    `json:"submittedBy,omitempty"`
+	MatchID     *int64    `json:"matchId,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // LeaderboardEntry is one row of the "top tracked players" board.

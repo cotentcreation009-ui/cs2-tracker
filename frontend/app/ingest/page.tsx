@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import { IngestForm } from "@/components/IngestForm";
+import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Ingest a demo — CS2 Tracker",
 };
 
-export default function IngestPage() {
+// Reads the session cookie to show ingest attribution, so render per-request.
+export const dynamic = "force-dynamic";
+
+export default async function IngestPage() {
+  const session = await getSession();
   return (
     <div className="mx-auto max-w-xl">
       <h1 className="text-2xl font-bold">Ingest a demo</h1>
@@ -16,7 +21,7 @@ export default function IngestPage() {
         Parsing runs on a worker, so this page polls the job until it finishes.
       </p>
       <div className="mt-5">
-        <IngestForm />
+        <IngestForm signedInAs={session?.personaName || session?.steamId64 || null} />
       </div>
     </div>
   );

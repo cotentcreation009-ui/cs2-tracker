@@ -238,6 +238,47 @@ func TestHandleJobNotFound(t *testing.T) {
 	}
 }
 
+func TestHandleJobSubmittedBy(t *testing.T) {
+	store := &fakeStore{job: func(id string) (models.IngestJob, error) {
+		return models.IngestJob{ID: id, Status: "done", SubmittedBy: "76561198000000001"}, nil
+	}}
+	w := doGET(routerWith(store), "/api/jobs/abc")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var j models.IngestJob
+	if err := json.Unmarshal(w.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.SubmittedBy != "76561198000000001" {
+		t.Errorf("submittedBy = %q, want round-tripped SteamID64", j.SubmittedBy)
+	}
+}
+
+func TestSubmitterFromRequest(t *testing.T) {
+	cases := []struct {
+		name, header, want string
+	}{
+		{"valid steamid64", "76561198000000001", "76561198000000001"},
+		{"empty header", "", ""},
+		{"whitespace trimmed", "  76561198000000001  ", "76561198000000001"},
+		{"too short", "12345", ""},
+		{"non-numeric", "gabe", ""},
+		{"below individual range", "76561197960265727", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/ingest/demo", nil)
+			if c.header != "" {
+				req.Header.Set("X-CS2-User", c.header)
+			}
+			if got := submitterFromRequest(req); got != c.want {
+				t.Errorf("submitterFromRequest(%q) = %q, want %q", c.header, got, c.want)
+			}
+		})
+	}
+}
+
 func TestHealthDBOK(t *testing.T) {
 	w := doGET(routerWith(&fakeStore{}), "/api/health")
 	if w.Code != http.StatusOK {

@@ -22,18 +22,43 @@ export function siteOrigin(req: Request): string {
   return new URL(req.url).origin;
 }
 
-/** Build the URL to send the browser to so it can authenticate with Steam. */
-export function buildAuthURL(origin: string): string {
+/** The canonical callback URL (no query) for an origin. */
+export function callbackURL(origin: string): string {
+  return `${origin}/api/auth/steam/callback`;
+}
+
+/**
+ * Build the URL to send the browser to so it can authenticate with Steam. The
+ * anti-CSRF `state` nonce rides on return_to (which Steam signs and echoes back),
+ * so the callback can confirm the response belongs to a flow this browser began.
+ */
+export function buildAuthURL(origin: string, state: string): string {
   const params = new URLSearchParams({
     "openid.ns": OPENID_NS,
     "openid.mode": "checkid_setup",
-    "openid.return_to": `${origin}/api/auth/steam/callback`,
+    "openid.return_to": `${callbackURL(origin)}?state=${encodeURIComponent(state)}`,
     "openid.realm": origin,
     // identifier_select lets Steam pick the user's own id (standard for Steam).
     "openid.identity": IDENTIFIER_SELECT,
     "openid.claimed_id": IDENTIFIER_SELECT,
   });
   return `${OPENID_ENDPOINT}?${params.toString()}`;
+}
+
+/**
+ * Verify the assertion's openid.return_to was one we issued: same origin and
+ * callback path (the query carries our state and is checked separately). Per
+ * OpenID 2.0 §11.1 the RP must confirm return_to matches before trusting a
+ * response, so a valid assertion minted for a different realm isn't accepted.
+ */
+export function returnToMatches(returnTo: string | null, origin: string): boolean {
+  if (!returnTo) return false;
+  try {
+    const u = new URL(returnTo);
+    return `${u.origin}${u.pathname}` === callbackURL(origin);
+  } catch {
+    return false;
+  }
 }
 
 const CLAIMED_ID_RE =
@@ -56,6 +81,14 @@ export async function verifyAssertion(
 ): Promise<boolean> {
   // Only a positive id_res assertion can be validated.
   if (params.get("openid.mode") !== "id_res") return false;
+
+  // The identity fields we consume must be covered by the signature. Steam
+  // returns claimed_id === identity; requiring both to be signed (and equal)
+  // stops an attacker appending an unsigned claimed_id to an otherwise-valid
+  // assertion, rather than relying on Steam's internal signing choices.
+  const signed = (params.get("openid.signed") ?? "").split(",");
+  if (!signed.includes("claimed_id") || !signed.includes("identity")) return false;
+  if (params.get("openid.claimed_id") !== params.get("openid.identity")) return false;
 
   const body = new URLSearchParams(params);
   body.set("openid.mode", "check_authentication");
