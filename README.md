@@ -199,7 +199,7 @@ It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
 | GET  | `/api/players/{steamid}/steam-stats` | Raw App 730 lifetime stats (needs key) |
 | GET  | `/api/matches/{id}` | Full match detail: scoreboard + rounds |
 | GET  | `/api/matches/{id}/kills` | Ordered killfeed for a match |
-| POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`); returns a pollable `jobId`. Honours an `X-CS2-User` header (SteamID64) set server-side by the frontend proxy from the signed-in session, recorded as the job's submitter |
+| POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`); returns a pollable `jobId`. Honours an `X-CS2-Session` header (the signed session token, forwarded server-side by the frontend proxy and HMAC-verified by the backend), recording the SteamID64 it carries as the job's submitter |
 | GET  | `/api/jobs/{id}` | Parse-job status (`queued`/`running`/`done`/`failed`, with `matchId` on success and `submittedBy` when attributed) |
 | GET  | `/api/queue` | Pending job count |
 | GET  | `/metrics` | Prometheus HTTP request counters (root path, not rate-limited) |
@@ -222,13 +222,14 @@ vars: `STEAM_API_KEY`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`,
 parallel per worker), `CACHE_TTL`, `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`
 (per-IP API rate limit; RPS 0 disables), and `API_INTERNAL_URL` (frontend).
 
-**Sign in through Steam** (frontend) adds two vars (see
-[`frontend/.env.example`](frontend/.env.example)): `SESSION_SECRET` — HMAC key
-for the signed session cookie, required in production; and `SITE_URL` — the
-public origin, recommended in production / required behind a reverse proxy so the
-OpenID realm/return_to and post-login redirect don't trust the request `Host`.
-Login is keyless OpenID 2.0 (no Steam API key needed); the key is still used to
-hydrate the signed-in user's persona for the header.
+**Sign in through Steam** adds `SESSION_SECRET` — the HMAC key for the signed
+session token. The frontend signs the cookie with it and the backend verifies
+the forwarded token with it, so **both services must be given the same value**
+(required in production; a shared dev fallback keeps local runs working). The
+frontend also takes `SITE_URL` — the public origin, recommended in production /
+required behind a reverse proxy so the OpenID realm/return_to and post-login
+redirect don't trust the request `Host`. Login is keyless OpenID 2.0 (no Steam
+API key needed); the key is still used to hydrate the signed-in user's persona.
 
 ## How the advanced stats are computed
 

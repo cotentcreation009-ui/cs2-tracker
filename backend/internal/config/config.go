@@ -13,6 +13,12 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// DevSessionSecret is the fallback HMAC key for verifying "Sign in through
+// Steam" session tokens in local development. It MUST match the frontend's
+// dev fallback (frontend/lib/session.ts). Override with SESSION_SECRET in any
+// real deployment — and set the same value on both services.
+const DevSessionSecret = "cs2-tracker-dev-session-secret-change-me"
+
 // Config is the fully-resolved configuration for the backend services.
 type Config struct {
 	// HTTP
@@ -25,6 +31,9 @@ type Config struct {
 
 	// Steam Web API
 	SteamAPIKey string // key from https://steamcommunity.com/dev/apikey (optional until provided)
+
+	// Auth: HMAC key for verifying frontend-issued session tokens (X-CS2-Session).
+	SessionSecret string
 
 	// Leetify public API (keyless; key optional for higher rate limits)
 	LeetifyBaseURL string
@@ -64,6 +73,7 @@ func Load() (*Config, error) {
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
 		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
+		SessionSecret:     getEnv("SESSION_SECRET", DevSessionSecret),
 		LeetifyBaseURL:    getEnv("LEETIFY_BASE_URL", "https://api-public.cs-prod.leetify.com"),
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),

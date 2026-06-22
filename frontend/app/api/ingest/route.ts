@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { API_BASE } from "@/lib/api";
-import { getSession } from "@/lib/session";
+import { SESSION_COOKIE } from "@/lib/session";
 
 // Same-origin proxy so the browser can enqueue a parse job without the backend
-// needing a public CORS surface. When the user is signed in, the job is
-// attributed to their Steam account via X-CS2-User — derived from the *verified*
-// session cookie here on the server, never from anything the client sent.
+// needing a public CORS surface. We forward the signed session token as
+// X-CS2-Session (read from the httpOnly cookie here on the server); the backend
+// verifies it against the shared secret and records the submitter. We never let
+// the client set this header — it's taken only from the cookie.
 export async function POST(req: Request) {
   let body: unknown;
   try {
@@ -17,8 +19,8 @@ export async function POST(req: Request) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
-  const session = await getSession();
-  if (session) headers["X-CS2-User"] = session.steamId64;
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (token) headers["X-CS2-Session"] = token;
 
   try {
     const res = await fetch(`${API_BASE}/api/ingest/demo`, {

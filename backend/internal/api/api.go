@@ -21,6 +21,7 @@ import (
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
+	"github.com/cs2tracker/server/internal/session"
 	"github.com/cs2tracker/server/internal/steam"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -438,7 +439,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		DemoPath:    req.DemoPath,
 		DemoURL:     req.DemoURL,
 		ShareCode:   req.ShareCode,
-		SubmittedBy: submitterFromRequest(r),
+		SubmittedBy: s.submitterFromRequest(r),
 	}); err != nil {
 		s.log.Warn("could not record job", "jobId", job.ID, "err", err)
 	}
@@ -513,12 +514,13 @@ func steamIDParam(r *http.Request) (uint64, bool) {
 }
 
 // submitterFromRequest returns the SteamID64 (decimal string) the ingest is
-// attributed to, taken from the X-CS2-User header, or "" when anonymous. The
-// header is trusted only because the backend is not browser-reachable: the
-// Next.js proxy is the sole caller and sets this from the *verified* session
-// (never from client input). Any missing or malformed value is ignored.
-func submitterFromRequest(r *http.Request) string {
-	id, ok := steam.ParseSteamID64(strings.TrimSpace(r.Header.Get("X-CS2-User")))
+// attributed to, or "" when anonymous. Identity is taken from the X-CS2-Session
+// token (the frontend-issued session cookie, forwarded by the Next.js proxy) and
+// cryptographically verified here against the shared SessionSecret — so the
+// backend establishes identity itself rather than trusting a plaintext header.
+func (s *Server) submitterFromRequest(r *http.Request) string {
+	token := strings.TrimSpace(r.Header.Get("X-CS2-Session"))
+	id, ok := session.Verify(token, s.cfg.SessionSecret)
 	if !ok {
 		return ""
 	}

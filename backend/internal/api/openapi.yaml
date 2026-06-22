@@ -194,13 +194,14 @@ paths:
     post:
       summary: Enqueue a demo parse job
       parameters:
-        - name: X-CS2-User
+        - name: X-CS2-Session
           in: header
           required: false
           description: >-
-            SteamID64 the job is attributed to. Set server-side by the frontend
-            proxy from the verified "Sign in through Steam" session; clients do
-            not set this directly. Malformed values are ignored (anonymous).
+            Signed "Sign in through Steam" session token, forwarded server-side
+            by the frontend proxy from the httpOnly cookie. The backend verifies
+            its HMAC against the shared secret and records the SteamID64 it
+            carries as the submitter. Missing/invalid tokens are ignored (anonymous).
           schema: { type: string }
       requestBody:
         required: true

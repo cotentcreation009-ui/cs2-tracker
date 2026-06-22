@@ -13,6 +13,7 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/models"
+	"github.com/cs2tracker/server/internal/session"
 	"github.com/cs2tracker/server/internal/steam"
 )
 
@@ -98,7 +99,7 @@ func (f *fakeStore) GetJob(_ context.Context, id string) (models.IngestJob, erro
 }
 
 func routerWith(store Store) http.Handler {
-	cfg := &config.Config{CORSOrigins: []string{"*"}}
+	cfg := &config.Config{CORSOrigins: []string{"*"}, SessionSecret: config.DevSessionSecret}
 	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
@@ -256,23 +257,28 @@ func TestHandleJobSubmittedBy(t *testing.T) {
 }
 
 func TestSubmitterFromRequest(t *testing.T) {
+	secret := config.DevSessionSecret
+	s := NewServer(&config.Config{SessionSecret: secret}, &fakeStore{}, steam.New(""),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	valid := session.Encode("76561198000000001", secret)
 	cases := []struct {
 		name, header, want string
 	}{
-		{"valid steamid64", "76561198000000001", "76561198000000001"},
-		{"empty header", "", ""},
-		{"whitespace trimmed", "  76561198000000001  ", "76561198000000001"},
-		{"too short", "12345", ""},
-		{"non-numeric", "gabe", ""},
-		{"below individual range", "76561197960265727", ""},
+		{"valid token", valid, "76561198000000001"},
+		{"empty", "", ""},
+		{"whitespace trimmed", "  " + valid + "  ", "76561198000000001"},
+		{"tampered signature", valid[:len(valid)-2] + "AA", ""},
+		{"wrong secret", session.Encode("76561198000000001", "other-secret"), ""},
+		{"garbage", "not-a-token", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/ingest/demo", nil)
 			if c.header != "" {
-				req.Header.Set("X-CS2-User", c.header)
+				req.Header.Set("X-CS2-Session", c.header)
 			}
-			if got := submitterFromRequest(req); got != c.want {
+			if got := s.submitterFromRequest(req); got != c.want {
 				t.Errorf("submitterFromRequest(%q) = %q, want %q", c.header, got, c.want)
 			}
 		})
