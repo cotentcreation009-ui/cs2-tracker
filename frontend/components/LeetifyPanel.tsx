@@ -1,5 +1,6 @@
 import type { LeetifyProfile } from "@/lib/types";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
+import { tierColor } from "@/lib/format";
 
 function Bar({ label, value }: { label: string; value: number }) {
   const pct = Math.max(0, Math.min(value, 100));
@@ -45,6 +46,11 @@ function signed(n: number): string {
 }
 const impactColor = (n: number) =>
   n > 0.03 ? "text-good" : n < -0.03 ? "text-bad" : "text-mid";
+
+// lowerColor: for metrics where a smaller value is better (preaim, reaction,
+// utility wasted on death).
+const lowerColor = (v: number, good: number, mid: number) =>
+  v <= good ? "text-good" : v <= mid ? "text-mid" : "text-bad";
 
 function Group({
   title,
@@ -156,29 +162,29 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
 
       {/* aim & mechanics */}
       <Group title="Aim & mechanics">
-        <Mini label="HS accuracy" value={`${s.accuracy_head.toFixed(1)}%`} />
-        <Mini label="Spotted accuracy" value={`${s.accuracy_enemy_spotted.toFixed(0)}%`} />
-        <Mini label="Counter-strafe" value={`${s.counter_strafing_good_shots_ratio.toFixed(0)}%`} />
-        <Mini label="Spray" value={`${s.spray_accuracy.toFixed(0)}%`} />
-        <Mini label="Preaim" value={`${s.preaim.toFixed(1)}°`} />
-        <Mini label="Reaction" value={`${s.reaction_time_ms.toFixed(0)} ms`} />
+        <Mini label="HS accuracy" value={`${s.accuracy_head.toFixed(1)}%`} valueClass={tierColor(s.accuracy_head, 25, 18)} />
+        <Mini label="Spotted accuracy" value={`${s.accuracy_enemy_spotted.toFixed(0)}%`} valueClass={tierColor(s.accuracy_enemy_spotted, 45, 35)} />
+        <Mini label="Counter-strafe" value={`${s.counter_strafing_good_shots_ratio.toFixed(0)}%`} valueClass={tierColor(s.counter_strafing_good_shots_ratio, 80, 60)} />
+        <Mini label="Spray" value={`${s.spray_accuracy.toFixed(0)}%`} valueClass={tierColor(s.spray_accuracy, 45, 30)} />
+        <Mini label="Preaim" value={`${s.preaim.toFixed(1)}°`} valueClass={lowerColor(s.preaim, 8, 11)} />
+        <Mini label="Reaction" value={`${s.reaction_time_ms.toFixed(0)} ms`} valueClass={lowerColor(s.reaction_time_ms, 550, 650)} />
       </Group>
 
       {/* utility */}
       <Group title="Utility">
-        <Mini label="HE dmg / match" value={s.he_foes_damage_avg.toFixed(1)} />
-        <Mini label="Blinded / flash" value={s.flashbang_hit_foe_per_flashbang.toFixed(2)} />
-        <Mini label="Flashes → kill" value={`${s.flashbang_leading_to_kill.toFixed(0)}%`} />
-        <Mini label="Util lost / death" value={`$${s.utility_on_death_avg.toFixed(0)}`} />
+        <Mini label="HE dmg / match" value={s.he_foes_damage_avg.toFixed(1)} valueClass={tierColor(s.he_foes_damage_avg, 6, 3)} />
+        <Mini label="Blinded / flash" value={s.flashbang_hit_foe_per_flashbang.toFixed(2)} valueClass={tierColor(s.flashbang_hit_foe_per_flashbang, 0.7, 0.4)} />
+        <Mini label="Flashes → kill" value={`${s.flashbang_leading_to_kill.toFixed(0)}%`} valueClass={tierColor(s.flashbang_leading_to_kill, 12, 7)} />
+        <Mini label="Util lost / death" value={`$${s.utility_on_death_avg.toFixed(0)}`} valueClass={lowerColor(s.utility_on_death_avg, 250, 400)} />
       </Group>
 
       {/* opening & trading */}
       <Group title="Opening & trading">
-        <Mini label="Opening CT" value={`${s.ct_opening_duel_success_percentage.toFixed(0)}%`} />
-        <Mini label="Opening T" value={`${s.t_opening_duel_success_percentage.toFixed(0)}%`} />
-        <Mini label="Trade success" value={`${s.trade_kills_success_percentage.toFixed(0)}%`} />
-        <Mini label="Traded on death" value={`${s.traded_deaths_success_percentage.toFixed(0)}%`} />
-        <Mini label="Trade chances / rd" value={s.trade_kill_opportunities_per_round.toFixed(2)} />
+        <Mini label="Opening CT" value={`${s.ct_opening_duel_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.ct_opening_duel_success_percentage, 55, 45)} />
+        <Mini label="Opening T" value={`${s.t_opening_duel_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.t_opening_duel_success_percentage, 55, 45)} />
+        <Mini label="Trade success" value={`${s.trade_kills_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.trade_kills_success_percentage, 50, 40)} />
+        <Mini label="Traded on death" value={`${s.traded_deaths_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.traded_deaths_success_percentage, 50, 40)} />
+        <Mini label="Trade chances / rd" value={s.trade_kill_opportunities_per_round.toFixed(2)} valueClass={tierColor(s.trade_kill_opportunities_per_round, 0.4, 0.25)} />
       </Group>
 
       {/* recent matches (Leetify) — click a row to inspect per-match stats */}

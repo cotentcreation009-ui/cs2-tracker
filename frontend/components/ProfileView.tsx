@@ -16,6 +16,8 @@ import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
 import { FaceitPanel } from "@/components/FaceitPanel";
+import { RankStrip } from "@/components/RankBadge";
+import { MapStrength } from "@/components/MapStrength";
 import {
   flag,
   fmt,
@@ -147,9 +149,15 @@ export function ProfileView({
         {hasData && <RatingRing rating={career.rating} />}
       </section>
 
+      <RankStrip leetify={leetify} faceit={faceit} />
+
       {leetify && <LeetifyPanel profile={leetify} />}
 
       {faceit && <FaceitPanel profile={faceit} />}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <MapStrength matches={leetify.recent_matches} />
+      )}
 
       {!hasData && !leetify && !faceit && (
         <div className="card px-5 py-6 text-sm text-muted">
