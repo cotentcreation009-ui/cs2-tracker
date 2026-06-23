@@ -34,12 +34,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               >
                 Compare
               </Link>
-              <Link
-                href="/ingest"
-                className="link-muted shrink-0 text-sm font-medium"
-              >
-                Ingest
-              </Link>
             </div>
           </div>
         </header>

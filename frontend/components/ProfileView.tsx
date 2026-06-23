@@ -153,12 +153,8 @@ export function ProfileView({
 
       {!hasData && !leetify && !faceit && (
         <div className="card px-5 py-6 text-sm text-muted">
-          We know this player&apos;s Steam identity, but no demos have been
-          parsed for them yet. Ingest a demo via{" "}
-          <code className="rounded bg-panel px-1.5 py-0.5 text-xs text-ink">
-            POST /api/ingest/demo
-          </code>{" "}
-          to populate career stats and match history.
+          We know this player&apos;s Steam identity, but have no CS2 stats for
+          them yet — their Leetify/FACEIT profile may be private or unavailable.
         </div>
       )}
 
