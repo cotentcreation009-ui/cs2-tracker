@@ -5,7 +5,20 @@ import { CompareForm } from "@/components/CompareForm";
 import { FetchError } from "@/components/FetchError";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Compare players — CS2 Tracker" };
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ a?: string; b?: string }>;
+}): Promise<Metadata> {
+  const { a, b } = await searchParams;
+  if (a && b) {
+    const title = `${a} vs ${b} — CS2 Tracker`;
+    const description = `Head-to-head CS2 comparison of ${a} and ${b}: Leetify rating, win rate, aim, utility and more.`;
+    return { title, description, openGraph: { title, description }, twitter: { card: "summary" } };
+  }
+  return { title: "Compare players — CS2 Tracker" };
+}
 
 export default async function ComparePage({
   searchParams,

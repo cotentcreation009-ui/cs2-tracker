@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   ApiError,
   getFaceit,
@@ -11,8 +12,23 @@ import {
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
+import { profileMetadata } from "@/lib/meta";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ vanity: string }>;
+}): Promise<Metadata> {
+  const { vanity } = await params;
+  try {
+    const id = await resolveSteamId(vanity);
+    return profileMetadata(await getProfile(id));
+  } catch {
+    return { title: "Player — CS2 Tracker" };
+  }
+}
 
 /**
  * /id/<vanity> mirrors Steam's custom-URL path. We resolve the vanity name to a

@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
+import { profileMetadata } from "@/lib/meta";
 
 // Profiles depend on live backend data, so render per-request.
 export const dynamic = "force-dynamic";
@@ -22,15 +23,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { steamid } = await params;
   try {
-    const { player, career } = await getProfile(steamid);
-    const name = player.personaName || steamid;
-    return {
-      title: `${name} — CS2 Tracker`,
-      description:
-        career.matches > 0
-          ? `${name}: ${career.rating} rating, ${career.kd} K/D over ${career.matches} matches.`
-          : `${name} on CS2 Tracker.`,
-    };
+    return profileMetadata(await getProfile(steamid));
   } catch {
     return { title: "Player — CS2 Tracker" };
   }

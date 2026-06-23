@@ -4,10 +4,22 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 
+const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+
 export const metadata: Metadata = {
-  title: "CS2 Tracker — advanced Counter-Strike 2 stats",
+  metadataBase: new URL(siteUrl),
+  title: "CS2 Tracker — Leetify, FACEIT & Steam stats for any player",
   description:
-    "Per-match and career CS2 analytics: rating, ADR, KAST, clutches, opening duels and more.",
+    "Look up any Counter-Strike 2 player: Leetify rating, FACEIT level & ELO, Premier/Wingman ranks, aim & utility stats, and Steam identity — all from one SteamID.",
+  applicationName: "CS2 Tracker",
+  openGraph: {
+    type: "website",
+    siteName: "CS2 Tracker",
+    title: "CS2 Tracker — Leetify, FACEIT & Steam stats for any player",
+    description:
+      "Look up any CS2 player's Leetify rating, FACEIT level, ranks and Steam identity in one place.",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

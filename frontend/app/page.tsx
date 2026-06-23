@@ -8,16 +8,16 @@ export const dynamic = "force-dynamic";
 
 const FEATURES = [
   {
-    title: "True per-round analytics",
-    body: "Every demo is parsed once into KAST, ADR, opening duels, trades and clutches — not just the end-of-match scoreboard.",
+    title: "Every rank in one place",
+    body: "Premier rating, FACEIT level & ELO, Wingman rank and Leetify rating for any account — pulled live from a single SteamID.",
   },
   {
-    title: "HLTV-style rating",
-    body: "A transparent, reproducible rating computed from your kill, survival and multi-kill output across every parsed match.",
+    title: "Deep Leetify analytics",
+    body: "Aim, positioning and utility ratings, opening duels, clutches, trading and recent-match form — the numbers past the scoreboard.",
   },
   {
-    title: "Career that updates on write",
-    body: "Rolling aggregates are recomputed the moment a demo finishes parsing, so your profile is always current and fast to load.",
+    title: "Steam identity & trust",
+    body: "Account age, CS2 friend code, friends and ban checks — vet a teammate or scope an opponent in seconds.",
   },
 ];
 
@@ -38,19 +38,20 @@ export default async function HomePage() {
             </span>
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-pretty text-muted">
-            Look up any player by SteamID64, vanity name or profile URL. Parse
-            your demos for round-level insight you can actually act on.
+            Look up any CS2 player by SteamID64, vanity name or profile URL — and
+            see their Leetify rating, FACEIT level, ranks and Steam identity in
+            one place.
           </p>
           <div className="mx-auto mt-7 max-w-md">
             <SearchBar autoFocus />
           </div>
           <p className="mt-3 text-xs text-faint">
-            Try a seeded demo profile:{" "}
+            See an example:{" "}
             <a
               className="text-brand hover:underline"
-              href="/profiles/76561198000000001"
+              href="/profiles/76561198077030352"
             >
-              /profiles/76561198000000001
+              a live player profile
             </a>
           </p>
         </div>
