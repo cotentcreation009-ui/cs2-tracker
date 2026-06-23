@@ -24,7 +24,8 @@ import (
 var ErrNotFound = errors.New("leetify: profile not found")
 
 // maxRecentMatches caps the recent-match list we surface (Leetify returns ~100).
-const maxRecentMatches = 10
+// The profile panel shows the first 10; the match-history page shows the rest.
+const maxRecentMatches = 30
 
 // Client talks to the Leetify public API.
 type Client struct {
