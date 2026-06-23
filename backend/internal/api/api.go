@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"golang.org/x/sync/singleflight"
 )
 
 // Store is the persistence surface the HTTP handlers depend on. *db.DB satisfies
@@ -56,7 +57,14 @@ type Server struct {
 	cache   *cache.Cache
 	log     *slog.Logger
 	metrics *metrics
+	// sf coalesces concurrent upstream fetches for the same key (cache stampede
+	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
+	sf singleflight.Group
 }
+
+// negativeCacheTTL is how long a "no such profile" result is cached so repeated
+// views of profile-less players don't keep hitting the upstream.
+const negativeCacheTTL = 5 * time.Minute
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
 // degrade gracefully); leetify/faceit clients may be nil or keyless (their
@@ -286,31 +294,27 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid SteamID64")
 		return
 	}
-	key := cache.SteamExtrasKey(id)
-	if s.cache != nil {
-		var cached map[string]any
-		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
-			setEdgeCache(w, s.cfg.ExternalCacheTTL)
-			writeJSON(w, http.StatusOK, cached)
-			return
-		}
-	}
-	out := map[string]any{
-		"steamId64":  strconv.FormatUint(id, 10),
-		"friendCode": steam.FriendCode(id),
-		"friends":    0,
-		"steamLevel": 0,
-	}
-	if s.steam.HasKey() {
-		if n, err := s.steam.GetFriendCount(r.Context(), id); err == nil {
-			out["friends"] = n
-		}
-		if lvl, err := s.steam.GetSteamLevel(r.Context(), id); err == nil {
-			out["steamLevel"] = lvl
-		}
-	}
-	if s.cache != nil {
-		_ = s.cache.SetJSONTTL(r.Context(), key, out, s.cfg.ExternalCacheTTL)
+	out, _, err := cachedExternal(s, r.Context(), cache.SteamExtrasKey(id),
+		func() (map[string]any, error) {
+			o := map[string]any{
+				"steamId64":  strconv.FormatUint(id, 10),
+				"friendCode": steam.FriendCode(id),
+				"friends":    0,
+				"steamLevel": 0,
+			}
+			if s.steam.HasKey() {
+				if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
+					o["friends"] = n
+				}
+				if lvl, e := s.steam.GetSteamLevel(r.Context(), id); e == nil {
+					o["steamLevel"] = lvl
+				}
+			}
+			return o, nil
+		})
+	if err != nil {
+		s.serverError(w, "steam extras", err)
+		return
 	}
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, out)
@@ -374,26 +378,15 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "leetify integration not configured")
 		return
 	}
-	key := cache.LeetifyKey(id)
-	if s.cache != nil {
-		var cached leetify.Profile
-		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
-			setEdgeCache(w, s.cfg.ExternalCacheTTL)
-			writeJSON(w, http.StatusOK, &cached)
-			return
-		}
-	}
-	prof, err := s.leetify.GetProfile(r.Context(), id)
-	if errors.Is(err, leetify.ErrNotFound) {
+	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
+		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
+	if notFound {
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
 		return
 	}
 	if err != nil {
 		s.serverError(w, "leetify profile", err)
 		return
-	}
-	if s.cache != nil {
-		_ = s.cache.SetJSONTTL(r.Context(), key, prof, s.cfg.ExternalCacheTTL)
 	}
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
@@ -412,30 +405,15 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
 		return
 	}
-	key := cache.FaceitKey(id)
-	if s.cache != nil {
-		var cached faceit.Profile
-		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
-			setEdgeCache(w, s.cfg.ExternalCacheTTL)
-			writeJSON(w, http.StatusOK, &cached)
-			return
-		}
-	}
-	prof, err := s.faceit.GetProfile(r.Context(), id)
-	if errors.Is(err, faceit.ErrNotFound) {
+	prof, notFound, err := cachedExternal(s, r.Context(), cache.FaceitKey(id),
+		func() (*faceit.Profile, error) { return s.faceit.GetProfile(r.Context(), id) })
+	if notFound {
 		writeError(w, http.StatusNotFound, "no FACEIT profile for this player")
-		return
-	}
-	if errors.Is(err, faceit.ErrNoAPIKey) {
-		writeError(w, http.StatusServiceUnavailable, "FACEIT API key not configured")
 		return
 	}
 	if err != nil {
 		s.serverError(w, "faceit profile", err)
 		return
-	}
-	if s.cache != nil {
-		_ = s.cache.SetJSONTTL(r.Context(), key, prof, s.cfg.ExternalCacheTTL)
 	}
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
@@ -639,6 +617,47 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// cachedExternal serves a live third-party payload with Redis caching, negative
+// caching and singleflight coalescing. Order: positive cache hit → negative
+// cache hit (returns notFound) → one upstream fetch per key (shared by all
+// concurrent callers) whose result is cached. ErrNotFound from the upstream is
+// cached briefly as a negative result.
+func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch func() (T, error)) (T, bool, error) {
+	var zero T
+	missKey := key + ":miss"
+	if s.cache != nil {
+		var cached T
+		if hit, _ := s.cache.GetJSON(ctx, key, &cached); hit {
+			return cached, false, nil
+		}
+		var miss bool
+		if hit, _ := s.cache.GetJSON(ctx, missKey, &miss); hit && miss {
+			return zero, true, nil
+		}
+	}
+
+	v, err, _ := s.sf.Do(key, func() (any, error) {
+		val, err := fetch()
+		if err != nil {
+			return nil, err
+		}
+		if s.cache != nil {
+			_ = s.cache.SetJSONTTL(ctx, key, val, s.cfg.ExternalCacheTTL)
+		}
+		return val, nil
+	})
+	if err != nil {
+		if errors.Is(err, leetify.ErrNotFound) || errors.Is(err, faceit.ErrNotFound) {
+			if s.cache != nil {
+				_ = s.cache.SetJSONTTL(ctx, missKey, true, negativeCacheTTL)
+			}
+			return zero, true, nil
+		}
+		return zero, false, err
+	}
+	return v.(T), false, nil
 }
 
 // setEdgeCache marks a successful read cacheable by a CDN (Cloudflare) for ttl,
