@@ -18,6 +18,10 @@ import { LeetifyPanel } from "@/components/LeetifyPanel";
 import { FaceitPanel } from "@/components/FaceitPanel";
 import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
+import { PlayerSummary } from "@/components/PlayerSummary";
+import { LiveForm } from "@/components/LiveForm";
+import { ShareButton } from "@/components/ShareButton";
+import Link from "next/link";
 import {
   flag,
   fmt,
@@ -149,9 +153,36 @@ export function ProfileView({
         {hasData && <RatingRing rating={career.rating} />}
       </section>
 
+      <div className="flex flex-wrap gap-2">
+        <ShareButton label="Share profile" />
+        <Link
+          href={`/compare?a=${player.steamId64}`}
+          className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+        >
+          Compare
+        </Link>
+      </div>
+
       <RankStrip leetify={leetify} faceit={faceit} />
 
+      {leetify && <PlayerSummary leetify={leetify} />}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <LiveForm matches={leetify.recent_matches} />
+      )}
+
       {leetify && <LeetifyPanel profile={leetify} />}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <div className="text-right">
+          <Link
+            href={`/profiles/${player.steamId64}/matches`}
+            className="text-sm font-medium text-brand hover:underline"
+          >
+            View all matches →
+          </Link>
+        </div>
+      )}
 
       {faceit && <FaceitPanel profile={faceit} />}
 

@@ -3,6 +3,7 @@ import { ApiError, getLeetify, getProfile, resolveSteamId } from "@/lib/api";
 import { ComparisonView } from "@/components/ComparisonView";
 import { CompareForm } from "@/components/CompareForm";
 import { FetchError } from "@/components/FetchError";
+import { ShareButton } from "@/components/ShareButton";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,10 @@ export default async function ComparePage({
     ]);
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">Head to head</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">Head to head</h1>
+          <ShareButton label="Share comparison" />
+        </div>
         <ComparisonView a={pa} b={pb} leetifyA={la} leetifyB={lb} />
         <CompareForm initialA={a} initialB={b} />
       </div>
