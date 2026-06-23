@@ -83,6 +83,7 @@ type Stats struct {
 }
 
 // RecentMatch is one row of Leetify's recent-match list (most recent first).
+// The per-match aim/mechanics fields back the expandable "inspect" row.
 type RecentMatch struct {
 	ID            string  `json:"id"`
 	FinishedAt    string  `json:"finished_at"`
@@ -91,6 +92,12 @@ type RecentMatch struct {
 	MapName       string  `json:"map_name"`
 	LeetifyRating float64 `json:"leetify_rating"`
 	Score         []int   `json:"score"`
+
+	Preaim               float64 `json:"preaim"`
+	ReactionTimeMs       float64 `json:"reaction_time_ms"`
+	AccuracyHead         float64 `json:"accuracy_head"`
+	AccuracyEnemySpotted float64 `json:"accuracy_enemy_spotted"`
+	SprayAccuracy        float64 `json:"spray_accuracy"`
 }
 
 // Profile is the subset of Leetify's /v3/profile we surface. Ranks is passed

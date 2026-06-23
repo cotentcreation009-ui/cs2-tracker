@@ -1,5 +1,5 @@
 import type { LeetifyProfile } from "@/lib/types";
-import { mapLabel, tierColor, timeAgo } from "@/lib/format";
+import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 
 function Bar({ label, value }: { label: string; value: number }) {
   const pct = Math.max(0, Math.min(value, 100));
@@ -45,13 +45,6 @@ function signed(n: number): string {
 }
 const impactColor = (n: number) =>
   n > 0.03 ? "text-good" : n < -0.03 ? "text-bad" : "text-mid";
-
-const sourceLabel: Record<string, string> = {
-  matchmaking: "MM",
-  premier: "Premier",
-  faceit: "FACEIT",
-  wingman: "Wingman",
-};
 
 function Group({
   title,
@@ -188,55 +181,8 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         <Mini label="Trade chances / rd" value={s.trade_kill_opportunities_per_round.toFixed(2)} />
       </Group>
 
-      {/* recent matches (Leetify) */}
-      {recent.length > 0 && (
-        <div className="mt-5">
-          <div className="stat-label mb-2">Recent matches (Leetify)</div>
-          <div className="overflow-hidden rounded-lg border border-line">
-            {recent.map((m, i) => {
-              const won = m.outcome === "win";
-              const tie = m.outcome === "tie";
-              return (
-                <div
-                  key={m.id || i}
-                  className={`flex items-center gap-3 px-3 py-2 text-sm ${
-                    i % 2 ? "bg-panel/40" : ""
-                  }`}
-                >
-                  <span
-                    className={`grid h-5 w-5 shrink-0 place-items-center rounded text-[11px] font-bold ${
-                      tie
-                        ? "bg-mid/20 text-mid"
-                        : won
-                          ? "bg-good/20 text-good"
-                          : "bg-bad/20 text-bad"
-                    }`}
-                  >
-                    {tie ? "T" : won ? "W" : "L"}
-                  </span>
-                  <span className="w-20 shrink-0 font-medium">
-                    {mapLabel(m.map_name)}
-                  </span>
-                  <span className="w-14 shrink-0 tabular-nums text-muted">
-                    {m.score?.length === 2 ? `${m.score[0]}–${m.score[1]}` : ""}
-                  </span>
-                  <span
-                    className={`w-12 shrink-0 tabular-nums ${impactColor(m.leetify_rating)}`}
-                  >
-                    {signed(m.leetify_rating)}
-                  </span>
-                  <span className="hidden shrink-0 text-xs text-faint sm:inline">
-                    {sourceLabel[m.data_source] || m.data_source}
-                  </span>
-                  <span className="ml-auto shrink-0 text-xs text-faint">
-                    {timeAgo(m.finished_at)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* recent matches (Leetify) — click a row to inspect per-match stats */}
+      <LeetifyRecentMatches matches={recent} />
     </section>
   );
 }

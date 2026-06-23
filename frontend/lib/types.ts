@@ -140,6 +140,11 @@ export interface LeetifyRecentMatch {
   map_name: string;
   leetify_rating: number;
   score: number[]; // [team, enemy]
+  preaim: number;
+  reaction_time_ms: number;
+  accuracy_head: number;
+  accuracy_enemy_spotted: number;
+  spray_accuracy: number;
 }
 
 export interface LeetifyProfile {
