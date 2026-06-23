@@ -2,9 +2,9 @@ import { SearchBar } from "@/components/SearchBar";
 import { Leaderboard } from "@/components/Leaderboard";
 import { getLeaderboard } from "@/lib/api";
 
-// The leaderboard is live data; render per-request (and degrade gracefully when
-// the backend is unavailable).
-export const dynamic = "force-dynamic";
+// The leaderboard updates slowly; cache the homepage (ISR) and degrade
+// gracefully when the backend is unavailable.
+export const revalidate = 60;
 
 const FEATURES = [
   {

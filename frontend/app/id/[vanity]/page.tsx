@@ -14,7 +14,7 @@ import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
 import { profileMetadata } from "@/lib/meta";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,

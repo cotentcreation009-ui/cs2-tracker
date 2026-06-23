@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -303,12 +304,26 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 				"steamLevel": 0,
 			}
 			if s.steam.HasKey() {
-				if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
-					o["friends"] = n
-				}
-				if lvl, e := s.steam.GetSteamLevel(r.Context(), id); e == nil {
-					o["steamLevel"] = lvl
-				}
+				// Independent calls — run them concurrently (write to locals to
+				// avoid a concurrent map write, then assign).
+				var wg sync.WaitGroup
+				var friends, level int
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
+						friends = n
+					}
+				}()
+				go func() {
+					defer wg.Done()
+					if lvl, e := s.steam.GetSteamLevel(r.Context(), id); e == nil {
+						level = lvl
+					}
+				}()
+				wg.Wait()
+				o["friends"] = friends
+				o["steamLevel"] = level
 			}
 			return o, nil
 		})

@@ -32,10 +32,19 @@ export class ApiError extends Error {
   }
 }
 
+// Reads are cached for a short window so popular profiles (shared links are a
+// bounded, highly-repeated keyspace) serve from the Next/CDN cache instead of
+// re-hitting the backend + third-party APIs on every view. Pages that must be
+// fresh per-request (e.g. compare, which reads searchParams) render dynamically
+// and bypass this anyway.
+const REVALIDATE_SECONDS = 60;
+
 async function getJSON<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+    res = await fetch(`${API_BASE}${path}`, {
+      next: { revalidate: REVALIDATE_SECONDS },
+    });
   } catch (err) {
     throw new ApiError(
       0,

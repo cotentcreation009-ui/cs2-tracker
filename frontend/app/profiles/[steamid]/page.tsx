@@ -13,8 +13,9 @@ import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
 import { profileMetadata } from "@/lib/meta";
 
-// Profiles depend on live backend data, so render per-request.
-export const dynamic = "force-dynamic";
+// Cache the rendered profile for a short window (ISR) so repeat/shared views are
+// served from cache; the underlying data is itself cached server-side.
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,
