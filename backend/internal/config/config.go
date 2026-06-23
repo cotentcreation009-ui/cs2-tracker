@@ -42,7 +42,8 @@ type Config struct {
 	WorkerConcurrency int           // number of jobs a single worker parses in parallel
 
 	// Caching
-	CacheTTL time.Duration // TTL for cached aggregate payloads in redis
+	CacheTTL         time.Duration // TTL for cached aggregate payloads in redis
+	ExternalCacheTTL time.Duration // TTL for cached live third-party payloads (Leetify/FACEIT/steam-extras)
 
 	// Rate limiting (per client IP). RateLimitRPS <= 0 disables it.
 	RateLimitRPS   float64 // sustained requests per second
@@ -78,6 +79,7 @@ func Load() (*Config, error) {
 		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
 		CacheTTL:          getDuration("CACHE_TTL", 5*time.Minute),
+		ExternalCacheTTL:  getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
 		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
 		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
 	}

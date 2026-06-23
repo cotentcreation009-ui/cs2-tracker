@@ -183,6 +183,7 @@ func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if players == nil {
 		players = []models.LeaderboardEntry{}
 	}
+	setEdgeCache(w, s.cfg.CacheTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"players": players})
 }
 
@@ -197,6 +198,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	if s.cache != nil {
 		var cached models.PlayerProfile
 		if hit, _ := s.cache.GetJSON(r.Context(), cache.ProfileKey(id), &cached); hit {
+			setEdgeCache(w, s.cfg.CacheTTL)
 			writeJSON(w, http.StatusOK, cached)
 			return
 		}
@@ -220,6 +222,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	if s.cache != nil {
 		_ = s.cache.SetJSON(r.Context(), cache.ProfileKey(id), prof)
 	}
+	setEdgeCache(w, s.cfg.CacheTTL)
 	writeJSON(w, http.StatusOK, prof)
 }
 
@@ -283,6 +286,15 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid SteamID64")
 		return
 	}
+	key := cache.SteamExtrasKey(id)
+	if s.cache != nil {
+		var cached map[string]any
+		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
+			setEdgeCache(w, s.cfg.ExternalCacheTTL)
+			writeJSON(w, http.StatusOK, cached)
+			return
+		}
+	}
 	out := map[string]any{
 		"steamId64":  strconv.FormatUint(id, 10),
 		"friendCode": steam.FriendCode(id),
@@ -297,6 +309,10 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 			out["steamLevel"] = lvl
 		}
 	}
+	if s.cache != nil {
+		_ = s.cache.SetJSONTTL(r.Context(), key, out, s.cfg.ExternalCacheTTL)
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -344,8 +360,10 @@ func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
 }
 
-// handleLeetify fetches a player's Leetify profile live (never stored, per
-// Leetify's terms). The frontend renders it with the required attribution.
+// handleLeetify fetches a player's Leetify profile, shown live with attribution.
+// A short Redis cache (ExternalCacheTTL) coalesces repeat views so we don't
+// re-hit Leetify on every request — important under load. NOTE: confirm a short
+// transient cache is compatible with Leetify's terms before commercial use.
 func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 	id, ok := steamIDParam(r)
 	if !ok {
@@ -356,6 +374,15 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "leetify integration not configured")
 		return
 	}
+	key := cache.LeetifyKey(id)
+	if s.cache != nil {
+		var cached leetify.Profile
+		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
+			setEdgeCache(w, s.cfg.ExternalCacheTTL)
+			writeJSON(w, http.StatusOK, &cached)
+			return
+		}
+	}
 	prof, err := s.leetify.GetProfile(r.Context(), id)
 	if errors.Is(err, leetify.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
@@ -365,6 +392,10 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "leetify profile", err)
 		return
 	}
+	if s.cache != nil {
+		_ = s.cache.SetJSONTTL(r.Context(), key, prof, s.cfg.ExternalCacheTTL)
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
 }
 
@@ -381,6 +412,15 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
 		return
 	}
+	key := cache.FaceitKey(id)
+	if s.cache != nil {
+		var cached faceit.Profile
+		if hit, _ := s.cache.GetJSON(r.Context(), key, &cached); hit {
+			setEdgeCache(w, s.cfg.ExternalCacheTTL)
+			writeJSON(w, http.StatusOK, &cached)
+			return
+		}
+	}
 	prof, err := s.faceit.GetProfile(r.Context(), id)
 	if errors.Is(err, faceit.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no FACEIT profile for this player")
@@ -394,6 +434,10 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "faceit profile", err)
 		return
 	}
+	if s.cache != nil {
+		_ = s.cache.SetJSONTTL(r.Context(), key, prof, s.cfg.ExternalCacheTTL)
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
 }
 
@@ -595,6 +639,14 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// setEdgeCache marks a successful read cacheable by a CDN (Cloudflare) for ttl,
+// with stale-while-revalidate so repeat traffic is absorbed at the edge instead
+// of hitting the origin. Must be called before WriteHeader (i.e. before writeJSON).
+func setEdgeCache(w http.ResponseWriter, ttl time.Duration) {
+	secs := strconv.Itoa(int(ttl.Seconds()))
+	w.Header().Set("Cache-Control", "public, max-age=0, s-maxage="+secs+", stale-while-revalidate=60")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
