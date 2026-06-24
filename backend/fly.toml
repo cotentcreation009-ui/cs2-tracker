@@ -1,0 +1,40 @@
+# Fly.io config for the cs2-tracker Go backend.
+# Builds from backend/Dockerfile (multi-stage; default CMD "api", EXPOSE 8080).
+#
+# First-time setup (run from the backend/ directory):
+#   fly launch --no-deploy        # reuses this file; choose a unique app name + region
+#   fly secrets set \
+#     DATABASE_URL="postgresql://...pooler.supabase.com:5432/postgres?sslmode=require" \
+#     STEAM_API_KEY="..." FACEIT_API_KEY="..."         # + optional REDIS_URL=rediss://...
+#   fly deploy
+#
+# Change `app` to your own unique name and `primary_region` to one near your users
+# and your Supabase region (`fly platform regions` lists them).
+
+app = "cs2-tracker-api"
+primary_region = "iad"
+
+[build]
+  # Uses backend/Dockerfile — no extra config needed.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep one machine always on: the rate limiter, singleflight and request
+  # coalescing live in process memory, so letting it scale to zero (cold start)
+  # would discard them.
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
