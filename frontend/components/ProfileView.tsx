@@ -21,6 +21,7 @@ import { MapStrength } from "@/components/MapStrength";
 import { PlayerSummary } from "@/components/PlayerSummary";
 import { LiveForm } from "@/components/LiveForm";
 import { ShareButton } from "@/components/ShareButton";
+import { RecordRecent } from "@/components/RecordRecent";
 import Link from "next/link";
 import {
   flag,
@@ -75,6 +76,13 @@ export function ProfileView({
 
   return (
     <div className="space-y-5">
+      <RecordRecent
+        player={{
+          steamId64: player.steamId64,
+          personaName: player.personaName,
+          avatarUrl: player.avatarUrl,
+        }}
+      />
       {/* Identity + rating */}
       <section className="card-2 flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">

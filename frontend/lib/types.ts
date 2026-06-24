@@ -210,6 +210,12 @@ export interface FaceitProfile {
   recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
 }
 
+export interface PlayerHit {
+  steamId64: string;
+  personaName: string;
+  avatarUrl: string;
+}
+
 export interface SteamExtras {
   steamId64: string;
   friendCode: string; // CS2 in-game friend code, e.g. "ADWZF-L9AL"
