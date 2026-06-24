@@ -11,6 +11,7 @@ testdata/*.dem.bz2
 
 # Go
 /backend/bin/
+*.exe
 *.test
 *.out
 
