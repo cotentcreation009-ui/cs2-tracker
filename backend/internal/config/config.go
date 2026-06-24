@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -95,8 +96,12 @@ func Load() (*Config, error) {
 func (c *Config) HasSteamKey() bool { return c.SteamAPIKey != "" }
 
 func getEnv(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		return v
+	// Trim surrounding whitespace so a key pasted from a dashboard with a stray
+	// space/newline (e.g. FACEIT_API_KEY) doesn't silently corrupt a header.
+	if v, ok := os.LookupEnv(key); ok {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
 	}
 	return fallback
 }

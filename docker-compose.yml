@@ -45,6 +45,12 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-cs2}:${POSTGRES_PASSWORD:-cs2}@postgres:5432/${POSTGRES_DB:-cs2tracker}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       STEAM_API_KEY: ${STEAM_API_KEY:-}
+      # Live-aggregator providers — without these forwarded into the container the
+      # FACEIT/Leetify panels stay disabled even when set in .env.
+      FACEIT_API_KEY: ${FACEIT_API_KEY:-}
+      FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
+      LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
+      EXTERNAL_CACHE_TTL: ${EXTERNAL_CACHE_TTL:-15m}
       CORS_ORIGINS: http://localhost:3000
       DEMO_QUEUE_KEY: cs2:demos:parse
       CACHE_TTL: 5m

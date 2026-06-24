@@ -56,7 +56,11 @@ app. (Verified: `Host: steamcommunity.test` → `/id/PodSoil` → 200.)
 `docker compose up --build` brings up Postgres + Redis + backend + worker +
 frontend (needs a healthy Docker engine). For a hostless/VM deploy, run the four
 binaries + Next directly (see the README "Running without Docker"), front them
-with Caddy/nginx for TLS, and set `STEAM_API_KEY` + `DATABASE_URL` + `REDIS_URL`.
+with Caddy/nginx for TLS, and set `STEAM_API_KEY` + `DATABASE_URL` + `REDIS_URL`
+on the backend process. To light up the FACEIT panel, also set `FACEIT_API_KEY`
+(a free **server-side** key from https://developers.faceit.com); without it the
+FACEIT panel and the cross-source table are simply hidden. Optional:
+`LEETIFY_API_KEY`, `FACEIT_BASE_URL`, `EXTERNAL_CACHE_TTL`.
 
 Data sources that populate the pages:
 - **Leetify API** (built) — instant MM/Premier + Faceit stats per SteamID, live.
