@@ -44,6 +44,11 @@ export function Killfeed({
                     {k.headshot && <span className="ml-1 text-bad">HS</span>}
                   </span>
                   <span className="text-muted">{nameOf(k.victimId)}</span>
+                  {k.assisterId && k.assisterId !== "0" && (
+                    <span className="text-xs text-faint">
+                      + {nameOf(k.assisterId)}
+                    </span>
+                  )}
                   {k.opening && (
                     <span className="pill bg-brand/15 text-brand">opening</span>
                   )}

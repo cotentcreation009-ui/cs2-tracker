@@ -5,6 +5,7 @@ import type {
   PlayerMatchSummary,
   PlayerProfile,
   SteamExtras,
+  SteamGameStats,
   WeaponStat,
 } from "@/lib/types";
 import { StatCard } from "@/components/StatCard";
@@ -12,6 +13,7 @@ import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
 import { RecentForm } from "@/components/RecentForm";
 import { RatingTrend } from "@/components/RatingTrend";
+import { MetricTrends } from "@/components/MetricTrends";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
@@ -22,6 +24,8 @@ import { PlayerSummary } from "@/components/PlayerSummary";
 import { LiveForm } from "@/components/LiveForm";
 import { ShareButton } from "@/components/ShareButton";
 import { RecordRecent } from "@/components/RecordRecent";
+import { SteamStatsPanel } from "@/components/SteamStatsPanel";
+import { CrossSource } from "@/components/CrossSource";
 import Link from "next/link";
 import {
   flag,
@@ -39,6 +43,7 @@ export function ProfileView({
   leetify = null,
   faceit = null,
   steamExtras = null,
+  steamStats = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -47,6 +52,7 @@ export function ProfileView({
   leetify?: LeetifyProfile | null;
   faceit?: FaceitProfile | null;
   steamExtras?: SteamExtras | null;
+  steamStats?: SteamGameStats | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -194,11 +200,20 @@ export function ProfileView({
 
       {faceit && <FaceitPanel profile={faceit} />}
 
+      {steamStats && <SteamStatsPanel data={steamStats} />}
+
+      <CrossSource
+        career={career}
+        leetify={leetify}
+        faceit={faceit}
+        steamStats={steamStats}
+      />
+
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
         <MapStrength matches={leetify.recent_matches} />
       )}
 
-      {!hasData && !leetify && !faceit && (
+      {!hasData && !leetify && !faceit && !steamStats && (
         <div className="card px-5 py-6 text-sm text-muted">
           We know this player&apos;s Steam identity, but have no CS2 stats for
           them yet — their Leetify/FACEIT profile may be private or unavailable.
@@ -253,6 +268,8 @@ export function ProfileView({
               <RatingTrend matches={matches} />
             </section>
           )}
+
+          {matches.length > 1 && <MetricTrends matches={matches} />}
 
           {/* Secondary stats */}
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

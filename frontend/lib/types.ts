@@ -210,6 +210,11 @@ export interface FaceitProfile {
   recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
 }
 
+export interface SteamGameStats {
+  gameName: string;
+  stats: Record<string, number>; // raw App 730 stat names -> values
+}
+
 export interface PlayerHit {
   steamId64: string;
   personaName: string;

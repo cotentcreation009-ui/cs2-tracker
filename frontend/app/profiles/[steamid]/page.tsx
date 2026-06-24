@@ -7,6 +7,7 @@ import {
   getPlayerMatches,
   getProfile,
   getSteamExtras,
+  getSteamStats,
   getWeaponStats,
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
@@ -41,7 +42,7 @@ export default async function ProfileBySteamID({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, matches, weapons, maps, leetify, faceit, steamExtras] =
+    const [profile, matches, weapons, maps, leetify, faceit, steamExtras, steamStats] =
       await Promise.all([
         getProfile(steamid),
         getPlayerMatches(steamid),
@@ -50,6 +51,7 @@ export default async function ProfileBySteamID({
         getLeetify(steamid),
         getFaceit(steamid),
         getSteamExtras(steamid),
+        getSteamStats(steamid),
       ]);
     return (
       <ProfileView
@@ -60,6 +62,7 @@ export default async function ProfileBySteamID({
         leetify={leetify}
         faceit={faceit}
         steamExtras={steamExtras}
+        steamStats={steamStats}
       />
     );
   } catch (e) {

@@ -26,7 +26,7 @@ function Mini({
  * back to the player's FACEIT page.
  */
 export function FaceitPanel({ profile: p }: { profile: FaceitProfile }) {
-  const recent = (p.recentResults || []).slice(0, 5);
+  const recent = (p.recentResults || []).slice(0, 20);
   return (
     <section className="card-2 px-5 py-5">
       <div className="mb-4 flex items-center justify-between">
@@ -85,9 +85,9 @@ export function FaceitPanel({ profile: p }: { profile: FaceitProfile }) {
 
       {/* recent results */}
       {recent.length > 0 && (
-        <div className="mt-4 flex items-center gap-2">
-          <span className="stat-label">Recent</span>
-          <div className="flex gap-1">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="stat-label">Recent {recent.length}</span>
+          <div className="flex flex-wrap gap-1">
             {recent.map((r, i) => (
               <span
                 key={i}

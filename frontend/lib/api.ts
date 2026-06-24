@@ -13,6 +13,7 @@ import type {
   LeetifyProfile,
   MapStat,
   SteamExtras,
+  SteamGameStats,
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
@@ -125,6 +126,18 @@ export async function getSteamExtras(
 ): Promise<SteamExtras | null> {
   try {
     return await getJSON<SteamExtras>(`/api/players/${steamId}/steam-extras`);
+  } catch {
+    return null;
+  }
+}
+
+// getSteamStats fetches a player's lifetime App 730 (CS2) stats. Supplementary,
+// and only available for public-profile accounts, so failures return null.
+export async function getSteamStats(
+  steamId: string,
+): Promise<SteamGameStats | null> {
+  try {
+    return await getJSON<SteamGameStats>(`/api/players/${steamId}/steam-stats`);
   } catch {
     return null;
   }
