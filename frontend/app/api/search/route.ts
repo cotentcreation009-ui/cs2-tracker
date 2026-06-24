@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, internalHeaders } from "@/lib/api";
 
 // Same-origin proxy so the client search box can autocomplete without the
 // backend needing a public CORS surface. Short-cached for repeated prefixes.
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   try {
     const res = await fetch(
       `${API_BASE}/api/search?q=${encodeURIComponent(q)}&limit=8`,
-      { next: { revalidate: 60 } },
+      { next: { revalidate: 60 }, headers: internalHeaders() },
     );
     const text = await res.text();
     return new NextResponse(text, {

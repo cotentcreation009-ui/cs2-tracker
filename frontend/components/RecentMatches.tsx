@@ -6,8 +6,7 @@ export function RecentMatches({ matches }: { matches: PlayerMatchSummary[] }) {
   if (matches.length === 0) {
     return (
       <div className="card px-5 py-8 text-center text-sm text-muted">
-        No matches parsed yet. Ingest a demo to populate this player&apos;s
-        history.
+        No recent matches available for this player.
       </div>
     );
   }

@@ -158,7 +158,7 @@ export function ComparisonView({
       {!hasCareer && !hasLeetify && (
         <div className="px-5 py-6 text-sm text-muted">
           No comparable stats for these two players — at least one has no public
-          Leetify profile and no parsed matches.
+          Leetify profile and no career stats.
         </div>
       )}
     </div>
