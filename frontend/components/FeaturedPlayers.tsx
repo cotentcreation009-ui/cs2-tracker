@@ -21,7 +21,7 @@ type Loaded = {
 };
 
 function flag(cc?: string): string | null {
-  if (!cc || cc.length !== 2) return null;
+  if (!cc || !/^[A-Za-z]{2}$/.test(cc)) return null;
   const base = 0x1f1e6;
   return String.fromCodePoint(
     ...[...cc.toUpperCase()].map((c) => base + c.charCodeAt(0) - 65),
@@ -68,7 +68,9 @@ export async function FeaturedPlayers() {
           const stat = headlineStat(leetify);
           const f = flag(profile.player.countryCode);
           const winPct =
-            leetify && leetify.winrate ? Math.round(leetify.winrate * 100) : null;
+            leetify && leetify.winrate != null
+              ? Math.round(leetify.winrate * 100)
+              : null;
           return (
             <Link
               key={id}
@@ -89,7 +91,12 @@ export async function FeaturedPlayers() {
               )}
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold">
-                  {name} {f && <span className="ml-0.5">{f}</span>}
+                  {name}{" "}
+                  {f && (
+                    <span className="ml-0.5" aria-hidden="true">
+                      {f}
+                    </span>
+                  )}
                 </div>
                 {winPct !== null && (
                   <div className="text-xs text-muted">{winPct}% win rate</div>

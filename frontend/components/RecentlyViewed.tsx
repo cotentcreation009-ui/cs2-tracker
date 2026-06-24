@@ -32,7 +32,9 @@ export function RecentlyViewed() {
                 className="h-9 w-9 shrink-0 rounded-lg object-cover"
               />
             ) : (
-              <span className="h-9 w-9 shrink-0 rounded-lg bg-panel" />
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel text-sm font-bold text-faint">
+                {(p.personaName || "?").slice(0, 1).toUpperCase()}
+              </span>
             )}
             <span className="truncate text-sm font-medium">
               {p.personaName || p.steamId64}
