@@ -83,6 +83,9 @@ func (f *fakeStore) ListTopPlayers(_ context.Context, l int) ([]models.Leaderboa
 	}
 	return nil, nil
 }
+func (f *fakeStore) SearchPlayers(context.Context, string, int) ([]models.PlayerHit, error) {
+	return nil, nil
+}
 func (f *fakeStore) ListMatchKills(_ context.Context, id int64) ([]models.Kill, error) {
 	if f.kills != nil {
 		return f.kills(id)

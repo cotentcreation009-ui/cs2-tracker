@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/models"
@@ -179,6 +180,37 @@ func (d *DB) ListTopPlayers(ctx context.Context, limit int) ([]models.Leaderboar
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// SearchPlayers finds known players whose persona name or vanity contains the
+// query (case-insensitive), for search autocomplete. Only players we've already
+// seen/hydrated are searchable.
+func (d *DB) SearchPlayers(ctx context.Context, query string, limit int) ([]models.PlayerHit, error) {
+	// Escape ILIKE wildcards in user input, then do a contains-match.
+	esc := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
+	pattern := "%" + esc + "%"
+	rows, err := d.Pool.Query(ctx, `
+		SELECT steam_id64, persona_name, avatar_url
+		FROM players
+		WHERE persona_name ILIKE $1 OR vanity_url ILIKE $1
+		ORDER BY (persona_name ILIKE $2) DESC, persona_name ASC
+		LIMIT $3`, pattern, esc+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.PlayerHit
+	for rows.Next() {
+		var h models.PlayerHit
+		var id int64
+		if err := rows.Scan(&id, &h.PersonaName, &h.AvatarURL); err != nil {
+			return nil, err
+		}
+		h.SteamID64 = uint64(id)
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }

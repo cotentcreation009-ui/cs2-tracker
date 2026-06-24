@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type Store interface {
 	GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error)
 	GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error)
 	ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error)
+	SearchPlayers(ctx context.Context, query string, limit int) ([]models.PlayerHit, error)
 	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
 	InsertJob(ctx context.Context, j models.IngestJob) error
 	GetJob(ctx context.Context, id string) (models.IngestJob, error)
@@ -66,6 +68,10 @@ type Server struct {
 // negativeCacheTTL is how long a "no such profile" result is cached so repeated
 // views of profile-less players don't keep hitting the upstream.
 const negativeCacheTTL = 5 * time.Minute
+
+// staleCacheTTL is how long a last-known-good copy is retained to serve when the
+// upstream is failing (stale-on-error), well beyond the fresh TTL.
+const staleCacheTTL = 24 * time.Hour
 
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
 // degrade gracefully); leetify/faceit clients may be nil or keyless (their
@@ -101,6 +107,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/health", s.handleHealth)
 		r.Get("/resolve", s.handleResolve)
 		r.Get("/leaderboard", s.handleLeaderboard)
+		r.Get("/search", s.handleSearch)
 
 		r.Route("/players/{steamid}", func(r chi.Router) {
 			r.Get("/", s.handleProfile)
@@ -194,6 +201,27 @@ func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 	setEdgeCache(w, s.cfg.CacheTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"players": players})
+}
+
+// handleSearch returns known players whose name/vanity matches a query, for
+// search autocomplete. Requires >=2 chars; returns an empty list otherwise.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeJSON(w, http.StatusOK, map[string]any{"players": []models.PlayerHit{}})
+		return
+	}
+	limit := clampInt(queryInt(r, "limit", 8), 1, 20)
+	hits, err := s.db.SearchPlayers(r.Context(), q, limit)
+	if err != nil {
+		s.serverError(w, "search", err)
+		return
+	}
+	if hits == nil {
+		hits = []models.PlayerHit{}
+	}
+	setEdgeCache(w, s.cfg.CacheTTL)
+	writeJSON(w, http.StatusOK, map[string]any{"players": hits})
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -635,13 +663,16 @@ func clampInt(v, lo, hi int) int {
 }
 
 // cachedExternal serves a live third-party payload with Redis caching, negative
-// caching and singleflight coalescing. Order: positive cache hit → negative
-// cache hit (returns notFound) → one upstream fetch per key (shared by all
-// concurrent callers) whose result is cached. ErrNotFound from the upstream is
-// cached briefly as a negative result.
+// caching, singleflight coalescing and stale-on-error. Order: positive cache hit
+// → negative cache hit (returns notFound) → one upstream fetch per key (shared by
+// all concurrent callers). On success it writes both a fresh copy (ExternalCacheTTL)
+// and a long-lived "stale" copy; ErrNotFound is cached briefly as negative; any
+// other upstream failure falls back to the last-known-good stale copy so a slow/
+// down provider degrades to minutes-old data rather than a missing panel.
 func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch func() (T, error)) (T, bool, error) {
 	var zero T
 	missKey := key + ":miss"
+	staleKey := key + ":stale"
 	if s.cache != nil {
 		var cached T
 		if hit, _ := s.cache.GetJSON(ctx, key, &cached); hit {
@@ -660,6 +691,7 @@ func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch fun
 		}
 		if s.cache != nil {
 			_ = s.cache.SetJSONTTL(ctx, key, val, s.cfg.ExternalCacheTTL)
+			_ = s.cache.SetJSONTTL(ctx, staleKey, val, staleCacheTTL)
 		}
 		return val, nil
 	})
@@ -669,6 +701,14 @@ func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch fun
 				_ = s.cache.SetJSONTTL(ctx, missKey, true, negativeCacheTTL)
 			}
 			return zero, true, nil
+		}
+		// Upstream slow/down: fall back to the last-known-good copy if we have one.
+		if s.cache != nil {
+			var stale T
+			if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
+				s.log.Warn("serving stale upstream data", "key", key, "err", err)
+				return stale, false, nil
+			}
 		}
 		return zero, false, err
 	}

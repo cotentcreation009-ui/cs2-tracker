@@ -190,6 +190,7 @@ It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
 | GET  | `/api/health` | Liveness + whether a Steam key is configured + queue depth |
 | GET  | `/api/resolve?q=<vanity\|id>` | Resolve a vanity name or SteamID64 → SteamID64 |
 | GET  | `/api/leaderboard?limit=` | Top tracked players by rating |
+| GET  | `/api/search?q=&limit=` | Autocomplete over known players (persona/vanity contains `q`) |
 | GET  | `/api/players/{steamid}` | Profile: identity + rolling career aggregate (cached) |
 | POST | `/api/players/{steamid}/refresh` | Re-fetch identity from Steam (needs key) |
 | GET  | `/api/players/{steamid}/matches?limit=&offset=` | Recent matches with the player's line |

@@ -67,6 +67,29 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/LeaderboardEntry" }
 
+  /api/search:
+    get:
+      summary: Autocomplete search over known players (name / vanity)
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 8 } }
+      responses:
+        "200":
+          description: Matching players
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  players:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        steamId64: { type: string }
+                        personaName: { type: string }
+                        avatarUrl: { type: string }
+
   /api/players/{steamid}:
     get:
       summary: Player profile (identity + rolling career)

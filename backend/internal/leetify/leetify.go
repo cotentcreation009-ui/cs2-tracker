@@ -118,6 +118,43 @@ type Profile struct {
 	RecentMatches []RecentMatch `json:"recent_matches"`
 }
 
+func transientStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// doWithRetry performs req with one bounded retry on transient failures (network
+// error or 429/502/503/504), with a short ctx-aware backoff.
+func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
+	const attempts = 2
+	var resp *http.Response
+	var err error
+	for i := 0; i < attempts; i++ {
+		resp, err = c.http.Do(req)
+		if err == nil && !transientStatus(resp.StatusCode) {
+			return resp, nil
+		}
+		if i == attempts-1 {
+			return resp, err
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		t := time.NewTimer(time.Duration(200*(i+1)) * time.Millisecond)
+		select {
+		case <-req.Context().Done():
+			t.Stop()
+			return nil, req.Context().Err()
+		case <-t.C:
+		}
+	}
+	return resp, err
+}
+
 // GetProfile fetches a player's Leetify profile by SteamID64.
 func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, error) {
 	q := url.Values{}
@@ -134,7 +171,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := c.doWithRetry(req)
 	if err != nil {
 		return nil, fmt.Errorf("leetify: request failed: %w", err)
 	}

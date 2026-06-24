@@ -231,6 +231,13 @@ type LeaderboardEntry struct {
 	WinRate     float64 `json:"winRate"`
 }
 
+// PlayerHit is a lightweight search/autocomplete result.
+type PlayerHit struct {
+	SteamID64   uint64 `json:"steamId64,string"`
+	PersonaName string `json:"personaName"`
+	AvatarURL   string `json:"avatarUrl"`
+}
+
 // MapStat is a player's aggregate performance on a single map.
 type MapStat struct {
 	Map          string  `json:"map"`

@@ -174,7 +174,7 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.http.Do(req)
+	resp, err := c.doWithRetry(req)
 	if err != nil {
 		return fmt.Errorf("faceit: request failed: %w", err)
 	}
@@ -193,6 +193,43 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	default:
 		return fmt.Errorf("faceit: unexpected status %d", resp.StatusCode)
 	}
+}
+
+func transientStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// doWithRetry performs req with one bounded retry on transient failures (network
+// error or 429/502/503/504), with a short ctx-aware backoff.
+func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
+	const attempts = 2
+	var resp *http.Response
+	var err error
+	for i := 0; i < attempts; i++ {
+		resp, err = c.http.Do(req)
+		if err == nil && !transientStatus(resp.StatusCode) {
+			return resp, nil
+		}
+		if i == attempts-1 {
+			return resp, err
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		t := time.NewTimer(time.Duration(200*(i+1)) * time.Millisecond)
+		select {
+		case <-req.Context().Done():
+			t.Stop()
+			return nil, req.Context().Err()
+		case <-t.C:
+		}
+	}
+	return resp, err
 }
 
 // atoi/atof parse FACEIT's stringly-typed stat values, tolerating blanks.
