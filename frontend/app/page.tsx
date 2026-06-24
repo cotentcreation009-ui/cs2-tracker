@@ -1,8 +1,10 @@
 import { SearchBar } from "@/components/SearchBar";
 import { Leaderboard } from "@/components/Leaderboard";
+import { FeaturedPlayers } from "@/components/FeaturedPlayers";
+import { RecentlyViewed } from "@/components/RecentlyViewed";
 import { getLeaderboard } from "@/lib/api";
 
-// The leaderboard updates slowly; cache the homepage (ISR) and degrade
+// Cache the homepage (ISR); featured-player data and the leaderboard degrade
 // gracefully when the backend is unavailable.
 export const revalidate = 60;
 
@@ -56,6 +58,10 @@ export default async function HomePage() {
           </p>
         </div>
       </section>
+
+      <RecentlyViewed />
+
+      <FeaturedPlayers />
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
         {FEATURES.map((f) => (

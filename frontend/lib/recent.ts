@@ -9,7 +9,12 @@ export function getRecentPlayers(): PlayerHit[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as PlayerHit[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return []; // guard against a malformed/stale value
+    return parsed.filter(
+      (p): p is PlayerHit => !!p && typeof p.steamId64 === "string",
+    );
   } catch {
     return [];
   }
