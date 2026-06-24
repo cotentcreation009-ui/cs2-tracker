@@ -19,6 +19,10 @@ type Config struct {
 	// HTTP
 	HTTPAddr    string   // address the API server binds to, e.g. ":8080"
 	CORSOrigins []string // allowed browser origins for the API
+	// InternalAPISecret, when set, gates every route except /api/health behind a
+	// matching X-Internal-Token header. Used when the backend is exposed on a
+	// public host (e.g. Fly.io) and only the trusted frontend should reach it.
+	InternalAPISecret string
 
 	// Datastores
 	DatabaseURL string // postgres connection string (pgx format)
@@ -67,6 +71,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		HTTPAddr:          getEnv("HTTP_ADDR", ":8080"),
 		CORSOrigins:       splitAndTrim(getEnv("CORS_ORIGINS", "http://localhost:3000")),
+		InternalAPISecret: getEnv("INTERNAL_API_SECRET", ""),
 		DatabaseURL:       getEnv("DATABASE_URL", "postgres://cs2:cs2@localhost:5432/cs2tracker?sslmode=disable"),
 		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
