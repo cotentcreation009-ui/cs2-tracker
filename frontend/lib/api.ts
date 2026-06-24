@@ -23,6 +23,15 @@ import type {
 export const API_BASE =
   process.env.API_INTERNAL_URL?.replace(/\/$/, "") || "http://localhost:8080";
 
+// Sent on every server-side backend call. When the backend sets the matching
+// INTERNAL_API_SECRET it rejects requests without this header, so only this
+// (trusted, server-side) client can reach a publicly-hosted backend.
+export const INTERNAL_TOKEN = process.env.INTERNAL_API_SECRET || "";
+
+export function internalHeaders(): Record<string, string> {
+  return INTERNAL_TOKEN ? { "X-Internal-Token": INTERNAL_TOKEN } : {};
+}
+
 /** Raised when the backend returns a non-2xx response we want to handle. */
 export class ApiError extends Error {
   constructor(
@@ -45,6 +54,7 @@ async function getJSON<T>(path: string): Promise<T> {
   try {
     res = await fetch(`${API_BASE}${path}`, {
       next: { revalidate: REVALIDATE_SECONDS },
+      headers: internalHeaders(),
     });
   } catch (err) {
     throw new ApiError(

@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -91,17 +92,27 @@ func (s *Server) Router() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "X-Internal-Token"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
 
-	// Prometheus metrics + the OpenAPI spec at the root (not rate-limited).
+	// When the backend is exposed on a public host (Fly.io), gate every route
+	// except /api/health behind a shared secret so only the trusted frontend can
+	// reach it — this is the access control, so the per-IP rate limiter (which is
+	// spoofable via X-Forwarded-For on a directly-reachable origin, and would
+	// otherwise throttle the single frontend egress) is skipped while it is on.
+	gated := s.cfg.InternalAPISecret != ""
+	if gated {
+		r.Use(s.internalAuth)
+	}
+
+	// Prometheus metrics + the OpenAPI spec at the root.
 	r.Get("/metrics", s.handleMetrics)
 	r.Get("/openapi.yaml", s.handleOpenAPI)
 
 	r.Route("/api", func(r chi.Router) {
-		if s.cfg.RateLimitRPS > 0 {
+		if s.cfg.RateLimitRPS > 0 && !gated {
 			r.Use(newRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst).middleware)
 		}
 		r.Get("/health", s.handleHealth)
@@ -123,44 +134,46 @@ func (s *Server) Router() http.Handler {
 
 		r.Get("/matches/{id}", s.handleMatch)
 		r.Get("/matches/{id}/kills", s.handleMatchKills)
-		r.Post("/ingest/demo", s.handleIngest)
-		r.Get("/jobs/{id}", s.handleJob)
-		r.Get("/queue", s.handleQueueDepth)
+		// Demo ingest is removed from the product; the dormant queue/job handlers
+		// are intentionally not routed so the public surface has no write/DoS path.
 	})
 
 	return r
 }
 
+// internalAuth gates the API behind InternalAPISecret. /api/health is exempt so
+// platform health checks (which can't easily send a custom header) still work.
+func (s *Server) internalAuth(next http.Handler) http.Handler {
+	secret := []byte(s.cfg.InternalAPISecret)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := []byte(r.Header.Get("X-Internal-Token"))
+		if subtle.ConstantTimeCompare(got, secret) != 1 {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // --- handlers ---------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	// Readiness probe: a healthy API must be able to reach Postgres.
+	// Public readiness probe (exempt from the internal-auth gate so platform
+	// health checks work). A healthy API must be able to reach Postgres. The
+	// payload is deliberately minimal — no key/DB/queue posture is leaked.
 	code := http.StatusOK
-	dbStatus := "unknown"
+	overall := "ok"
 	if s.db != nil {
 		if err := s.db.Ping(r.Context()); err != nil {
-			dbStatus = "down"
 			code = http.StatusServiceUnavailable
-		} else {
-			dbStatus = "ok"
+			overall = "degraded"
 		}
 	}
-	overall := "ok"
-	if code != http.StatusOK {
-		overall = "degraded"
-	}
-	status := map[string]any{
-		"status":      overall,
-		"database":    dbStatus,
-		"steamApiKey": s.cfg.HasSteamKey(),
-		"time":        time.Now().UTC(),
-	}
-	if s.queue != nil {
-		if depth, err := s.queue.Depth(r.Context()); err == nil {
-			status["queueDepth"] = depth
-		}
-	}
-	writeJSON(w, code, status)
+	writeJSON(w, code, map[string]any{"status": overall, "time": time.Now().UTC()})
 }
 
 // handleResolve maps a vanity name or raw SteamID64 to a SteamID64.
@@ -247,7 +260,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		// the profile page still works the first time it is visited.
 		hydrated, herr := s.hydrateFromSteam(r.Context(), id)
 		if herr != nil {
-			writeError(w, http.StatusNotFound, "player not tracked yet — ingest a demo or add a Steam API key to hydrate identity")
+			writeError(w, http.StatusNotFound, "player not found")
 			return
 		}
 		prof = hydrated

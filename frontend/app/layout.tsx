@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 CS
               </span>
               <span className="text-lg font-bold tracking-tight">
-                Tracker<span className="text-brand">.gg</span>
+                CS2 <span className="text-brand">Tracker</span>
               </span>
             </Link>
             <div className="ml-auto flex items-center gap-3">

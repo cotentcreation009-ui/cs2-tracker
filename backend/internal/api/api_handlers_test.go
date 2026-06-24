@@ -113,6 +113,26 @@ func doGET(h http.Handler, path string) *httptest.ResponseRecorder {
 	return w
 }
 
+func TestInternalAuthGate(t *testing.T) {
+	cfg := &config.Config{CORSOrigins: []string{"*"}, InternalAPISecret: "s3cr3t"}
+	r := NewServer(cfg, &fakeStore{}, steam.New(""), nil, nil, nil, nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil))).Router()
+
+	if w := doGET(r, "/api/leaderboard"); w.Code != http.StatusUnauthorized {
+		t.Errorf("no token => %d, want 401", w.Code)
+	}
+	if w := doGET(r, "/api/health"); w.Code != http.StatusOK {
+		t.Errorf("health (exempt) no token => %d, want 200", w.Code)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/leaderboard", nil)
+	req.Header.Set("X-Internal-Token", "s3cr3t")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusUnauthorized {
+		t.Error("correct token => 401, want allowed through")
+	}
+}
+
 func TestHandleProfileFound(t *testing.T) {
 	store := &fakeStore{profile: func(id uint64) (models.PlayerProfile, error) {
 		return models.PlayerProfile{
@@ -216,31 +236,6 @@ func TestHandleWeaponsEmptyArray(t *testing.T) {
 	}
 }
 
-func TestHandleJob(t *testing.T) {
-	mid := int64(7)
-	store := &fakeStore{job: func(id string) (models.IngestJob, error) {
-		return models.IngestJob{ID: id, Status: "done", MatchID: &mid}, nil
-	}}
-	w := doGET(routerWith(store), "/api/jobs/abc")
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d", w.Code)
-	}
-	var j models.IngestJob
-	if err := json.Unmarshal(w.Body.Bytes(), &j); err != nil {
-		t.Fatal(err)
-	}
-	if j.ID != "abc" || j.Status != "done" || j.MatchID == nil || *j.MatchID != 7 {
-		t.Errorf("unexpected job: %+v", j)
-	}
-}
-
-func TestHandleJobNotFound(t *testing.T) {
-	w := doGET(routerWith(&fakeStore{}), "/api/jobs/zzz")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("code = %d, want 404", w.Code)
-	}
-}
-
 func TestHealthDBOK(t *testing.T) {
 	w := doGET(routerWith(&fakeStore{}), "/api/health")
 	if w.Code != http.StatusOK {
@@ -250,7 +245,7 @@ func TestHealthDBOK(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
 		t.Fatal(err)
 	}
-	if s["database"] != "ok" || s["status"] != "ok" {
+	if s["status"] != "ok" {
 		t.Errorf("unexpected health: %+v", s)
 	}
 }
