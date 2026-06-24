@@ -21,7 +21,7 @@ const matchPlayerCols = `match_id, steam_id64, persona_name, start_side,
 	rounds_played, kills, deaths, assists, headshot_kills, damage, utility_damage,
 	enemies_flashed, kast_rounds, opening_kills, opening_deaths, clutches_won,
 	clutches_lost, mvps, k1, k2, k3, k4, k5, adr, kast_pct, hs_pct, kd, kpr, dpr,
-	rating, won`
+	rating, won, flash_duration, clutch_matrix`
 
 // --- Player identity --------------------------------------------------------
 
@@ -461,13 +461,13 @@ func ensurePlayer(ctx context.Context, tx pgx.Tx, steamID uint64, name string) e
 func insertMatchPlayer(ctx context.Context, tx pgx.Tx, matchID int64, mp models.MatchPlayer) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO match_players (`+matchPlayerCols+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
 		ON CONFLICT (match_id, steam_id64) DO NOTHING`,
 		matchID, int64(mp.SteamID64), mp.PersonaName, string(mp.StartSide),
 		mp.RoundsPlayed, mp.Kills, mp.Deaths, mp.Assists, mp.HeadshotKills, mp.Damage, mp.UtilityDamage,
 		mp.EnemiesFlashed, mp.KASTRounds, mp.OpeningKills, mp.OpeningDeaths, mp.ClutchesWon,
 		mp.ClutchesLost, mp.MVPs, mp.K1, mp.K2, mp.K3, mp.K4, mp.K5, mp.ADR, mp.KASTPct, mp.HSPct,
-		mp.KD, mp.KPR, mp.DPR, mp.Rating, mp.Won)
+		mp.KD, mp.KPR, mp.DPR, mp.Rating, mp.Won, mp.FlashDuration, mp.Clutch)
 	return err
 }
 
@@ -592,6 +592,6 @@ func matchPlayerScanTargets(mp *models.MatchPlayer) []any {
 		&mp.RoundsPlayed, &mp.Kills, &mp.Deaths, &mp.Assists, &mp.HeadshotKills, &mp.Damage, &mp.UtilityDamage,
 		&mp.EnemiesFlashed, &mp.KASTRounds, &mp.OpeningKills, &mp.OpeningDeaths, &mp.ClutchesWon,
 		&mp.ClutchesLost, &mp.MVPs, &mp.K1, &mp.K2, &mp.K3, &mp.K4, &mp.K5, &mp.ADR, &mp.KASTPct, &mp.HSPct,
-		&mp.KD, &mp.KPR, &mp.DPR, &mp.Rating, &mp.Won,
+		&mp.KD, &mp.KPR, &mp.DPR, &mp.Rating, &mp.Won, &mp.FlashDuration, &mp.Clutch,
 	}
 }

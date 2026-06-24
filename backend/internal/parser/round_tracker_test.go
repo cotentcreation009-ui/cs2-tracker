@@ -112,6 +112,36 @@ func TestClutchWon(t *testing.T) {
 	}
 }
 
+// TestClutch1v2Lost covers a non-5 clutch size that loses — the data that
+// populates ClutchMatrix.LostBySize[2]. Guards the opponent-count bookkeeping
+// for sizes other than the all-or-nothing 1v5 case.
+func TestClutch1v2Lost(t *testing.T) {
+	rt := NewRoundTracker(tw)
+	addStdTeams(rt)
+	// T trims CT down to two alive (11, 12).
+	rt.RecordKill(1*time.Second, 1, 13, 0, teamT, teamCT)
+	rt.RecordKill(2*time.Second, 2, 14, 0, teamT, teamCT)
+	rt.RecordKill(3*time.Second, 3, 15, 0, teamT, teamCT)
+	// CT wipes T down to a lone survivor (player 5) — a 1v2 begins.
+	rt.RecordKill(4*time.Second, 11, 1, 0, teamCT, teamT)
+	rt.RecordKill(5*time.Second, 11, 2, 0, teamCT, teamT)
+	rt.RecordKill(6*time.Second, 12, 3, 0, teamCT, teamT)
+	rt.RecordKill(7*time.Second, 12, 4, 0, teamCT, teamT)
+	// Player 5 falls; CT takes the round.
+	rt.RecordKill(8*time.Second, 11, 5, 0, teamCT, teamT)
+
+	out := rt.Finalize(teamCT, map[uint64]bool{11: true, 12: true})
+	if out.Clutcher != 5 {
+		t.Errorf("clutcher = %d, want 5", out.Clutcher)
+	}
+	if out.ClutchOpponents != 2 {
+		t.Errorf("clutch opponents = %d, want 2", out.ClutchOpponents)
+	}
+	if out.ClutchWon {
+		t.Error("clutch should be lost (CT won the round)")
+	}
+}
+
 func TestNoClutchWhenTwoAlive(t *testing.T) {
 	rt := NewRoundTracker(tw)
 	addStdTeams(rt)

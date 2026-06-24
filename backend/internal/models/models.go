@@ -88,6 +88,21 @@ type MatchPlayer struct {
 	DPR     float64 `json:"dpr"`
 	Rating  float64 `json:"rating"`
 	Won     bool    `json:"won"`
+
+	// FlashDuration is the total seconds of enemy blindness this player inflicted
+	// across the match — a far better flashbang grade than a raw flashed count.
+	FlashDuration float64 `json:"flashDuration"`
+	// Clutch holds the 1vX outcome distribution (who they beat, not just how many
+	// clutches) so a clutch matrix and situational win-rates can be built.
+	Clutch ClutchMatrix `json:"clutch"`
+}
+
+// ClutchMatrix records clutch wins/losses bucketed by the number of opponents
+// alive when the 1vX began. Index by opponent count 1..5 (index 0 is unused);
+// a nil slice means no clutch situations were faced.
+type ClutchMatrix struct {
+	WonBySize  []int `json:"wonBySize,omitempty"`
+	LostBySize []int `json:"lostBySize,omitempty"`
 }
 
 // Round is one round outcome inside a match, including each team's buy.
