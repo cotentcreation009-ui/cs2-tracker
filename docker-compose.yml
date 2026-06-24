@@ -51,7 +51,7 @@ services:
       FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
       LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
       EXTERNAL_CACHE_TTL: ${EXTERNAL_CACHE_TTL:-15m}
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       DEMO_QUEUE_KEY: cs2:demos:parse
       CACHE_TTL: 5m
     ports:
@@ -91,6 +91,9 @@ services:
     build: ./frontend
     environment:
       API_INTERNAL_URL: http://backend:8080
+      # Public origin used for metadataBase / canonical / OpenGraph / sitemap /
+      # robots. Without this it silently falls back to http://localhost:3000.
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
     depends_on:
