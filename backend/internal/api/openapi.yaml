@@ -67,6 +67,29 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/LeaderboardEntry" }
 
+  /api/search:
+    get:
+      summary: Autocomplete search over known players (name / vanity)
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 8 } }
+      responses:
+        "200":
+          description: Matching players
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  players:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        steamId64: { type: string }
+                        personaName: { type: string }
+                        avatarUrl: { type: string }
+
   /api/players/{steamid}:
     get:
       summary: Player profile (identity + rolling career)
@@ -153,6 +176,15 @@ paths:
         "200": { description: Leetify profile (ratings, ranks, stats) }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/players/{steamid}/faceit:
+    get:
+      summary: Live FACEIT profile (CS2 skill level, ELO, lifetime stats; needs FACEIT_API_KEY)
+      parameters: [{ $ref: "#/components/parameters/SteamID" }]
+      responses:
+        "200": { description: FACEIT profile }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: FACEIT integration not configured }
+
   /api/players/{steamid}/steam-stats:
     get:
       summary: Raw Steam App 730 lifetime stats (needs key)
@@ -161,6 +193,23 @@ paths:
         "200": { description: Stat map }
         "404": { $ref: "#/components/responses/NotFound" }
         "503": { description: Steam API key not configured }
+
+  /api/players/{steamid}/steam-extras:
+    get:
+      summary: CS2 friend code (always) + best-effort friends count & Steam level
+      parameters: [{ $ref: "#/components/parameters/SteamID" }]
+      responses:
+        "200":
+          description: Steam extras
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  steamId64: { type: string }
+                  friendCode: { type: string }
+                  friends: { type: integer }
+                  steamLevel: { type: integer }
 
   /api/matches/{id}:
     get:
@@ -287,6 +336,9 @@ components:
         roundsPlayed: { type: integer }
         kills: { type: integer, format: int64 }
         deaths: { type: integer, format: int64 }
+        utilityDamage: { type: integer, format: int64 }
+        enemiesFlashed: { type: integer, format: int64 }
+        mvps: { type: integer, format: int64 }
         rating: { type: number }
         adr: { type: number }
         kastPct: { type: number }

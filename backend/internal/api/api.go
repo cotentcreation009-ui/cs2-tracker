@@ -12,11 +12,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
@@ -24,6 +27,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"golang.org/x/sync/singleflight"
 )
 
 // Store is the persistence surface the HTTP handlers depend on. *db.DB satisfies
@@ -38,6 +42,7 @@ type Store interface {
 	GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error)
 	GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error)
 	ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error)
+	SearchPlayers(ctx context.Context, query string, limit int) ([]models.PlayerHit, error)
 	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
 	InsertJob(ctx context.Context, j models.IngestJob) error
 	GetJob(ctx context.Context, id string) (models.IngestJob, error)
@@ -50,16 +55,29 @@ type Server struct {
 	db      Store
 	steam   *steam.Client
 	leetify *leetify.Client
+	faceit  *faceit.Client
 	queue   *queue.Queue
 	cache   *cache.Cache
 	log     *slog.Logger
 	metrics *metrics
+	// sf coalesces concurrent upstream fetches for the same key (cache stampede
+	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
+	sf singleflight.Group
 }
 
+// negativeCacheTTL is how long a "no such profile" result is cached so repeated
+// views of profile-less players don't keep hitting the upstream.
+const negativeCacheTTL = 5 * time.Minute
+
+// staleCacheTTL is how long a last-known-good copy is retained to serve when the
+// upstream is failing (stale-on-error), well beyond the fresh TTL.
+const staleCacheTTL = 24 * time.Hour
+
 // NewServer wires a Server. cache and queue may be nil (caching/ingest then
-// degrade gracefully).
-func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, queue: q, cache: c, log: log, metrics: &metrics{}}
+// degrade gracefully); leetify/faceit clients may be nil or keyless (their
+// panels are simply hidden).
+func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, faceitClient *faceit.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}}
 }
 
 // Router builds the HTTP handler.
@@ -89,6 +107,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/health", s.handleHealth)
 		r.Get("/resolve", s.handleResolve)
 		r.Get("/leaderboard", s.handleLeaderboard)
+		r.Get("/search", s.handleSearch)
 
 		r.Route("/players/{steamid}", func(r chi.Router) {
 			r.Get("/", s.handleProfile)
@@ -97,7 +116,9 @@ func (s *Server) Router() http.Handler {
 			r.Get("/weapons", s.handleWeapons)
 			r.Get("/maps", s.handleMaps)
 			r.Get("/leetify", s.handleLeetify)
+			r.Get("/faceit", s.handleFaceit)
 			r.Get("/steam-stats", s.handleSteamStats)
+			r.Get("/steam-extras", s.handleSteamExtras)
 		})
 
 		r.Get("/matches/{id}", s.handleMatch)
@@ -178,7 +199,29 @@ func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if players == nil {
 		players = []models.LeaderboardEntry{}
 	}
+	setEdgeCache(w, s.cfg.CacheTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"players": players})
+}
+
+// handleSearch returns known players whose name/vanity matches a query, for
+// search autocomplete. Requires >=2 chars; returns an empty list otherwise.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeJSON(w, http.StatusOK, map[string]any{"players": []models.PlayerHit{}})
+		return
+	}
+	limit := clampInt(queryInt(r, "limit", 8), 1, 20)
+	hits, err := s.db.SearchPlayers(r.Context(), q, limit)
+	if err != nil {
+		s.serverError(w, "search", err)
+		return
+	}
+	if hits == nil {
+		hits = []models.PlayerHit{}
+	}
+	setEdgeCache(w, s.cfg.CacheTTL)
+	writeJSON(w, http.StatusOK, map[string]any{"players": hits})
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +235,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	if s.cache != nil {
 		var cached models.PlayerProfile
 		if hit, _ := s.cache.GetJSON(r.Context(), cache.ProfileKey(id), &cached); hit {
+			setEdgeCache(w, s.cfg.CacheTTL)
 			writeJSON(w, http.StatusOK, cached)
 			return
 		}
@@ -215,6 +259,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	if s.cache != nil {
 		_ = s.cache.SetJSON(r.Context(), cache.ProfileKey(id), prof)
 	}
+	setEdgeCache(w, s.cfg.CacheTTL)
 	writeJSON(w, http.StatusOK, prof)
 }
 
@@ -269,6 +314,55 @@ func (s *Server) handleSteamStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSteamExtras returns the CS2 friend code (deterministic from the id, no
+// key needed) plus best-effort friends count and Steam level (require a key and
+// a public profile/friends list; 0 otherwise).
+func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	out, _, err := cachedExternal(s, r.Context(), cache.SteamExtrasKey(id),
+		func() (map[string]any, error) {
+			o := map[string]any{
+				"steamId64":  strconv.FormatUint(id, 10),
+				"friendCode": steam.FriendCode(id),
+				"friends":    0,
+				"steamLevel": 0,
+			}
+			if s.steam.HasKey() {
+				// Independent calls — run them concurrently (write to locals to
+				// avoid a concurrent map write, then assign).
+				var wg sync.WaitGroup
+				var friends, level int
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
+						friends = n
+					}
+				}()
+				go func() {
+					defer wg.Done()
+					if lvl, e := s.steam.GetSteamLevel(r.Context(), id); e == nil {
+						level = lvl
+					}
+				}()
+				wg.Wait()
+				o["friends"] = friends
+				o["steamLevel"] = level
+			}
+			return o, nil
+		})
+	if err != nil {
+		s.serverError(w, "steam extras", err)
+		return
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handlePlayerMatches(w http.ResponseWriter, r *http.Request) {
 	id, ok := steamIDParam(r)
 	if !ok {
@@ -313,8 +407,10 @@ func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
 }
 
-// handleLeetify fetches a player's Leetify profile live (never stored, per
-// Leetify's terms). The frontend renders it with the required attribution.
+// handleLeetify fetches a player's Leetify profile, shown live with attribution.
+// A short Redis cache (ExternalCacheTTL) coalesces repeat views so we don't
+// re-hit Leetify on every request — important under load. NOTE: confirm a short
+// transient cache is compatible with Leetify's terms before commercial use.
 func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 	id, ok := steamIDParam(r)
 	if !ok {
@@ -325,8 +421,9 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "leetify integration not configured")
 		return
 	}
-	prof, err := s.leetify.GetProfile(r.Context(), id)
-	if errors.Is(err, leetify.ErrNotFound) {
+	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
+		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
+	if notFound {
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
 		return
 	}
@@ -334,6 +431,34 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "leetify profile", err)
 		return
 	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
+	writeJSON(w, http.StatusOK, prof)
+}
+
+// handleFaceit fetches a player's live FACEIT profile (CS2 skill level, elo and
+// lifetime stats). Like Leetify it is fetched real-time and never stored; the
+// FaceitPanel renders it with attribution. Needs FACEIT_API_KEY.
+func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	if s.faceit == nil || !s.faceit.HasKey() {
+		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
+		return
+	}
+	prof, notFound, err := cachedExternal(s, r.Context(), cache.FaceitKey(id),
+		func() (*faceit.Profile, error) { return s.faceit.GetProfile(r.Context(), id) })
+	if notFound {
+		writeError(w, http.StatusNotFound, "no FACEIT profile for this player")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "faceit profile", err)
+		return
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
 }
 
@@ -495,6 +620,11 @@ func (s *Server) hydrateFromSteam(ctx context.Context, id uint64) (models.Player
 		ProfileURL:  su.ProfileURL,
 		CountryCode: su.LocCountryCode,
 	}
+	// timecreated is only present for public profiles.
+	if !su.TimeCreated.IsZero() {
+		t := su.TimeCreated
+		player.SteamCreatedAt = &t
+	}
 	if err := s.db.UpsertPlayer(ctx, player); err != nil {
 		return models.PlayerProfile{}, err
 	}
@@ -530,6 +660,67 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// cachedExternal serves a live third-party payload with Redis caching, negative
+// caching, singleflight coalescing and stale-on-error. Order: positive cache hit
+// → negative cache hit (returns notFound) → one upstream fetch per key (shared by
+// all concurrent callers). On success it writes both a fresh copy (ExternalCacheTTL)
+// and a long-lived "stale" copy; ErrNotFound is cached briefly as negative; any
+// other upstream failure falls back to the last-known-good stale copy so a slow/
+// down provider degrades to minutes-old data rather than a missing panel.
+func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch func() (T, error)) (T, bool, error) {
+	var zero T
+	missKey := key + ":miss"
+	staleKey := key + ":stale"
+	if s.cache != nil {
+		var cached T
+		if hit, _ := s.cache.GetJSON(ctx, key, &cached); hit {
+			return cached, false, nil
+		}
+		var miss bool
+		if hit, _ := s.cache.GetJSON(ctx, missKey, &miss); hit && miss {
+			return zero, true, nil
+		}
+	}
+
+	v, err, _ := s.sf.Do(key, func() (any, error) {
+		val, err := fetch()
+		if err != nil {
+			return nil, err
+		}
+		if s.cache != nil {
+			_ = s.cache.SetJSONTTL(ctx, key, val, s.cfg.ExternalCacheTTL)
+			_ = s.cache.SetJSONTTL(ctx, staleKey, val, staleCacheTTL)
+		}
+		return val, nil
+	})
+	if err != nil {
+		if errors.Is(err, leetify.ErrNotFound) || errors.Is(err, faceit.ErrNotFound) {
+			if s.cache != nil {
+				_ = s.cache.SetJSONTTL(ctx, missKey, true, negativeCacheTTL)
+			}
+			return zero, true, nil
+		}
+		// Upstream slow/down: fall back to the last-known-good copy if we have one.
+		if s.cache != nil {
+			var stale T
+			if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
+				s.log.Warn("serving stale upstream data", "key", key, "err", err)
+				return stale, false, nil
+			}
+		}
+		return zero, false, err
+	}
+	return v.(T), false, nil
+}
+
+// setEdgeCache marks a successful read cacheable by a CDN (Cloudflare) for ttl,
+// with stale-while-revalidate so repeat traffic is absorbed at the edge instead
+// of hitting the origin. Must be called before WriteHeader (i.e. before writeJSON).
+func setEdgeCache(w http.ResponseWriter, ttl time.Duration) {
+	secs := strconv.Itoa(int(ttl.Seconds()))
+	w.Header().Set("Cache-Control", "public, max-age=0, s-maxage="+secs+", stale-while-revalidate=60")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

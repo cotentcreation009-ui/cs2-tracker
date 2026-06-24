@@ -18,14 +18,17 @@ const (
 // Player is a Steam account we know about. The SteamID64 is the source of truth;
 // profile fields are hydrated from the Steam Web API when a key is available.
 type Player struct {
-	SteamID64   uint64    `json:"steamId64,string"`
-	PersonaName string    `json:"personaName"`
-	AvatarURL   string    `json:"avatarUrl"`
-	ProfileURL  string    `json:"profileUrl"`
-	VanityURL   string    `json:"vanityUrl,omitempty"`
-	CountryCode string    `json:"countryCode,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	SteamID64   uint64 `json:"steamId64,string"`
+	PersonaName string `json:"personaName"`
+	AvatarURL   string `json:"avatarUrl"`
+	ProfileURL  string `json:"profileUrl"`
+	VanityURL   string `json:"vanityUrl,omitempty"`
+	CountryCode string `json:"countryCode,omitempty"`
+	// SteamCreatedAt is the Steam account creation time (public profiles only);
+	// nil when unknown.
+	SteamCreatedAt *time.Time `json:"steamCreatedAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // Match is one parsed game. share_code is unique when the match was ingested via
@@ -85,6 +88,21 @@ type MatchPlayer struct {
 	DPR     float64 `json:"dpr"`
 	Rating  float64 `json:"rating"`
 	Won     bool    `json:"won"`
+
+	// FlashDuration is the total seconds of enemy blindness this player inflicted
+	// across the match — a far better flashbang grade than a raw flashed count.
+	FlashDuration float64 `json:"flashDuration"`
+	// Clutch holds the 1vX outcome distribution (who they beat, not just how many
+	// clutches) so a clutch matrix and situational win-rates can be built.
+	Clutch ClutchMatrix `json:"clutch"`
+}
+
+// ClutchMatrix records clutch wins/losses bucketed by the number of opponents
+// alive when the 1vX began. Index by opponent count 1..5 (index 0 is unused);
+// a nil slice means no clutch situations were faced.
+type ClutchMatrix struct {
+	WonBySize  []int `json:"wonBySize,omitempty"`
+	LostBySize []int `json:"lostBySize,omitempty"`
 }
 
 // Round is one round outcome inside a match, including each team's buy.
@@ -126,26 +144,29 @@ type ParsedMatch struct {
 // PlayerCareer is the rolling aggregate across every match we have for a player.
 // It is recomputed on write (aggregate-on-write) so profile reads are cheap.
 type PlayerCareer struct {
-	SteamID64     uint64 `json:"steamId64,string"`
-	Matches       int    `json:"matches"`
-	Wins          int    `json:"wins"`
-	Losses        int    `json:"losses"`
-	RoundsPlayed  int    `json:"roundsPlayed"`
-	Kills         int64  `json:"kills"`
-	Deaths        int64  `json:"deaths"`
-	Assists       int64  `json:"assists"`
-	HeadshotKills int64  `json:"headshotKills"`
-	Damage        int64  `json:"damage"`
-	KASTRounds    int64  `json:"kastRounds"`
-	OpeningKills  int64  `json:"openingKills"`
-	OpeningDeaths int64  `json:"openingDeaths"`
-	ClutchesWon   int64  `json:"clutchesWon"`
-	ClutchesLost  int64  `json:"clutchesLost"`
-	K1            int64  `json:"k1"`
-	K2            int64  `json:"k2"`
-	K3            int64  `json:"k3"`
-	K4            int64  `json:"k4"`
-	K5            int64  `json:"k5"`
+	SteamID64      uint64 `json:"steamId64,string"`
+	Matches        int    `json:"matches"`
+	Wins           int    `json:"wins"`
+	Losses         int    `json:"losses"`
+	RoundsPlayed   int    `json:"roundsPlayed"`
+	Kills          int64  `json:"kills"`
+	Deaths         int64  `json:"deaths"`
+	Assists        int64  `json:"assists"`
+	HeadshotKills  int64  `json:"headshotKills"`
+	Damage         int64  `json:"damage"`
+	KASTRounds     int64  `json:"kastRounds"`
+	OpeningKills   int64  `json:"openingKills"`
+	OpeningDeaths  int64  `json:"openingDeaths"`
+	ClutchesWon    int64  `json:"clutchesWon"`
+	ClutchesLost   int64  `json:"clutchesLost"`
+	UtilityDamage  int64  `json:"utilityDamage"`
+	EnemiesFlashed int64  `json:"enemiesFlashed"`
+	MVPs           int64  `json:"mvps"`
+	K1             int64  `json:"k1"`
+	K2             int64  `json:"k2"`
+	K3             int64  `json:"k3"`
+	K4             int64  `json:"k4"`
+	K5             int64  `json:"k5"`
 
 	// Derived
 	KD        float64   `json:"kd"`
@@ -223,6 +244,13 @@ type LeaderboardEntry struct {
 	KD          float64 `json:"kd"`
 	ADR         float64 `json:"adr"`
 	WinRate     float64 `json:"winRate"`
+}
+
+// PlayerHit is a lightweight search/autocomplete result.
+type PlayerHit struct {
+	SteamID64   uint64 `json:"steamId64,string"`
+	PersonaName string `json:"personaName"`
+	AvatarURL   string `json:"avatarUrl"`
 }
 
 // MapStat is a player's aggregate performance on a single map.

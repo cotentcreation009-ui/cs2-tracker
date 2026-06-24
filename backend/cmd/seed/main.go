@@ -196,11 +196,19 @@ func genKills(teamA, teamB []uint64, rounds int, seed uint64) []models.Kill {
 			if aAttacks && i%2 == 0 {
 				killer = teamA[0] // bias the hero toward entry frags
 			}
+			// ~35% of kills are assisted by a different teammate.
+			assister := uint64(0)
+			if next(100) < 35 {
+				if a := killers[next(len(killers))]; a != killer {
+					assister = a
+				}
+			}
 			kills = append(kills, models.Kill{
 				Round:       r,
 				TimeSeconds: float64(r*105 + i*9),
 				KillerID:    killer,
 				VictimID:    victims[next(len(victims))],
+				AssisterID:  assister,
 				Weapon:      seedWeapons[next(len(seedWeapons))],
 				Headshot:    next(100) < 45,
 				Opening:     i == 0,

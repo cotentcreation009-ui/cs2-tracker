@@ -7,10 +7,13 @@
 //   - local dev:       http://localhost:8080
 
 import type {
+  FaceitProfile,
   Kill,
   LeaderboardEntry,
   LeetifyProfile,
   MapStat,
+  SteamExtras,
+  SteamGameStats,
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
@@ -30,10 +33,19 @@ export class ApiError extends Error {
   }
 }
 
+// Reads are cached for a short window so popular profiles (shared links are a
+// bounded, highly-repeated keyspace) serve from the Next/CDN cache instead of
+// re-hitting the backend + third-party APIs on every view. Pages that must be
+// fresh per-request (e.g. compare, which reads searchParams) render dynamically
+// and bypass this anyway.
+const REVALIDATE_SECONDS = 60;
+
 async function getJSON<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+    res = await fetch(`${API_BASE}${path}`, {
+      next: { revalidate: REVALIDATE_SECONDS },
+    });
   } catch (err) {
     throw new ApiError(
       0,
@@ -89,6 +101,43 @@ export async function getLeetify(
 ): Promise<LeetifyProfile | null> {
   try {
     return await getJSON<LeetifyProfile>(`/api/players/${steamId}/leetify`);
+  } catch {
+    return null;
+  }
+}
+
+// getFaceit fetches a player's live FACEIT profile. Supplementary, so any
+// failure (no key configured, no FACEIT account, unreachable) returns null and
+// the panel is hidden.
+export async function getFaceit(
+  steamId: string,
+): Promise<FaceitProfile | null> {
+  try {
+    return await getJSON<FaceitProfile>(`/api/players/${steamId}/faceit`);
+  } catch {
+    return null;
+  }
+}
+
+// getSteamExtras fetches the CS2 friend code (+ best-effort friends/level).
+// Supplementary, so failures return null.
+export async function getSteamExtras(
+  steamId: string,
+): Promise<SteamExtras | null> {
+  try {
+    return await getJSON<SteamExtras>(`/api/players/${steamId}/steam-extras`);
+  } catch {
+    return null;
+  }
+}
+
+// getSteamStats fetches a player's lifetime App 730 (CS2) stats. Supplementary,
+// and only available for public-profile accounts, so failures return null.
+export async function getSteamStats(
+  steamId: string,
+): Promise<SteamGameStats | null> {
+  try {
+    return await getJSON<SteamGameStats>(`/api/players/${steamId}/steam-stats`);
   } catch {
     return null;
   }

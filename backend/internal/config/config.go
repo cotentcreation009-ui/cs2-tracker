@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -30,6 +31,10 @@ type Config struct {
 	LeetifyBaseURL string
 	LeetifyAPIKey  string
 
+	// FACEIT Data API (requires a free key from https://developers.faceit.com)
+	FaceitBaseURL string
+	FaceitAPIKey  string
+
 	// Demo pipeline
 	DemoQueueKey      string        // redis list key used as the parse job queue
 	DemoWorkDir       string        // scratch dir where demos are downloaded/extracted before parsing
@@ -38,7 +43,8 @@ type Config struct {
 	WorkerConcurrency int           // number of jobs a single worker parses in parallel
 
 	// Caching
-	CacheTTL time.Duration // TTL for cached aggregate payloads in redis
+	CacheTTL         time.Duration // TTL for cached aggregate payloads in redis
+	ExternalCacheTTL time.Duration // TTL for cached live third-party payloads (Leetify/FACEIT/steam-extras)
 
 	// Rate limiting (per client IP). RateLimitRPS <= 0 disables it.
 	RateLimitRPS   float64 // sustained requests per second
@@ -66,12 +72,15 @@ func Load() (*Config, error) {
 		SteamAPIKey:       getEnv("STEAM_API_KEY", ""),
 		LeetifyBaseURL:    getEnv("LEETIFY_BASE_URL", "https://api-public.cs-prod.leetify.com"),
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
+		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
+		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
 		DemoWorkDir:       getEnv("DEMO_WORK_DIR", os.TempDir()),
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),
 		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
 		CacheTTL:          getDuration("CACHE_TTL", 5*time.Minute),
+		ExternalCacheTTL:  getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
 		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
 		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
 	}
@@ -87,8 +96,12 @@ func Load() (*Config, error) {
 func (c *Config) HasSteamKey() bool { return c.SteamAPIKey != "" }
 
 func getEnv(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		return v
+	// Trim surrounding whitespace so a key pasted from a dashboard with a stray
+	// space/newline (e.g. FACEIT_API_KEY) doesn't silently corrupt a header.
+	if v, ok := os.LookupEnv(key); ok {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
 	}
 	return fallback
 }

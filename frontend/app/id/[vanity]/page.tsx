@@ -1,16 +1,35 @@
+import type { Metadata } from "next";
 import {
   ApiError,
+  getFaceit,
   getLeetify,
   getMapStats,
   getPlayerMatches,
   getProfile,
+  getSteamExtras,
+  getSteamStats,
   getWeaponStats,
   resolveSteamId,
 } from "@/lib/api";
 import { ProfileView } from "@/components/ProfileView";
 import { FetchError } from "@/components/FetchError";
+import { profileMetadata } from "@/lib/meta";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ vanity: string }>;
+}): Promise<Metadata> {
+  const { vanity } = await params;
+  try {
+    const id = await resolveSteamId(vanity);
+    return profileMetadata(await getProfile(id));
+  } catch {
+    return { title: "Player — CS2 Tracker" };
+  }
+}
 
 /**
  * /id/<vanity> mirrors Steam's custom-URL path. We resolve the vanity name to a
@@ -25,13 +44,17 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps, leetify] = await Promise.all([
-      getProfile(steamId),
-      getPlayerMatches(steamId),
-      getWeaponStats(steamId).catch(() => []),
-      getMapStats(steamId).catch(() => []),
-      getLeetify(steamId),
-    ]);
+    const [profile, matches, weapons, maps, leetify, faceit, steamExtras, steamStats] =
+      await Promise.all([
+        getProfile(steamId),
+        getPlayerMatches(steamId),
+        getWeaponStats(steamId).catch(() => []),
+        getMapStats(steamId).catch(() => []),
+        getLeetify(steamId),
+        getFaceit(steamId),
+        getSteamExtras(steamId),
+        getSteamStats(steamId),
+      ]);
     return (
       <ProfileView
         profile={profile}
@@ -39,6 +62,9 @@ export default async function ProfileByVanity({
         weapons={weapons}
         maps={maps}
         leetify={leetify}
+        faceit={faceit}
+        steamExtras={steamExtras}
+        steamStats={steamStats}
       />
     );
   } catch (e) {

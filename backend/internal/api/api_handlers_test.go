@@ -83,6 +83,9 @@ func (f *fakeStore) ListTopPlayers(_ context.Context, l int) ([]models.Leaderboa
 	}
 	return nil, nil
 }
+func (f *fakeStore) SearchPlayers(context.Context, string, int) ([]models.PlayerHit, error) {
+	return nil, nil
+}
 func (f *fakeStore) ListMatchKills(_ context.Context, id int64) ([]models.Kill, error) {
 	if f.kills != nil {
 		return f.kills(id)
@@ -99,7 +102,7 @@ func (f *fakeStore) GetJob(_ context.Context, id string) (models.IngestJob, erro
 
 func routerWith(store Store) http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
-	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s.Router()
 }
 

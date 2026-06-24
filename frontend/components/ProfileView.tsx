@@ -1,8 +1,11 @@
 import type {
+  FaceitProfile,
   LeetifyProfile,
   MapStat,
   PlayerMatchSummary,
   PlayerProfile,
+  SteamExtras,
+  SteamGameStats,
   WeaponStat,
 } from "@/lib/types";
 import { StatCard } from "@/components/StatCard";
@@ -10,9 +13,20 @@ import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
 import { RecentForm } from "@/components/RecentForm";
 import { RatingTrend } from "@/components/RatingTrend";
+import { MetricTrends } from "@/components/MetricTrends";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
+import { FaceitPanel } from "@/components/FaceitPanel";
+import { RankStrip } from "@/components/RankBadge";
+import { MapStrength } from "@/components/MapStrength";
+import { PlayerSummary } from "@/components/PlayerSummary";
+import { LiveForm } from "@/components/LiveForm";
+import { ShareButton } from "@/components/ShareButton";
+import { RecordRecent } from "@/components/RecordRecent";
+import { SteamStatsPanel } from "@/components/SteamStatsPanel";
+import { CrossSource } from "@/components/CrossSource";
+import Link from "next/link";
 import {
   flag,
   fmt,
@@ -27,16 +41,30 @@ export function ProfileView({
   weapons = [],
   maps = [],
   leetify = null,
+  faceit = null,
+  steamExtras = null,
+  steamStats = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
   weapons?: WeaponStat[];
   maps?: MapStat[];
   leetify?: LeetifyProfile | null;
+  faceit?: FaceitProfile | null;
+  steamExtras?: SteamExtras | null;
+  steamStats?: SteamGameStats | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
   const multiKillRounds = career.k3 + career.k4 + career.k5;
+
+  // Steam account age (public profiles only).
+  const steamCreated = player.steamCreatedAt
+    ? new Date(player.steamCreatedAt)
+    : null;
+  const accountAgeYears = steamCreated
+    ? (Date.now() - steamCreated.getTime()) / (365.25 * 24 * 3600 * 1000)
+    : null;
 
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
@@ -44,8 +72,23 @@ export function ProfileView({
   const clutchWinPct =
     clutchTotal > 0 ? (career.clutchesWon / clutchTotal) * 100 : 0;
 
+  // Per-round rates derived from the career sums (no extra stored columns).
+  const rounds = career.roundsPlayed;
+  const kpr = rounds > 0 ? career.kills / rounds : 0;
+  const dpr = rounds > 0 ? career.deaths / rounds : 0;
+  const udPerRound = rounds > 0 ? career.utilityDamage / rounds : 0;
+  const flashesPerRound = rounds > 0 ? career.enemiesFlashed / rounds : 0;
+  const mvpsPerMatch = career.matches > 0 ? career.mvps / career.matches : 0;
+
   return (
     <div className="space-y-5">
+      <RecordRecent
+        player={{
+          steamId64: player.steamId64,
+          personaName: player.personaName,
+          avatarUrl: player.avatarUrl,
+        }}
+      />
       {/* Identity + rating */}
       <section className="card-2 flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
@@ -74,6 +117,39 @@ export function ProfileView({
               <span className="font-mono text-xs text-faint">
                 {player.steamId64}
               </span>
+              {steamCreated && accountAgeYears != null && (
+                <span title={`Steam account created ${steamCreated.toLocaleDateString()}`}>
+                  Account{" "}
+                  <span className="font-medium text-ink">
+                    {accountAgeYears.toFixed(1)}y
+                  </span>{" "}
+                  · since {steamCreated.getFullYear()}
+                </span>
+              )}
+              {steamExtras?.friendCode && (
+                <span>
+                  Friend code{" "}
+                  <span className="font-mono text-xs text-ink">
+                    {steamExtras.friendCode}
+                  </span>
+                </span>
+              )}
+              {steamExtras != null && steamExtras.friends > 0 && (
+                <span>
+                  <span className="font-medium text-ink">
+                    {steamExtras.friends.toLocaleString("en-US")}
+                  </span>{" "}
+                  friends
+                </span>
+              )}
+              {steamExtras != null && steamExtras.steamLevel > 0 && (
+                <span>
+                  Steam{" "}
+                  <span className="font-medium text-ink">
+                    lvl {steamExtras.steamLevel}
+                  </span>
+                </span>
+              )}
               {player.profileUrl && (
                 <a
                   href={player.profileUrl}
@@ -91,16 +167,56 @@ export function ProfileView({
         {hasData && <RatingRing rating={career.rating} />}
       </section>
 
+      <div className="flex flex-wrap gap-2">
+        <ShareButton label="Share profile" />
+        <Link
+          href={`/compare?a=${player.steamId64}`}
+          className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+        >
+          Compare
+        </Link>
+      </div>
+
+      <RankStrip leetify={leetify} faceit={faceit} />
+
+      {leetify && <PlayerSummary leetify={leetify} />}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <LiveForm matches={leetify.recent_matches} />
+      )}
+
       {leetify && <LeetifyPanel profile={leetify} />}
 
-      {!hasData && !leetify && (
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <div className="text-right">
+          <Link
+            href={`/profiles/${player.steamId64}/matches`}
+            className="text-sm font-medium text-brand hover:underline"
+          >
+            View all matches →
+          </Link>
+        </div>
+      )}
+
+      {faceit && <FaceitPanel profile={faceit} />}
+
+      {steamStats && <SteamStatsPanel data={steamStats} />}
+
+      <CrossSource
+        career={career}
+        leetify={leetify}
+        faceit={faceit}
+        steamStats={steamStats}
+      />
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <MapStrength matches={leetify.recent_matches} />
+      )}
+
+      {!hasData && !leetify && !faceit && !steamStats && (
         <div className="card px-5 py-6 text-sm text-muted">
-          We know this player&apos;s Steam identity, but no demos have been
-          parsed for them yet. Ingest a demo via{" "}
-          <code className="rounded bg-panel px-1.5 py-0.5 text-xs text-ink">
-            POST /api/ingest/demo
-          </code>{" "}
-          to populate career stats and match history.
+          We know this player&apos;s Steam identity, but have no CS2 stats for
+          them yet — their Leetify/FACEIT profile may be private or unavailable.
         </div>
       )}
 
@@ -153,6 +269,8 @@ export function ProfileView({
             </section>
           )}
 
+          {matches.length > 1 && <MetricTrends matches={matches} />}
+
           {/* Secondary stats */}
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
@@ -175,6 +293,38 @@ export function ProfileView({
               value={career.rating.toFixed(2)}
               valueClass={ratingColor(career.rating)}
             />
+          </section>
+
+          {/* Utility & impact */}
+          <section>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
+              Utility &amp; impact
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <StatCard
+                label="Kills / round"
+                value={kpr.toFixed(2)}
+                valueClass={tierColor(kpr, 0.75, 0.6)}
+              />
+              <StatCard label="Deaths / round" value={dpr.toFixed(2)} />
+              <StatCard
+                label="Utility dmg / round"
+                value={udPerRound.toFixed(1)}
+                valueClass={tierColor(udPerRound, 8, 5)}
+                sub={`${fmt(career.utilityDamage)} total`}
+              />
+              <StatCard
+                label="Flashes / round"
+                value={flashesPerRound.toFixed(2)}
+                valueClass={tierColor(flashesPerRound, 1, 0.6)}
+                sub={`${fmt(career.enemiesFlashed)} enemies`}
+              />
+              <StatCard
+                label="MVPs"
+                value={fmt(career.mvps)}
+                sub={`${mvpsPerMatch.toFixed(1)} / match`}
+              />
+            </div>
           </section>
 
           {/* Recent matches + weapons */}

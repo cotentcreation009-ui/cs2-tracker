@@ -190,13 +190,16 @@ It exercises `ResolveVanityURL`, `GetPlayerSummaries` and
 | GET  | `/api/health` | Liveness + whether a Steam key is configured + queue depth |
 | GET  | `/api/resolve?q=<vanity\|id>` | Resolve a vanity name or SteamID64 → SteamID64 |
 | GET  | `/api/leaderboard?limit=` | Top tracked players by rating |
+| GET  | `/api/search?q=&limit=` | Autocomplete over known players (persona/vanity contains `q`) |
 | GET  | `/api/players/{steamid}` | Profile: identity + rolling career aggregate (cached) |
 | POST | `/api/players/{steamid}/refresh` | Re-fetch identity from Steam (needs key) |
 | GET  | `/api/players/{steamid}/matches?limit=&offset=` | Recent matches with the player's line |
 | GET  | `/api/players/{steamid}/weapons?limit=` | Per-weapon kills + headshot % from the killfeed |
 | GET  | `/api/players/{steamid}/maps` | Per-map career breakdown (W-L, win %, rating, ADR) |
 | GET  | `/api/players/{steamid}/leetify` | Live Leetify profile (ratings, ranks, stats) — fetched real-time, attributed |
+| GET  | `/api/players/{steamid}/faceit` | Live FACEIT profile (CS2 skill level, ELO, lifetime stats) — fetched real-time, attributed (needs `FACEIT_API_KEY`) |
 | GET  | `/api/players/{steamid}/steam-stats` | Raw App 730 lifetime stats (needs key) |
+| GET  | `/api/players/{steamid}/steam-extras` | CS2 friend code (computed, always) + best-effort friends count & Steam level (needs key + public profile) |
 | GET  | `/api/matches/{id}` | Full match detail: scoreboard + rounds |
 | GET  | `/api/matches/{id}/kills` | Ordered killfeed for a match |
 | POST | `/api/ingest/demo` | Enqueue a parse job (`demoPath` \| `demoUrl` \| `shareCode`); returns a pollable `jobId` |
@@ -217,7 +220,9 @@ are resolved through the backend's `ResolveVanityURL` call.
 ## Configuration
 
 All config is environment-driven (see [`.env.example`](.env.example)). Notable
-vars: `STEAM_API_KEY`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`,
+vars: `STEAM_API_KEY`, `FACEIT_API_KEY` (free, from
+<https://developers.faceit.com> — enables the live FACEIT panel),
+`DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`,
 `DELETE_RAW_DEMO`, `JOB_TIMEOUT`, `WORKER_CONCURRENCY` (jobs parsed in
 parallel per worker), `CACHE_TTL`, `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`
 (per-IP API rate limit; RPS 0 disables), and `API_INTERNAL_URL` (frontend).

@@ -309,7 +309,9 @@ func (c *collector) onPlayerFlashed(e events.PlayerFlashed) {
 	if e.FlashDuration() <= 0 {
 		return
 	}
-	c.player(e.Attacker.SteamID64).EnemiesFlashed++
+	ap := c.player(e.Attacker.SteamID64)
+	ap.EnemiesFlashed++
+	ap.FlashDuration += e.FlashDuration().Seconds()
 }
 
 func (c *collector) onMVP(e events.RoundMVPAnnouncement) {
@@ -361,10 +363,22 @@ func (c *collector) onRoundEnd(e events.RoundEnd) {
 	}
 	if out.Clutcher != 0 {
 		cp := c.player(out.Clutcher)
+		size := out.ClutchOpponents
+		if size < 1 {
+			size = 1
+		} else if size > 5 {
+			size = 5
+		}
+		if cp.Clutch.WonBySize == nil {
+			cp.Clutch.WonBySize = make([]int, 6)
+			cp.Clutch.LostBySize = make([]int, 6)
+		}
 		if out.ClutchWon {
 			cp.ClutchesWon++
+			cp.Clutch.WonBySize[size]++
 		} else {
 			cp.ClutchesLost++
+			cp.Clutch.LostBySize[size]++
 		}
 	}
 

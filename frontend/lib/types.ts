@@ -10,6 +10,7 @@ export interface Player {
   profileUrl: string;
   vanityUrl?: string;
   countryCode?: string;
+  steamCreatedAt?: string; // Steam account creation time (public profiles only)
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +31,9 @@ export interface PlayerCareer {
   openingDeaths: number;
   clutchesWon: number;
   clutchesLost: number;
+  utilityDamage: number;
+  enemiesFlashed: number;
+  mvps: number;
   k1: number;
   k2: number;
   k3: number;
@@ -128,12 +132,29 @@ export interface WeaponStat {
   hsPct: number;
 }
 
+export interface LeetifyRecentMatch {
+  id: string;
+  finished_at: string;
+  data_source: string; // matchmaking | premier | faceit | ...
+  outcome: string; // win | loss | tie
+  map_name: string;
+  leetify_rating: number;
+  score: number[]; // [team, enemy]
+  preaim: number;
+  reaction_time_ms: number;
+  accuracy_head: number;
+  accuracy_enemy_spotted: number;
+  spray_accuracy: number;
+}
+
 export interface LeetifyProfile {
   name: string;
   steam64_id: string;
   total_matches: number;
   winrate: number; // 0..1
   privacy_mode: string;
+  first_match_date?: string;
+  bans?: unknown[];
   rating: {
     aim: number;
     positioning: number;
@@ -145,12 +166,20 @@ export interface LeetifyProfile {
   };
   stats: {
     accuracy_head: number;
+    accuracy_enemy_spotted: number;
     preaim: number;
     reaction_time_ms: number;
     spray_accuracy: number;
+    counter_strafing_good_shots_ratio: number;
     ct_opening_duel_success_percentage: number;
     t_opening_duel_success_percentage: number;
     trade_kills_success_percentage: number;
+    traded_deaths_success_percentage: number;
+    trade_kill_opportunities_per_round: number;
+    flashbang_hit_foe_per_flashbang: number;
+    flashbang_leading_to_kill: number;
+    he_foes_damage_avg: number;
+    utility_on_death_avg: number;
   };
   ranks: {
     leetify?: number;
@@ -159,6 +188,44 @@ export interface LeetifyProfile {
     faceit_elo?: number;
     wingman?: number;
   };
+  recent_matches?: LeetifyRecentMatch[];
+}
+
+export interface FaceitProfile {
+  playerId: string;
+  nickname: string;
+  country: string;
+  avatar: string;
+  faceitUrl: string;
+  region: string;
+  skillLevel: number;
+  elo: number;
+  matches: number;
+  winRatePct: number;
+  kdRatio: number;
+  hsPct: number;
+  avgKills: number;
+  currentWinStreak: number;
+  longestWinStreak: number;
+  recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
+}
+
+export interface SteamGameStats {
+  gameName: string;
+  stats: Record<string, number>; // raw App 730 stat names -> values
+}
+
+export interface PlayerHit {
+  steamId64: string;
+  personaName: string;
+  avatarUrl: string;
+}
+
+export interface SteamExtras {
+  steamId64: string;
+  friendCode: string; // CS2 in-game friend code, e.g. "ADWZF-L9AL"
+  friends: number; // 0 when the friends list is private / no key
+  steamLevel: number; // 0 when hidden / no key
 }
 
 export interface IngestJob {

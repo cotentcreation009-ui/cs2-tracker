@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/models"
@@ -20,23 +21,24 @@ const matchPlayerCols = `match_id, steam_id64, persona_name, start_side,
 	rounds_played, kills, deaths, assists, headshot_kills, damage, utility_damage,
 	enemies_flashed, kast_rounds, opening_kills, opening_deaths, clutches_won,
 	clutches_lost, mvps, k1, k2, k3, k4, k5, adr, kast_pct, hs_pct, kd, kpr, dpr,
-	rating, won`
+	rating, won, flash_duration, clutch_matrix`
 
 // --- Player identity --------------------------------------------------------
 
 // UpsertPlayer writes the Steam-sourced identity for a player.
 func (d *DB) UpsertPlayer(ctx context.Context, p models.Player) error {
 	_, err := d.Pool.Exec(ctx, `
-		INSERT INTO players (steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6, now())
+		INSERT INTO players (steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, steam_created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7, now())
 		ON CONFLICT (steam_id64) DO UPDATE SET
 			persona_name = EXCLUDED.persona_name,
 			avatar_url   = EXCLUDED.avatar_url,
 			profile_url  = EXCLUDED.profile_url,
 			vanity_url   = CASE WHEN EXCLUDED.vanity_url <> '' THEN EXCLUDED.vanity_url ELSE players.vanity_url END,
 			country_code = EXCLUDED.country_code,
+			steam_created_at = COALESCE(EXCLUDED.steam_created_at, players.steam_created_at),
 			updated_at   = now()`,
-		int64(p.SteamID64), p.PersonaName, p.AvatarURL, p.ProfileURL, p.VanityURL, p.CountryCode)
+		int64(p.SteamID64), p.PersonaName, p.AvatarURL, p.ProfileURL, p.VanityURL, p.CountryCode, p.SteamCreatedAt)
 	return err
 }
 
@@ -46,10 +48,11 @@ func (d *DB) GetProfile(ctx context.Context, steamID uint64) (models.PlayerProfi
 	var prof models.PlayerProfile
 	var id int64
 	err := d.Pool.QueryRow(ctx, `
-		SELECT steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, created_at, updated_at
+		SELECT steam_id64, persona_name, avatar_url, profile_url, vanity_url, country_code, steam_created_at, created_at, updated_at
 		FROM players WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&id, &prof.Player.PersonaName, &prof.Player.AvatarURL, &prof.Player.ProfileURL,
-			&prof.Player.VanityURL, &prof.Player.CountryCode, &prof.Player.CreatedAt, &prof.Player.UpdatedAt)
+			&prof.Player.VanityURL, &prof.Player.CountryCode, &prof.Player.SteamCreatedAt,
+			&prof.Player.CreatedAt, &prof.Player.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return prof, ErrNotFound
 	}
@@ -177,6 +180,37 @@ func (d *DB) ListTopPlayers(ctx context.Context, limit int) ([]models.Leaderboar
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// SearchPlayers finds known players whose persona name or vanity contains the
+// query (case-insensitive), for search autocomplete. Only players we've already
+// seen/hydrated are searchable.
+func (d *DB) SearchPlayers(ctx context.Context, query string, limit int) ([]models.PlayerHit, error) {
+	// Escape ILIKE wildcards in user input, then do a contains-match.
+	esc := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
+	pattern := "%" + esc + "%"
+	rows, err := d.Pool.Query(ctx, `
+		SELECT steam_id64, persona_name, avatar_url
+		FROM players
+		WHERE persona_name ILIKE $1 OR vanity_url ILIKE $1
+		ORDER BY (persona_name ILIKE $2) DESC, persona_name ASC
+		LIMIT $3`, pattern, esc+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.PlayerHit
+	for rows.Next() {
+		var h models.PlayerHit
+		var id int64
+		if err := rows.Scan(&id, &h.PersonaName, &h.AvatarURL); err != nil {
+			return nil, err
+		}
+		h.SteamID64 = uint64(id)
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }
@@ -427,13 +461,13 @@ func ensurePlayer(ctx context.Context, tx pgx.Tx, steamID uint64, name string) e
 func insertMatchPlayer(ctx context.Context, tx pgx.Tx, matchID int64, mp models.MatchPlayer) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO match_players (`+matchPlayerCols+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
 		ON CONFLICT (match_id, steam_id64) DO NOTHING`,
 		matchID, int64(mp.SteamID64), mp.PersonaName, string(mp.StartSide),
 		mp.RoundsPlayed, mp.Kills, mp.Deaths, mp.Assists, mp.HeadshotKills, mp.Damage, mp.UtilityDamage,
 		mp.EnemiesFlashed, mp.KASTRounds, mp.OpeningKills, mp.OpeningDeaths, mp.ClutchesWon,
 		mp.ClutchesLost, mp.MVPs, mp.K1, mp.K2, mp.K3, mp.K4, mp.K5, mp.ADR, mp.KASTPct, mp.HSPct,
-		mp.KD, mp.KPR, mp.DPR, mp.Rating, mp.Won)
+		mp.KD, mp.KPR, mp.DPR, mp.Rating, mp.Won, mp.FlashDuration, mp.Clutch)
 	return err
 }
 
@@ -476,12 +510,14 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 			COALESCE(SUM(kills),0), COALESCE(SUM(deaths),0), COALESCE(SUM(assists),0), COALESCE(SUM(headshot_kills),0),
 			COALESCE(SUM(damage),0), COALESCE(SUM(kast_rounds),0), COALESCE(SUM(opening_kills),0), COALESCE(SUM(opening_deaths),0),
 			COALESCE(SUM(clutches_won),0), COALESCE(SUM(clutches_lost),0),
+			COALESCE(SUM(utility_damage),0), COALESCE(SUM(enemies_flashed),0), COALESCE(SUM(mvps),0),
 			COALESCE(SUM(k1),0), COALESCE(SUM(k2),0), COALESCE(SUM(k3),0), COALESCE(SUM(k4),0), COALESCE(SUM(k5),0)
 		FROM match_players WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&c.Matches, &c.Wins, &c.Losses, &c.RoundsPlayed,
 			&c.Kills, &c.Deaths, &c.Assists, &c.HeadshotKills,
 			&c.Damage, &c.KASTRounds, &c.OpeningKills, &c.OpeningDeaths,
 			&c.ClutchesWon, &c.ClutchesLost,
+			&c.UtilityDamage, &c.EnemiesFlashed, &c.MVPs,
 			&c.K1, &c.K2, &c.K3, &c.K4, &c.K5)
 	if err != nil {
 		return err
@@ -491,8 +527,9 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO player_careers (steam_id64, matches, wins, losses, rounds_played, kills, deaths, assists,
 			headshot_kills, damage, kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost,
-			k1, k2, k3, k4, k5, kd, adr, kast_pct, hs_pct, rating, win_rate, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26, now())
+			k1, k2, k3, k4, k5, kd, adr, kast_pct, hs_pct, rating, win_rate,
+			utility_damage, enemies_flashed, mvps, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29, now())
 		ON CONFLICT (steam_id64) DO UPDATE SET
 			matches=EXCLUDED.matches, wins=EXCLUDED.wins, losses=EXCLUDED.losses, rounds_played=EXCLUDED.rounds_played,
 			kills=EXCLUDED.kills, deaths=EXCLUDED.deaths, assists=EXCLUDED.assists, headshot_kills=EXCLUDED.headshot_kills,
@@ -500,10 +537,13 @@ func recomputeCareer(ctx context.Context, tx pgx.Tx, steamID uint64) error {
 			opening_deaths=EXCLUDED.opening_deaths, clutches_won=EXCLUDED.clutches_won, clutches_lost=EXCLUDED.clutches_lost,
 			k1=EXCLUDED.k1, k2=EXCLUDED.k2, k3=EXCLUDED.k3, k4=EXCLUDED.k4, k5=EXCLUDED.k5,
 			kd=EXCLUDED.kd, adr=EXCLUDED.adr, kast_pct=EXCLUDED.kast_pct, hs_pct=EXCLUDED.hs_pct,
-			rating=EXCLUDED.rating, win_rate=EXCLUDED.win_rate, updated_at=now()`,
+			rating=EXCLUDED.rating, win_rate=EXCLUDED.win_rate,
+			utility_damage=EXCLUDED.utility_damage, enemies_flashed=EXCLUDED.enemies_flashed, mvps=EXCLUDED.mvps,
+			updated_at=now()`,
 		int64(c.SteamID64), c.Matches, c.Wins, c.Losses, c.RoundsPlayed, c.Kills, c.Deaths, c.Assists,
 		c.HeadshotKills, c.Damage, c.KASTRounds, c.OpeningKills, c.OpeningDeaths, c.ClutchesWon, c.ClutchesLost,
-		c.K1, c.K2, c.K3, c.K4, c.K5, c.KD, c.ADR, c.KASTPct, c.HSPct, c.Rating, c.WinRate)
+		c.K1, c.K2, c.K3, c.K4, c.K5, c.KD, c.ADR, c.KASTPct, c.HSPct, c.Rating, c.WinRate,
+		c.UtilityDamage, c.EnemiesFlashed, c.MVPs)
 	return err
 }
 
@@ -512,12 +552,14 @@ func (d *DB) getCareer(ctx context.Context, q pgxQuerier, steamID uint64) (model
 	var id int64
 	err := q.QueryRow(ctx, `
 		SELECT steam_id64, matches, wins, losses, rounds_played, kills, deaths, assists, headshot_kills, damage,
-			kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost, k1, k2, k3, k4, k5,
+			kast_rounds, opening_kills, opening_deaths, clutches_won, clutches_lost,
+			utility_damage, enemies_flashed, mvps, k1, k2, k3, k4, k5,
 			kd, adr, kast_pct, hs_pct, rating, win_rate, updated_at
 		FROM player_careers WHERE steam_id64=$1`, int64(steamID)).
 		Scan(&id, &c.Matches, &c.Wins, &c.Losses, &c.RoundsPlayed, &c.Kills, &c.Deaths, &c.Assists,
 			&c.HeadshotKills, &c.Damage, &c.KASTRounds, &c.OpeningKills, &c.OpeningDeaths, &c.ClutchesWon,
-			&c.ClutchesLost, &c.K1, &c.K2, &c.K3, &c.K4, &c.K5, &c.KD, &c.ADR, &c.KASTPct, &c.HSPct,
+			&c.ClutchesLost, &c.UtilityDamage, &c.EnemiesFlashed, &c.MVPs,
+			&c.K1, &c.K2, &c.K3, &c.K4, &c.K5, &c.KD, &c.ADR, &c.KASTPct, &c.HSPct,
 			&c.Rating, &c.WinRate, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound
@@ -550,6 +592,6 @@ func matchPlayerScanTargets(mp *models.MatchPlayer) []any {
 		&mp.RoundsPlayed, &mp.Kills, &mp.Deaths, &mp.Assists, &mp.HeadshotKills, &mp.Damage, &mp.UtilityDamage,
 		&mp.EnemiesFlashed, &mp.KASTRounds, &mp.OpeningKills, &mp.OpeningDeaths, &mp.ClutchesWon,
 		&mp.ClutchesLost, &mp.MVPs, &mp.K1, &mp.K2, &mp.K3, &mp.K4, &mp.K5, &mp.ADR, &mp.KASTPct, &mp.HSPct,
-		&mp.KD, &mp.KPR, &mp.DPR, &mp.Rating, &mp.Won,
+		&mp.KD, &mp.KPR, &mp.DPR, &mp.Rating, &mp.Won, &mp.FlashDuration, &mp.Clutch,
 	}
 }
