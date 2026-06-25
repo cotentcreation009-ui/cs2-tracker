@@ -6,9 +6,9 @@
 export const SITE_NAME = "CS2 Tracker";
 export const SITE_DOMAIN = "steamcommunity.run";
 
-// A real inbox for privacy / data-removal / legal requests. Easiest: enable free
-// Cloudflare Email Routing on the domain so this forwards to your personal inbox.
-export const CONTACT_EMAIL = "privacy@steamcommunity.run";
+// Real, monitored inbox for privacy / data-removal / legal / ad-network (AdSense)
+// contact. A business address is fine here — it needn't match the site domain.
+export const CONTACT_EMAIL = "admin@evamedialab.com";
 
 // Governing law for the Terms — set your country (and state/province).
 export const GOVERNING_LAW = "[your country / state]";
