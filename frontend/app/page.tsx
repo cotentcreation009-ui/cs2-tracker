@@ -12,14 +12,17 @@ const FEATURES = [
   {
     title: "Every rank in one place",
     body: "Premier rating, FACEIT level & ELO, Wingman rank and Leetify rating for any account — pulled live from a single SteamID.",
+    accent: "bg-brand/10 text-brand",
   },
   {
     title: "Deep Leetify analytics",
     body: "Aim, positioning and utility ratings, opening duels, clutches, trading and recent-match form — the numbers past the scoreboard.",
+    accent: "bg-brand2/10 text-brand2",
   },
   {
     title: "Steam identity & trust",
     body: "Account age, CS2 friend code, friends and ban checks — vet a teammate or scope an opponent in seconds.",
+    accent: "bg-mid/10 text-mid",
   },
 ];
 
@@ -28,34 +31,36 @@ export default async function HomePage() {
 
   return (
     <div>
-      <section className="card-2 relative overflow-hidden px-6 py-14 text-center sm:px-10">
-        <div className="mx-auto max-w-2xl">
-          <div className="pill mx-auto mb-4 bg-brand/10 text-brand">
-            Counter-Strike 2 · Steam App 730
+      <section
+        className="relative overflow-hidden rounded-2xl border border-brand/25 bg-panel2/40 px-6 py-16 text-center backdrop-blur-sm sm:px-10 sm:py-24"
+        style={{ boxShadow: "0 0 60px -14px rgba(56,214,255,0.30)" }}
+      >
+        <div className="relative mx-auto max-w-2xl">
+          <div className="pill mx-auto mb-5 border border-brand/20 bg-brand/10 text-brand">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand2" />
+            Counter-Strike 2 · live stats
           </div>
-          <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl">
-            The CS2 stat tracker that goes{" "}
-            <span className="bg-gradient-to-r from-brand to-brand2 bg-clip-text text-transparent">
-              past the scoreboard
-            </span>
+          <h1 className="text-balance text-4xl font-extrabold tracking-tight sm:text-6xl">
+            The CS2 tracker that goes{" "}
+            <span className="gradient-text">past the scoreboard</span>
           </h1>
-          <p className="mx-auto mt-4 max-w-xl text-pretty text-muted">
-            Look up any CS2 player by SteamID64, vanity name or profile URL — and
-            see their Leetify rating, FACEIT level, ranks and Steam identity in
-            one place.
+          <p className="mx-auto mt-5 max-w-xl text-pretty text-muted sm:text-lg">
+            Look up any player by SteamID, vanity name, or profile URL — Leetify
+            rating, FACEIT level, ranks and Steam identity, all in one place.
           </p>
-          <div className="mx-auto mt-7 max-w-md">
+          <div className="mx-auto mt-8 max-w-md">
             <SearchBar autoFocus />
           </div>
-          <p className="mt-3 text-xs text-faint">
-            See an example:{" "}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-faint">
             <a
-              className="text-brand hover:underline"
+              className="font-medium text-brand hover:underline"
               href="/profiles/76561198077030352"
             >
-              a live player profile
+              Try a live profile →
             </a>
-          </p>
+            <span aria-hidden>·</span>
+            <span>Powered by Leetify · FACEIT · Steam</span>
+          </div>
         </div>
       </section>
 
@@ -63,9 +68,14 @@ export default async function HomePage() {
 
       <FeaturedPlayers />
 
-      <section className="mt-6 grid gap-4 md:grid-cols-3">
+      <section className="mt-8 grid gap-4 md:grid-cols-3">
         {FEATURES.map((f) => (
-          <div key={f.title} className="card px-5 py-5">
+          <div key={f.title} className="card lift px-5 py-5">
+            <div
+              className={`mb-3 grid h-9 w-9 place-items-center rounded-lg ${f.accent}`}
+            >
+              <span className="h-2 w-2 rounded-full bg-current" />
+            </div>
             <h3 className="font-semibold">{f.title}</h3>
             <p className="mt-2 text-sm leading-relaxed text-muted">{f.body}</p>
           </div>

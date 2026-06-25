@@ -11,11 +11,11 @@ export function profileMetadata(p: PlayerProfile): Metadata {
   const { player, career } = p;
   const id = player.steamId64;
   const name = player.personaName || id;
-  const title = `${name} — CS2 Tracker`;
+  const title = `${name} — StatRun`;
   const description =
     career.matches > 0
       ? `${name}: ${career.rating} rating, ${career.kd} K/D over ${career.matches} CS2 matches — plus Leetify, FACEIT and Steam stats.`
-      : `${name} — Leetify rating, FACEIT level, ranks and Steam identity on CS2 Tracker.`;
+      : `${name} — Leetify rating, FACEIT level, ranks and Steam identity on StatRun.`;
   const canonical = `/profiles/${id}`;
   const images = player.avatarUrl ? [player.avatarUrl] : undefined;
   return {

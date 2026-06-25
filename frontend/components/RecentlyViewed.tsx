@@ -22,7 +22,7 @@ export function RecentlyViewed() {
           <Link
             key={p.steamId64}
             href={`/profiles/${p.steamId64}`}
-            className="card flex items-center gap-3 px-4 py-3 transition hover:border-brand/60"
+            className="card lift flex items-center gap-3 px-4 py-3"
           >
             {p.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element

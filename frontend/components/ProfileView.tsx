@@ -8,6 +8,7 @@ import type {
   SteamGameStats,
   WeaponStat,
 } from "@/lib/types";
+import type { ReactNode } from "react";
 import { StatCard } from "@/components/StatCard";
 import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
@@ -34,6 +35,15 @@ import {
   ratingColor,
   tierColor,
 } from "@/lib/format";
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
+      <span className="h-3.5 w-1 rounded-full bg-linear-to-b from-brand to-brand2" />
+      {children}
+    </h2>
+  );
+}
 
 export function ProfileView({
   profile,
@@ -89,93 +99,105 @@ export function ProfileView({
           avatarUrl: player.avatarUrl,
         }}
       />
-      {/* Identity + rating */}
-      <section className="card-2 flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          {player.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={player.avatarUrl}
-              alt={player.personaName}
-              className="h-20 w-20 rounded-xl border border-line object-cover"
-            />
-          ) : (
-            <div className="grid h-20 w-20 place-items-center rounded-xl border border-line bg-panel text-2xl font-bold text-faint">
-              {(player.personaName || "?").slice(0, 1).toUpperCase()}
+      {/* Profile hero */}
+      <section className="card-2 relative overflow-hidden">
+        {/* faint brand banner (reuses the hero artwork) */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/hero-holo.webp"
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-[0.22]"
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(4,6,14,0.30), rgba(14,23,48,0.92))",
+            }}
+          />
+        </div>
+
+        <div className="relative flex flex-col gap-5 px-5 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="shrink-0 rounded-2xl bg-linear-to-br from-brand to-brand2 p-[2px] shadow-[0_0_26px_-6px_rgba(91,157,255,0.55)]">
+              {player.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={player.avatarUrl}
+                  alt={player.personaName}
+                  className="h-20 w-20 rounded-[14px] object-cover"
+                />
+              ) : (
+                <div className="grid h-20 w-20 place-items-center rounded-[14px] bg-panel text-2xl font-bold text-faint">
+                  {(player.personaName || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
             </div>
-          )}
-          <div>
-            <h1 className="text-2xl font-bold leading-tight">
-              {player.personaName || player.steamId64}
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
-              {player.countryCode && (
-                <span>
-                  {flag(player.countryCode)} {player.countryCode}
-                </span>
-              )}
-              <span className="font-mono text-xs text-faint">
-                {player.steamId64}
-              </span>
-              {steamCreated && accountAgeYears != null && (
-                <span title={`Steam account created ${steamCreated.toLocaleDateString()}`}>
-                  Account{" "}
-                  <span className="font-medium text-ink">
-                    {accountAgeYears.toFixed(1)}y
-                  </span>{" "}
-                  · since {steamCreated.getFullYear()}
-                </span>
-              )}
-              {steamExtras?.friendCode && (
-                <span>
-                  Friend code{" "}
-                  <span className="font-mono text-xs text-ink">
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-extrabold leading-tight sm:text-3xl">
+                {player.personaName || player.steamId64}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {player.countryCode && (
+                  <span className="pill bg-panel text-muted">
+                    {flag(player.countryCode)} {player.countryCode}
+                  </span>
+                )}
+                {steamCreated && accountAgeYears != null && (
+                  <span
+                    className="pill bg-panel text-muted"
+                    title={`Steam account created ${steamCreated.toLocaleDateString()}`}
+                  >
+                    {accountAgeYears.toFixed(1)}y on Steam
+                  </span>
+                )}
+                {steamExtras != null && steamExtras.steamLevel > 0 && (
+                  <span className="pill bg-panel text-muted">
+                    Steam lvl {steamExtras.steamLevel}
+                  </span>
+                )}
+                {steamExtras != null && steamExtras.friends > 0 && (
+                  <span className="pill bg-panel text-muted">
+                    {steamExtras.friends.toLocaleString("en-US")} friends
+                  </span>
+                )}
+                {steamExtras?.friendCode && (
+                  <span className="pill bg-panel font-mono text-muted">
                     {steamExtras.friendCode}
                   </span>
-                </span>
-              )}
-              {steamExtras != null && steamExtras.friends > 0 && (
-                <span>
-                  <span className="font-medium text-ink">
-                    {steamExtras.friends.toLocaleString("en-US")}
-                  </span>{" "}
-                  friends
-                </span>
-              )}
-              {steamExtras != null && steamExtras.steamLevel > 0 && (
-                <span>
-                  Steam{" "}
-                  <span className="font-medium text-ink">
-                    lvl {steamExtras.steamLevel}
-                  </span>
-                </span>
-              )}
-              {player.profileUrl && (
-                <a
-                  href={player.profileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="link-muted underline-offset-2 hover:underline"
-                >
-                  View on Steam ↗
-                </a>
-              )}
+                )}
+                {player.profileUrl && (
+                  <a
+                    href={player.profileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="pill bg-panel text-muted transition hover:text-ink"
+                  >
+                    Steam ↗
+                  </a>
+                )}
+              </div>
+              <div className="mt-1.5 font-mono text-[11px] text-faint">
+                {player.steamId64}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 sm:flex-col sm:items-end">
+            {hasData && <RatingRing rating={career.rating} />}
+            <div className="flex gap-2">
+              <ShareButton label="Share" />
+              <Link
+                href={`/compare?a=${player.steamId64}`}
+                className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+              >
+                Compare
+              </Link>
             </div>
           </div>
         </div>
-
-        {hasData && <RatingRing rating={career.rating} />}
       </section>
-
-      <div className="flex flex-wrap gap-2">
-        <ShareButton label="Share profile" />
-        <Link
-          href={`/compare?a=${player.steamId64}`}
-          className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
-        >
-          Compare
-        </Link>
-      </div>
 
       <RankStrip leetify={leetify} faceit={faceit} />
 
@@ -297,9 +319,7 @@ export function ProfileView({
 
           {/* Utility & impact */}
           <section>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-              Utility &amp; impact
-            </h2>
+            <SectionTitle>Utility &amp; impact</SectionTitle>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <StatCard
                 label="Kills / round"
@@ -330,25 +350,19 @@ export function ProfileView({
           {/* Recent matches + weapons */}
           <section className="grid gap-5 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-                Recent matches
-              </h2>
+              <SectionTitle>Recent matches</SectionTitle>
               <RecentMatches matches={matches} />
             </div>
             <div className="space-y-5">
               {maps.length > 0 && (
                 <div>
-                  <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-                    Maps
-                  </h2>
+                  <SectionTitle>Maps</SectionTitle>
                   <MapStats maps={maps} />
                 </div>
               )}
               {weapons.length > 0 && (
                 <div>
-                  <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-                    Top weapons
-                  </h2>
+                  <SectionTitle>Top weapons</SectionTitle>
                   <WeaponStats weapons={weapons} />
                 </div>
               )}
