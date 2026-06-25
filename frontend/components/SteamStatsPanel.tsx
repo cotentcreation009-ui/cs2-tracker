@@ -1,5 +1,5 @@
 import type { SteamGameStats } from "@/lib/types";
-import { fmt, tierColor } from "@/lib/format";
+import { fmt, mapLabel, tierColor } from "@/lib/format";
 
 const WEAPON_LABELS: Record<string, string> = {
   ak47: "AK-47",
@@ -95,6 +95,42 @@ export function SteamStatsPanel({ data }: { data: SteamGameStats }) {
     .sort((a, b) => b.kills - a.kills)
     .slice(0, 8);
 
+  // Most-recent official match snapshot (last_match_* family).
+  const lm = {
+    kills: n("last_match_kills"),
+    deaths: n("last_match_deaths"),
+    mvps: n("last_match_mvps"),
+    damage: n("last_match_damage"),
+    money: n("last_match_money_spent"),
+    rounds: n("last_match_rounds") || n("last_match_t_wins") + n("last_match_ct_wins"),
+  };
+  const lmKd = lm.deaths ? lm.kills / lm.deaths : lm.kills;
+  const hasLastMatch = lm.kills > 0 || lm.deaths > 0 || lm.damage > 0;
+
+  // Lifetime wins per map (total_wins_map_*).
+  const perMapWins = Object.keys(s)
+    .filter((k) => k.startsWith("total_wins_map_"))
+    .map((k) => ({ map: k.slice("total_wins_map_".length), wins: s[k] }))
+    .filter((m) => m.wins > 0)
+    .sort((a, b) => b.wins - a.wins)
+    .slice(0, 8);
+
+  // Fun lifetime totals we already have but never showed.
+  const extras = [
+    { label: "Bombs planted", key: "total_planted_bombs" },
+    { label: "Bombs defused", key: "total_defused_bombs" },
+    { label: "Total MVPs", key: "total_mvps" },
+    { label: "Dominations", key: "total_dominations" },
+    { label: "Revenges", key: "total_revenges" },
+    { label: "Knife kills", key: "total_kills_knife" },
+    { label: "Blinded kills", key: "total_kills_enemy_blinded" },
+    { label: "Hostages saved", key: "total_rescued_hostages" },
+    { label: "Zoomed-AWP kills", key: "total_kills_against_zoomed_sniper" },
+  ]
+    .map((e) => ({ ...e, v: n(e.key) }))
+    .filter((e) => e.v > 0);
+  const moneyEarned = n("total_money_earned");
+
   if (kills === 0) return null;
 
   return (
@@ -161,6 +197,51 @@ export function SteamStatsPanel({ data }: { data: SteamGameStats }) {
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+      )}
+
+      {hasLastMatch && (
+        <div className="mt-4">
+          <div className="stat-label mb-2">Last official match</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <Mini label="Kills" value={fmt(lm.kills)} />
+            <Mini label="Deaths" value={fmt(lm.deaths)} />
+            <Mini
+              label="K/D"
+              value={lmKd.toFixed(2)}
+              valueClass={tierColor(lmKd, 1.1, 0.95)}
+            />
+            <Mini label="MVPs" value={fmt(lm.mvps)} />
+            <Mini label="Damage" value={fmt(lm.damage)} />
+            {lm.money > 0 && (
+              <Mini label="Money spent" value={`$${fmt(lm.money)}`} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {perMapWins.length > 0 && (
+        <div className="mt-4">
+          <div className="stat-label mb-2">Map wins (lifetime)</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {perMapWins.map((m) => (
+              <Mini key={m.map} label={mapLabel(m.map)} value={fmt(m.wins)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(extras.length > 0 || moneyEarned > 0) && (
+        <div className="mt-4">
+          <div className="stat-label mb-2">Lifetime extras</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {extras.map((e) => (
+              <Mini key={e.key} label={e.label} value={fmt(e.v)} />
+            ))}
+            {moneyEarned > 0 && (
+              <Mini label="Money earned" value={`$${fmt(moneyEarned)}`} />
+            )}
           </div>
         </div>
       )}
