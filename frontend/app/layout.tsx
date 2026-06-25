@@ -3,6 +3,10 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
+import {
+  CookieConsent,
+  CookieSettingsButton,
+} from "@/components/CookieConsent";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
@@ -53,11 +57,24 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <main className="mx-auto max-w-6xl px-4 pb-24 pt-6">{children}</main>
 
         <footer className="border-t border-line">
-          <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-faint">
-            CS2 Tracker · open-source analytics for Counter-Strike 2 · not
-            affiliated with Valve.
+          <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-faint sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              CS2 Tracker · independent, open-source analytics for Counter-Strike
+              2 · not affiliated with Valve, Steam, Leetify or FACEIT.
+            </span>
+            <span className="flex items-center gap-3">
+              <Link href="/privacy" className="hover:text-muted">
+                Privacy
+              </Link>
+              <Link href="/terms" className="hover:text-muted">
+                Terms
+              </Link>
+              <CookieSettingsButton />
+            </span>
           </div>
         </footer>
+
+        <CookieConsent />
       </body>
     </html>
   );
