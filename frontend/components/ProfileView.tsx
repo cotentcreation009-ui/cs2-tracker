@@ -29,6 +29,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { RecordRecent } from "@/components/RecordRecent";
 import { SteamStatsPanel } from "@/components/SteamStatsPanel";
 import { CrossSource } from "@/components/CrossSource";
+import { CheatMeter } from "@/components/CheatMeter";
 import Link from "next/link";
 import {
   flag,
@@ -258,6 +259,20 @@ export function ProfileView({
         faceit={faceit}
         steamStats={steamStats}
       />
+
+      {leetify && (
+        <CheatMeter
+          player={player}
+          leetify={leetify}
+          faceit={faceit}
+          steamStats={steamStats}
+          generatedOn={new Date().toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })}
+        />
+      )}
 
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
         <MapStrength matches={leetify.recent_matches} />
