@@ -226,6 +226,8 @@ export interface SteamExtras {
   friendCode: string; // CS2 in-game friend code, e.g. "ADWZF-L9AL"
   friends: number; // 0 when the friends list is private / no key
   steamLevel: number; // 0 when hidden / no key
+  personaState?: number; // -1 unknown, 0 offline, >0 online/away/busy/snooze
+  visibility?: number; // 0 unknown, 1 private, 3 public
 }
 
 export interface IngestJob {

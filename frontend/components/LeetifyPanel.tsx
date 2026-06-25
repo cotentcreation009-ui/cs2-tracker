@@ -1,5 +1,6 @@
 import type { LeetifyProfile } from "@/lib/types";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
+import { RatingRadar } from "@/components/RatingRadar";
 import { tierColor } from "@/lib/format";
 
 function Bar({ label, value }: { label: string; value: number }) {
@@ -145,11 +146,14 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         )}
       </div>
 
-      {/* skill ratings (0-100) */}
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <Bar label="Aim" value={p.rating.aim} />
-        <Bar label="Positioning" value={p.rating.positioning} />
-        <Bar label="Utility" value={p.rating.utility} />
+      {/* skill profile radar + the precise 0-100 bars */}
+      <div className="mt-5 grid items-center gap-4 sm:grid-cols-[240px_1fr]">
+        <RatingRadar rating={p.rating} />
+        <div className="grid gap-3">
+          <Bar label="Aim" value={p.rating.aim} />
+          <Bar label="Positioning" value={p.rating.positioning} />
+          <Bar label="Utility" value={p.rating.utility} />
+        </div>
       </div>
 
       {/* impact ratings (centred near 0) */}

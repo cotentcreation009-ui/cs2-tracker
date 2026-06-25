@@ -339,17 +339,20 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 	out, _, err := cachedExternal(s, r.Context(), cache.SteamExtrasKey(id),
 		func() (map[string]any, error) {
 			o := map[string]any{
-				"steamId64":  strconv.FormatUint(id, 10),
-				"friendCode": steam.FriendCode(id),
-				"friends":    0,
-				"steamLevel": 0,
+				"steamId64":    strconv.FormatUint(id, 10),
+				"friendCode":   steam.FriendCode(id),
+				"friends":      0,
+				"steamLevel":   0,
+				"personaState": -1, // -1 = unknown; 0 = offline, >0 = online/away/busy
+				"visibility":   0,  // 0 = unknown; 1 = private, 3 = public
 			}
 			if s.steam.HasKey() {
 				// Independent calls — run them concurrently (write to locals to
 				// avoid a concurrent map write, then assign).
 				var wg sync.WaitGroup
 				var friends, level int
-				wg.Add(2)
+				var personaState, visibility = -1, 0
+				wg.Add(3)
 				go func() {
 					defer wg.Done()
 					if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
@@ -362,9 +365,18 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 						level = lvl
 					}
 				}()
+				go func() {
+					defer wg.Done()
+					if sums, e := s.steam.GetPlayerSummaries(r.Context(), id); e == nil && len(sums) > 0 {
+						personaState = sums[0].PersonaState
+						visibility = sums[0].CommunityVisibilityState
+					}
+				}()
 				wg.Wait()
 				o["friends"] = friends
 				o["steamLevel"] = level
+				o["personaState"] = personaState
+				o["visibility"] = visibility
 			}
 			return o, nil
 		})

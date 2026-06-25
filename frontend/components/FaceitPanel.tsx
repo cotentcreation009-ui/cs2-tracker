@@ -40,6 +40,9 @@ export function FaceitPanel({ profile: p }: { profile: FaceitProfile }) {
               Level {p.skillLevel}
             </span>
           )}
+          {p.region && (
+            <span className="pill bg-panel text-muted">{p.region}</span>
+          )}
         </div>
         {p.faceitUrl && (
           <a

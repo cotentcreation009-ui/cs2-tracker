@@ -13,8 +13,9 @@ import { StatCard } from "@/components/StatCard";
 import { RatingRing } from "@/components/RatingRing";
 import { RecentMatches } from "@/components/RecentMatches";
 import { RecentForm } from "@/components/RecentForm";
-import { RatingTrend } from "@/components/RatingTrend";
-import { MetricTrends } from "@/components/MetricTrends";
+import { ParsedTrendChart } from "@/components/ParsedTrendChart";
+import { LiveTrendChart } from "@/components/LiveTrendChart";
+import { MultiKillBar } from "@/components/MultiKillBar";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
@@ -23,6 +24,7 @@ import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
 import { PlayerSummary } from "@/components/PlayerSummary";
 import { LiveForm } from "@/components/LiveForm";
+import { LeetifyInsights } from "@/components/LeetifyInsights";
 import { ShareButton } from "@/components/ShareButton";
 import { RecordRecent } from "@/components/RecordRecent";
 import { SteamStatsPanel } from "@/components/SteamStatsPanel";
@@ -35,6 +37,15 @@ import {
   ratingColor,
   tierColor,
 } from "@/lib/format";
+
+const PERSONA: Record<number, string> = {
+  1: "Online",
+  2: "Busy",
+  3: "Away",
+  4: "Snooze",
+  5: "Online",
+  6: "Online",
+};
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -66,7 +77,6 @@ export function ProfileView({
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
-  const multiKillRounds = career.k3 + career.k4 + career.k5;
 
   // Steam account age (public profiles only).
   const steamCreated = player.steamCreatedAt
@@ -139,6 +149,16 @@ export function ProfileView({
                 {player.personaName || player.steamId64}
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {steamExtras?.personaState != null &&
+                  steamExtras.personaState > 0 && (
+                    <span className="pill bg-good/15 text-good">
+                      <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                      {PERSONA[steamExtras.personaState] || "Online"}
+                    </span>
+                  )}
+                {steamExtras?.visibility === 1 && (
+                  <span className="pill bg-mid/15 text-mid">Private profile</span>
+                )}
                 {player.countryCode && (
                   <span className="pill bg-panel text-muted">
                     {flag(player.countryCode)} {player.countryCode}
@@ -205,6 +225,14 @@ export function ProfileView({
 
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
         <LiveForm matches={leetify.recent_matches} />
+      )}
+
+      {leetify?.recent_matches && leetify.recent_matches.length >= 4 && (
+        <LeetifyInsights matches={leetify.recent_matches} />
+      )}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 1 && (
+        <LiveTrendChart matches={leetify.recent_matches} />
       )}
 
       {leetify && <LeetifyPanel profile={leetify} />}
@@ -284,17 +312,12 @@ export function ProfileView({
             />
           </section>
 
-          {matches.length > 0 && (
-            <section className="grid gap-3 lg:grid-cols-2">
-              <RecentForm matches={matches} />
-              <RatingTrend matches={matches} />
-            </section>
-          )}
+          {matches.length > 0 && <RecentForm matches={matches} />}
 
-          {matches.length > 1 && <MetricTrends matches={matches} />}
+          {matches.length > 1 && <ParsedTrendChart matches={matches} />}
 
           {/* Secondary stats */}
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
             <StatCard
               label="Opening duels"
@@ -308,7 +331,6 @@ export function ProfileView({
               valueClass={tierColor(clutchWinPct, 50, 30)}
               sub={`${fmt(career.clutchesWon)}/${fmt(clutchTotal)}`}
             />
-            <StatCard label="Multi-kill rounds" value={fmt(multiKillRounds)} />
             <StatCard label="Assists" value={fmt(career.assists)} />
             <StatCard
               label="Career rating"
@@ -316,6 +338,8 @@ export function ProfileView({
               valueClass={ratingColor(career.rating)}
             />
           </section>
+
+          <MultiKillBar career={career} />
 
           {/* Utility & impact */}
           <section>
