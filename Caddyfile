@@ -1,0 +1,25 @@
+# Caddy reverse proxy for the single-box prod deploy.
+# TLS is terminated here with a Cloudflare ORIGIN certificate (so Cloudflare's
+# SSL/TLS mode can be "Full (strict)" with the orange-cloud proxy on). Browsers
+# only ever see Cloudflare's edge cert; this cert secures Cloudflare <-> origin.
+# DOMAIN is injected from the environment by docker-compose.prod.yml.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Cloudflare Origin Certificate (generated in the Cloudflare dashboard and
+	# saved next to docker-compose.prod.yml as origin.pem / origin.key).
+	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+
+	# Everything goes to the Next.js frontend; it reaches the Go backend over the
+	# internal Docker network. The backend is never exposed publicly.
+	reverse_proxy frontend:3000
+}
