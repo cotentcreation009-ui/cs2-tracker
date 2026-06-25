@@ -1,32 +1,35 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ *
- * Design tokens. Tailwind v4 turns these into utilities, so e.g.
- * --color-panel becomes bg-panel / text-panel / border-panel.
+ * StatRun "Holo" theme — deep-space / holographic command console.
+ * Tailwind v4 turns these tokens into utilities (bg-panel, text-ink, …).
  * ------------------------------------------------------------------ */
 @theme {
-  --color-bg: #0a0c12;
-  --color-panel: #11151f;
-  --color-panel2: #161b27;
-  --color-line: #222a3a;
-  --color-ink: #e9ecf4;
-  --color-muted: #8b93a8;
-  --color-faint: #5a6378;
-  --color-brand: #5b9dff;
-  --color-brand2: #18d6b0;
+  --color-bg: #04060e;
+  --color-panel: #0a1222;
+  --color-panel2: #0e1730;
+  --color-panel3: #142046;
+  --color-line: #1d3a66;
+  --color-line2: #2f5a9c;
+  --color-ink: #e3f2ff;
+  --color-muted: #93b6d8;
+  --color-faint: #5a7aa3;
+  --color-brand: #38d6ff;
+  --color-brand2: #8a7dff;
   --color-good: #46d369;
   --color-mid: #f5b942;
   --color-bad: #f5694a;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
 
-  --radius-card: 14px;
+  --radius-card: 16px;
 }
 
 html {
   color-scheme: dark;
+  scroll-behavior: smooth;
 }
 
 body {
@@ -34,45 +37,112 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  /* Subtle top glow for a bit of depth. */
+  text-rendering: optimizeLegibility;
+  /* Deep-space holographic backdrop (original Higgsfield art) + veil + scanlines */
   background-image:
-    radial-gradient(1100px 520px at 80% -10%, rgba(91, 157, 255, 0.10), transparent 60%),
-    radial-gradient(900px 500px at 0% 0%, rgba(24, 214, 176, 0.06), transparent 55%);
+    repeating-linear-gradient(0deg, rgba(56, 214, 255, 0.03) 0px, rgba(56, 214, 255, 0.03) 1px, transparent 1px, transparent 4px),
+    linear-gradient(rgba(4, 6, 14, 0.55), rgba(4, 6, 14, 0.9)),
+    url("/hero-holo.webp");
+  background-size: auto, auto, cover;
+  background-position: center, center, center top;
   background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+::selection {
+  background: rgba(56, 214, 255, 0.32);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 @layer components {
+  /* Small/dense cards: near-solid + cyan edge + glow (readable, no blur). */
   .card {
-    background-color: var(--color-panel);
-    border: 1px solid var(--color-line);
+    background-color: color-mix(in srgb, var(--color-panel) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-brand) 20%, var(--color-line));
     border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 rgba(56, 214, 255, 0.05),
+      0 14px 36px -28px rgba(56, 214, 255, 0.3);
   }
 
+  /* Showcase panels: frosted holographic glass over the space backdrop. */
   .card-2 {
-    background-color: var(--color-panel2);
-    border: 1px solid var(--color-line);
+    background-color: color-mix(in srgb, var(--color-panel2) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-brand) 28%, var(--color-line));
     border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 rgba(56, 214, 255, 0.08),
+      0 18px 46px -26px rgba(56, 214, 255, 0.4);
+    backdrop-filter: blur(4px);
+  }
+
+  /* Interactive cards: lift + cyan glow on hover. */
+  .lift {
+    transition:
+      transform 0.18s ease,
+      border-color 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-brand) 60%, var(--color-line));
+    box-shadow: 0 0 26px -6px rgba(56, 214, 255, 0.5);
   }
 
   .pill {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium;
+    border: 1px solid color-mix(in srgb, var(--color-brand) 20%, transparent);
   }
 
   .stat-label {
-    @apply text-xs font-medium uppercase tracking-wider text-muted;
+    @apply text-[11px] font-medium uppercase tracking-wider text-muted;
   }
 
   .link-muted {
     @apply text-muted transition-colors hover:text-ink;
   }
 
-  /* thin custom scrollbars */
+  .btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition;
+  }
+  .btn-primary {
+    background-image: linear-gradient(135deg, var(--color-brand), var(--color-brand2));
+    color: #04060e;
+  }
+  .btn-primary:hover {
+    filter: brightness(1.07);
+  }
+  .btn-ghost {
+    border: 1px solid var(--color-line);
+    background-color: var(--color-panel2);
+    color: var(--color-ink);
+  }
+  .btn-ghost:hover {
+    border-color: color-mix(in srgb, var(--color-brand) 50%, var(--color-line));
+  }
+
+  .gradient-text {
+    background-image: linear-gradient(135deg, var(--color-brand), var(--color-brand2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
   .scroll-slim::-webkit-scrollbar {
     height: 8px;
     width: 8px;
   }
   .scroll-slim::-webkit-scrollbar-thumb {
-    background: var(--color-line);
+    background: var(--color-line2);
     border-radius: 999px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    background: var(--color-faint);
   }
 }

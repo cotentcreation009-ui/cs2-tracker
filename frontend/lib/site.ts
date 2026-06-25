@@ -3,7 +3,7 @@
 // ⚠️ EDIT THESE BEFORE LAUNCH, and have a lawyer review the page wording — the
 // content in app/privacy and app/terms is a solid template tailored to what this
 // site does, not legal advice.
-export const SITE_NAME = "CS2 Tracker";
+export const SITE_NAME = "StatRun";
 export const SITE_DOMAIN = "steamcommunity.run";
 
 // Real, monitored inbox for privacy / data-removal / legal / ad-network (AdSense)

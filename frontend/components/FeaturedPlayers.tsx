@@ -75,7 +75,7 @@ export async function FeaturedPlayers() {
             <Link
               key={id}
               href={`/profiles/${id}`}
-              className="card flex items-center gap-3 px-4 py-3 transition hover:border-brand/60"
+              className="card lift flex items-center gap-3 px-4 py-3"
             >
               {profile.player.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element

@@ -14,11 +14,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { a, b } = await searchParams;
   if (a && b) {
-    const title = `${a} vs ${b} — CS2 Tracker`;
+    const title = `${a} vs ${b} — StatRun`;
     const description = `Head-to-head CS2 comparison of ${a} and ${b}: Leetify rating, win rate, aim, utility and more.`;
     return { title, description, openGraph: { title, description }, twitter: { card: "summary" } };
   }
-  return { title: "Compare players — CS2 Tracker" };
+  return { title: "Compare players — StatRun" };
 }
 
 export default async function ComparePage({

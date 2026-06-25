@@ -27,7 +27,7 @@ export async function generateMetadata({
   try {
     return profileMetadata(await getProfile(steamid));
   } catch {
-    return { title: "Player — CS2 Tracker" };
+    return { title: "Player — StatRun" };
   }
 }
 

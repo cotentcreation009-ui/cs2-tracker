@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "CS2 Tracker",
-    short_name: "CS2 Tracker",
+    name: "StatRun",
+    short_name: "StatRun",
     description:
       "Look up any CS2 player: Leetify rating, FACEIT level, ranks and Steam identity.",
     start_url: "/",
