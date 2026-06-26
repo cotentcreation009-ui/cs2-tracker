@@ -46,6 +46,16 @@ type Config struct {
 	JobTimeout        time.Duration // max time a single parse job may run
 	WorkerConcurrency int           // number of jobs a single worker parses in parallel
 
+	// Demo direct-upload object storage (GCS). When DemoGCSBucket is set, the API
+	// signs direct-to-bucket upload URLs so the browser PUTs a .dem straight to
+	// the bucket (bypassing our servers and Cloudflare's body-size limit) and the
+	// worker pulls it back to parse. When unset, demos fall back to the
+	// through-server multipart upload (capped at demoMaxUploadBytes).
+	DemoGCSBucket      string        // bucket name; empty disables direct upload
+	DemoGCSCredentials string        // path to a service-account JSON key (empty = Application Default Credentials)
+	DemoMaxBytes       int64         // hard cap for a single direct (GCS) upload
+	DemoURLTTL         time.Duration // signed upload-URL lifetime
+
 	// Caching
 	CacheTTL         time.Duration // TTL for cached aggregate payloads in redis
 	ExternalCacheTTL time.Duration // TTL for cached live third-party payloads (Leetify/FACEIT/steam-extras)
@@ -84,6 +94,11 @@ func Load() (*Config, error) {
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),
 		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
+
+		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
+		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),
+		DemoMaxBytes:       int64(getInt("DEMO_MAX_MB", 600)) << 20,
+		DemoURLTTL:         getDuration("DEMO_URL_TTL", 15*time.Minute),
 		CacheTTL:          getDuration("CACHE_TTL", 5*time.Minute),
 		ExternalCacheTTL:  getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
 		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),

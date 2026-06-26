@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cs2tracker/server/internal/api"
+	"github.com/cs2tracker/server/internal/blob"
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
@@ -84,6 +85,24 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := api.NewServer(cfg, database, steamClient, leetifyClient, faceitClient, q, c, log)
+
+	// Direct demo upload (object storage) is optional: when DEMO_GCS_BUCKET is
+	// unset, the demo flow falls back to through-server multipart upload.
+	if gcs, err := blob.NewGCS(ctx, cfg.DemoGCSBucket, cfg.DemoGCSCredentials); err != nil {
+		log.Warn("object storage unavailable; demo direct-upload disabled", "err", err)
+	} else if gcs != nil {
+		srv.SetBlob(gcs)
+		defer gcs.Close()
+		// Fail-fast: V4 signing needs a private key (key file) or the SA's
+		// Token Creator role (keyless). A startup sign proves it works instead of
+		// 500ing on the first user upload.
+		if _, err := gcs.SignPutURL(ctx, "preflight/check.dem", "application/octet-stream", time.Minute); err != nil {
+			log.Error("demo direct-upload: URL signing failed — set DEMO_GCS_CREDENTIALS to a key file, or grant the service account roles/iam.serviceAccountTokenCreator", "err", err)
+		} else {
+			log.Info("demo direct-upload enabled", "bucket", cfg.DemoGCSBucket)
+		}
+	}
+
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

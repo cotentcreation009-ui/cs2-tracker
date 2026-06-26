@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
@@ -99,6 +100,20 @@ func (f *fakeStore) GetJob(_ context.Context, id string) (models.IngestJob, erro
 	}
 	return models.IngestJob{}, db.ErrNotFound
 }
+
+func (f *fakeStore) CreateDemoJob(context.Context, string, string, string, int64) error { return nil }
+func (f *fakeStore) CreateDemoJobIfAbsent(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+func (f *fakeStore) SetDemoStatus(context.Context, string, string, string) error { return nil }
+func (f *fakeStore) GetDemoJob(context.Context, string) (db.DemoJobStatus, error) {
+	return db.DemoJobStatus{}, db.ErrNotFound
+}
+func (f *fakeStore) GetDemoData(context.Context, string) ([]byte, string, error) {
+	return nil, "", db.ErrNotFound
+}
+func (f *fakeStore) CountDemoJobsSince(context.Context, time.Time) (int, error)             { return 0, nil }
+func (f *fakeStore) CountDemoJobsByIPSince(context.Context, string, time.Time) (int, error) { return 0, nil }
 
 func routerWith(store Store) http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}

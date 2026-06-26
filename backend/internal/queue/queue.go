@@ -21,17 +21,23 @@ import (
 type JobType string
 
 const (
-	// JobParseDemo asks a worker to parse a demo and persist the results.
+	// JobParseDemo asks a worker to parse a demo and persist the trusted
+	// career/match results (the player-stats pipeline).
 	JobParseDemo JobType = "parse_demo"
+	// JobParseReplay asks a worker to parse a user-uploaded demo into the
+	// normalized replay JSON (positions/events) for the private demo-analysis
+	// library. Result goes to demo_results, never to career/leaderboard data.
+	JobParseReplay JobType = "parse_replay"
 )
 
 // Job is a unit of work on the queue.
 type Job struct {
 	ID         string    `json:"id"`
 	Type       JobType   `json:"type"`
-	Source     string    `json:"source,omitempty"`    // local | valve | faceit
+	Source     string    `json:"source,omitempty"`    // local | valve | faceit | gcs | upload
 	DemoPath   string    `json:"demoPath,omitempty"`  // local file path to a .dem
 	DemoURL    string    `json:"demoUrl,omitempty"`   // remote .dem(.bz2) URL (e.g. Valve GOTV)
+	ObjectKey  string    `json:"objectKey,omitempty"` // object-storage key (Source=="gcs")
 	ShareCode  string    `json:"shareCode,omitempty"` // match-sharing code, if known
 	EnqueuedAt time.Time `json:"enqueuedAt"`
 }

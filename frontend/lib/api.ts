@@ -32,6 +32,21 @@ export function internalHeaders(): Record<string, string> {
   return INTERNAL_TOKEN ? { "X-Internal-Token": INTERNAL_TOKEN } : {};
 }
 
+// trustedClientIp extracts the real client IP from a header set by our own edge
+// (Cloudflare's cf-connecting-ip), NOT the client-controllable X-Forwarded-For —
+// so demo quotas can't be reset by spoofing XFF. Falls back to x-real-ip / the
+// first XFF hop for non-CF deploys, and "" locally (backend then uses the
+// connection IP). Forward the result as X-Real-IP, which chi's RealIP prefers.
+export function trustedClientIp(req: Request): string {
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() ?? "";
+  return "";
+}
+
 /** Raised when the backend returns a non-2xx response we want to handle. */
 export class ApiError extends Error {
   constructor(

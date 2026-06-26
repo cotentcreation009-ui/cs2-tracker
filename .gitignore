@@ -37,3 +37,6 @@ Thumbs.db
 *.swp
 # .vscode/ is committed (shared tasks/launch/extensions); ignore only local user files
 .vscode/*.log
+
+# local build artifacts (parsedemo.exe etc.)
+/bin/
