@@ -56,10 +56,12 @@ services:
       # Locks the backend to the frontend: every route except /api/health requires
       # this token. Set the SAME value on the frontend below. (openssl rand -hex 32)
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in .env}
-      # Shared scratch dir for the multipart fallback: the API streams an upload
-      # to disk here and the worker (same volume) reads it. The GCS direct-upload
-      # path doesn't use this — the browser uploads straight to the bucket.
-      DEMO_WORK_DIR: /demos
+      # Scratch dir for demo parsing — a container-local, writable path. The
+      # service runs as a non-root user that can't write a root-owned named
+      # volume, so we keep this on the container filesystem. The GCS path
+      # downloads to the worker's own dir; the multipart fallback (only used when
+      # GCS is unset) would need a shared writable volume.
+      DEMO_WORK_DIR: /tmp/cs2demos
       # Direct (object-storage) upload. Set DEMO_GCS_BUCKET in .env to enable it;
       # signing uses the VM's attached service account (keyless) unless
       # DEMO_GCS_CREDENTIALS points at a mounted JSON key. See docs/demo-parsing.md.
@@ -67,8 +69,6 @@ services:
       DEMO_GCS_CREDENTIALS: ${DEMO_GCS_CREDENTIALS:-}
       DEMO_MAX_MB: ${DEMO_MAX_MB:-600}
       DEMO_URL_TTL: ${DEMO_URL_TTL:-15m}
-    volumes:
-      - demowork:/demos
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,22 +91,23 @@ services:
     build: ./backend
     command: ["worker"]
     restart: unless-stopped
-    mem_limit: 2g
+    # 8GB VM: give a single parse generous headroom (a big demo can need a few
+    # GB). GOMEMLIMIT keeps Go GC'ing under the hard cap so one pathological demo
+    # can only OOM this container, never the whole box.
+    mem_limit: 5g
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-cs2}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cs2tracker}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      DEMO_WORK_DIR: /demos
+      DEMO_WORK_DIR: /tmp/cs2demos
       DELETE_RAW_DEMO: "true"
       WORKER_CONCURRENCY: "1"
       JOB_TIMEOUT: 8m
-      GOMEMLIMIT: 1800MiB
+      GOMEMLIMIT: 4096MiB
       # GCS direct-upload: the worker downloads the uploaded object to parse it,
       # then deletes it. Same bucket/creds as the backend.
       DEMO_GCS_BUCKET: ${DEMO_GCS_BUCKET:-}
       DEMO_GCS_CREDENTIALS: ${DEMO_GCS_CREDENTIALS:-}
       DEMO_MAX_MB: ${DEMO_MAX_MB:-600}
-    volumes:
-      - demowork:/demos
     depends_on:
       postgres:
         condition: service_healthy
@@ -144,6 +145,5 @@ services:
 
 volumes:
   pgdata:
-  demowork:
   caddy_data:
   caddy_config:
