@@ -6,13 +6,19 @@
 package worker
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/cs2tracker/server/internal/blob"
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/demosource"
 	"github.com/cs2tracker/server/internal/models"
@@ -29,7 +35,13 @@ type Dequeuer interface {
 type Store interface {
 	InsertParsedMatch(ctx context.Context, pm *models.ParsedMatch) (int64, error)
 	SetJobStatus(ctx context.Context, id, status string, matchID *int64, errMsg string) error
+	// Demo-analysis (user-uploaded replay) results.
+	SetDemoStatus(ctx context.Context, id, status, errMsg string) error
+	SaveDemoResult(ctx context.Context, id, mapName string, gzipData []byte) error
 }
+
+// ReplayParseFunc extracts the normalized replay model from a demo reader.
+type ReplayParseFunc func(r io.Reader) (*parser.ReplayMatch, error)
 
 // Resolver turns a job into a local demo path on disk.
 type Resolver func(ctx context.Context, job queue.Job, workDir string) (demosource.Resolved, error)
@@ -44,6 +56,9 @@ type Worker struct {
 	Cache         *cache.Cache // may be nil; cache invalidation is best-effort
 	Resolve       Resolver
 	Parse         ParseFunc
+	ReplayParse   ReplayParseFunc
+	Blob          blob.Store // nil unless object-storage (GCS) demo upload is configured
+	MaxDemoBytes  int64      // reject GCS objects larger than this (<=0 = unbounded)
 	WorkDir       string
 	DeleteRawDemo bool
 	JobTimeout    time.Duration
@@ -57,6 +72,7 @@ func New(store Store, c *cache.Cache, workDir string, deleteRaw bool, jobTimeout
 		Cache:         c,
 		Resolve:       demosource.Resolve,
 		Parse:         parser.ParseFile,
+		ReplayParse:   parser.ParseReplay,
 		WorkDir:       workDir,
 		DeleteRawDemo: deleteRaw,
 		JobTimeout:    jobTimeout,
@@ -109,20 +125,106 @@ func (w *Worker) Run(ctx context.Context, q Dequeuer, concurrency int) {
 // in-flight jobs drain.
 func (w *Worker) Process(job *queue.Job) {
 	log := w.Log.With("jobId", job.ID, "type", job.Type)
-	if job.Type != queue.JobParseDemo {
+	switch job.Type {
+	case queue.JobParseDemo:
+		w.setStatus(job.ID, models.JobRunning, nil, "")
+		matchID, err := w.runParse(job, log)
+		if err != nil {
+			log.Error("job failed", "err", err)
+			w.setStatus(job.ID, models.JobFailed, nil, err.Error())
+			return
+		}
+		w.setStatus(job.ID, models.JobDone, &matchID, "")
+	case queue.JobParseReplay:
+		w.setDemoStatus(job.ID, "running", "")
+		if err := w.runReplay(job, log); err != nil {
+			log.Error("replay job failed", "err", err)
+			w.setDemoStatus(job.ID, "failed", err.Error())
+			return
+		}
+		// runReplay marks the result done on success.
+	default:
 		log.Warn("unknown job type, skipping")
 		w.setStatus(job.ID, models.JobFailed, nil, "unknown job type")
-		return
+	}
+}
+
+// runReplay parses a user-uploaded demo into the normalized replay model, gzips
+// it, and stores it. The raw .dem is always deleted afterward.
+func (w *Worker) runReplay(job *queue.Job, log *slog.Logger) error {
+	jobCtx, cancel := context.WithTimeout(context.Background(), w.JobTimeout)
+	defer cancel()
+
+	// Resolve the demo to a local file. A "gcs" job was uploaded straight to
+	// object storage by the browser, so we pull it down here (and delete it from
+	// the bucket after); other sources go through the normal resolver.
+	var path string
+	if job.Source == "gcs" {
+		if w.Blob == nil {
+			return fmt.Errorf("gcs job but object storage is not configured")
+		}
+		path = filepath.Join(w.WorkDir, job.ID+".dem")
+		if _, err := w.Blob.Download(jobCtx, job.ObjectKey, path, w.MaxDemoBytes); err != nil {
+			return fmt.Errorf("download demo from object storage: %w", err)
+		}
+		defer func() {
+			if err := w.Blob.Delete(context.Background(), job.ObjectKey); err != nil {
+				log.Warn("could not delete object-storage demo", "key", job.ObjectKey, "err", err)
+			}
+		}()
+	} else {
+		res, err := w.Resolve(jobCtx, *job, w.WorkDir)
+		if err != nil {
+			return fmt.Errorf("resolve demo: %w", err)
+		}
+		path = res.Path
+	}
+	defer func() {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Warn("could not delete uploaded demo", "path", path, "err", err)
+		}
+	}()
+
+	started := time.Now()
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open demo: %w", err)
+	}
+	defer f.Close()
+
+	rm, err := w.ReplayParse(f)
+	if err != nil {
+		return fmt.Errorf("parse replay: %w", err)
 	}
 
-	w.setStatus(job.ID, models.JobRunning, nil, "")
-	matchID, err := w.runParse(job, log)
+	jsonB, err := json.Marshal(rm)
 	if err != nil {
-		log.Error("job failed", "err", err)
-		w.setStatus(job.ID, models.JobFailed, nil, err.Error())
-		return
+		return fmt.Errorf("marshal replay: %w", err)
 	}
-	w.setStatus(job.ID, models.JobDone, &matchID, "")
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(jsonB); err != nil {
+		return fmt.Errorf("gzip: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("gzip close: %w", err)
+	}
+
+	if err := w.Store.SaveDemoResult(jobCtx, job.ID, rm.Map, buf.Bytes()); err != nil {
+		return fmt.Errorf("save result: %w", err)
+	}
+	log.Info("demo replay parsed",
+		"map", rm.Map, "rounds", rm.Rounds, "players", len(rm.Players),
+		"jsonBytes", len(jsonB), "gzipBytes", buf.Len(), "took", time.Since(started).String())
+	return nil
+}
+
+func (w *Worker) setDemoStatus(id, status, errMsg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := w.Store.SetDemoStatus(ctx, id, status, errMsg); err != nil {
+		w.Log.Warn("could not update demo status", "jobId", id, "err", err)
+	}
 }
 
 func (w *Worker) runParse(job *queue.Job, log *slog.Logger) (int64, error) {

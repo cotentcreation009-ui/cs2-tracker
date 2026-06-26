@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://steamcommunity.run"],
+    "method": ["PUT", "OPTIONS"],
+    "responseHeader": ["Content-Type"],
+    "maxAgeSeconds": 3600
+  }
+]

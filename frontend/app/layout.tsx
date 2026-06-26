@@ -51,6 +51,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <SearchBar />
               </div>
               <Link
+                href="/demos"
+                className="link-muted shrink-0 text-sm font-medium"
+              >
+                Demos
+              </Link>
+              <Link
                 href="/compare"
                 className="link-muted shrink-0 text-sm font-medium"
               >

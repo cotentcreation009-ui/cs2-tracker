@@ -42,6 +42,10 @@ func (f *fakeStore) SetJobStatus(_ context.Context, _ string, status string, mat
 	return nil
 }
 
+func (f *fakeStore) SetDemoStatus(context.Context, string, string, string) error { return nil }
+
+func (f *fakeStore) SaveDemoResult(context.Context, string, string, []byte) error { return nil }
+
 func (f *fakeStore) countStatus(status string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

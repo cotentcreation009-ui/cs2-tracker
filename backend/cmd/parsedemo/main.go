@@ -27,13 +27,22 @@ import (
 func main() {
 	jsonOut := flag.Bool("json", false, "print the full parsed result as JSON")
 	toDB := flag.Bool("db", false, "also persist the parsed match to Postgres (uses DATABASE_URL)")
+	replayOut := flag.Bool("replay", false, "extract positional replay data (radar/heatmap) and write <demo>.replay.json")
 	flag.Parse()
 
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: parsedemo [-json] [-db] <demo.dem>")
+		fmt.Fprintln(os.Stderr, "usage: parsedemo [-json] [-db] [-replay] <demo.dem>")
 		os.Exit(2)
 	}
 	path := flag.Arg(0)
+
+	if *replayOut {
+		if err := doReplay(path); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	fmt.Fprintf(os.Stderr, "parsing %s ...\n", path)
 	pm, err := parser.ParseFile(path)
@@ -60,6 +69,46 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "stored in database.")
 	}
+}
+
+// doReplay runs the positional extractor and writes <demo>.replay.json, plus a
+// summary so we can sanity-check coordinate/event extraction on a real demo.
+func doReplay(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	fmt.Fprintf(os.Stderr, "extracting replay from %s ...\n", path)
+	rm, err := parser.ParseReplay(f)
+	if err != nil {
+		return err
+	}
+
+	frames, kills, nades, bombs := 0, 0, 0, 0
+	for _, r := range rm.RoundData {
+		frames += len(r.Frames)
+		kills += len(r.Kills)
+		nades += len(r.Nades)
+		bombs += len(r.Bomb)
+	}
+	fmt.Printf("\nmap=%s  tickRate=%.0f  frameHz=%d  players=%d  rounds=%d\nframes=%d  kills=%d  nades=%d  bombEvents=%d\n",
+		rm.Map, rm.TickRate, rm.FrameHz, len(rm.Players), len(rm.RoundData), frames, kills, nades, bombs)
+	for _, p := range rm.Players {
+		fmt.Printf("  %-18s %-2s %d\n", truncate(p.Name, 18), p.Team, p.SteamID)
+	}
+
+	b, err := json.Marshal(rm)
+	if err != nil {
+		return err
+	}
+	out := path + ".replay.json"
+	if err := os.WriteFile(out, b, 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s (%.1f MB)\n", out, float64(len(b))/1e6)
+	return nil
 }
 
 func printScoreboard(pm *models.ParsedMatch) {

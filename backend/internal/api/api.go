@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cs2tracker/server/internal/blob"
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
@@ -47,6 +48,14 @@ type Store interface {
 	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
 	InsertJob(ctx context.Context, j models.IngestJob) error
 	GetJob(ctx context.Context, id string) (models.IngestJob, error)
+	// Demo-analysis (user-uploaded replay) results.
+	CreateDemoJob(ctx context.Context, id, clientIP, filename string, sizeBytes int64) error
+	CreateDemoJobIfAbsent(ctx context.Context, id, clientIP string) (bool, error)
+	SetDemoStatus(ctx context.Context, id, status, errMsg string) error
+	GetDemoJob(ctx context.Context, id string) (db.DemoJobStatus, error)
+	GetDemoData(ctx context.Context, id string) (data []byte, mapName string, err error)
+	CountDemoJobsSince(ctx context.Context, t time.Time) (int, error)
+	CountDemoJobsByIPSince(ctx context.Context, ip string, t time.Time) (int, error)
 	Ping(ctx context.Context) error
 }
 
@@ -59,6 +68,7 @@ type Server struct {
 	faceit  *faceit.Client
 	queue   *queue.Queue
 	cache   *cache.Cache
+	blob    blob.Store // nil when direct (object-storage) upload is not configured
 	log     *slog.Logger
 	metrics *metrics
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
@@ -81,6 +91,10 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}}
 }
 
+// SetBlob attaches an object-storage backend, enabling browser-direct demo
+// uploads. With no blob store set, the demo flow falls back to multipart upload.
+func (s *Server) SetBlob(b blob.Store) { s.blob = b }
+
 // Router builds the HTTP handler.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
@@ -88,7 +102,6 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(s.requestLogger)
-	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
@@ -103,39 +116,66 @@ func (s *Server) Router() http.Handler {
 	// spoofable via X-Forwarded-For on a directly-reachable origin, and would
 	// otherwise throttle the single frontend egress) is skipped while it is on.
 	gated := s.cfg.InternalAPISecret != ""
-	if gated {
-		r.Use(s.internalAuth)
-	}
 
-	// Prometheus metrics + the OpenAPI spec at the root.
-	r.Get("/metrics", s.handleMetrics)
-	r.Get("/openapi.yaml", s.handleOpenAPI)
+	// Prometheus metrics + the OpenAPI spec (gated when a secret is set).
+	r.Group(func(r chi.Router) {
+		if gated {
+			r.Use(s.internalAuth)
+		}
+		r.Get("/metrics", s.handleMetrics)
+		r.Get("/openapi.yaml", s.handleOpenAPI)
+	})
 
 	r.Route("/api", func(r chi.Router) {
-		if s.cfg.RateLimitRPS > 0 && !gated {
-			r.Use(newRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst).middleware)
-		}
-		r.Get("/health", s.handleHealth)
-		r.Get("/resolve", s.handleResolve)
-		r.Get("/leaderboard", s.handleLeaderboard)
-		r.Get("/search", s.handleSearch)
-
-		r.Route("/players/{steamid}", func(r chi.Router) {
-			r.Get("/", s.handleProfile)
-			r.Post("/refresh", s.handleRefresh)
-			r.Get("/matches", s.handlePlayerMatches)
-			r.Get("/weapons", s.handleWeapons)
-			r.Get("/maps", s.handleMaps)
-			r.Get("/leetify", s.handleLeetify)
-			r.Get("/faceit", s.handleFaceit)
-			r.Get("/steam-stats", s.handleSteamStats)
-			r.Get("/steam-extras", s.handleSteamExtras)
+		// Demo analysis: reached via the same-origin Next proxy (which adds the
+		// internal token and forwards the real client IP), so it stays behind the
+		// gate like everything else. It only differs in needing a long timeout for
+		// large uploads; per-IP/global quota lives in the handlers. Results are
+		// scoped to the uploader's private library and never feed shared stats.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(15 * time.Minute))
+			if gated {
+				r.Use(s.internalAuth)
+			}
+			// Direct (object-storage) upload: sign a URL, then enqueue once the
+			// browser has PUT the demo straight to the bucket. Falls back to the
+			// through-server multipart path when GCS is not configured.
+			r.Post("/demos/presign", s.handleDemoPresign)
+			r.Post("/demos/parse", s.handleDemoParse)
+			r.Post("/demos/upload", s.handleDemoUpload)
+			r.Get("/demos/{id}", s.handleDemoJob)
+			r.Get("/demos/{id}/data", s.handleDemoData)
 		})
 
-		r.Get("/matches/{id}", s.handleMatch)
-		r.Get("/matches/{id}/kills", s.handleMatchKills)
-		// Demo ingest is removed from the product; the dormant queue/job handlers
-		// are intentionally not routed so the public surface has no write/DoS path.
+		// Everything else: 30s timeout, gated behind the internal token.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(30 * time.Second))
+			if gated {
+				r.Use(s.internalAuth)
+			}
+			if s.cfg.RateLimitRPS > 0 && !gated {
+				r.Use(newRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst).middleware)
+			}
+			r.Get("/health", s.handleHealth)
+			r.Get("/resolve", s.handleResolve)
+			r.Get("/leaderboard", s.handleLeaderboard)
+			r.Get("/search", s.handleSearch)
+
+			r.Route("/players/{steamid}", func(r chi.Router) {
+				r.Get("/", s.handleProfile)
+				r.Post("/refresh", s.handleRefresh)
+				r.Get("/matches", s.handlePlayerMatches)
+				r.Get("/weapons", s.handleWeapons)
+				r.Get("/maps", s.handleMaps)
+				r.Get("/leetify", s.handleLeetify)
+				r.Get("/faceit", s.handleFaceit)
+				r.Get("/steam-stats", s.handleSteamStats)
+				r.Get("/steam-extras", s.handleSteamExtras)
+			})
+
+			r.Get("/matches/{id}", s.handleMatch)
+			r.Get("/matches/{id}/kills", s.handleMatchKills)
+		})
 	})
 
 	return r

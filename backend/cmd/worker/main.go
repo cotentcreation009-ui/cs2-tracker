@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/cs2tracker/server/internal/blob"
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
@@ -68,6 +69,17 @@ func run(log *slog.Logger) error {
 	}
 
 	w := worker.New(database, c, workDir, cfg.DeleteRawDemo, cfg.JobTimeout, log)
+
+	// Attach object storage so the worker can pull browser-direct (GCS) uploads.
+	if gcs, err := blob.NewGCS(ctx, cfg.DemoGCSBucket, cfg.DemoGCSCredentials); err != nil {
+		log.Warn("object storage unavailable; gcs demo jobs will fail", "err", err)
+	} else if gcs != nil {
+		w.Blob = gcs
+		w.MaxDemoBytes = cfg.DemoMaxBytes
+		defer gcs.Close()
+		log.Info("worker object-storage enabled", "bucket", cfg.DemoGCSBucket)
+	}
+
 	log.Info("worker started",
 		"queue", cfg.DemoQueueKey, "workDir", workDir, "concurrency", cfg.WorkerConcurrency)
 
