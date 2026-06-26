@@ -140,7 +140,12 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onFlash)
 	p.RegisterEventHandler(rc.onHE)
 
-	if err = p.ParseToEnd(); err != nil {
+	// demoinfocs can abort mid-demo on CS2 protocol drift (e.g. "unable to find
+	// existing entity N" — the demo is from a newer build than the parser fully
+	// supports). Rounds completed before that point were emitted with a
+	// consistent entity state, so salvage them as a partial result instead of
+	// failing the whole demo. Only hard-fail when nothing usable came out.
+	if err = p.ParseToEnd(); err != nil && rc.roundCount == 0 {
 		return nil, fmt.Errorf("parser: replay parse: %w", err)
 	}
 
