@@ -57,7 +57,7 @@ export interface SusFactor {
   detail: string;
   score: number;
   band: Band;
-  weight: number;
+  primary?: boolean; // the discriminating signal (cross-platform gap)
 }
 
 export interface MetricCard {
@@ -160,55 +160,78 @@ export function computeSuspicion(
     gap = offAvg - faceitQ.avgRating;
   }
 
-  // --- consistency (low rating variance over recent matches) ---
-  const ratings = last.map((m) => m.leetify_rating);
-  let consistencyPct = 0;
-  if (ratings.length >= 4) {
-    const mean = ratings.reduce((a, v) => a + v, 0) / ratings.length;
-    const variance =
-      ratings.reduce((a, v) => a + (v - mean) ** 2, 0) / ratings.length;
-    const sd = Math.sqrt(variance);
-    consistencyPct = clamp(100 - sd * 55);
-  }
-
   const kd = faceit?.kdRatio || steamKd(steamStats);
+  const banCount = leetify.bans?.length ?? 0;
+  const banned = banCount > 0;
 
-  // --- factor table (drives the score + the right-hand list) ---
+  // --- sub-scores (0 = normal, 100 = extreme) ---
+  // Strict thresholds: only genuinely superhuman values ramp up, NOT pro-level
+  // skill (e.g. preaim must beat ~5° and reaction ~450ms before it counts).
+  const sGap = gap != null ? up(gap, 0.1, 0.9) : null;
+  const sReaction = s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 630, 440) : null;
+  const sPreaim = s.preaim > 0 ? down(s.preaim, 11, 4.5) : null;
+  const sHs = s.accuracy_head > 0 ? up(s.accuracy_head, 20, 42) : null;
+  const sAim = leetify.rating.aim > 0 ? up(leetify.rating.aim, 78, 99) : null;
+  const sKd = kd > 0 ? up(kd, 1.0, 2.0) : null;
+
+  // Mechanical-anomaly composite — reaction, crosshair placement and aim carry
+  // the most weight (the most direct aimbot/triggerbot tells); HS% and K/D are
+  // lighter, skill-linked support.
+  const mechParts: [number, number][] = (
+    [
+      [sReaction, 0.26],
+      [sPreaim, 0.24],
+      [sAim, 0.22],
+      [sHs, 0.16],
+      [sKd, 0.12],
+    ] as [number | null, number][]
+  ).filter((p): p is [number, number] => p[0] != null);
+  const mw = mechParts.reduce((a, p) => a + p[1], 0);
+  const mech = mw ? mechParts.reduce((a, p) => a + p[0] * p[1], 0) / mw : 0;
+
+  // Score: mechanics drive it. The cross-platform gap then works BOTH ways — a
+  // big gap (great only in weak-anti-cheat queues) amplifies mechanics and adds
+  // on top; a near-zero gap (proven consistent vs FACEIT's anti-cheat) is
+  // exculpatory and discounts mechanics toward legit. No gap to cross-check →
+  // mechanics mostly stand. A ban floors the score high.
+  let score: number;
+  if (sGap != null) {
+    score = mech * (0.55 + 0.45 * (sGap / 100)) + sGap * 0.3;
+  } else {
+    score = mech * 0.8;
+  }
+  if (banned) score = Math.max(score, 85);
+  score = clamp(score);
+  const band = band5(score);
+
+  // --- factor list (only signals that actually move the score) ---
   const F: SusFactor[] = [];
-  const push = (
+  const add = (
     key: string,
     icon: string,
     label: string,
     display: string,
     detail: string,
-    score: number,
-    weight: number,
-  ) => F.push({ key, icon, label, display, detail, score, band: band5(score), weight });
-
-  if (gap != null)
-    push("xplat", "swap", "Cross-platform gap", `${gap >= 0 ? "+" : ""}${gap.toFixed(2)}`, "MM/Premier vs FACEIT rating", up(gap, 0.15, 1.0), 0.22);
-  if (s.reaction_time_ms > 0)
-    push("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)} ms`, "time to damage in duels", down(s.reaction_time_ms, 650, 480), 0.14);
-  if (s.preaim > 0)
-    push("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, "lower = unnaturally precise", down(s.preaim, 12, 6), 0.12);
-  if (kd > 0)
-    push("kd", "target", "K/D ratio", kd.toFixed(2), "avg ≈ 1.0", up(kd, 1.0, 2.0), 0.12);
-  if (s.accuracy_head > 0)
-    push("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, "share of hits on the head", up(s.accuracy_head, 20, 42), 0.1);
-  if (leetify.rating.aim > 0)
-    push("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), "Leetify aim (0–100)", up(leetify.rating.aim, 55, 92), 0.07);
-  if (consistencyPct > 0)
-    push("consistency", "chart", "Consistency", `${consistencyPct.toFixed(0)}%`, `${last.length} recent matches`, up(consistencyPct, 55, 92), 0.05);
-  if (leetify.rating.utility > 0)
-    push("utility", "flask", "Utility usage", leetify.rating.utility.toFixed(1), "Leetify utility (0–100)", up(leetify.rating.utility, 55, 85), 0.02);
-  if (Number.isFinite(leetify.rating.clutch))
-    push("clutch", "flame", "Clutch rating", `${leetify.rating.clutch >= 0 ? "+" : ""}${leetify.rating.clutch.toFixed(2)}`, "impact in clutch rounds", up(leetify.rating.clutch, 0, 0.12), 0.02);
-  const banCount = leetify.bans?.length ?? 0;
-  push("bans", "shield", "Ban / VAC history", banCount > 0 ? `${banCount}` : "Clean", "bans on record (Leetify)", banCount > 0 ? 100 : 0, 0.14);
-
-  const wsum = F.reduce((a, f) => a + f.weight, 0);
-  const score = wsum ? clamp(F.reduce((a, f) => a + f.score * f.weight, 0) / wsum) : 0;
-  const band = band5(score);
+    sub: number | null,
+    primary = false,
+  ) => {
+    if (sub != null) F.push({ key, icon, label, display, detail, score: sub, band: band5(sub), primary });
+  };
+  add("xplat", "swap", "Cross-platform gap", gap != null ? `${gap >= 0 ? "+" : ""}${gap.toFixed(2)}` : "—", "MM/Premier vs FACEIT — primary signal", sGap, true);
+  add("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)} ms`, "time to damage in duels", sReaction);
+  add("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, "lower = unnaturally precise", sPreaim);
+  add("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, "share of hits on the head", sHs);
+  add("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), "skill-linked — only counts with a gap", sAim);
+  add("kd", "target", "K/D ratio", kd.toFixed(2), "skill-linked — only counts with a gap", sKd);
+  F.push({
+    key: "bans",
+    icon: "shield",
+    label: "Ban / VAC history",
+    display: banned ? `${banCount}` : "Clean",
+    detail: "bans on record (Leetify)",
+    score: banned ? 100 : 0,
+    band: band5(banned ? 100 : 0),
+  });
 
   // --- detailed metric scale-cards (the middle row) ---
   const metrics: MetricCard[] = [];
@@ -238,15 +261,15 @@ export function computeSuspicion(
     });
 
   if (s.reaction_time_ms > 0)
-    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 650, 480), "650ms", "Avg", "480ms", "Elite");
+    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 630, 440), "630ms", "Human", "440ms", "Inhuman");
   if (s.preaim > 0)
-    card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 12, 6), "12°", "Avg", "6°", "Elite");
-  if (kd > 0)
-    card("kd", "target", "K/D ratio", kd.toFixed(2), up(kd, 0.9, 1.6), "0.90", "Avg", "1.60", "High");
+    card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 11, 4.5), "11°", "Typical", "4.5°", "Inhuman");
   if (leetify.rating.aim > 0)
-    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 50, 90), "50", "Avg", "90", "Top 5%");
+    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 78, 99), "78", "High", "99", "Extreme");
+  if (kd > 0)
+    card("kd", "target", "K/D ratio", kd.toFixed(2), up(kd, 1.0, 2.0), "1.0", "Avg", "2.0", "Extreme");
   if (s.accuracy_head > 0)
-    card("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, up(s.accuracy_head, 18, 40), "18%", "Low", "40%", "High");
+    card("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, up(s.accuracy_head, 20, 42), "20%", "Typical", "42%", "Extreme");
 
   // --- recent W/L/D donut + consistency trend ---
   const wins = last.filter((m) => m.outcome === "win").length;

@@ -22,9 +22,8 @@ import { LeetifyPanel } from "@/components/LeetifyPanel";
 import { FaceitPanel } from "@/components/FaceitPanel";
 import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
-import { PlayerSummary } from "@/components/PlayerSummary";
 import { LiveForm } from "@/components/LiveForm";
-import { LeetifyInsights } from "@/components/LeetifyInsights";
+import { CounterReport } from "@/components/CounterReport";
 import { ShareButton } from "@/components/ShareButton";
 import { RecordRecent } from "@/components/RecordRecent";
 import { SteamStatsPanel } from "@/components/SteamStatsPanel";
@@ -222,44 +221,7 @@ export function ProfileView({
 
       <RankStrip leetify={leetify} faceit={faceit} />
 
-      {leetify && <PlayerSummary leetify={leetify} />}
-
-      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <LiveForm matches={leetify.recent_matches} />
-      )}
-
-      {leetify?.recent_matches && leetify.recent_matches.length >= 4 && (
-        <LeetifyInsights matches={leetify.recent_matches} />
-      )}
-
-      {leetify?.recent_matches && leetify.recent_matches.length > 1 && (
-        <LiveTrendChart matches={leetify.recent_matches} />
-      )}
-
-      {leetify && <LeetifyPanel profile={leetify} />}
-
-      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <div className="text-right">
-          <Link
-            href={`/profiles/${player.steamId64}/matches`}
-            className="text-sm font-medium text-brand hover:underline"
-          >
-            View all matches →
-          </Link>
-        </div>
-      )}
-
-      {faceit && <FaceitPanel profile={faceit} />}
-
-      {steamStats && <SteamStatsPanel data={steamStats} />}
-
-      <CrossSource
-        career={career}
-        leetify={leetify}
-        faceit={faceit}
-        steamStats={steamStats}
-      />
-
+      {/* Integrity check — top of page, right below the ranks */}
       {leetify && (
         <CheatMeter
           player={player}
@@ -274,6 +236,40 @@ export function ProfileView({
         />
       )}
 
+      {/* Recent form & trends */}
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <section className="space-y-4">
+          <SectionTitle>Recent form &amp; trends</SectionTitle>
+          <LiveForm matches={leetify.recent_matches} />
+          {leetify.recent_matches.length > 1 && (
+            <LiveTrendChart matches={leetify.recent_matches} />
+          )}
+          <div className="text-right">
+            <Link
+              href={`/profiles/${player.steamId64}/matches`}
+              className="text-sm font-medium text-brand hover:underline"
+            >
+              View all matches →
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {/* Skill breakdown */}
+      {leetify && <LeetifyPanel profile={leetify} />}
+
+      {/* Other platforms */}
+      {faceit && <FaceitPanel profile={faceit} />}
+
+      {steamStats && <SteamStatsPanel data={steamStats} />}
+
+      <CrossSource
+        career={career}
+        leetify={leetify}
+        faceit={faceit}
+        steamStats={steamStats}
+      />
+
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
         <MapStrength matches={leetify.recent_matches} />
       )}
@@ -287,8 +283,10 @@ export function ProfileView({
 
       {hasData && (
         <>
-          {/* Headline stats */}
-          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          {/* Career stats */}
+          <section>
+            <SectionTitle>Career stats</SectionTitle>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
             <StatCard
               label="Matches"
               value={fmt(career.matches)}
@@ -325,6 +323,7 @@ export function ProfileView({
               value={`${career.hsPct.toFixed(0)}%`}
               valueClass={tierColor(career.hsPct, 50, 40)}
             />
+            </div>
           </section>
 
           {matches.length > 0 && <RecentForm matches={matches} />}
@@ -408,6 +407,15 @@ export function ProfileView({
             </div>
           </section>
         </>
+      )}
+
+      {/* Counter report — the payoff, at the bottom */}
+      {leetify && (
+        <CounterReport
+          leetify={leetify}
+          faceit={faceit}
+          name={player.personaName || "this player"}
+        />
       )}
     </div>
   );

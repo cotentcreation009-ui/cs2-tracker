@@ -446,7 +446,12 @@ export function CheatMeter({
           <div className="stat-label mb-1">Factors analyzed</div>
           <ul className="divide-y divide-line/60">
             {factors.map((f) => (
-              <li key={f.key} className="flex items-center gap-2.5 py-2">
+              <li
+                key={f.key}
+                className={`flex items-center gap-2.5 py-2 ${
+                  f.primary ? "rounded-lg border border-brand/30 bg-brand/5 px-2" : ""
+                }`}
+              >
                 <span
                   className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-panel2"
                   style={{ color: BAND_HEX[f.band] }}
