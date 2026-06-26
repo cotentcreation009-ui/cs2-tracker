@@ -221,8 +221,10 @@ export function ProfileView({
 
       <RankStrip leetify={leetify} faceit={faceit} />
 
-      {/* Integrity check — top of page, right below the ranks */}
-      {leetify && (
+      {/* Integrity check — top of page, right below the ranks. Renders for any
+          account with usable data (Leetify, FACEIT or Steam stats); it
+          self-hides when there genuinely isn't enough to analyze. */}
+      {(leetify || faceit || steamStats) && (
         <CheatMeter
           player={player}
           leetify={leetify}

@@ -487,7 +487,13 @@ export function CheatMeter({
       )}
 
       {/* consistency · history · verdict */}
-      <div className="mt-5 grid gap-3 lg:grid-cols-[1.25fr_1fr_1fr]">
+      <div
+        className={`mt-5 grid gap-3 ${
+          summary.total > 0 ? "lg:grid-cols-[1.25fr_1fr_1fr]" : ""
+        }`}
+      >
+        {summary.total > 0 && (
+          <>
         <div className="card px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="stat-label">
@@ -551,6 +557,8 @@ export function CheatMeter({
             </div>
           </div>
         </div>
+          </>
+        )}
 
         <div className="card px-4 py-3">
           <div className="stat-label mb-1">Overall verdict</div>

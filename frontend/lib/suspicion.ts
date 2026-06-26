@@ -126,9 +126,14 @@ export function computeSuspicion(
   faceit: FaceitProfile | null | undefined,
   steamStats: SteamGameStats | null | undefined,
 ): Suspicion | null {
-  if (!leetify) return null;
-  const s = leetify.stats;
-  const recent = leetify.recent_matches ?? [];
+  // Work from whatever sources exist. Leetify gives the strongest mechanical
+  // tells (reaction / crosshair / aim); Steam stats (shot accuracy, HS%, K/D)
+  // and FACEIT still let us produce a lower-confidence read for the many players
+  // who aren't on Leetify — so the meter shows for every looked-up account that
+  // has at least a couple of usable signals.
+  if (!leetify && !faceit && !steamStats) return null;
+  const s = leetify?.stats;
+  const recent = leetify?.recent_matches ?? [];
   const last = recent.slice(0, 30);
 
   // --- per-queue + cross-platform gap ---
@@ -161,39 +166,76 @@ export function computeSuspicion(
   }
 
   const kd = faceit?.kdRatio || steamKd(steamStats);
-  const banCount = leetify.bans?.length ?? 0;
+  const banCount = leetify?.bans?.length ?? 0;
   const banned = banCount > 0;
+
+  // Universal signals available without Leetify, from Steam's App-730 totals.
+  const ss = steamStats?.stats;
+  const steamKills = ss?.["total_kills"] ?? 0;
+  const steamFired = ss?.["total_shots_fired"] ?? 0;
+  const accuracyPct =
+    steamFired > 0 ? ((ss?.["total_shots_hit"] ?? 0) / steamFired) * 100 : 0;
+
+  // Headshot signal: prefer Leetify's head-accuracy (its own scale); else fall
+  // back to HS% of kills from FACEIT or Steam — a different metric, so a
+  // different threshold and label.
+  let sHs: number | null = null;
+  let hsValue = 0;
+  let hsDisplay = "—";
+  let hsLabel = "HS accuracy";
+  let hsDetail = "share of hits on the head";
+  let hsLo: [string, string] = ["20%", "Typical"];
+  let hsHi: [string, string] = ["42%", "Extreme"];
+  if (s && s.accuracy_head > 0) {
+    hsValue = s.accuracy_head;
+    sHs = up(hsValue, 20, 42);
+    hsDisplay = `${hsValue.toFixed(0)}%`;
+  } else {
+    const hsPct =
+      faceit?.hsPct ||
+      (steamKills > 0 ? ((ss?.["total_kills_headshot"] ?? 0) / steamKills) * 100 : 0);
+    if (hsPct > 0) {
+      hsValue = hsPct;
+      sHs = up(hsValue, 45, 72);
+      hsDisplay = `${hsValue.toFixed(0)}%`;
+      hsLabel = "Headshot %";
+      hsDetail = "share of kills that are headshots";
+      hsLo = ["45%", "Typical"];
+      hsHi = ["72%", "Extreme"];
+    }
+  }
 
   // --- sub-scores (0 = normal, 100 = extreme) ---
   // Strict thresholds: only genuinely superhuman values ramp up, NOT pro-level
   // skill (e.g. preaim must beat ~5° and reaction ~450ms before it counts).
   const sGap = gap != null ? up(gap, 0.1, 0.9) : null;
-  const sReaction = s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 630, 440) : null;
-  const sPreaim = s.preaim > 0 ? down(s.preaim, 11, 4.5) : null;
-  const sHs = s.accuracy_head > 0 ? up(s.accuracy_head, 20, 42) : null;
-  const sAim = leetify.rating.aim > 0 ? up(leetify.rating.aim, 78, 99) : null;
+  const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 630, 440) : null;
+  const sPreaim = s && s.preaim > 0 ? down(s.preaim, 11, 4.5) : null;
+  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 78, 99) : null;
+  const sAccuracy = accuracyPct > 0 ? up(accuracyPct, 24, 40) : null;
   const sKd = kd > 0 ? up(kd, 1.0, 2.0) : null;
 
-  // Mechanical-anomaly composite — reaction, crosshair placement and aim carry
-  // the most weight (the most direct aimbot/triggerbot tells); HS% and K/D are
-  // lighter, skill-linked support.
+  // Mechanical-anomaly composite — reaction, crosshair placement and aim are the
+  // most direct aimbot/triggerbot tells; shot accuracy is the strongest tell we
+  // have without Leetify; HS% and K/D are lighter, skill-linked support. Weights
+  // renormalise over whatever signals are actually present.
   const mechParts: [number, number][] = (
     [
-      [sReaction, 0.26],
-      [sPreaim, 0.24],
-      [sAim, 0.22],
-      [sHs, 0.16],
+      [sReaction, 0.22],
+      [sPreaim, 0.2],
+      [sAim, 0.16],
+      [sAccuracy, 0.16],
+      [sHs, 0.14],
       [sKd, 0.12],
     ] as [number | null, number][]
   ).filter((p): p is [number, number] => p[0] != null);
   const mw = mechParts.reduce((a, p) => a + p[1], 0);
   const mech = mw ? mechParts.reduce((a, p) => a + p[0] * p[1], 0) / mw : 0;
 
-  // Score: mechanics drive it. The cross-platform gap then works BOTH ways — a
-  // big gap (great only in weak-anti-cheat queues) amplifies mechanics and adds
-  // on top; a near-zero gap (proven consistent vs FACEIT's anti-cheat) is
-  // exculpatory and discounts mechanics toward legit. No gap to cross-check →
-  // mechanics mostly stand. A ban floors the score high.
+  // Score: mechanics drive it. The cross-platform gap (Leetify only) then works
+  // BOTH ways — a big gap amplifies mechanics and adds on top; a near-zero gap
+  // is exculpatory. No gap to cross-check → mechanics mostly stand. A ban floors
+  // the score high.
   let score: number;
   if (sGap != null) {
     score = mech * (0.55 + 0.45 * (sGap / 100)) + sGap * 0.3;
@@ -218,20 +260,23 @@ export function computeSuspicion(
     if (sub != null) F.push({ key, icon, label, display, detail, score: sub, band: band5(sub), primary });
   };
   add("xplat", "swap", "Cross-platform gap", gap != null ? `${gap >= 0 ? "+" : ""}${gap.toFixed(2)}` : "—", "MM/Premier vs FACEIT — primary signal", sGap, true);
-  add("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)} ms`, "time to damage in duels", sReaction);
-  add("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, "lower = unnaturally precise", sPreaim);
-  add("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, "share of hits on the head", sHs);
-  add("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), "skill-linked — only counts with a gap", sAim);
-  add("kd", "target", "K/D ratio", kd.toFixed(2), "skill-linked — only counts with a gap", sKd);
-  F.push({
-    key: "bans",
-    icon: "shield",
-    label: "Ban / VAC history",
-    display: banned ? `${banCount}` : "Clean",
-    detail: "bans on record (Leetify)",
-    score: banned ? 100 : 0,
-    band: band5(banned ? 100 : 0),
-  });
+  add("reaction", "bolt", "Reaction time", s ? `${s.reaction_time_ms.toFixed(0)} ms` : "—", "time to damage in duels", sReaction);
+  add("preaim", "cross", "Crosshair placement", s ? `${s.preaim.toFixed(1)}°` : "—", "lower = unnaturally precise", sPreaim);
+  add("accuracy", "target", "Shot accuracy", accuracyPct > 0 ? `${accuracyPct.toFixed(0)}%` : "—", "shots hit vs fired", sAccuracy);
+  add("hs", "target", hsLabel, hsDisplay, hsDetail, sHs);
+  add("aim", "cross", "Aim rating", leetify ? leetify.rating.aim.toFixed(1) : "—", "aim quality (Leetify)", sAim);
+  add("kd", "target", "K/D ratio", kd > 0 ? kd.toFixed(2) : "—", "kills per death", sKd);
+  if (leetify) {
+    F.push({
+      key: "bans",
+      icon: "shield",
+      label: "Ban / VAC history",
+      display: banned ? `${banCount}` : "Clean",
+      detail: "bans on record (Leetify)",
+      score: banned ? 100 : 0,
+      band: band5(banned ? 100 : 0),
+    });
+  }
 
   // --- detailed metric scale-cards (the middle row) ---
   const metrics: MetricCard[] = [];
@@ -260,16 +305,18 @@ export function computeSuspicion(
       note: noteFor(band5(marker)),
     });
 
-  if (s.reaction_time_ms > 0)
+  if (s && s.reaction_time_ms > 0)
     card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 630, 440), "630ms", "Human", "440ms", "Inhuman");
-  if (s.preaim > 0)
+  if (s && s.preaim > 0)
     card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 11, 4.5), "11°", "Typical", "4.5°", "Inhuman");
-  if (leetify.rating.aim > 0)
+  if (leetify && leetify.rating.aim > 0)
     card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 78, 99), "78", "High", "99", "Extreme");
-  if (kd > 0)
+  if (sAccuracy != null)
+    card("accuracy", "target", "Shot accuracy", `${accuracyPct.toFixed(0)}%`, up(accuracyPct, 24, 40), "24%", "Typical", "40%", "Inhuman");
+  if (sKd != null)
     card("kd", "target", "K/D ratio", kd.toFixed(2), up(kd, 1.0, 2.0), "1.0", "Avg", "2.0", "Extreme");
-  if (s.accuracy_head > 0)
-    card("hs", "target", "HS accuracy", `${s.accuracy_head.toFixed(0)}%`, up(s.accuracy_head, 20, 42), "20%", "Typical", "42%", "Extreme");
+  if (sHs != null)
+    card("hs", "target", hsLabel, hsDisplay, sHs, hsLo[0], hsLo[1], hsHi[0], hsHi[1]);
 
   // --- recent W/L/D donut + consistency trend ---
   const wins = last.filter((m) => m.outcome === "win").length;
@@ -284,13 +331,15 @@ export function computeSuspicion(
   };
 
   // --- confidence: how much real data backs the read ---
+  // Leetify is the strongest source, so a Steam/FACEIT-only read starts lower
+  // and stays honestly less confident.
   const confidence = clamp(
-    45 +
+    (leetify ? 45 : 30) +
       Math.min(recent.length, 30) +
       (faceit ? 8 : 0) +
       (steamStats ? 6 : 0) +
       Math.min(F.length, 9),
-    40,
+    30,
     97,
   );
 
@@ -322,11 +371,13 @@ export function computeSuspicion(
     trend,
     summary: { wins, losses, draws, total: last.length },
     scope: {
-      matches: leetify.total_matches || faceit?.matches || recent.length,
+      matches: leetify?.total_matches || faceit?.matches || recent.length,
       hours: steamStats?.stats?.["total_time_played"]
         ? steamStats.stats["total_time_played"] / 3600
         : null,
     },
-    hasEnough: F.length >= 4,
+    // Show whenever there are at least two real signals (the ever-present "bans"
+    // row doesn't count), so Steam/FACEIT-only players still get a read.
+    hasEnough: F.filter((f) => f.key !== "bans").length >= 2,
   };
 }
