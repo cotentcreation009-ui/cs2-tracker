@@ -414,6 +414,7 @@ export function ProfileView({
         <CounterReport
           leetify={leetify}
           faceit={faceit}
+          steamStats={steamStats}
           name={player.personaName || "this player"}
         />
       )}
