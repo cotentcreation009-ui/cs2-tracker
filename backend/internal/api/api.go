@@ -143,6 +143,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/demos/presign", s.handleDemoPresign)
 			r.Post("/demos/parse", s.handleDemoParse)
 			r.Post("/demos/upload", s.handleDemoUpload)
+			r.Post("/demos/from-url", s.handleDemoFromURL)
 			r.Get("/demos/{id}", s.handleDemoJob)
 			r.Get("/demos/{id}/data", s.handleDemoData)
 		})

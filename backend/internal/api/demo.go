@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,6 +154,89 @@ func (s *Server) handleDemoUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
+// isPublicHost guards the from-URL ingest against SSRF: the worker will fetch
+// whatever URL we accept, so reject hosts that resolve to loopback/private/
+// link-local space (incl. the cloud metadata IP). Not bullet-proof against DNS
+// rebinding, but blocks the obvious internal-target attacks.
+func isPublicHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	h := strings.ToLower(host)
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || h == "metadata.google.internal" {
+		return false
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return false
+		}
+	}
+	return true
+}
+
+// handleDemoFromURL enqueues a replay parse for a demo at a remote URL (e.g. a
+// FACEIT demo link or a Valve GOTV .dem/.bz2). The worker downloads it server-
+// side, so the user never needs the file locally. Public + quota'd + SSRF-guarded.
+func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
+	if s.queue == nil {
+		writeError(w, http.StatusServiceUnavailable, "demo parsing is not available right now")
+		return
+	}
+	if ok, status, msg := s.demoQuotaOK(r); !ok {
+		writeError(w, status, msg)
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	raw := strings.TrimSpace(req.URL)
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		writeError(w, http.StatusBadRequest, "url must start with http:// or https://")
+		return
+	}
+	lower := strings.ToLower(u.Path)
+	if !strings.HasSuffix(lower, ".dem") && !strings.HasSuffix(lower, ".bz2") && !strings.HasSuffix(lower, ".gz") {
+		writeError(w, http.StatusBadRequest, "url must point to a .dem (optionally .bz2/.gz) file")
+		return
+	}
+	if !isPublicHost(u.Hostname()) {
+		writeError(w, http.StatusBadRequest, "that url host is not allowed")
+		return
+	}
+
+	id := randID()
+	name := filepath.Base(u.Path)
+	if name == "" || name == "." || name == "/" {
+		name = "remote.dem"
+	}
+	if err := s.db.CreateDemoJob(r.Context(), id, clientIP(r), name, 0); err != nil {
+		s.serverError(w, "record demo job", err)
+		return
+	}
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:      id,
+		Type:    queue.JobParseReplay,
+		Source:  "url",
+		DemoURL: raw,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
+		s.serverError(w, "enqueue", err)
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
 }
 
