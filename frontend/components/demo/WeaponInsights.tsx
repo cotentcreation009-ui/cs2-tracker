@@ -255,14 +255,16 @@ export default function WeaponInsights({
         meta,
         rounds,
         roundSel === null ? undefined : (_r, idx) => idx === roundSel,
+        view.side,
       ),
-    [meta, rounds, roundSel],
+    [meta, rounds, roundSel, view.side],
   );
 
   if (!data.totalKills) {
     return (
       <div className="card-2 px-5 py-8 text-center text-sm text-muted">
-        No kill data available for {roundSel === null ? "this match" : `round ${rounds[roundSel]?.n}`}.
+        No kill data available for {roundSel === null ? "this match" : `round ${rounds[roundSel]?.n}`}
+        {view.side !== "all" ? ` (${view.side} side)` : ""}.
       </div>
     );
   }
@@ -286,9 +288,15 @@ export default function WeaponInsights({
           {data.totalKills} kills · {data.rounds} {data.rounds === 1 ? "round" : "rounds"} · kill-derived
         </span>
 
-        {roundSel !== null && (
+        {(roundSel !== null || view.side !== "all") && (
           <span className="ml-auto pill bg-brand/15 text-brand">
-            Round {rounds[roundSel]?.n} · scoped
+            {[
+              roundSel !== null ? `Round ${rounds[roundSel]?.n}` : null,
+              view.side !== "all" ? `${view.side} side` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}{" "}
+            · scoped
           </span>
         )}
       </div>

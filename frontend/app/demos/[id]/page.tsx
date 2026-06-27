@@ -190,7 +190,7 @@ export default function ReplayPage() {
       }
 
       // grenades active at t
-      for (const n of round.nades) {
+      for (const n of round.nades ?? []) {
         const dur = n.dur || 0.8;
         if (t < n.t || t > n.t + dur) continue;
         const c = toPx(n.x, n.y);
@@ -219,8 +219,8 @@ export default function ReplayPage() {
       }
 
       // bomb marker (after plant, until defuse/explode)
-      const plant = round.bomb.find((b) => b.k === "plant" && b.t <= t);
-      const ended = round.bomb.find(
+      const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= t);
+      const ended = (round.bomb ?? []).find(
         (b) => (b.k === "defuse" || b.k === "explode") && b.t <= t,
       );
       if (plant && !ended) {
@@ -235,7 +235,7 @@ export default function ReplayPage() {
       }
 
       // recent kills: X on victim for 4s, killer line for 1.5s
-      for (const ki of round.kills) {
+      for (const ki of round.kills ?? []) {
         if (ki.t > t || t - ki.t > 4) continue;
         const v = toPx(ki.vx, ki.vy);
         ctx.strokeStyle = "#f5694a";
@@ -307,7 +307,7 @@ export default function ReplayPage() {
       let b = "";
       if (t >= duration && round.winner) {
         b = `${round.winner} win · ${round.reason.replace(/_/g, " ")}`;
-      } else if (round.bomb.some((x) => x.k === "defuse_start" && Math.abs(x.t - t) < 3)) {
+      } else if ((round.bomb ?? []).some((x) => x.k === "defuse_start" && Math.abs(x.t - t) < 3)) {
         b = "Defusing…";
       } else if (plant && !ended) {
         b = "Bomb planted";
@@ -352,14 +352,14 @@ export default function ReplayPage() {
 
   // the shared round scope drives which round the replay shows
   useEffect(() => {
-    if (scopeRound == null) return;
+    if (scopeRound == null || scopeRound < 0 || scopeRound >= rounds.length) return;
     setRoundIdx(scopeRound);
     roundRef.current = scopeRound;
     tRef.current = 0;
     setTime(0);
     playRef.current = false;
     setPlaying(false);
-  }, [scopeRound]);
+  }, [scopeRound, rounds.length]);
 
   if (loading) return <div className="card px-5 py-6 text-sm text-muted">Loading replay…</div>;
   if (!meta || !round)
@@ -439,7 +439,7 @@ export default function ReplayPage() {
         meta={meta}
         rounds={rounds}
         view={view}
-        showSide={tab === "routes" || tab === "map"}
+        showSide={tab !== "replay"}
       />
 
       {/* analysis tabs */}
@@ -521,6 +521,16 @@ export default function ReplayPage() {
                   </button>
                 ))}
               </div>
+              {scopeRound !== null && (
+                <button
+                  type="button"
+                  onClick={() => setScopeRound(null)}
+                  title="Unlink this round from the toolbar"
+                  className="pill bg-brand/15 text-brand"
+                >
+                  R{round.n} scoped ✕
+                </button>
+              )}
               <span className="ml-auto text-xs tabular-nums text-muted">
                 {time.toFixed(1)}s / {duration.toFixed(0)}s
               </span>
@@ -583,7 +593,7 @@ export default function ReplayPage() {
               </div>
             </div>
             <div className="mt-3 border-t border-line pt-2 text-xs text-faint">
-              {round.kills.length} kills · {round.nades.length} nades
+              {(round.kills ?? []).length} kills · {(round.nades ?? []).length} nades
             </div>
           </div>
         </div>

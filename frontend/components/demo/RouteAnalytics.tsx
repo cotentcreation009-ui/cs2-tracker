@@ -24,7 +24,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const sideFilter = view.side;
   const playerFilter: number | "all" = view.focusPlayer ?? "all";
   const roundFilter: number | "all" =
-    view.scopeRound == null ? "all" : rounds[view.scopeRound]?.n ?? "all";
+    view.scopeRound != null && view.scopeRound >= 0 && view.scopeRound < rounds.length
+      ? rounds[view.scopeRound]?.n ?? "all"
+      : "all";
 
   // drop a drilled-in cluster when the shared filters or mode change
   useEffect(() => {
