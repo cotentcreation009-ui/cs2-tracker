@@ -119,8 +119,10 @@ type ReplayKill struct {
 type ReplayNade struct {
 	T    float64 `json:"t"`
 	Kind string  `json:"k"` // smoke | molotov | flash | he | decoy
-	X    int32   `json:"x"`
-	Y    int32   `json:"y"`
+	X    int32   `json:"x"`  // landing / detonation X
+	Y    int32   `json:"y"`  // landing / detonation Y
+	Ox   int32   `json:"ox"` // throw-origin X (where the thrower released it)
+	Oy   int32   `json:"oy"` // throw-origin Y
 	Dur  float64 `json:"dur"`
 	By   int     `json:"by"` // thrower player index, -1 if unknown
 }
@@ -160,10 +162,12 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onBombDefuseStart)
 	p.RegisterEventHandler(rc.onBombDefused)
 	p.RegisterEventHandler(rc.onBombExplode)
+	p.RegisterEventHandler(rc.onProjectileThrow)
 	p.RegisterEventHandler(rc.onSmoke)
 	p.RegisterEventHandler(rc.onInferno)
 	p.RegisterEventHandler(rc.onFlash)
 	p.RegisterEventHandler(rc.onHE)
+	p.RegisterEventHandler(rc.onDecoy)
 	p.RegisterEventHandler(rc.onFreezeEnd)
 	p.RegisterEventHandler(rc.onPlayerHurt)
 	p.RegisterEventHandler(rc.onPlayerFlashed)
@@ -235,6 +239,22 @@ type replayCollector struct {
 	spotted map[uint64]map[uint64]bool
 	spotT   map[uint64]map[uint64]float64
 	spotAim map[uint64]map[uint64]float64
+
+	// util throw-origin tracking (per round). The detonation events (SmokeStart
+	// etc.) fire where the nade LANDS — by then the thrower has moved — so we
+	// capture the launch point at GrenadeProjectileThrow and join it back.
+	// nadeOrigins is keyed by the projectile entity id (matches GrenadeEntityID
+	// on smoke/he/flash/decoy); moloOrigins is a fallback queue for molotovs,
+	// whose inferno entity id does NOT match the projectile id.
+	nadeOrigins map[int]throwOrigin
+	moloOrigins []throwOrigin
+}
+
+type throwOrigin struct {
+	x, y int32
+	by   int
+	kind string
+	t    float64
 }
 
 // stats returns the per-round accumulator for a player index, creating it lazily.
@@ -329,6 +349,8 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.spotted = map[uint64]map[uint64]bool{}
 	rc.spotT = map[uint64]map[uint64]float64{}
 	rc.spotAim = map[uint64]map[uint64]float64{}
+	rc.nadeOrigins = map[int]throwOrigin{} // entity ids are reused — reset each round
+	rc.moloOrigins = nil
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -366,6 +388,8 @@ func (rc *replayCollector) onRoundEnd(e events.RoundEnd) {
 	}
 	rc.cur = nil // release the round's frames immediately
 	rc.stat = nil
+	rc.nadeOrigins = nil
+	rc.moloOrigins = nil
 }
 
 func (rc *replayCollector) onFrameDone(events.FrameDone) {
@@ -540,20 +564,115 @@ func (rc *replayCollector) onBombDefuseStart(events.BombDefuseStart) {
 func (rc *replayCollector) onBombDefused(events.BombDefused) { x, y := rc.bombXY(); rc.addBomb("defuse", x, y) }
 func (rc *replayCollector) onBombExplode(events.BombExplode) { x, y := rc.bombXY(); rc.addBomb("explode", x, y) }
 
-func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *common.Player) {
+// onProjectileThrow records where each grenade was released, so the detonation
+// handlers can attach a real throw origin instead of the landing spot.
+func (rc *replayCollector) onProjectileThrow(e events.GrenadeProjectileThrow) {
+	proj := e.Projectile
+	if rc.cur == nil || proj == nil || proj.WeaponInstance == nil {
+		return
+	}
+	kind := kindOfEq(proj.WeaponInstance.Type)
+	if kind == "" {
+		return
+	}
+	op := proj.Position()
+	if len(proj.Trajectory) > 0 {
+		op = proj.Trajectory[0].Position // the launch point, appended at throw
+	}
+	o := throwOrigin{x: i32(op.X), y: i32(op.Y), by: rc.playerIndex(proj.Thrower), kind: kind, t: round2(rc.rt())}
+	rc.nadeOrigins[proj.Entity.ID()] = o
+	if kind == "molotov" {
+		rc.moloOrigins = append(rc.moloOrigins, o)
+	}
+}
+
+// addNade appends a nade row, resolving its throw origin from the registry
+// (by projectile entity id) with a molotov-only thrower+time fallback. When no
+// origin is found, Ox/Oy default to the landing so the line is just zero-length.
+func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *common.Player, entID int) {
 	if rc.cur == nil {
 		return
 	}
-	rc.cur.Nades = append(rc.cur.Nades, ReplayNade{
-		T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Dur: dur,
-		By: rc.playerIndex(by),
-	})
+	n := ReplayNade{T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Dur: dur, By: rc.playerIndex(by)}
+	o, ok := throwOrigin{}, false
+	if entID >= 0 {
+		o, ok = rc.nadeOrigins[entID]
+	}
+	if !ok && kind == "molotov" {
+		o, ok = rc.popMolo(n.By)
+	}
+	if ok {
+		n.Ox, n.Oy = o.x, o.y
+		if n.By < 0 {
+			n.By = o.by
+		}
+	} else {
+		n.Ox, n.Oy = n.X, n.Y
+	}
+	rc.cur.Nades = append(rc.cur.Nades, n)
 }
 
-func (rc *replayCollector) onSmoke(e events.SmokeStart)         { rc.addNade("smoke", e.Position, 18, e.Thrower) }
-func (rc *replayCollector) onInferno(e events.FireGrenadeStart) { rc.addNade("molotov", e.Position, 7, e.Thrower) }
-func (rc *replayCollector) onFlash(e events.FlashExplode)       { rc.addNade("flash", e.Position, 0, e.Thrower) }
-func (rc *replayCollector) onHE(e events.HeExplode)             { rc.addNade("he", e.Position, 0, e.Thrower) }
+// popMolo finds and removes the best molotov throw-origin: prefer the same
+// thrower, then the oldest throw (infernos ignite in throw order). Returns
+// ok=false when the queue is empty.
+func (rc *replayCollector) popMolo(by int) (throwOrigin, bool) {
+	best := -1
+	for i, o := range rc.moloOrigins {
+		if best < 0 {
+			best = i
+			continue
+		}
+		b := rc.moloOrigins[best]
+		// favour a thrower match, then the OLDEST throw — infernos ignite in
+		// throw order, so popping oldest-first keeps origins paired correctly.
+		bMatch, oMatch := b.by == by && by >= 0, o.by == by && by >= 0
+		if oMatch && !bMatch {
+			best = i
+		} else if oMatch == bMatch && o.t < b.t {
+			best = i
+		}
+	}
+	if best < 0 {
+		return throwOrigin{}, false
+	}
+	o := rc.moloOrigins[best]
+	rc.moloOrigins = append(rc.moloOrigins[:best], rc.moloOrigins[best+1:]...)
+	return o, true
+}
+
+// kindOfEq maps a grenade equipment type to our nade kind, "" if not a grenade.
+func kindOfEq(t common.EquipmentType) string {
+	switch t {
+	case common.EqSmoke:
+		return "smoke"
+	case common.EqHE:
+		return "he"
+	case common.EqFlash:
+		return "flash"
+	case common.EqDecoy:
+		return "decoy"
+	case common.EqMolotov, common.EqIncendiary:
+		return "molotov"
+	default:
+		return ""
+	}
+}
+
+func (rc *replayCollector) onSmoke(e events.SmokeStart) { rc.addNade("smoke", e.Position, 18, e.Thrower, e.GrenadeEntityID) }
+func (rc *replayCollector) onFlash(e events.FlashExplode) { rc.addNade("flash", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
+func (rc *replayCollector) onHE(e events.HeExplode)       { rc.addNade("he", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
+func (rc *replayCollector) onDecoy(e events.DecoyStart)   { rc.addNade("decoy", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
+
+// onInferno uses InfernoStart (the actual fire) rather than FireGrenadeStart,
+// which in Source 2 has a nil thrower and may not fire. The inferno entity id
+// doesn't match the projectile, so molotov origins use the thrower+time fallback.
+func (rc *replayCollector) onInferno(e events.InfernoStart) {
+	if e.Inferno == nil {
+		return
+	}
+	pos := e.Inferno.Entity.Position()
+	rc.addNade("molotov", pos, 7, e.Inferno.Thrower(), -1)
+}
 
 // onFreezeEnd snapshots each player's buy (equipment value + a coarse buy type)
 // at the moment the round goes live.
