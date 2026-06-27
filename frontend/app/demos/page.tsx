@@ -7,6 +7,7 @@ import {
   WARN_DEMO_BYTES,
   mb,
   parseDemoFile,
+  parseDemoFromUrl,
 } from "@/lib/demo/parseClient";
 import {
   deleteMatch,
@@ -24,6 +25,7 @@ export default function DemosPage() {
   const [phase, setPhase] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [url, setUrl] = useState("");
   const acRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -81,6 +83,37 @@ export default function DemosPage() {
     if (f) void handleFile(f);
     e.target.value = "";
   };
+
+  const handleUrl = useCallback(async () => {
+    const u = url.trim();
+    if (!u || parsing) return;
+    setError(null);
+    setParsing(true);
+    setPhase("queueing…");
+    const ac = new AbortController();
+    acRef.current = ac;
+    try {
+      const { meta, rounds } = await parseDemoFromUrl(u, {
+        onPhase: (p) => setPhase(p),
+        signal: ac.signal,
+      });
+      const name =
+        (u.split("?")[0].split("/").pop() || "demo").replace(
+          /\.dem(\.(bz2|gz))?$/i,
+          "",
+        ) || "Demo";
+      await saveMatch(meta, rounds, name);
+      setUrl("");
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg !== "cancelled") setError(msg);
+    } finally {
+      setParsing(false);
+      setPhase("");
+      acRef.current = null;
+    }
+  }, [url, parsing, refresh]);
 
   return (
     <div className="space-y-6">
@@ -190,6 +223,32 @@ export default function DemosPage() {
             </div>
           </>
         )}
+      </div>
+
+      {/* parse from a link — server fetches the demo, no local file needed */}
+      <div className="card-2 flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
+        <div className="shrink-0 text-xs font-semibold uppercase tracking-wider text-muted">
+          Or parse from a link
+        </div>
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleUrl();
+          }}
+          placeholder="https://…/match.dem  ·  FACEIT demo link or GOTV .dem/.bz2"
+          disabled={parsing}
+          className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm text-ink placeholder:text-faint disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => void handleUrl()}
+          disabled={parsing || !url.trim()}
+          className="btn btn-ghost shrink-0 text-sm disabled:opacity-40"
+        >
+          Parse link
+        </button>
       </div>
 
       {error && (

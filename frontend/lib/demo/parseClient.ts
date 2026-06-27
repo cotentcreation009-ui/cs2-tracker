@@ -161,12 +161,37 @@ export async function parseDemoFile(
       `That demo is ${mb(file.size)} — over the ${mb(MAX_DEMO_BYTES)} limit.`,
     );
   }
-  const { signal } = handlers;
-
-  // 1. Upload + queue (object storage or multipart fallback).
+  // 1. Upload + queue (object storage or multipart fallback). 2+3 shared below.
   const id = await uploadAndQueue(file, handlers);
+  return pollAndFetch(id, handlers);
+}
 
-  // 2. Poll the parse job.
+// Parse a demo the server fetches from a remote URL (e.g. a FACEIT demo link or
+// a Valve GOTV .dem/.bz2) — the user never needs the file on their machine.
+export async function parseDemoFromUrl(
+  url: string,
+  handlers: ParseHandlers = {},
+): Promise<ParseResult> {
+  const { signal } = handlers;
+  handlers.onPhase?.("queueing…");
+  const res = await fetch("/api/demos/from-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: url.trim() }),
+    signal,
+  });
+  if (!res.ok) throw new Error(await errText(res, "could not start parsing"));
+  const { id } = (await res.json()) as { id: string };
+  return pollAndFetch(id, handlers);
+}
+
+// Poll a parse job to completion, then fetch + shape the result. Shared by the
+// upload and from-URL paths.
+async function pollAndFetch(
+  id: string,
+  handlers: ParseHandlers,
+): Promise<ParseResult> {
+  const { signal } = handlers;
   handlers.onReady?.();
   handlers.onPhase?.("parsing on our servers…");
   let status: DemoStatus;
@@ -186,8 +211,6 @@ export async function parseDemoFile(
       );
     }
   }
-
-  // 3. Fetch the finished result.
   handlers.onPhase?.("loading result…");
   const dr = await fetch(`/api/demos/${id}/data`, { signal });
   if (!dr.ok) throw new Error(await errText(dr, "could not load result"));
