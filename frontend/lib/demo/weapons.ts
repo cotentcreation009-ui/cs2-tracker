@@ -211,7 +211,7 @@ export function computeWeaponInsights(
   rounds.forEach((r, idx) => {
     if (roundFilter && !roundFilter(r, idx)) return;
     usedRounds++;
-    for (const k of r.kills) {
+    for (const k of r.kills ?? []) {
       if (k.k < 0) continue; // no killer (e.g. suicide / world) — skip weapon credit
       const m = weaponMeta(k.w);
       const hs = k.hs ? 1 : 0;

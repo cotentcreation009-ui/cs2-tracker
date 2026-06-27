@@ -62,8 +62,8 @@ function buildPaths(meta: ReplayMeta, rounds: ReplayRound[]): PlayerPath[] {
       const side = sideOf(round, i, meta);
       const player = meta.players[i];
       if (!player) continue;
-      const death = round.kills.find((k) => k.v === i) ?? null;
-      const kills = round.kills.filter((k) => k.k === i).map((k) => ({ x: k.kx, y: k.ky }));
+      const death = (round.kills ?? []).find((k) => k.v === i) ?? null;
+      const kills = (round.kills ?? []).filter((k) => k.k === i).map((k) => ({ x: k.kx, y: k.ky }));
       out.push({
         key: `${round.n}-${i}`, round: round.n, roundIdx, playerIndex: i,
         playerName: player.name || `Player ${i}`, side, points,
