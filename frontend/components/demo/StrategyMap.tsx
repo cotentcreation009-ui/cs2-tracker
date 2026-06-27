@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
+import { throwOrigin } from "@/lib/demo/insights";
+import { KIND_COLOR } from "@/components/demo/RadarMap";
 import type { DemoView, SideFilter } from "@/components/demo/MatchToolbar";
 
 const SIZE = 720;
 type Layer = "positions" | "kills" | "deaths" | "nades";
+type Spread = "tight" | "normal" | "wide";
 
 const LAYERS: { key: Layer; label: string }[] = [
   { key: "positions", label: "Position density" },
@@ -15,12 +18,87 @@ const LAYERS: { key: Layer; label: string }[] = [
   { key: "deaths", label: "Deaths" },
   { key: "nades", label: "Utility" },
 ];
+const SPREADS: { key: Spread; label: string; mult: number }[] = [
+  { key: "tight", label: "Tight", mult: 0.66 },
+  { key: "normal", label: "Normal", mult: 1 },
+  { key: "wide", label: "Wide", mult: 1.6 },
+];
+
+// classic heat gradient (low → high): blue → cyan → green → yellow → red
+const HEAT_STOPS: [number, number, number, number][] = [
+  [0.0, 36, 64, 200],
+  [0.3, 0, 200, 224],
+  [0.5, 36, 210, 96],
+  [0.72, 244, 222, 52],
+  [1.0, 240, 58, 40],
+];
+const HEAT_CSS =
+  "linear-gradient(90deg, rgb(36,64,200), rgb(0,200,224), rgb(36,210,96), rgb(244,222,52), rgb(240,58,40))";
+
+function heatColor(t: number): [number, number, number] {
+  for (let i = 1; i < HEAT_STOPS.length; i++) {
+    if (t <= HEAT_STOPS[i][0]) {
+      const [t0, r0, g0, b0] = HEAT_STOPS[i - 1];
+      const [t1, r1, g1, b1] = HEAT_STOPS[i];
+      const f = (t - t0) / (t1 - t0 || 1);
+      return [
+        Math.round(r0 + (r1 - r0) * f),
+        Math.round(g0 + (g1 - g0) * f),
+        Math.round(b0 + (b1 - b0) * f),
+      ];
+    }
+  }
+  const l = HEAT_STOPS[HEAT_STOPS.length - 1];
+  return [l[1], l[2], l[3]];
+}
+
+// Classic normalized heatmap: accumulate intensity on an offscreen canvas, find
+// the peak, then colorize each pixel through the gradient and composite.
+function classicHeat(
+  ctx: CanvasRenderingContext2D,
+  off: HTMLCanvasElement,
+  pts: { x: number; y: number }[],
+  radius: number,
+) {
+  if (!pts.length) return;
+  const octx = off.getContext("2d", { willReadFrequently: true });
+  if (!octx) return;
+  octx.clearRect(0, 0, SIZE, SIZE);
+  octx.globalCompositeOperation = "lighter";
+  for (const p of pts) {
+    const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
+    g.addColorStop(0, "rgba(255,255,255,0.32)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    octx.fillStyle = g;
+    octx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
+  }
+  octx.globalCompositeOperation = "source-over";
+
+  const img = octx.getImageData(0, 0, SIZE, SIZE);
+  const d = img.data;
+  let max = 1;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > max) max = d[i];
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i];
+    if (v === 0) {
+      d[i + 3] = 0;
+      continue;
+    }
+    const t = Math.min(1, v / max);
+    const [r, g, b] = heatColor(t);
+    d[i] = r;
+    d[i + 1] = g;
+    d[i + 2] = b;
+    d[i + 3] = Math.round(Math.min(1, t * 1.15 + 0.05) * 235);
+  }
+  octx.putImageData(img, 0, 0);
+  ctx.drawImage(off, 0, 0);
+}
 
 /**
- * Aggregate heatmap over a match — position density, kills, deaths and utility.
- * Rendered as a tab in the demo viewer (with the shared toolbar driving
- * side/round/player) and also on the standalone /map page (where `view` is
- * absent and a local side toggle is shown instead).
+ * Aggregate heatmap over a match — classic blue→red density for positions /
+ * kills / deaths, plus utility drawn as throw → landing lines. Driven by the
+ * shared toolbar (side / round / player) when present, else a local side toggle.
  */
 export function StrategyMap({
   meta,
@@ -35,14 +113,16 @@ export function StrategyMap({
 }) {
   const [active, setActive] = useState<Set<Layer>>(new Set(["positions"]));
   const [localSide, setLocalSide] = useState<SideFilter>("all");
+  const [spread, setSpread] = useState<Spread>("normal");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const offRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imgOk = useRef(false);
 
-  // shared selection (from toolbar) takes priority; standalone page uses local
   const side = view?.side ?? localSide;
   const scopeRound = view?.scopeRound ?? null;
   const focusPlayer = view?.focusPlayer ?? null;
+  const spreadMult = SPREADS.find((s) => s.key === spread)?.mult ?? 1;
 
   const toPx = useMemo(() => {
     const proj = buildProjection(meta.map, rounds);
@@ -51,6 +131,16 @@ export function StrategyMap({
       return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
     };
   }, [meta.map, rounds]);
+
+  const getOff = () => {
+    if (!offRef.current) {
+      const c = document.createElement("canvas");
+      c.width = SIZE;
+      c.height = SIZE;
+      offRef.current = c;
+    }
+    return offRef.current;
+  };
 
   useEffect(() => {
     let alive = true;
@@ -78,27 +168,6 @@ export function StrategyMap({
     return "all";
   }, []);
 
-  const heat = useCallback(
-    (
-      ctx: CanvasRenderingContext2D,
-      pts: { x: number; y: number }[],
-      color: string,
-      radius: number,
-      alpha: number,
-    ) => {
-      ctx.globalCompositeOperation = "lighter";
-      for (const p of pts) {
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
-        g.addColorStop(0, color.replace("ALPHA", String(alpha)));
-        g.addColorStop(1, color.replace("ALPHA", "0"));
-        ctx.fillStyle = g;
-        ctx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
-      }
-      ctx.globalCompositeOperation = "source-over";
-    },
-    [],
-  );
-
   const redraw = useCallback(() => {
     const cv = canvasRef.current;
     if (!cv) return;
@@ -106,7 +175,7 @@ export function StrategyMap({
     if (!ctx) return;
     ctx.clearRect(0, 0, SIZE, SIZE);
     if (imgOk.current && imgRef.current) {
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.5;
       ctx.drawImage(imgRef.current, 0, 0, SIZE, SIZE);
       ctx.globalAlpha = 1;
     } else {
@@ -127,12 +196,13 @@ export function StrategyMap({
       scopeRound != null && rounds[scopeRound] ? [rounds[scopeRound]] : rounds;
     const sideOk = (s: SideFilter) => side === "all" || s === side;
     const playerOk = (i: number) => focusPlayer == null || i === focusPlayer;
+    const off = getOff();
 
     if (active.has("positions")) {
       const pts: { x: number; y: number }[] = [];
       for (const rd of scoped) {
         const frames = rd.frames ?? [];
-        for (let fi = 0; fi < frames.length; fi += 3) {
+        for (let fi = 0; fi < frames.length; fi += 2) {
           for (const p of frames[fi].p) {
             if (!playerOk(p.i)) continue;
             if (!sideOk(sideOfRound(rd, p.i))) continue;
@@ -140,37 +210,52 @@ export function StrategyMap({
           }
         }
       }
-      heat(ctx, pts, "rgba(56,214,255,ALPHA)", 26, 0.06);
+      classicHeat(ctx, off, pts, 34 * spreadMult);
     }
     if (active.has("kills")) {
       const pts: { x: number; y: number }[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
-      heat(ctx, pts, "rgba(70,211,105,ALPHA)", 22, 0.4);
+          if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
+      classicHeat(ctx, off, pts, 26 * spreadMult);
     }
     if (active.has("deaths")) {
       const pts: { x: number; y: number }[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
-      heat(ctx, pts, "rgba(245,105,74,ALPHA)", 22, 0.4);
+          if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
+      classicHeat(ctx, off, pts, 26 * spreadMult);
     }
     if (active.has("nades")) {
-      const colors: Record<string, string> = {
-        smoke: "rgba(210,210,220,ALPHA)",
-        molotov: "rgba(255,120,40,ALPHA)",
-        flash: "rgba(255,255,255,ALPHA)",
-        he: "rgba(255,170,60,ALPHA)",
-      };
       for (const rd of scoped)
         for (const n of rd.nades ?? []) {
           if (focusPlayer != null && n.by !== focusPlayer) continue;
           const c = toPx(n.x, n.y);
-          heat(ctx, [c], colors[n.k] || "rgba(150,150,150,ALPHA)", 18, 0.45);
+          const col = KIND_COLOR[n.k] ?? "#8a7dff";
+          const o = n.by >= 0 ? throwOrigin(rd, n.by, n.t) : null;
+          if (o) {
+            const oc = toPx(o.x, o.y);
+            ctx.globalAlpha = 0.6;
+            ctx.strokeStyle = col;
+            ctx.lineWidth = 1.4;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(oc.x, oc.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+          }
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 4.5, 0, 7);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "#04060e";
+          ctx.stroke();
         }
     }
-  }, [rounds, active, side, scopeRound, focusPlayer, toPx, heat, sideOfRound]);
+  }, [rounds, active, side, scopeRound, focusPlayer, spreadMult, toPx, sideOfRound]);
 
   useEffect(() => {
     redraw();
@@ -194,14 +279,15 @@ export function StrategyMap({
   };
 
   const focusName = focusPlayer != null ? meta.players[focusPlayer]?.name : null;
+  const heatOn = active.has("positions") || active.has("kills") || active.has("deaths");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
       <canvas
         ref={canvasRef}
         width={SIZE}
         height={SIZE}
-        className="aspect-square w-full max-w-160 rounded-xl border border-line bg-panel2"
+        className="aspect-square w-full max-w-200 rounded-xl border border-line bg-panel2"
       />
 
       <div className="space-y-3">
@@ -223,6 +309,33 @@ export function StrategyMap({
               </button>
             ))}
           </div>
+
+          {heatOn && (
+            <>
+              <div className="stat-label mb-1.5 mt-3">Spread</div>
+              <div className="flex rounded-lg border border-line bg-panel p-0.5">
+                {SPREADS.map((sp) => (
+                  <button
+                    key={sp.key}
+                    type="button"
+                    onClick={() => setSpread(sp.key)}
+                    className={`flex-1 rounded-md px-2 py-0.5 text-xs font-medium transition ${
+                      spread === sp.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    {sp.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2">
+                <div className="h-2 w-full rounded-full" style={{ background: HEAT_CSS }} />
+                <div className="mt-0.5 flex justify-between text-[10px] text-faint">
+                  <span>low</span>
+                  <span>high</span>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* local side toggle only when there is no shared toolbar */}
           {!view && (
@@ -270,6 +383,9 @@ export function StrategyMap({
             </div>
           )}
           {side !== "all" && <div className="mt-1">{side} side only.</div>}
+          {active.has("nades") && (
+            <div className="mt-1">Utility shown as throw → landing lines.</div>
+          )}
           {!hasCalibration(meta.map) && (
             <div className="mt-1 text-mid">
               {meta.map} radar uncalibrated — positions auto-scaled.
