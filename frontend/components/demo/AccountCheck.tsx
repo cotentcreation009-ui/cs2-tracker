@@ -40,16 +40,61 @@ export function AccountCheck({
   steamId,
   name,
   matchScore = 0,
+  matchStats = "",
 }: {
   steamId: string;
   name: string;
   matchScore?: number;
+  matchStats?: string;
 }) {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [data, setData] = useState<AccountScores | null>(null);
   const [err, setErr] = useState("");
+  const [aiState, setAiState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [aiText, setAiText] = useState("");
+  const [aiErr, setAiErr] = useState("");
 
   if (!steamId) return null;
+
+  const runAi = async () => {
+    if (!data || aiState === "loading") return;
+    setAiState("loading");
+    setAiErr("");
+    const summary = [
+      `Player: ${name}`,
+      matchStats ? `This-match stats: ${matchStats}` : "",
+      `This-match CheatMeter: ${matchScore.toFixed(0)}%`,
+      data.cheat
+        ? `Career CheatMeter: ${data.cheat.score.toFixed(0)}% — ${
+            data.cheat.factors.filter((f) => f.score >= 40).map((f) => `${f.label} ${f.display}`).join(", ") ||
+            "no standout factors"
+          }`
+        : "Career CheatMeter: no data",
+      data.smurf ? `Smurf: ${data.smurf.score.toFixed(0)}%${data.smurf.reasons.length ? ` — ${data.smurf.reasons.join(", ")}` : ""}` : "",
+      data.boosted ? `Boosted: ${data.boosted.score.toFixed(0)}%${data.boosted.reasons.length ? ` — ${data.boosted.reasons.join(", ")}` : ""}` : "",
+      data.trust != null ? `Trust: ${data.trust.toFixed(0)}/100` : "",
+      data.banned ? "Has a ban on record." : "No bans on record.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      const res = await fetch("/api/ai/analyze", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(b.error || `AI request failed (${res.status})`);
+      }
+      const { text } = (await res.json()) as { text: string };
+      setAiText(text);
+      setAiState("done");
+    } catch (e) {
+      setAiErr(e instanceof Error ? e.message : "failed");
+      setAiState("error");
+    }
+  };
 
   const run = async () => {
     if (state === "loading") return;
@@ -119,6 +164,23 @@ export function AccountCheck({
           </span>
         </div>
       )}
+      <div className="border-t border-line pt-1.5">
+        {aiState === "idle" && (
+          <button
+            type="button"
+            onClick={runAi}
+            className="w-full rounded-md border border-line py-1 text-[11px] text-muted transition hover:bg-panel/50 hover:text-ink"
+          >
+            ✨ AI read
+          </button>
+        )}
+        {aiState === "loading" && <div className="text-[11px] text-faint">Analysing {name}…</div>}
+        {aiState === "error" && <div className="text-[11px] text-bad">{aiErr}</div>}
+        {aiState === "done" && (
+          <p className="whitespace-pre-line text-[11px] leading-relaxed text-muted">{aiText}</p>
+        )}
+      </div>
+
       <Link href={`/profiles/${steamId}`} className="block text-center text-[10px] text-brand hover:underline">
         full profile →
       </Link>

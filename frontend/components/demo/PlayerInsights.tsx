@@ -281,7 +281,16 @@ function PlayerCard({
         </div>
       )}
 
-      <AccountCheck steamId={p.steamId} name={p.name} matchScore={cheat.score} />
+      <AccountCheck
+        steamId={p.steamId}
+        name={p.name}
+        matchScore={cheat.score}
+        matchStats={`${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR, opening ${p.openingWinPct.toFixed(0)}%${
+          p.aimSamples >= 5
+            ? `, reaction ${p.reactionMs.toFixed(0)}ms, pre-aim ${p.preaimDeg.toFixed(1)}°`
+            : ""
+        }`}
+      />
     </div>
   );
 }

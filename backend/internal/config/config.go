@@ -39,6 +39,11 @@ type Config struct {
 	FaceitBaseURL string
 	FaceitAPIKey  string
 
+	// AI interpretation (Anthropic). Optional — when AnthropicAPIKey is unset the
+	// AI-read endpoint reports "not configured" instead of calling out.
+	AnthropicAPIKey string
+	AnthropicModel  string
+
 	// Demo pipeline
 	DemoQueueKey      string        // redis list key used as the parse job queue
 	DemoWorkDir       string        // scratch dir where demos are downloaded/extracted before parsing
@@ -89,6 +94,8 @@ func Load() (*Config, error) {
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
 		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
+		AnthropicAPIKey:   getEnv("ANTHROPIC_API_KEY", ""),
+		AnthropicModel:    getEnv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),
 		DemoWorkDir:       getEnv("DEMO_WORK_DIR", os.TempDir()),
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),
