@@ -60,6 +60,16 @@ const UTIL_LIFE: Record<string, number> = {
 const mmss = (t: number) =>
   `${Math.floor(Math.max(0, t) / 60)}:${String(Math.floor(Math.max(0, t) % 60)).padStart(2, "0")}`;
 
+function reasonLabel(reason: string, winner: string): string {
+  const k = (reason || "").toLowerCase();
+  if (k.includes("defus")) return "Bomb defused";
+  if (k.includes("bomb") || k.includes("detonat")) return "Bomb detonated";
+  if (k.includes("time") || k.includes("saved") || k.includes("expir")) return "Time expired";
+  if (k.includes("elim") || k.includes("won") || k.includes("win") || k.includes("kill"))
+    return `${winner === "CT" ? "CTs" : "Terrorists"} eliminated`;
+  return reason ? reason.replace(/_/g, " ") : "Round ended";
+}
+
 // Live feed for the replay: utility currently active at the playhead + the kill
 // log up to now + bomb status — all synced to the scrubber time.
 function EventFeed({
@@ -472,11 +482,9 @@ export default function ReplayPage() {
         }
       }
 
-      // advisory banner
+      // advisory banner (round result is shown as a popup, not here)
       let b = "";
-      if (t >= duration && round.winner) {
-        b = `${round.winner} win · ${round.reason.replace(/_/g, " ")}`;
-      } else if ((round.bomb ?? []).some((x) => x.k === "defuse_start" && Math.abs(x.t - t) < 3)) {
+      if ((round.bomb ?? []).some((x) => x.k === "defuse_start" && Math.abs(x.t - t) < 3)) {
         b = "Defusing…";
       } else if (plant && !ended) {
         b = "Bomb planted";
@@ -548,6 +556,18 @@ export default function ReplayPage() {
     setFocusPlayer,
     setScopeRound,
     setSide,
+  };
+
+  // round navigation (drives scopeRound → the sync effect updates the replay)
+  const goRound = (i: number) => setScopeRound(clamp(i, 0, rounds.length - 1));
+  const atFirst = roundIdx <= 0;
+  const atLast = roundIdx >= rounds.length - 1;
+  const finished = duration > 0 && time >= duration - 0.05;
+  const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
+  const replay = () => {
+    seek(0);
+    playRef.current = true;
+    setPlaying(true);
   };
 
   return (
@@ -645,9 +665,34 @@ export default function ReplayPage() {
             height={SIZE}
             className="aspect-square w-full max-w-160 rounded-xl border border-line bg-panel2"
           />
-          {banner && (
+          {banner && !finished && (
             <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-line2 bg-bg/80 px-3 py-1 text-xs font-semibold backdrop-blur">
               {banner}
+            </div>
+          )}
+          {finished && round.winner && (
+            <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-xl border border-line2 bg-bg/90 px-4 py-2.5 text-center shadow-lg backdrop-blur">
+              <div className="text-[10px] uppercase tracking-wider text-faint">
+                Round {round.n} over
+              </div>
+              <div className="text-lg font-extrabold leading-tight" style={{ color: winHex }}>
+                {round.winner} win
+              </div>
+              <div className="text-[11px] text-muted">{reasonLabel(round.reason, round.winner)}</div>
+              <div className="mt-2 flex justify-center gap-2">
+                <button type="button" onClick={replay} className="btn btn-ghost px-2.5 py-1 text-xs">
+                  ↺ Replay
+                </button>
+                {!atLast && (
+                  <button
+                    type="button"
+                    onClick={() => goRound(roundIdx + 1)}
+                    className="btn btn-primary px-2.5 py-1 text-xs"
+                  >
+                    Next round →
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {!hasCalibration(meta.map) && (
@@ -660,6 +705,33 @@ export default function ReplayPage() {
         {/* controls + round info */}
         <div className="space-y-3">
           <div className="card px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => goRound(roundIdx - 1)}
+                disabled={atFirst}
+                className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs font-semibold tabular-nums">
+                Round {round.n}
+                {round.winner && (
+                  <span className="ml-1.5 pill" style={{ background: `${winHex}22`, color: winHex }}>
+                    {round.winner}
+                  </span>
+                )}
+                <span className="ml-1.5 text-faint">{roundIdx + 1}/{rounds.length}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => goRound(roundIdx + 1)}
+                disabled={atLast}
+                className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
