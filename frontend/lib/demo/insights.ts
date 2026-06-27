@@ -32,11 +32,14 @@ export interface PlayerInsight {
 }
 
 // One grenade landing, attributed to a thrower — used to plot a player's utility
-// on the radar and spot repeated setups.
+// on the radar (and animate the throw → bloom) and spot repeated setups.
 export interface UtilThrow {
   kind: string; // smoke | molotov | flash | he | decoy
-  x: number;
+  x: number; // landing position
   y: number;
+  ox: number; // thrower's position at throw time (arc origin)
+  oy: number;
+  t: number; // seconds since round start
   round: number;
 }
 
@@ -114,6 +117,27 @@ function deriveSiteAnchor(rounds: ReplayRound[]): SiteAnchor {
 
 const d2 = (ax: number, ay: number, bx: number, by: number) =>
   (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
+
+// throwerOriginAt finds a player's position closest to time t in a round — used
+// as the visual origin of a grenade arc on the util map.
+function throwerOriginAt(
+  r: ReplayRound,
+  idx: number,
+  t: number,
+): { x: number; y: number } | null {
+  let best: { x: number; y: number } | null = null;
+  let bestDt = Infinity;
+  for (const f of r.frames ?? []) {
+    const p = f.p.find((pp) => pp.i === idx);
+    if (!p) continue;
+    const dt = Math.abs(f.t - t);
+    if (dt < bestDt) {
+      bestDt = dt;
+      best = { x: p.x, y: p.y };
+    }
+  }
+  return best;
+}
 
 export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): InsightsResult {
   const anchor = deriveSiteAnchor(rounds);
@@ -247,7 +271,13 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       else if (n.k === "flash") { util.flash++; kind = "flash"; if (a) a.util.flash++; }
       else if (n.k === "he") { util.he++; kind = "he"; if (a) a.util.he++; }
       else if (n.k === "decoy") { util.decoy++; kind = "decoy"; if (a) a.util.decoy++; }
-      if (a && kind) a.nadeList.push({ kind, x: n.x, y: n.y, round: r.n });
+      if (a && kind) {
+        const o = throwerOriginAt(r, n.by, n.t);
+        a.nadeList.push({
+          kind, x: n.x, y: n.y, round: r.n, t: n.t,
+          ox: o?.x ?? n.x, oy: o?.y ?? n.y,
+        });
+      }
     }
   }
   util.perRound = rounds.length ? util.total / rounds.length : 0;

@@ -297,7 +297,18 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 		rc.capEvery = math.Max(1, math.Round(tr/float64(captureHz)))
 	}
 	rc.lastCap = -1e9
-	rc.cur = &ReplayRound{Number: rc.roundCount + 1}
+	// Initialise slices so empty categories marshal as [] (not null) — the §5
+	// contract is arrays, and null would break array consumers on the frontend.
+	rc.cur = &ReplayRound{
+		Number: rc.roundCount + 1,
+		CT:     []int{},
+		T:      []int{},
+		Frames: []ReplayFrame{},
+		Kills:  []ReplayKill{},
+		Nades:  []ReplayNade{},
+		Bomb:   []ReplayBomb{},
+		Stats:  []ReplayPlayerStat{},
+	}
 	rc.stat = map[int]*ReplayPlayerStat{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)

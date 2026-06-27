@@ -468,7 +468,7 @@ export default function ReplayPage() {
             ref={canvasRef}
             width={SIZE}
             height={SIZE}
-            className="aspect-square w-full max-w-[640px] rounded-xl border border-line bg-panel2"
+            className="aspect-square w-full max-w-160 rounded-xl border border-line bg-panel2"
           />
           {banner && (
             <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-line2 bg-bg/80 px-3 py-1 text-xs font-semibold backdrop-blur">
@@ -530,7 +530,7 @@ export default function ReplayPage() {
                 setPlaying(false);
                 seek(parseFloat(e.target.value));
               }}
-              className="mt-3 w-full accent-[var(--color-brand)]"
+              className="mt-3 w-full accent-brand"
             />
           </div>
 
