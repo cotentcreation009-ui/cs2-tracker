@@ -146,6 +146,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/demos/from-url", s.handleDemoFromURL)
 			r.Get("/demos/{id}", s.handleDemoJob)
 			r.Get("/demos/{id}/data", s.handleDemoData)
+			r.Post("/ai/analyze", s.handleAiAnalyze)
 		})
 
 		// Everything else: 30s timeout, gated behind the internal token.
