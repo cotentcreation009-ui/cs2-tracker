@@ -91,16 +91,52 @@ function UtilPill({
   );
 }
 
+interface SideLean { a: number; b: number; mid: number; n: number }
+interface PlayerSiteLean { ct: SideLean; t: SideLean }
+
+function leanLabel(l: SideLean): string {
+  const tot = l.a + l.b + l.mid || 1;
+  const a = l.a / tot;
+  const b = l.b / tot;
+  if (a >= 0.55) return "A-heavy";
+  if (b >= 0.55) return "B-heavy";
+  if (Math.abs(a - b) < 0.12) return "flexible";
+  return a > b ? "A lean" : "B lean";
+}
+function LeanRow({ side, l }: { side: "CT" | "T"; l: SideLean }) {
+  const tot = l.a + l.b + l.mid || 1;
+  const aw = (l.a / tot) * 100;
+  const mw = (l.mid / tot) * 100;
+  const bw = (l.b / tot) * 100;
+  return (
+    <div>
+      <div className="flex justify-between text-[10px]">
+        <span className="font-semibold" style={{ color: side === "T" ? T : CT }}>{side}</span>
+        <span className="text-faint">
+          {leanLabel(l)} · A {Math.round(aw)} · Mid {Math.round(mw)} · B {Math.round(bw)}
+        </span>
+      </div>
+      <div className="mt-0.5 flex h-1.5 overflow-hidden rounded-full bg-panel">
+        <div style={{ width: `${aw}%`, background: "#f5694a" }} />
+        <div style={{ width: `${mw}%`, background: "#f5b942" }} />
+        <div style={{ width: `${bw}%`, background: "#5b9dff" }} />
+      </div>
+    </div>
+  );
+}
+
 function PlayerCard({
   p,
   focused,
   activeKind,
+  lean,
   onFocus,
   onUtil,
 }: {
   p: PlayerInsight;
   focused: boolean;
   activeKind: string | null;
+  lean?: PlayerSiteLean;
   onFocus: () => void;
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
@@ -187,7 +223,13 @@ function PlayerCard({
         </div>
       )}
 
-      {area.rounds > 0 && (
+      {lean && (lean.ct.n > 0 || lean.t.n > 0) ? (
+        <div className="mt-2.5 space-y-1.5">
+          <div className="text-[11px] text-muted">Site focus (by call-out)</div>
+          {lean.ct.n > 0 && <LeanRow side="CT" l={lean.ct} />}
+          {lean.t.n > 0 && <LeanRow side="T" l={lean.t} />}
+        </div>
+      ) : area.rounds > 0 ? (
         <div className="mt-2.5">
           <div className="flex justify-between text-[11px] text-muted">
             <span>Area lean</span>
@@ -198,12 +240,12 @@ function PlayerCard({
             </span>
           </div>
           <div className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-panel">
-            <div style={{ width: `${(area.a / areaTotal) * 100}%`, background: "#46d369" }} />
+            <div style={{ width: `${(area.a / areaTotal) * 100}%`, background: "#f5694a" }} />
             <div style={{ width: `${(area.mid / areaTotal) * 100}%`, background: "#f5b942" }} />
             <div style={{ width: `${(area.b / areaTotal) * 100}%`, background: "#5b9dff" }} />
           </div>
         </div>
-      )}
+      ) : null}
 
       {p.buys.pistol + p.buys.eco + p.buys.force + p.buys.full > 0 && (
         <div className="mt-2 flex items-center justify-between text-[10px]">
@@ -343,7 +385,43 @@ export default function PlayerInsights({
     return (t: number): Timing => (t <= t1 ? "early" : t <= t2 ? "mid" : "late");
   }, [players]);
 
-  // load this map's user-defined call-out zones (localStorage)
+  // per-player A/B/Mid lean per side, classified against the active call-out
+  // zones — "is this player usually an A or B player on each side?"
+  const siteLean = useMemo(() => {
+    const m = new Map<number, PlayerSiteLean>();
+    if (!zones.length) return m;
+    const get = (i: number) => {
+      let v = m.get(i);
+      if (!v) {
+        v = { ct: { a: 0, b: 0, mid: 0, n: 0 }, t: { a: 0, b: 0, mid: 0, n: 0 } };
+        m.set(i, v);
+      }
+      return v;
+    };
+    const scoped =
+      view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
+    for (const r of scoped) {
+      const frames = r.frames ?? [];
+      for (let fi = 0; fi < frames.length; fi += 4) {
+        for (const p of frames[fi].p) {
+          if (p.h <= 0) continue;
+          const sd = r.ct?.includes(p.i) ? "ct" : r.t?.includes(p.i) ? "t" : null;
+          if (!sd) continue;
+          const z = classifyPosition(meta.map, p.x, p.y, zones);
+          const k = z?.kind;
+          if (k !== "A" && k !== "B" && k !== "Mid") continue;
+          const v = get(p.i)[sd];
+          if (k === "A") v.a++;
+          else if (k === "B") v.b++;
+          else v.mid++;
+          v.n++;
+        }
+      }
+    }
+    return m;
+  }, [meta.map, rounds, view.scopeRound, zones]);
+
+  // load this map's active call-out zones (localStorage / built-in defaults)
   useEffect(() => {
     setZones(loadZones(meta.map));
   }, [meta.map]);
@@ -430,6 +508,7 @@ export default function PlayerInsights({
               p={p}
               focused={focusI === p.i}
               activeKind={focusI === p.i ? activeKind : null}
+              lean={siteLean.get(p.i)}
               onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
               onUtil={pickUtil}
             />
