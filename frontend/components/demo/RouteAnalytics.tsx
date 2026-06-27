@@ -128,9 +128,15 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
           </div>
           <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-            {mode === "common"
-              ? clusters.map((c) => <RouteRow key={c.id} cluster={c} active={c.id === selected} onClick={() => setSelected(c.id === selected ? null : c.id)} />)
-              : individualPaths.slice().sort((a, b) => a.round - b.round).map((p) => <PathRow key={p.key} path={p} />)}
+            {(mode === "common" ? clusters.length : individualPaths.length) === 0 ? (
+              <div className="grid h-full min-h-24 place-items-center px-4 text-center text-xs text-muted">
+                No routes match the current player / round / side filter — clear it in the toolbar above.
+              </div>
+            ) : mode === "common" ? (
+              clusters.map((c) => <RouteRow key={c.id} cluster={c} active={c.id === selected} onClick={() => setSelected(c.id === selected ? null : c.id)} />)
+            ) : (
+              individualPaths.slice().sort((a, b) => a.round - b.round).map((p) => <PathRow key={p.key} path={p} />)
+            )}
           </div>
         </div>
       </div>

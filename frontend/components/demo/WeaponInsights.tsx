@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
+  weaponMeta,
   type PlayerWeaponStat,
   type WeaponStat,
   type WeaponInsightsData,
 } from "@/lib/demo/weapons";
+import { buildProjection } from "@/lib/demo/projection";
+import { radarImage } from "@/lib/maps/calibration";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const CT = "#5b9dff";
@@ -224,6 +227,91 @@ function PlayerCard({
   );
 }
 
+// --- kill-position map ------------------------------------------------------
+
+// Every kill plotted at the victim's spot, coloured by the killer's weapon,
+// obeying the shared toolbar (round / side / focused player). Makes Weapons
+// map-centric like the other lenses, via the shared projection.
+function KillMap({
+  meta,
+  rounds,
+  view,
+}: {
+  meta: ReplayMeta;
+  rounds: ReplayRound[];
+  view: DemoView;
+}) {
+  const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
+  const calibrated = proj.calibrated;
+
+  const marks = useMemo(() => {
+    const scoped =
+      view.scopeRound != null && rounds[view.scopeRound]
+        ? [rounds[view.scopeRound]]
+        : rounds;
+    const killerSide = (r: ReplayRound, i: number) =>
+      r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : meta.players[i]?.team ?? "";
+    const out: { x: number; y: number; color: string }[] = [];
+    for (const r of scoped) {
+      for (const k of r.kills ?? []) {
+        if (k.k < 0) continue;
+        if (view.focusPlayer != null && k.k !== view.focusPlayer) continue;
+        if (view.side !== "all" && killerSide(r, k.k) !== view.side) continue;
+        const p = proj.project(k.vx, k.vy);
+        if (!p) continue;
+        out.push({ x: p.x * 100, y: p.y * 100, color: weaponMeta(k.w).color });
+      }
+    }
+    return out;
+  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer]);
+
+  return (
+    <div className="card-2 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="stat-label">Kill positions</span>
+        <span className="text-[10px] text-faint">
+          {marks.length} kills · X at victim · coloured by weapon
+        </span>
+      </div>
+      <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-xl border border-line bg-panel2">
+        {calibrated ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={radarImage(meta.map)}
+            alt={`${meta.map} radar`}
+            className="absolute inset-0 h-full w-full object-cover opacity-90"
+            draggable={false}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-[#0a1020]" />
+        )}
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="absolute inset-0 h-full w-full"
+        >
+          {marks.map((m, i) => (
+            <g key={i} stroke={m.color} strokeWidth={0.55} strokeLinecap="round">
+              <line x1={m.x - 1.2} y1={m.y - 1.2} x2={m.x + 1.2} y2={m.y + 1.2} />
+              <line x1={m.x + 1.2} y1={m.y - 1.2} x2={m.x - 1.2} y2={m.y + 1.2} />
+            </g>
+          ))}
+        </svg>
+        {marks.length === 0 && (
+          <div className="absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted">
+            No kills for the current filter.
+          </div>
+        )}
+        {!calibrated && (
+          <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">
+            {meta.map} uncalibrated — auto-scaled
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // --- main -------------------------------------------------------------------
 
 /**
@@ -323,6 +411,8 @@ export default function WeaponInsights({
           hex={data.deadliestPlayer ? teamColor(data.deadliestPlayer.team) : undefined}
         />
       </div>
+
+      <KillMap meta={meta} rounds={rounds} view={view} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* weapon kill chart */}
