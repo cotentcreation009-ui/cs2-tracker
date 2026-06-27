@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { computeInsights, type PlayerInsight } from "@/lib/demo/insights";
 import { demoCheat, BAND_HEX, BAND_LABEL, type DemoCheat } from "@/lib/demo/cheat";
-import { computeTendencies, tendencySummary, type PlayerTendencies } from "@/lib/demo/tendencies";
+import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
@@ -13,7 +14,7 @@ const T = "#e7b53c";
 
 function VerdictCard({ p, cheat, tend }: { p: PlayerInsight; cheat: DemoCheat; tend?: PlayerTendencies }) {
   const col = p.team === "T" ? T : CT;
-  const tLines = tendencySummary(tend);
+  const tLines = playstyleSummary(p, tend);
   const cheatFactors = cheat.factors
     .slice(0, 4)
     .map((f) => `${f.label} ${f.display}`)
@@ -27,6 +28,13 @@ function VerdictCard({ p, cheat, tend }: { p: PlayerInsight; cheat: DemoCheat; t
       <div className="flex items-center gap-2">
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: col }} />
         <span className="truncate text-sm font-bold">{p.name}</span>
+        <Link
+          href={`/profiles/${p.steamId}`}
+          title="Open full career profile"
+          className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted transition hover:bg-panel/50 hover:text-ink"
+        >
+          Profile →
+        </Link>
         <span className="ml-auto shrink-0 text-[11px] tabular-nums text-faint">
           {p.kills}-{p.deaths} · {p.adr.toFixed(0)} ADR
         </span>

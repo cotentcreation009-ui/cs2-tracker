@@ -16,7 +16,7 @@ import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
 import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
 import { demoCheat, BAND_HEX, BAND_LABEL } from "@/lib/demo/cheat";
-import { computeTendencies, tendencySummary, type PlayerTendencies } from "@/lib/demo/tendencies";
+import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
@@ -149,6 +149,8 @@ function PlayerCard({
   const area = p.area;
   const areaTotal = area.a + area.b + area.mid || 1;
   const cheat = demoCheat(p);
+  const tLines = playstyleSummary(p, tend);
+  const hasAim = p.shots >= 1 || p.aimSamples >= 1;
   return (
     <div
       className={`card lift relative overflow-hidden py-3 pl-3 pr-4 transition ${
@@ -156,17 +158,26 @@ function PlayerCard({
       }`}
     >
       <span className="absolute inset-y-0 left-0 w-1" style={{ background: hex }} />
-      <button
-        type="button"
-        onClick={onFocus}
-        className="flex w-full items-center justify-between gap-2 text-left"
-        title="Focus this player across all tabs"
-      >
-        <span className="truncate font-bold">{p.name}</span>
-        <span className="pill shrink-0" style={{ background: `${hex}22`, color: hex }}>
-          {p.team || "—"}
-        </span>
-      </button>
+      <div className="flex w-full items-center gap-2">
+        <button
+          type="button"
+          onClick={onFocus}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          title="Focus this player across all tabs"
+        >
+          <span className="truncate font-bold">{p.name}</span>
+          <span className="pill shrink-0" style={{ background: `${hex}22`, color: hex }}>
+            {p.team || "—"}
+          </span>
+        </button>
+        <Link
+          href={`/profiles/${p.steamId}`}
+          title="Open full career profile"
+          className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted transition hover:bg-panel/50 hover:text-ink"
+        >
+          Profile →
+        </Link>
+      </div>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-2xl font-extrabold tabular-nums" style={{ color: hex }}>
           {p.kills}
@@ -206,6 +217,15 @@ function PlayerCard({
         <Stat label="Trade K" value={`${p.tradeKills}`} sub={`${p.tradeKillPct.toFixed(0)}%`} />
         <Stat label="Multi-K" value={`${p.multiKillRounds}`} sub="rounds" />
       </div>
+
+      {hasAim && (
+        <div className="mt-1.5 grid grid-cols-4 gap-1.5" title="From this demo's per-tick aim capture">
+          <Stat label="Accuracy" value={p.shots >= 1 ? `${p.accuracy.toFixed(0)}%` : "—"} />
+          <Stat label="HS acc" value={p.shots >= 1 ? `${p.hsAccuracy.toFixed(0)}%` : "—"} />
+          <Stat label="Reaction" value={p.aimSamples >= 1 ? `${p.reactionMs.toFixed(0)}ms` : "—"} />
+          <Stat label="Pre-aim" value={p.aimSamples >= 1 ? `${p.preaimDeg.toFixed(1)}°` : "—"} />
+        </div>
+      )}
 
       <div className="mt-2.5">
         <div className="flex justify-between text-[11px] text-muted">
@@ -284,6 +304,17 @@ function PlayerCard({
         </div>
       )}
 
+      {tLines.length > 0 && (
+        <div className="mt-2.5 space-y-0.5 border-t border-line pt-2">
+          <div className="text-[10px] uppercase tracking-wider text-faint">Tendencies (this demo)</div>
+          {tLines.map((l, i) => (
+            <div key={i} className="text-[11px] leading-snug text-muted">
+              {l}
+            </div>
+          ))}
+        </div>
+      )}
+
       <AccountCheck
         steamId={p.steamId}
         name={p.name}
@@ -292,7 +323,7 @@ function PlayerCard({
           p.shots >= 40 ? `, acc ${p.accuracy.toFixed(0)}%/HS-acc ${p.hsAccuracy.toFixed(0)}%` : ""
         }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`}
         cheatFactors={cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ")}
-        tendencyLines={tendencySummary(tend)}
+        tendencyLines={playstyleSummary(p, tend)}
       />
     </div>
   );
