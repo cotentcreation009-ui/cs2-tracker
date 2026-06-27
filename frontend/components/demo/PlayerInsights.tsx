@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeInsights,
@@ -208,14 +208,27 @@ export default function PlayerInsights({
   rounds: ReplayRound[];
   view: DemoView;
 }) {
-  const data = useMemo(() => computeInsights(meta, rounds), [meta, rounds]);
   const [kind, setKind] = useState<string | null>(null);
+
+  // scope the insights to the toolbar's round + side selection
+  const data = useMemo(() => {
+    const scoped =
+      view.scopeRound != null && rounds[view.scopeRound]
+        ? [rounds[view.scopeRound]]
+        : rounds;
+    return computeInsights(meta, scoped);
+  }, [meta, rounds, view.scopeRound]);
+
+  const players = useMemo(
+    () => data.players.filter((p) => view.side === "all" || p.team === view.side),
+    [data, view.side],
+  );
 
   // Default the map to the biggest utility user's most-thrown grenade, so it's
   // alive on first view instead of an empty prompt.
   const fallback = useMemo(() => {
     let best: PlayerInsight | null = null;
-    for (const p of data.players) {
+    for (const p of players) {
       if (p.utilNades.length && (!best || p.utilNades.length > best.utilNades.length)) {
         best = p;
       }
@@ -225,19 +238,30 @@ export default function PlayerInsights({
     for (const n of best.utilNades) counts[n.kind] = (counts[n.kind] ?? 0) + 1;
     const topKind = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
     return { i: best.i, kind: topKind };
-  }, [data]);
+  }, [players]);
 
-  if (!data.players.length) {
+  // reset the grenade-kind selection when the scope changes
+  useEffect(() => {
+    setKind(null);
+  }, [view.scopeRound, view.side]);
+
+  const scopeLabel =
+    view.scopeRound != null && rounds[view.scopeRound]
+      ? `round ${rounds[view.scopeRound].n}`
+      : "match";
+
+  if (!players.length) {
     return (
       <div className="card px-4 py-6 text-sm text-muted">
-        No per-player data in this demo.
+        No per-player data for {scopeLabel}
+        {view.side !== "all" ? ` on ${view.side}` : ""}.
       </div>
     );
   }
 
   const u = data.util;
   const focusI = view.focusPlayer ?? fallback?.i ?? null;
-  const selPlayer = focusI != null ? data.players.find((p) => p.i === focusI) ?? null : null;
+  const selPlayer = focusI != null ? players.find((p) => p.i === focusI) ?? null : null;
   const selKinds: string[] = selPlayer
     ? UTIL_KINDS.filter((k) => selPlayer.utilNades.some((n) => n.kind === k))
     : [];
@@ -267,7 +291,7 @@ export default function PlayerInsights({
           thrown on the map — tight clusters across rounds reveal a repeatable setup.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          {data.players.map((p) => (
+          {players.map((p) => (
             <PlayerCard
               key={p.i}
               p={p}
@@ -329,7 +353,9 @@ export default function PlayerInsights({
           ) : (
             <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted">
               {selPlayer
-                ? `${selPlayer.name} threw no utility we could track.`
+                ? `${selPlayer.name} threw no trackable utility${
+                    view.scopeRound != null ? ` in ${scopeLabel}` : ""
+                  }.`
                 : "Pick a player to watch their utility on the map."}
             </div>
           )}
@@ -338,7 +364,7 @@ export default function PlayerInsights({
         <div className="card-2 px-4 py-3">
           <div className="mb-2 flex items-center gap-2">
             <span className="stat-label">Utility used</span>
-            <span className="pill bg-panel text-faint">match total</span>
+            <span className="pill bg-panel text-faint">{scopeLabel} total</span>
             <span className="ml-auto text-xs text-muted tabular-nums">
               {u.perRound.toFixed(1)} / round
             </span>

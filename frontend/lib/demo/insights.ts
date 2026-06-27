@@ -63,6 +63,7 @@ export const PLAYER_INSIGHTS_LIMITATIONS = [
   "Assists are a trade-proximity proxy (our data has no assist event).",
   "Economy is a coarse equipment-value bucket (pistol / eco / force / full), not real money or a full loadout.",
   "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones. Clutch / 1vX needs per-tick data we don't capture.",
+  "Grenades whose thrower the demo didn't record are counted in match totals but can't be attributed to a player on the map.",
 ].join(" ");
 
 const sideOf = (r: ReplayRound, i: number, meta: ReplayMeta): "CT" | "T" | "" => {

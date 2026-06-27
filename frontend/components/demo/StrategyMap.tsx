@@ -53,17 +53,22 @@ export function StrategyMap({
   }, [meta.map, rounds]);
 
   useEffect(() => {
+    let alive = true;
     imgOk.current = false;
     const img = new Image();
     img.onload = () => {
+      if (!alive) return;
       imgRef.current = img;
       imgOk.current = true;
       redraw();
     };
     img.onerror = () => {
-      imgOk.current = false;
+      if (alive) imgOk.current = false;
     };
     img.src = radarImage(meta.map);
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 

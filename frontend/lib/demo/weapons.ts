@@ -105,6 +105,16 @@ function normKey(raw: string): string {
   return k;
 }
 
+const sideOfKiller = (
+  r: ReplayRound,
+  i: number,
+  meta: ReplayMeta,
+): "CT" | "T" | "" => {
+  if (r.ct?.includes(i)) return "CT";
+  if (r.t?.includes(i)) return "T";
+  return meta.players[i]?.team ?? "";
+};
+
 export function weaponMeta(raw: string): WeaponMeta {
   const key = normKey(raw);
   const hit = CATALOG[key];
@@ -198,6 +208,7 @@ export function computeWeaponInsights(
   meta: ReplayMeta,
   rounds: ReplayRound[],
   roundFilter?: (r: ReplayRound, idx: number) => boolean,
+  side: "all" | "CT" | "T" = "all",
 ): WeaponInsightsData {
   if (!meta || !rounds?.length) return EMPTY;
 
@@ -213,6 +224,7 @@ export function computeWeaponInsights(
     usedRounds++;
     for (const k of r.kills ?? []) {
       if (k.k < 0) continue; // no killer (e.g. suicide / world) — skip weapon credit
+      if (side !== "all" && sideOfKiller(r, k.k, meta) !== side) continue;
       const m = weaponMeta(k.w);
       const hs = k.hs ? 1 : 0;
       totalKills++;

@@ -68,18 +68,23 @@ export function UtilThrowMap({
   const calibrated = hasCalibration(map);
 
   useEffect(() => {
+    let alive = true;
     imgOk.current = false;
     imgRef.current = null;
     if (!calibrated) return;
     const img = new Image();
     img.onload = () => {
+      if (!alive) return;
       imgRef.current = img;
       imgOk.current = true;
     };
     img.onerror = () => {
-      imgOk.current = false;
+      if (alive) imgOk.current = false;
     };
     img.src = radarImage(map);
+    return () => {
+      alive = false;
+    };
   }, [map, calibrated]);
 
   useEffect(() => {
