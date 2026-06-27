@@ -7,6 +7,17 @@ import { getMatch } from "@/lib/demo/store";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { hasCalibration, radarImage, worldToRadar } from "@/lib/maps/calibration";
 import { mapLabel } from "@/lib/format";
+import RouteAnalytics from "@/components/demo/RouteAnalytics";
+import WeaponInsights from "@/components/demo/WeaponInsights";
+import PlayerInsights from "@/components/demo/PlayerInsights";
+
+const TABS = [
+  { k: "replay", label: "Replay" },
+  { k: "routes", label: "Routes" },
+  { k: "weapons", label: "Weapons" },
+  { k: "insights", label: "Insights" },
+] as const;
+type Tab = (typeof TABS)[number]["k"];
 
 const SIZE = 720; // canvas internal resolution
 const CT = "#5b9dff";
@@ -40,6 +51,7 @@ export default function ReplayPage() {
   const [speed, setSpeed] = useState(2);
   const [time, setTime] = useState(0);
   const [banner, setBanner] = useState("");
+  const [tab, setTab] = useState<Tab>("replay");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -368,6 +380,30 @@ export default function ReplayPage() {
         </Link>
       </div>
 
+      {/* analysis tabs */}
+      <div className="flex flex-wrap gap-1 border-b border-line">
+        {TABS.map((tb) => (
+          <button
+            key={tb.k}
+            type="button"
+            onClick={() => setTab(tb.k)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+              tab === tb.k
+                ? "border-brand text-ink"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} />}
+      {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} />}
+      {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} />}
+
+      {tab === "replay" && (
+        <>
       {/* round strip */}
       <div className="flex flex-wrap gap-1">
         {rounds.map((r, i) => (
@@ -487,6 +523,8 @@ export default function ReplayPage() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

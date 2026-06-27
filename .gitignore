@@ -40,3 +40,6 @@ Thumbs.db
 
 # local build artifacts (parsedemo.exe etc.)
 /bin/
+
+# vendored copy of the previous demo-parser app (reference only)
+demo parser app/
