@@ -18,9 +18,9 @@ import (
 
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/stats"
-	dem "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs"
-	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
-	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
+	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
 )
 
 // HashFile returns the hex-encoded SHA-256 of a file. The worker stamps this on
@@ -411,7 +411,8 @@ func (c *collector) addRoundWinToRoster(winner int) {
 }
 
 func (c *collector) finish() *models.ParsedMatch {
-	mapName := c.p.Header().MapName
+	// v5 dropped Parser.Header(); the map name comes from the game rules convars.
+	mapName := c.p.GameState().Rules().ConVars()["mp_mapname"]
 	if mapName == "" {
 		mapName = "unknown"
 	}

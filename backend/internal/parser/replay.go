@@ -17,9 +17,9 @@ import (
 	"math"
 
 	"github.com/golang/geo/r3"
-	dem "github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs"
-	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/common"
-	"github.com/markus-wa/demoinfocs-golang/v4/pkg/demoinfocs/events"
+	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
 )
 
 // captureHz is how many position snapshots/second we keep. 1 Hz matches the
@@ -187,7 +187,8 @@ type replayCollector struct {
 }
 
 func mapNameOf(p dem.Parser) string {
-	if m := p.Header().MapName; m != "" {
+	// v5 dropped Parser.Header(); the map name comes from the game rules convars.
+	if m := p.GameState().Rules().ConVars()["mp_mapname"]; m != "" {
 		return m
 	}
 	return "unknown"
