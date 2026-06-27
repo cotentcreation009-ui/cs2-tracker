@@ -58,6 +58,10 @@ export interface ReplayPlayerStat {
   aimN?: number; // kills with an aim-tell sample (victim became visible first)
   rctMs?: number; // sum reaction ms (since victim spotted) — average by aimN
   preaim?: number; // sum crosshair offset (deg) at spot instant — average by aimN
+  snap?: number; // kills landed fast despite a far crosshair (superhuman correction)
+  shots?: number; // firearm bullets fired
+  hits?: number; // firearm bullets that dealt damage
+  hsHits?: number; // of hits, headshots
 }
 
 export interface ReplayBomb {

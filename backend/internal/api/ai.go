@@ -12,7 +12,10 @@ import (
 	"github.com/cs2tracker/server/internal/ai"
 )
 
-const aiSystemPrompt = `You are a fair, cautious CS2 anti-cheat analyst. Given one player's match + account stats, write a SHORT read (3-5 sentences) on whether they look like a cheater, smurf, boosted, or legit. Weigh the evidence both ways, cite the specific stats that drive your read, and end with a one-line suggestion (e.g. "Legit — elite but human", "Worth reviewing for aim", "Likely smurf"). Never state cheating as fact — these are public stats, not proof. Be concise and concrete.`
+const aiSystemPrompt = `You are a sharp, fair CS2 analyst. You are given one player's match stats, aim tells, tactical tendencies (positioning/rotations/site preference from their movement), and account signals. Write a SHORT read (4-6 sentences) covering TWO things:
+1. Playstyle & tendencies — their role and how they play (e.g. entry vs lurker, takes space vs seeks contact, rotates a lot vs anchors, predictable site/route), with one concrete, actionable observation (e.g. "exploitable — almost always B on T-side").
+2. Integrity — whether anything looks anomalous (cheating, smurfing, boosted), weighing evidence both ways and citing the specific stats that drive it. Remember a high frag count is NOT itself suspicious; only aim-quality anomalies (snap kills, accuracy, reaction) are.
+Lead with the playstyle read and end with a one-line verdict (e.g. "Aggressive entry — looks legit", "Worth reviewing for aim", "Likely smurf"). Never state cheating as fact — these are public stats, not proof. Be concrete and do NOT invent data that wasn't provided.`
 
 // crude per-IP limiter so AI calls (which cost money) can't be spammed.
 var (

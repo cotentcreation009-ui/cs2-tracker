@@ -1,10 +1,17 @@
 // Per-player, single-match anomaly score for a parsed demo ("CheatMeter, this
-// match"). Built only from what a demo actually gives us per player —
-// performance signals (HS%, K/D, ADR, kills/round, opening-duel success,
-// multi-kill frequency). It is NOT account data (Smurf/Boosted/Bought need
-// profile lookups) and NOT per-tick aim telemetry (reaction / crosshair before
-// visibility need tick-rate data we don't capture). So it's a "this game looked
-// unusual" flag — high-skill legit players score high too — never an accusation.
+// match"). It is built ONLY from aim-quality signals that directly indicate
+// mechanically anomalous aim — NOT volume/impact (kills, K/D, ADR, KPR, multi-
+// kills, opening duels), because a strong player simply frags a lot and that is
+// not cheating. Signals, strongest first:
+//   • Snap kills — landed almost instantly despite the crosshair being far off
+//     target (a superhuman correction). The key tell, and the one that does NOT
+//     punish good angle-holding (a pre-aimed hold has a LOW crosshair offset).
+//   • Accuracy & headshot-accuracy (hits / shots) — volume-independent.
+//   • Reaction (very low only → trigger-style) and headshot % — minor.
+// Aim-tell + accuracy data come from the per-tick parser, so they need a recent
+// re-parse; older demos fall back to headshot % only, at low confidence. Always
+// an "unusual this game" flag — elite legit players can score moderately — never
+// proof; account data (Smurf/Boosted/bans) lives in the separate Account check.
 
 import type { PlayerInsight } from "./insights";
 import { band5, BAND_HEX, BAND_LABEL, type Band } from "@/lib/suspicion";
@@ -27,54 +34,64 @@ export interface DemoCheatFactor {
 export interface DemoCheat {
   score: number;
   band: Band;
+  confidence: number; // 0..1 — how much real aim data backed the score
   factors: DemoCheatFactor[]; // sorted, strongest tell first
 }
 
-// Score one player from their in-match insight stats.
+// Score one player from their in-match aim-quality stats.
 export function demoCheat(p: PlayerInsight): DemoCheat {
-  const rounds = Math.max(1, p.roundsPlayed);
-  const sHs = p.kills >= 5 ? up(p.hsPct, 50, 80) : null; // need a sample of kills
-  const sAdr = up(p.adr, 85, 130);
-  const sKd = up(p.kd, 1.3, 2.5);
-  const sKpr = up(p.kpr, 0.75, 1.15);
-  const sOpen = p.openingAttempts >= 4 ? up(p.openingWinPct, 55, 85) : null;
-  const sMulti = up((p.multiKillRounds / rounds) * 100, 18, 45);
-  // strongest tells — only when the demo captured aim data (newer parses)
-  const enough = p.aimSamples >= 5;
-  const sReact = enough ? down(p.reactionMs, 500, 150) : null; // ms after visible
-  const sPreaim = enough ? down(p.preaimDeg, 20, 3) : null; // crosshair offset °
+  const hasAim = p.aimSamples >= 6; // reaction/snap need spotted-kill samples
+  const hasShots = p.shots >= 40; // accuracy needs a sample of bullets
+
+  // Primary, volume-independent aim tells.
+  const sSnap = hasAim ? up(p.snapRate, 8, 35) : null; // fast kill despite far crosshair
+  // accuracy: window kept wide so high-precision-but-legit play (AWP, tappers
+  // at 40-60%) doesn't saturate — only genuinely anomalous gun accuracy does.
+  const sAcc = hasShots ? up(p.accuracy, 30, 65) : null; // bullets that hit
+  const sHsAcc = hasShots ? up(p.hsAccuracy, 10, 28) : null; // bullets that headshot
+  // Minor corroborators.
+  const sReact = hasAim ? down(p.reactionMs, 220, 80) : null; // only very low (trigger-like)
+  const sHs = p.kills >= 8 ? up(p.hsPct, 50, 88) : null; // pros run high too → weak
 
   const parts: [string, string, string, number | null, number][] = [
-    ["react", "Reaction", `${p.reactionMs.toFixed(0)}ms`, sReact, 0.24],
-    ["preaim", "Pre-aim", `${p.preaimDeg.toFixed(1)}°`, sPreaim, 0.22],
-    ["hs", "Headshot %", `${p.hsPct.toFixed(0)}%`, sHs, 0.16],
-    ["adr", "ADR", p.adr.toFixed(0), sAdr, 0.12],
-    ["kd", "K/D", p.kd.toFixed(2), sKd, 0.1],
-    ["kpr", "Kills / round", p.kpr.toFixed(2), sKpr, 0.08],
-    ["open", "Opening duels", `${p.openingWinPct.toFixed(0)}%`, sOpen, 0.05],
-    ["multi", "Multi-kill rounds", `${p.multiKillRounds}`, sMulti, 0.03],
+    ["snap", "Snap kills", `${p.snapRate.toFixed(0)}%`, sSnap, 0.3],
+    ["acc", "Accuracy", `${p.accuracy.toFixed(0)}%`, sAcc, 0.24],
+    ["hsacc", "HS accuracy", `${p.hsAccuracy.toFixed(0)}%`, sHsAcc, 0.18],
+    ["react", "Reaction", `${p.reactionMs.toFixed(0)}ms`, sReact, 0.1],
+    ["hs", "Headshot %", `${p.hsPct.toFixed(0)}%`, sHs, 0.1],
   ];
   const present = parts.filter(
     (x): x is [string, string, string, number, number] => x[3] != null,
   );
+
+  if (present.length === 0) {
+    return { score: 0, band: band5(0), confidence: 0, factors: [] };
+  }
+
   const mw = present.reduce((a, x) => a + x[4], 0) || 1;
   const mean = present.reduce((a, x) => a + x[3] * x[4], 0) / mw;
 
-  // one or two superhuman tells shouldn't be averaged away — blend the mean with
-  // the peak of the most direct signals (aim tells first, then HS / ADR).
+  // One or two superhuman tells shouldn't be averaged away by normal ones — blend
+  // the weighted mean with the peak of the most direct tells. Accuracy is left
+  // OUT of the peak set so a lone high-accuracy reading (e.g. an AWPer) can't
+  // dominate via the peak — it still contributes through the weighted mean.
   const core = present
-    .filter((x) => ["react", "preaim", "hs", "adr"].includes(x[0]))
+    .filter((x) => ["snap", "hsacc"].includes(x[0]))
     .map((x) => x[3])
     .sort((a, b) => b - a);
   const peak = core.length === 0 ? 0 : core.length === 1 ? core[0] : (core[0] + core[1]) / 2;
   const mech = core.length ? Math.max(mean, 0.4 * mean + 0.6 * peak) : mean;
 
-  // with real aim telemetry we can be more confident; without, stay conservative
-  const score = clamp(mech * (enough ? 0.95 : 0.85));
+  // Confidence scales with how many DIRECT aim tells we actually had. With none
+  // (old demo: HS%/reaction only) the score is heavily discounted so a missing
+  // re-parse can't read as "clean" OR over-accuse.
+  const direct = [sSnap, sAcc, sHsAcc].filter((x) => x != null).length;
+  const confidence = direct >= 3 ? 1 : direct === 2 ? 0.9 : direct === 1 ? 0.78 : 0.5;
+  const score = clamp(mech * confidence);
 
   const factors: DemoCheatFactor[] = present
     .map(([key, label, display, sub]) => ({ key, label, display, score: sub, band: band5(sub) }))
     .sort((a, b) => b.score - a.score);
 
-  return { score, band: band5(score), factors };
+  return { score, band: band5(score), confidence, factors };
 }
