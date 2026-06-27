@@ -39,8 +39,14 @@ type Config struct {
 	FaceitBaseURL string
 	FaceitAPIKey  string
 
-	// AI interpretation (Anthropic). Optional — when AnthropicAPIKey is unset the
-	// AI-read endpoint reports "not configured" instead of calling out.
+	// AI interpretation. Preferred provider is Vertex AI (Gemini) — on GCE it
+	// uses the VM's service account (no key, billed to the GCP project). Anthropic
+	// is an optional fallback. When neither is configured the AI-read endpoint
+	// reports "not configured".
+	VertexProject  string // GCP project for Vertex; auto-detected from GCE metadata when empty
+	VertexLocation string // Vertex region, e.g. us-central1
+	VertexModel    string // Gemini model id, e.g. gemini-2.0-flash-001
+
 	AnthropicAPIKey string
 	AnthropicModel  string
 
@@ -94,6 +100,9 @@ func Load() (*Config, error) {
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
 		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
+		VertexProject:     getEnv("VERTEX_PROJECT", getEnv("GCP_PROJECT", getEnv("GOOGLE_CLOUD_PROJECT", ""))),
+		VertexLocation:    getEnv("VERTEX_LOCATION", "us-central1"),
+		VertexModel:       getEnv("VERTEX_MODEL", "gemini-2.0-flash-001"),
 		AnthropicAPIKey:   getEnv("ANTHROPIC_API_KEY", ""),
 		AnthropicModel:    getEnv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
 		DemoQueueKey:      getEnv("DEMO_QUEUE_KEY", "cs2:demos:parse"),

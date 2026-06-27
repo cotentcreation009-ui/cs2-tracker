@@ -50,6 +50,14 @@ services:
       FACEIT_API_KEY: ${FACEIT_API_KEY:-}
       FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
       LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
+      # AI read (per-player verdict). Preferred: Vertex AI (Gemini), keyless via
+      # the VM's service account — no separate bill, usage goes to the GCP
+      # project. Needs the aiplatform.googleapis.com API enabled and the SA
+      # granted roles/aiplatform.user. Project auto-detects from GCE metadata;
+      # override with VERTEX_PROJECT if needed. ANTHROPIC_* is an optional fallback.
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
+      VERTEX_MODEL: ${VERTEX_MODEL:-gemini-2.0-flash-001}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       EXTERNAL_CACHE_TTL: ${EXTERNAL_CACHE_TTL:-15m}
