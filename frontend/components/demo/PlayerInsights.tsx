@@ -10,6 +10,7 @@ import {
 } from "@/lib/demo/insights";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
 import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
+import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
 
@@ -38,7 +39,7 @@ function SplitBar({ a, b, aHex, bHex }: { a: number; b: number; aHex: string; bH
   );
 }
 
-// Clickable utility chip — drives the shared map panel for this player + kind.
+// Clickable utility chip — drives the shared map panel + focuses this player.
 function UtilPill({
   kind,
   n,
@@ -74,11 +75,15 @@ function UtilPill({
 
 function PlayerCard({
   p,
+  focused,
   activeKind,
+  onFocus,
   onUtil,
 }: {
   p: PlayerInsight;
+  focused: boolean;
   activeKind: string | null;
+  onFocus: () => void;
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
   const hex = sideHex(p.team);
@@ -86,14 +91,23 @@ function PlayerCard({
   const area = p.area;
   const areaTotal = area.a + area.b + area.mid || 1;
   return (
-    <div className="card lift relative overflow-hidden py-3 pl-3 pr-4">
+    <div
+      className={`card lift relative overflow-hidden py-3 pl-3 pr-4 transition ${
+        focused ? "ring-1 ring-brand/50" : ""
+      }`}
+    >
       <span className="absolute inset-y-0 left-0 w-1" style={{ background: hex }} />
-      <div className="flex items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={onFocus}
+        className="flex w-full items-center justify-between gap-2 text-left"
+        title="Focus this player across all tabs"
+      >
         <span className="truncate font-bold">{p.name}</span>
         <span className="pill shrink-0" style={{ background: `${hex}22`, color: hex }}>
           {p.team || "—"}
         </span>
-      </div>
+      </button>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-2xl font-extrabold tabular-nums" style={{ color: hex }}>
           {p.kills}
@@ -188,12 +202,14 @@ function PlayerCard({
 export default function PlayerInsights({
   meta,
   rounds,
+  view,
 }: {
   meta: ReplayMeta;
   rounds: ReplayRound[];
+  view: DemoView;
 }) {
   const data = useMemo(() => computeInsights(meta, rounds), [meta, rounds]);
-  const [sel, setSel] = useState<{ i: number; kind: string } | null>(null);
+  const [kind, setKind] = useState<string | null>(null);
 
   // Default the map to the biggest utility user's most-thrown grenade, so it's
   // alive on first view instead of an empty prompt.
@@ -207,8 +223,8 @@ export default function PlayerInsights({
     if (!best) return null;
     const counts: Record<string, number> = {};
     for (const n of best.utilNades) counts[n.kind] = (counts[n.kind] ?? 0) + 1;
-    const kind = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    return { i: best.i, kind };
+    const topKind = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    return { i: best.i, kind: topKind };
   }, [data]);
 
   if (!data.players.length) {
@@ -220,32 +236,45 @@ export default function PlayerInsights({
   }
 
   const u = data.util;
-  const active = sel ?? fallback;
-  const selPlayer = active ? data.players.find((p) => p.i === active.i) ?? null : null;
-  const selKinds = selPlayer
+  const focusI = view.focusPlayer ?? fallback?.i ?? null;
+  const selPlayer = focusI != null ? data.players.find((p) => p.i === focusI) ?? null : null;
+  const selKinds: string[] = selPlayer
     ? UTIL_KINDS.filter((k) => selPlayer.utilNades.some((n) => n.kind === k))
     : [];
+  const activeKind =
+    kind && selKinds.includes(kind)
+      ? kind
+      : selPlayer && fallback && fallback.i === selPlayer.i && selKinds.includes(fallback.kind)
+        ? fallback.kind
+        : selKinds[0] ?? null;
   const selThrows =
-    selPlayer && active
-      ? selPlayer.utilNades.filter((n) => n.kind === active.kind)
+    selPlayer && activeKind
+      ? selPlayer.utilNades.filter((n) => n.kind === activeKind)
       : [];
   const roundsHit = new Set(selThrows.map((d) => d.round)).size;
+
+  const pickUtil = (player: PlayerInsight, k: string) => {
+    view.setFocusPlayer(player.i);
+    setKind(k);
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,380px)]">
       {/* left: player cards */}
       <div className="space-y-3">
         <p className="text-[11px] text-faint">
-          Click a player&apos;s utility chip to watch it thrown on the map — tight
-          clusters across rounds reveal a repeatable setup.
+          Click a player to focus them everywhere; click a utility chip to watch it
+          thrown on the map — tight clusters across rounds reveal a repeatable setup.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           {data.players.map((p) => (
             <PlayerCard
               key={p.i}
               p={p}
-              activeKind={active?.i === p.i ? active.kind : null}
-              onUtil={(player, kind) => setSel({ i: player.i, kind })}
+              focused={focusI === p.i}
+              activeKind={focusI === p.i ? activeKind : null}
+              onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
+              onUtil={pickUtil}
             />
           ))}
         </div>
@@ -267,16 +296,16 @@ export default function PlayerInsights({
             )}
           </div>
 
-          {selPlayer && active && selThrows.length > 0 ? (
+          {selPlayer && activeKind && selThrows.length > 0 ? (
             <>
               <div className="mb-2 flex flex-wrap gap-1">
                 {selKinds.map((k) => (
                   <button
                     key={k}
                     type="button"
-                    onClick={() => setSel({ i: selPlayer.i, kind: k })}
+                    onClick={() => setKind(k)}
                     className={`pill transition ${
-                      k === active.kind
+                      k === activeKind
                         ? "bg-brand/15 text-brand"
                         : "bg-panel text-muted hover:text-ink"
                     }`}
@@ -292,14 +321,16 @@ export default function PlayerInsights({
               <UtilThrowMap map={meta.map} throws={selThrows} />
               <p className="mt-2 text-center text-xs text-muted">
                 <span className="font-semibold text-ink">{selThrows.length}</span>{" "}
-                {(KIND_LABEL[active.kind] ?? active.kind).toLowerCase()} across{" "}
+                {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} across{" "}
                 <span className="font-semibold text-ink">{roundsHit}</span> round
                 {roundsHit === 1 ? "" : "s"} — tight clusters = a repeatable setup.
               </p>
             </>
           ) : (
             <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted">
-              Click a player&apos;s utility chip to watch it thrown on the map.
+              {selPlayer
+                ? `${selPlayer.name} threw no utility we could track.`
+                : "Pick a player to watch their utility on the map."}
             </div>
           )}
         </div>

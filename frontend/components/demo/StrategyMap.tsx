@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
-import { hasCalibration, radarImage, worldToRadar } from "@/lib/maps/calibration";
+import { hasCalibration, radarImage } from "@/lib/maps/calibration";
+import { buildProjection } from "@/lib/demo/projection";
+import type { DemoView, SideFilter } from "@/components/demo/MatchToolbar";
 
 const SIZE = 720;
-type Side = "all" | "CT" | "T";
 type Layer = "positions" | "kills" | "deaths" | "nades";
 
 const LAYERS: { key: Layer; label: string }[] = [
@@ -16,49 +17,40 @@ const LAYERS: { key: Layer; label: string }[] = [
 ];
 
 /**
- * Aggregate heatmap over a whole match — position density, kills, deaths and
- * utility, filterable by side. Rendered inline (a tab in the demo viewer) so the
- * map analysis lives alongside replay/routes/weapons/insights, not on a separate
- * page.
+ * Aggregate heatmap over a match — position density, kills, deaths and utility.
+ * Rendered as a tab in the demo viewer (with the shared toolbar driving
+ * side/round/player) and also on the standalone /map page (where `view` is
+ * absent and a local side toggle is shown instead).
  */
 export function StrategyMap({
   meta,
   rounds,
   name = "match",
+  view,
 }: {
   meta: ReplayMeta;
   rounds: ReplayRound[];
   name?: string;
+  view?: DemoView;
 }) {
   const [active, setActive] = useState<Set<Layer>>(new Set(["positions"]));
-  const [side, setSide] = useState<Side>("all");
+  const [localSide, setLocalSide] = useState<SideFilter>("all");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imgOk = useRef(false);
 
+  // shared selection (from toolbar) takes priority; standalone page uses local
+  const side = view?.side ?? localSide;
+  const scopeRound = view?.scopeRound ?? null;
+  const focusPlayer = view?.focusPlayer ?? null;
+
   const toPx = useMemo(() => {
-    if (hasCalibration(meta.map)) {
-      return (x: number, y: number) => {
-        const r = worldToRadar(meta.map, x, y);
-        return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
-      };
-    }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const rd of rounds)
-      for (const f of rd.frames ?? [])
-        for (const p of f.p) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-    const span = Math.max(maxX - minX, maxY - minY) || 1;
-    const pad = 0.06;
-    return (x: number, y: number) => ({
-      x: (pad + ((x - minX) / span) * (1 - 2 * pad)) * SIZE,
-      y: (pad + ((maxY - y) / span) * (1 - 2 * pad)) * SIZE,
-    });
-  }, [meta, rounds]);
+    const proj = buildProjection(meta.map, rounds);
+    return (x: number, y: number) => {
+      const r = proj.project(x, y);
+      return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
+    };
+  }, [meta.map, rounds]);
 
   useEffect(() => {
     imgOk.current = false;
@@ -75,7 +67,7 @@ export function StrategyMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 
-  const sideOfRound = useCallback((rd: ReplayRound, i: number): Side => {
+  const sideOfRound = useCallback((rd: ReplayRound, i: number): SideFilter => {
     if (rd.ct?.includes(i)) return "CT";
     if (rd.t?.includes(i)) return "T";
     return "all";
@@ -126,14 +118,18 @@ export function StrategyMap({
       }
     }
 
-    const sideOk = (s: Side) => side === "all" || s === side;
+    const scoped =
+      scopeRound != null && rounds[scopeRound] ? [rounds[scopeRound]] : rounds;
+    const sideOk = (s: SideFilter) => side === "all" || s === side;
+    const playerOk = (i: number) => focusPlayer == null || i === focusPlayer;
 
     if (active.has("positions")) {
       const pts: { x: number; y: number }[] = [];
-      for (const rd of rounds) {
+      for (const rd of scoped) {
         const frames = rd.frames ?? [];
         for (let fi = 0; fi < frames.length; fi += 3) {
           for (const p of frames[fi].p) {
+            if (!playerOk(p.i)) continue;
             if (!sideOk(sideOfRound(rd, p.i))) continue;
             pts.push(toPx(p.x, p.y));
           }
@@ -143,16 +139,16 @@ export function StrategyMap({
     }
     if (active.has("kills")) {
       const pts: { x: number; y: number }[] = [];
-      for (const rd of rounds)
+      for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
+          if (playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
       heat(ctx, pts, "rgba(70,211,105,ALPHA)", 22, 0.4);
     }
     if (active.has("deaths")) {
       const pts: { x: number; y: number }[] = [];
-      for (const rd of rounds)
+      for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
+          if (playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
       heat(ctx, pts, "rgba(245,105,74,ALPHA)", 22, 0.4);
     }
     if (active.has("nades")) {
@@ -162,13 +158,14 @@ export function StrategyMap({
         flash: "rgba(255,255,255,ALPHA)",
         he: "rgba(255,170,60,ALPHA)",
       };
-      for (const rd of rounds)
+      for (const rd of scoped)
         for (const n of rd.nades ?? []) {
+          if (focusPlayer != null && n.by !== focusPlayer) continue;
           const c = toPx(n.x, n.y);
           heat(ctx, [c], colors[n.k] || "rgba(150,150,150,ALPHA)", 18, 0.45);
         }
     }
-  }, [rounds, active, side, toPx, heat, sideOfRound]);
+  }, [rounds, active, side, scopeRound, focusPlayer, toPx, heat, sideOfRound]);
 
   useEffect(() => {
     redraw();
@@ -190,6 +187,8 @@ export function StrategyMap({
     a.href = cv.toDataURL("image/png");
     a.click();
   };
+
+  const focusName = focusPlayer != null ? meta.players[focusPlayer]?.name : null;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
@@ -219,21 +218,28 @@ export function StrategyMap({
               </button>
             ))}
           </div>
-          <div className="stat-label mb-2 mt-3">Side</div>
-          <div className="flex rounded-lg border border-line bg-panel p-0.5">
-            {(["all", "CT", "T"] as Side[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSide(s)}
-                className={`rounded-md px-2.5 py-0.5 text-xs font-medium uppercase transition ${
-                  side === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+
+          {/* local side toggle only when there is no shared toolbar */}
+          {!view && (
+            <>
+              <div className="stat-label mb-2 mt-3">Side</div>
+              <div className="flex rounded-lg border border-line bg-panel p-0.5">
+                {(["all", "CT", "T"] as SideFilter[]).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setLocalSide(s)}
+                    className={`rounded-md px-2.5 py-0.5 text-xs font-medium uppercase transition ${
+                      side === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
           <button
             type="button"
             onClick={exportPng}
@@ -243,8 +249,22 @@ export function StrategyMap({
           </button>
         </div>
         <div className="card px-4 py-3 text-xs text-muted">
-          Aggregated over{" "}
-          <span className="font-semibold text-ink">{rounds.length}</span> rounds.
+          {scopeRound != null && rounds[scopeRound] ? (
+            <>
+              Showing <span className="font-semibold text-ink">round {rounds[scopeRound].n}</span>.
+            </>
+          ) : (
+            <>
+              Aggregated over{" "}
+              <span className="font-semibold text-ink">{rounds.length}</span> rounds.
+            </>
+          )}
+          {focusName && (
+            <div className="mt-1">
+              Focused on <span className="font-semibold text-ink">{focusName}</span>.
+            </div>
+          )}
+          {side !== "all" && <div className="mt-1">{side} side only.</div>}
           {!hasCalibration(meta.map) && (
             <div className="mt-1 text-mid">
               {meta.map} radar uncalibrated — positions auto-scaled.

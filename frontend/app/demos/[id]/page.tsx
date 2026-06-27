@@ -5,12 +5,14 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getMatch } from "@/lib/demo/store";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
-import { hasCalibration, radarImage, worldToRadar } from "@/lib/maps/calibration";
+import { hasCalibration, radarImage } from "@/lib/maps/calibration";
+import { buildProjection } from "@/lib/demo/projection";
 import { mapLabel } from "@/lib/format";
 import RouteAnalytics from "@/components/demo/RouteAnalytics";
 import WeaponInsights from "@/components/demo/WeaponInsights";
 import PlayerInsights from "@/components/demo/PlayerInsights";
 import { StrategyMap } from "@/components/demo/StrategyMap";
+import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
 
 const TABS = [
   { k: "replay", label: "Replay" },
@@ -54,8 +56,12 @@ export default function ReplayPage() {
   const [time, setTime] = useState(0);
   const [banner, setBanner] = useState("");
   const [tab, setTab] = useState<Tab>("replay");
+  const [focusPlayer, setFocusPlayer] = useState<number | null>(null);
+  const [scopeRound, setScopeRound] = useState<number | null>(null);
+  const [side, setSide] = useState<SideFilter>("all");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const focusRef = useRef<number | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imgOk = useRef(false);
   const tRef = useRef(0);
@@ -94,27 +100,11 @@ export default function ReplayPage() {
   // world -> canvas px (calibrated, else normalize to data bounds)
   const toPx = useMemo(() => {
     if (!meta) return (x: number, y: number) => ({ x, y });
-    if (hasCalibration(meta.map)) {
-      return (x: number, y: number) => {
-        const r = worldToRadar(meta.map, x, y);
-        return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
-      };
-    }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const rd of rounds)
-      for (const f of rd.frames)
-        for (const p of f.p) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-    const span = Math.max(maxX - minX, maxY - minY) || 1;
-    const pad = 0.06;
-    return (x: number, y: number) => ({
-      x: (pad + ((x - minX) / span) * (1 - 2 * pad)) * SIZE,
-      y: (pad + ((maxY - y) / span) * (1 - 2 * pad)) * SIZE,
-    });
+    const proj = buildProjection(meta.map, rounds);
+    return (x: number, y: number) => {
+      const r = proj.project(x, y);
+      return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
+    };
   }, [meta, rounds]);
 
   const sideOf = useCallback(
@@ -269,14 +259,16 @@ export default function ReplayPage() {
 
       // players
       const blips = posAt(round, t);
+      const focus = focusRef.current;
       let aliveCT = 0,
         aliveT = 0;
       for (const p of blips) {
-        const side = sideOf(p.i);
-        if (side === "CT") aliveCT++;
+        const pside = sideOf(p.i);
+        if (pside === "CT") aliveCT++;
         else aliveT++;
         const c = toPx(p.x, p.y);
-        const col = side === "CT" ? CT : T;
+        const col = pside === "CT" ? CT : T;
+        ctx.globalAlpha = focus != null && p.i !== focus ? 0.22 : 1;
         // look direction
         const rad = (-p.d * Math.PI) / 180;
         ctx.strokeStyle = col;
@@ -301,6 +293,14 @@ export default function ReplayPage() {
         ctx.font = "bold 8px sans-serif";
         const label = (meta?.players[p.i]?.name || "?").slice(0, 1).toUpperCase();
         ctx.fillText(label, c.x - 2.5, c.y + 3);
+        ctx.globalAlpha = 1;
+        if (focus === p.i) {
+          ctx.strokeStyle = "#38d6ff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 10, 0, 7);
+          ctx.stroke();
+        }
       }
 
       // advisory banner
@@ -344,13 +344,22 @@ export default function ReplayPage() {
     tRef.current = clamp(t, 0, duration);
     setTime(tRef.current);
   };
-  const selectRound = (i: number) => {
-    setRoundIdx(i);
-    roundRef.current = i;
-    seek(0);
+
+  // keep the focus highlight live without rebuilding the draw loop
+  useEffect(() => {
+    focusRef.current = focusPlayer;
+  }, [focusPlayer]);
+
+  // the shared round scope drives which round the replay shows
+  useEffect(() => {
+    if (scopeRound == null) return;
+    setRoundIdx(scopeRound);
+    roundRef.current = scopeRound;
+    tRef.current = 0;
+    setTime(0);
     playRef.current = false;
     setPlaying(false);
-  };
+  }, [scopeRound]);
 
   if (loading) return <div className="card px-5 py-6 text-sm text-muted">Loading replay…</div>;
   if (!meta || !round)
@@ -362,6 +371,15 @@ export default function ReplayPage() {
         </Link>
       </div>
     );
+
+  const view: DemoView = {
+    focusPlayer,
+    scopeRound,
+    side,
+    setFocusPlayer,
+    setScopeRound,
+    setSide,
+  };
 
   return (
     <div className="space-y-4">
@@ -417,6 +435,13 @@ export default function ReplayPage() {
         </div>
       </section>
 
+      <MatchToolbar
+        meta={meta}
+        rounds={rounds}
+        view={view}
+        showSide={tab === "routes" || tab === "map"}
+      />
+
       {/* analysis tabs */}
       <div className="flex flex-wrap gap-1 border-b border-line">
         {TABS.map((tb) => (
@@ -435,32 +460,13 @@ export default function ReplayPage() {
         ))}
       </div>
 
-      {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} />}
-      {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} />}
-      {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} />}
-      {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} />}
+      {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
+      {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
+      {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
+      {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
 
       {tab === "replay" && (
         <>
-      {/* round strip */}
-      <div className="flex flex-wrap gap-1">
-        {rounds.map((r, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => selectRound(i)}
-            title={`Round ${r.n} · ${r.winner || "?"}`}
-            className={`h-7 w-7 rounded text-[11px] font-bold tabular-nums transition ${
-              i === roundIdx
-                ? "ring-2 ring-brand"
-                : ""
-            } ${r.winner === "CT" ? "bg-[#5b9dff]/25 text-[#9cc1ff]" : r.winner === "T" ? "bg-[#e7b53c]/25 text-[#f0cd78]" : "bg-panel text-muted"}`}
-          >
-            {r.n}
-          </button>
-        ))}
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
         {/* radar */}
         <div className="relative">

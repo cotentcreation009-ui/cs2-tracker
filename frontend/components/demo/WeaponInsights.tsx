@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
@@ -8,6 +8,7 @@ import {
   type WeaponStat,
   type WeaponInsightsData,
 } from "@/lib/demo/weapons";
+import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const CT = "#5b9dff";
 const T = "#e7b53c";
@@ -234,13 +235,19 @@ function PlayerCard({
 export default function WeaponInsights({
   meta,
   rounds,
+  view,
 }: {
   meta: ReplayMeta;
   rounds: ReplayRound[];
+  view: DemoView;
 }) {
-  // null = whole match, otherwise a round index
-  const [roundSel, setRoundSel] = useState<number | null>(null);
+  const roundSel = view.scopeRound; // null = whole match, else a round index
   const [openPlayer, setOpenPlayer] = useState<number | null>(null);
+
+  // Follow the shared player focus (toolbar or another tab).
+  useEffect(() => {
+    if (view.focusPlayer != null) setOpenPlayer(view.focusPlayer);
+  }, [view.focusPlayer]);
 
   const data = useMemo(
     () =>
@@ -279,39 +286,11 @@ export default function WeaponInsights({
           {data.totalKills} kills · {data.rounds} {data.rounds === 1 ? "round" : "rounds"} · kill-derived
         </span>
 
-        {/* round scope */}
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setRoundSel(null)}
-            className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${
-              roundSel === null ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
-            }`}
-          >
-            All
-          </button>
-          <div className="flex max-w-[280px] flex-wrap gap-0.5">
-            {rounds.map((r, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setRoundSel(i)}
-                title={`Round ${r.n}`}
-                className={`h-6 w-6 rounded text-[10px] font-bold tabular-nums transition ${
-                  roundSel === i
-                    ? "ring-2 ring-brand"
-                    : r.winner === "CT"
-                      ? "bg-[#5b9dff]/20 text-[#9cc1ff]"
-                      : r.winner === "T"
-                        ? "bg-[#e7b53c]/20 text-[#f0cd78]"
-                        : "bg-panel text-muted"
-                }`}
-              >
-                {r.n}
-              </button>
-            ))}
-          </div>
-        </div>
+        {roundSel !== null && (
+          <span className="ml-auto pill bg-brand/15 text-brand">
+            Round {rounds[roundSel]?.n} · scoped
+          </span>
+        )}
       </div>
 
       {/* headline stat strip */}
@@ -390,7 +369,11 @@ export default function WeaponInsights({
                 p={p}
                 maxKills={maxKills}
                 open={openPlayer === p.i}
-                onToggle={() => setOpenPlayer(openPlayer === p.i ? null : p.i)}
+                onToggle={() => {
+                  const next = openPlayer === p.i ? null : p.i;
+                  setOpenPlayer(next);
+                  view.setFocusPlayer(next);
+                }}
               />
             ))}
           </div>
@@ -398,9 +381,10 @@ export default function WeaponInsights({
       </div>
 
       <p className="text-[10px] leading-relaxed text-faint">
-        Derived entirely from kill events (killer · weapon · headshot). We don&apos;t
-        capture weapon purchases, fire/damage events or round economy, so this is a
-        kill-driven weapon meta rather than a loadout/eco profile.
+        Derived from kill events (killer · weapon · headshot). Per-weapon purchases
+        and per-weapon damage aren&apos;t attributed by the demo, so this is a
+        kill-driven weapon meta — see the Insights tab for economy (buys), ADR and
+        flash stats.
       </p>
     </section>
   );

@@ -1,41 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { analyzeRoutes, type PlayerPath, type RouteCluster, type Side } from "@/lib/demo/routes";
-import { hasCalibration, radarImage, worldToRadar } from "@/lib/maps/calibration";
+import { radarImage } from "@/lib/maps/calibration";
+import { buildProjection } from "@/lib/demo/projection";
+import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const CT = "#5b9dff"; const T = "#e7b53c";
 const winColor = (wr: number, alpha = 1) => `hsla(${Math.round(wr * 120)}, 70%, 55%, ${alpha})`;
 
-interface Props { meta: ReplayMeta; rounds: ReplayRound[]; }
-type SideFilter = "all" | "T" | "CT";
+interface Props { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView; }
 type ViewMode = "common" | "individual";
 
-export default function RouteAnalytics({ meta, rounds }: Props) {
-  const [sideFilter, setSideFilter] = useState<SideFilter>("all");
-  const [playerFilter, setPlayerFilter] = useState<number | "all">("all");
-  const [roundFilter, setRoundFilter] = useState<number | "all">("all");
-  const [view, setView] = useState<ViewMode>("common");
+export default function RouteAnalytics({ meta, rounds, view }: Props) {
+  const [mode, setMode] = useState<ViewMode>("common");
   const [selected, setSelected] = useState<string | null>(null);
-  const calibrated = hasCalibration(meta.map);
+  const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
+  const calibrated = proj.calibrated;
   const analysis = useMemo(() => analyzeRoutes(meta, rounds), [meta, rounds]);
 
-  const toFrac = useMemo(() => {
-    if (calibrated) return (x: number, y: number) => worldToRadar(meta.map, x, y);
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of analysis.paths) for (const pt of p.points) {
-      if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
-      if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
-    }
-    const span = Math.max(maxX - minX, maxY - minY) || 1; const pad = 0.06;
-    return (x: number, y: number) => ({
-      x: pad + ((x - minX) / span) * (1 - 2 * pad),
-      y: pad + ((maxY - y) / span) * (1 - 2 * pad),
-    });
-  }, [calibrated, meta.map, analysis.paths]);
+  // shared filters come from the toolbar (player/round/side carry across tabs)
+  const sideFilter = view.side;
+  const playerFilter: number | "all" = view.focusPlayer ?? "all";
+  const roundFilter: number | "all" =
+    view.scopeRound == null ? "all" : rounds[view.scopeRound]?.n ?? "all";
 
-  const pt = (x: number, y: number) => { const r = toFrac(x, y); return r ? { x: r.x * 100, y: r.y * 100 } : null; };
+  // drop a drilled-in cluster when the shared filters or mode change
+  useEffect(() => {
+    setSelected(null);
+  }, [view.side, view.focusPlayer, view.scopeRound, mode]);
+
+  const pt = (x: number, y: number) => {
+    const r = proj.project(x, y);
+    return r ? { x: r.x * 100, y: r.y * 100 } : null;
+  };
   const matchPath = (p: PlayerPath) =>
     (sideFilter === "all" || p.side === sideFilter) &&
     (playerFilter === "all" || p.playerIndex === playerFilter) &&
@@ -50,14 +49,14 @@ export default function RouteAnalytics({ meta, rounds }: Props) {
   const individualPaths = useMemo(() => analysis.paths.filter(matchPath),
     [analysis.paths, sideFilter, playerFilter, roundFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedCluster = view === "common" ? clusters.find((c) => c.id === selected) ?? null : null;
+  const selectedCluster = mode === "common" ? clusters.find((c) => c.id === selected) ?? null : null;
 
   const drawnPaths = useMemo(() => {
-    if (view === "individual")
+    if (mode === "individual")
       return individualPaths.map((p) => ({ path: p, winRate: p.won ? 1 : 0, emphasis: false }));
     const source = selectedCluster ? [selectedCluster] : clusters;
     return source.flatMap((c) => c.paths.map((p) => ({ path: p, winRate: c.winRate, emphasis: !!selectedCluster })));
-  }, [view, individualPaths, clusters, selectedCluster]);
+  }, [mode, individualPaths, clusters, selectedCluster]);
 
   const killMarkers = selectedCluster?.killPositions ?? [];
   const deathMarkers = selectedCluster?.deathPositions ?? [];
@@ -79,25 +78,14 @@ export default function RouteAnalytics({ meta, rounds }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Seg value={sideFilter} onChange={(v) => { setSideFilter(v); setSelected(null); }}
-          options={[{ key: "all", label: "Both" }, { key: "T", label: "T-side" }, { key: "CT", label: "CT-side" }]} />
-        <Seg value={view} onChange={(v) => { setView(v); setSelected(null); }}
+        <Seg value={mode} onChange={(v) => { setMode(v); setSelected(null); }}
           options={[{ key: "common", label: "Common routes" }, { key: "individual", label: "All paths" }]} />
-        <select value={playerFilter} onChange={(e) => { setPlayerFilter(e.target.value === "all" ? "all" : Number(e.target.value)); setSelected(null); }}
-          className="rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-ink">
-          <option value="all">All players</option>
-          {analysis.players.map((p) => <option key={p.index} value={p.index}>{p.name}</option>)}
-        </select>
-        <select value={roundFilter} onChange={(e) => { setRoundFilter(e.target.value === "all" ? "all" : Number(e.target.value)); setSelected(null); }}
-          className="rounded-lg border border-line bg-panel px-2.5 py-1 text-xs text-ink">
-          <option value="all">All rounds</option>
-          {rounds.map((r) => <option key={r.n} value={r.n}>Round {r.n}{r.winner ? ` · ${r.winner}` : ""}</option>)}
-        </select>
+        <span className="text-[11px] text-faint">Player, round &amp; side filter from the toolbar above.</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
         <div className="space-y-3">
-          <div className="relative aspect-square w-full max-w-[640px] overflow-hidden rounded-xl border border-line bg-panel2">
+          <div className="relative aspect-square w-full max-w-160 overflow-hidden rounded-xl border border-line bg-panel2">
             {calibrated ? (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img src={radarImage(meta.map)} alt={`${meta.map} radar`}
@@ -132,13 +120,13 @@ export default function RouteAnalytics({ meta, rounds }: Props) {
             <Stat label="Avg life" value={`${summary.avgLife.toFixed(1)}s`} />
           </div>
         </div>
-        <div className="card flex max-h-[640px] flex-col px-4 py-3">
+        <div className="card flex max-h-160 flex-col px-4 py-3">
           <div className="mb-2 flex items-center justify-between">
-            <span className="stat-label">{view === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
+            <span className="stat-label">{mode === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
             {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
           </div>
           <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
-            {view === "common"
+            {mode === "common"
               ? clusters.map((c) => <RouteRow key={c.id} cluster={c} active={c.id === selected} onClick={() => setSelected(c.id === selected ? null : c.id)} />)
               : individualPaths.slice().sort((a, b) => a.round - b.round).map((p) => <PathRow key={p.key} path={p} />)}
           </div>
