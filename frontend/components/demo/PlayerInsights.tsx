@@ -16,6 +16,7 @@ import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
 import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
 import { demoCheat, BAND_HEX, BAND_LABEL } from "@/lib/demo/cheat";
+import { AccountCheck } from "@/components/demo/AccountCheck";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
@@ -279,6 +280,8 @@ function PlayerCard({
           </span>
         </div>
       )}
+
+      <AccountCheck steamId={p.steamId} name={p.name} />
     </div>
   );
 }
