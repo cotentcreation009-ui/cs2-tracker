@@ -13,6 +13,9 @@ import WeaponInsights from "@/components/demo/WeaponInsights";
 import PlayerInsights from "@/components/demo/PlayerInsights";
 import { StrategyMap } from "@/components/demo/StrategyMap";
 import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
+import { KIND_COLOR } from "@/components/demo/RadarMap";
+import { weaponLabel } from "@/lib/demo/insights";
+import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 
 const TABS = [
   { k: "replay", label: "Replay" },
@@ -44,6 +47,110 @@ interface Blip {
   bomb?: boolean;
 }
 
+// approximate on-map lifetime per grenade kind (seconds) for the "active now" feed
+const UTIL_LIFE: Record<string, number> = {
+  smoke: 17,
+  molotov: 7,
+  inferno: 7,
+  incgrenade: 7,
+  flash: 1.6,
+  he: 1,
+  decoy: 15,
+};
+const mmss = (t: number) =>
+  `${Math.floor(Math.max(0, t) / 60)}:${String(Math.floor(Math.max(0, t) % 60)).padStart(2, "0")}`;
+
+// Live feed for the replay: utility currently active at the playhead + the kill
+// log up to now + bomb status — all synced to the scrubber time.
+function EventFeed({
+  round,
+  time,
+  meta,
+  zones,
+}: {
+  round: ReplayRound;
+  time: number;
+  meta: ReplayMeta;
+  zones: Zone[];
+}) {
+  const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
+  const sideOf = (i: number) => (round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "");
+  const lifeOf = (n: { k: string; dur: number }) => Math.max(n.dur || 0, UTIL_LIFE[n.k] ?? 1);
+  const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
+
+  const active = (round.nades ?? [])
+    .filter((n) => time >= n.t && time <= n.t + lifeOf(n))
+    .map((n) => ({ n, rem: n.t + lifeOf(n) - time }))
+    .sort((a, b) => a.rem - b.rem);
+  const kills = (round.kills ?? [])
+    .filter((k) => k.k >= 0 && k.t <= time)
+    .sort((a, b) => b.t - a.t);
+
+  const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= time);
+  const ended = (round.bomb ?? []).find((b) => (b.k === "defuse" || b.k === "explode") && b.t <= time);
+  const defusing = (round.bomb ?? []).some((b) => b.k === "defuse_start" && b.t <= time) && !ended;
+
+  return (
+    <div className="card px-4 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="stat-label">Live feed</span>
+        <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
+      </div>
+
+      {plant && !ended && (
+        <div className="mb-2 flex items-center gap-2 rounded-md bg-bad/10 px-2 py-1 text-xs text-bad">
+          <span className="font-bold">C4</span>
+          <span>{defusing ? "Being defused…" : "Bomb planted"}</span>
+          <span className="ml-auto tabular-nums">{mmss(time - plant.t)} ago</span>
+        </div>
+      )}
+
+      <div className="mb-2">
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Active utility</div>
+        {active.length === 0 ? (
+          <div className="text-xs text-faint">None right now.</div>
+        ) : (
+          <div className="space-y-0.5">
+            {active.map((a, i) => {
+              const z = zoneOf(a.n.x, a.n.y);
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[a.n.k] ?? "#8a7dff" }} />
+                  <span className="capitalize text-ink">{a.n.k}</span>
+                  {a.n.by >= 0 && <span className="truncate text-faint">{name(a.n.by)}</span>}
+                  {z && <span className="truncate text-faint">· {z}</span>}
+                  <span className="ml-auto shrink-0 tabular-nums text-faint">{a.rem.toFixed(0)}s</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Kills ({kills.length})</div>
+        {kills.length === 0 ? (
+          <div className="text-xs text-faint">No kills yet.</div>
+        ) : (
+          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1">
+            {kills.map((k, i) => {
+              const recent = time - k.t < 4;
+              return (
+                <div key={i} className={`flex items-center gap-1.5 text-xs ${recent ? "" : "opacity-55"}`}>
+                  <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(k.t)}</span>
+                  <span className="truncate font-medium" style={{ color: sideOf(k.k) === "T" ? T : CT }}>{name(k.k)}</span>
+                  <span className="shrink-0 text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
+                  <span className="ml-auto truncate text-muted">{name(k.v)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ReplayPage() {
   const { id } = useParams<{ id: string }>();
   const [meta, setMeta] = useState<ReplayMeta | null>(null);
@@ -59,6 +166,7 @@ export default function ReplayPage() {
   const [focusPlayer, setFocusPlayer] = useState<number | null>(null);
   const [scopeRound, setScopeRound] = useState<number | null>(null);
   const [side, setSide] = useState<SideFilter>("all");
+  const [zones, setZones] = useState<Zone[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focusRef = useRef<number | null>(null);
@@ -130,6 +238,11 @@ export default function ReplayPage() {
       imgOk.current = false;
     };
     img.src = radarImage(meta.map);
+  }, [meta]);
+
+  // load the map's call-out zones so the live feed can name util landings
+  useEffect(() => {
+    if (meta) setZones(loadZones(meta.map));
   }, [meta]);
 
   const posAt = useCallback((rd: ReplayRound, t: number): Blip[] => {
@@ -548,7 +661,39 @@ export default function ReplayPage() {
               }}
               className="mt-3 w-full accent-brand"
             />
+            {duration > 0 && (
+              <div className="relative mt-1 h-2">
+                {(round.nades ?? []).map((n, i) => (
+                  <span
+                    key={`n${i}`}
+                    title={`${n.k} · ${mmss(n.t)}`}
+                    className="absolute top-0.5 h-1 w-0.5 -translate-x-1/2 rounded-full"
+                    style={{ left: `${(n.t / duration) * 100}%`, background: KIND_COLOR[n.k] ?? "#8a7dff" }}
+                  />
+                ))}
+                {(round.kills ?? []).filter((k) => k.k >= 0).map((k, i) => (
+                  <button
+                    key={`k${i}`}
+                    type="button"
+                    title={`Kill · ${mmss(k.t)} — jump`}
+                    onClick={() => { playRef.current = false; setPlaying(false); seek(k.t); }}
+                    className="absolute top-0 h-2 w-1 -translate-x-1/2 rounded-full transition-transform hover:scale-150"
+                    style={{ left: `${(k.t / duration) * 100}%`, background: "#f5694a" }}
+                  />
+                ))}
+                {(round.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => (
+                  <span
+                    key={`b${i}`}
+                    title={`Bomb plant · ${mmss(b.t)}`}
+                    className="absolute -top-0.5 h-2.5 w-0.5 -translate-x-1/2"
+                    style={{ left: `${(b.t / duration) * 100}%`, background: "#fff" }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
+
+          <EventFeed round={round} time={time} meta={meta} zones={zones} />
 
           <div className="card px-4 py-3 text-sm">
             <div className="mb-2.5 flex items-center justify-between">
