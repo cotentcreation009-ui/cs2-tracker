@@ -15,6 +15,7 @@ import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
 import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
+import { demoCheat, BAND_HEX, BAND_LABEL } from "@/lib/demo/cheat";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
@@ -143,6 +144,7 @@ function PlayerCard({
   const mk = p.multiKills;
   const area = p.area;
   const areaTotal = area.a + area.b + area.mid || 1;
+  const cheat = demoCheat(p);
   return (
     <div
       className={`card lift relative overflow-hidden py-3 pl-3 pr-4 transition ${
@@ -169,6 +171,29 @@ function PlayerCard({
         <span className="text-xs text-muted">
           {p.kd.toFixed(2)} K/D · {p.kpr.toFixed(2)} KPR
         </span>
+      </div>
+
+      <div
+        className="mt-2"
+        title={`CheatMeter — single-match anomaly, not proof. Top: ${cheat.factors
+          .slice(0, 3)
+          .map((f) => `${f.label} ${f.display}`)
+          .join(" · ")}`}
+      >
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-muted">
+            CheatMeter <span className="text-faint">· this match</span>
+          </span>
+          <span className="font-bold tabular-nums" style={{ color: BAND_HEX[cheat.band] }}>
+            {cheat.score.toFixed(0)}% {BAND_LABEL[cheat.band]}
+          </span>
+        </div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-panel">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${cheat.score}%`, background: BAND_HEX[cheat.band] }}
+          />
+        </div>
       </div>
 
       <div className="mt-2 grid grid-cols-4 gap-1.5">
