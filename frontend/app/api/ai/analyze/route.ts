@@ -1,7 +1,8 @@
 import { API_BASE, internalHeaders, trustedClientIp } from "@/lib/api";
 
-// Proxy a player summary to the backend's AI read endpoint (Anthropic). Rate-
-// limited server-side; forward the real client IP for that limiter.
+// Proxy a player summary to the backend's AI read endpoint (Vertex AI / Gemini,
+// or Anthropic fallback). Rate-limited server-side; forward the real client IP
+// for that limiter.
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {

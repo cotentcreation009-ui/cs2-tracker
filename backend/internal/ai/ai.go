@@ -14,18 +14,25 @@ import (
 	"time"
 )
 
-// ErrNotConfigured is returned when no Anthropic API key is set.
+// ErrNotConfigured is returned when a provider has no credentials.
 var ErrNotConfigured = errors.New("ai: not configured")
+
+// Provider is any model backend that can turn a system+user prompt into text.
+type Provider interface {
+	Configured() bool
+	Analyze(ctx context.Context, system, user string) (string, error)
+}
 
 const endpoint = "https://api.anthropic.com/v1/messages"
 
+// Client talks to the Anthropic Messages API (fallback provider).
 type Client struct {
 	key   string
 	model string
 	http  *http.Client
 }
 
-func New(key, model string) *Client {
+func NewAnthropic(key, model string) *Client {
 	if model == "" {
 		model = "claude-haiku-4-5-20251001"
 	}

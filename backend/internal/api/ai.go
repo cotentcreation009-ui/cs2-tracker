@@ -40,10 +40,13 @@ func aiAllow(ip string) bool {
 }
 
 // handleAiAnalyze turns a client-supplied player summary into a short written
-// read via the Anthropic API. Gated + rate-limited; reports cleanly when no key
-// is configured.
+// read. Prefers Vertex AI (Gemini, keyless on GCE) and falls back to Anthropic.
+// Gated + rate-limited; reports cleanly when no provider is configured.
 func (s *Server) handleAiAnalyze(w http.ResponseWriter, r *http.Request) {
-	client := ai.New(s.cfg.AnthropicAPIKey, s.cfg.AnthropicModel)
+	var client ai.Provider = ai.NewVertex(s.cfg.VertexProject, s.cfg.VertexLocation, s.cfg.VertexModel)
+	if !client.Configured() {
+		client = ai.NewAnthropic(s.cfg.AnthropicAPIKey, s.cfg.AnthropicModel)
+	}
 	if !client.Configured() {
 		writeError(w, http.StatusServiceUnavailable, "AI analysis isn't configured")
 		return
