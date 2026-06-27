@@ -25,7 +25,70 @@ export interface AccountScores {
   smurf: SubScore | null;
   boosted: SubScore | null;
   trust: number | null;
+  banned: boolean;
   hasData: boolean;
+}
+
+export type Tone = "good" | "mid" | "bad" | "info";
+export const TONE_HEX: Record<Tone, string> = {
+  good: "#46d369",
+  mid: "#f5b942",
+  bad: "#f5694a",
+  info: "#8a7dff",
+};
+
+export interface Verdict {
+  label: string;
+  tone: Tone;
+  evidence: string[];
+}
+
+// Merge the in-match CheatMeter with the account scores into one suggestion +
+// the strongest evidence. A "look closer" read, never an accusation.
+export function verdict(matchScore: number, a: AccountScores): Verdict {
+  if (a.banned) {
+    return { label: "Banned on record", tone: "bad", evidence: ["VAC / game ban (Leetify)"] };
+  }
+  const career = a.cheat?.score ?? 0;
+  const cheatConcern = Math.max(career, matchScore * 0.8);
+  const smurf = a.smurf?.score ?? 0;
+  const boosted = a.boosted?.score ?? 0;
+  const top = Math.max(cheatConcern, smurf, boosted);
+
+  if (top < 35) {
+    return {
+      label: "Looks clean",
+      tone: "good",
+      evidence: a.trust != null ? [`Trust ${a.trust.toFixed(0)}/100`] : [],
+    };
+  }
+  if (cheatConcern >= smurf && cheatConcern >= boosted && cheatConcern >= 50) {
+    const ev = (a.cheat?.factors ?? [])
+      .filter((f) => f.score >= 45)
+      .slice(0, 3)
+      .map((f) => `${f.label} ${f.display}`);
+    if (!ev.length && matchScore >= 50) ev.push(`this match ${matchScore.toFixed(0)}%`);
+    return {
+      label: cheatConcern >= 70 ? "Strong anomalies — review" : "Worth reviewing",
+      tone: "bad",
+      evidence: ev,
+    };
+  }
+  if (smurf >= boosted && smurf >= 45) {
+    return {
+      label: smurf >= 65 ? "Likely smurf" : "Possible smurf",
+      tone: "mid",
+      evidence: a.smurf?.reasons ?? [],
+    };
+  }
+  if (boosted >= 45) {
+    return {
+      label: boosted >= 65 ? "Likely boosted" : "Possible boosted",
+      tone: "mid",
+      evidence: a.boosted?.reasons ?? [],
+    };
+  }
+  return { label: "Mixed signals — worth a look", tone: "mid", evidence: [] };
 }
 
 export function accountScores(
@@ -107,5 +170,5 @@ export function accountScores(
   const worst = Math.max(cheat?.score ?? 0, smurf?.score ?? 0, boosted?.score ?? 0);
   const trust = faceit || leetify || steamStats ? clamp(100 - worst - (banned ? 40 : 0)) : null;
 
-  return { cheat, smurf, boosted, trust, hasData: !!(faceit || leetify || steamStats || extras) };
+  return { cheat, smurf, boosted, trust, banned, hasData: !!(faceit || leetify || steamStats || extras) };
 }

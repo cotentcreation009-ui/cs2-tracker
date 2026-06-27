@@ -281,7 +281,7 @@ function PlayerCard({
         </div>
       )}
 
-      <AccountCheck steamId={p.steamId} name={p.name} />
+      <AccountCheck steamId={p.steamId} name={p.name} matchScore={cheat.score} />
     </div>
   );
 }

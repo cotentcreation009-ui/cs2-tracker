@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { getFaceit, getSteamExtras, getSteamStats, getLeetify } from "@/lib/api";
-import { accountScores, BAND_HEX, BAND_LABEL, type AccountScores, type Band } from "@/lib/demo/account";
+import { accountScores, verdict, BAND_HEX, BAND_LABEL, TONE_HEX, type AccountScores, type Band } from "@/lib/demo/account";
 
 function ScoreBar({
   label,
@@ -36,7 +36,15 @@ function ScoreBar({
 
 // On-demand account-level scores for one demo player (Steam/FACEIT/Leetify by
 // steamId). One lookup per click, so we never auto-fire 10 profile fetches.
-export function AccountCheck({ steamId, name }: { steamId: string; name: string }) {
+export function AccountCheck({
+  steamId,
+  name,
+  matchScore = 0,
+}: {
+  steamId: string;
+  name: string;
+  matchScore?: number;
+}) {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [data, setData] = useState<AccountScores | null>(null);
   const [err, setErr] = useState("");
@@ -78,8 +86,18 @@ export function AccountCheck({ steamId, name }: { steamId: string; name: string 
   if (!data || !data.hasData)
     return <div className="mt-2 text-[11px] text-faint">No public profile data for this player.</div>;
 
+  const v = verdict(matchScore, data);
   return (
     <div className="mt-2 space-y-1.5 rounded-md border border-line bg-bg/40 p-2">
+      <div className="rounded-md px-2 py-1.5" style={{ background: `${TONE_HEX[v.tone]}1f` }}>
+        <div className="text-[10px] uppercase tracking-wider text-faint">Verdict</div>
+        <div className="text-sm font-bold" style={{ color: TONE_HEX[v.tone] }}>
+          {v.label}
+        </div>
+        {v.evidence.length > 0 && (
+          <div className="text-[10px] text-muted">{v.evidence.join(" · ")}</div>
+        )}
+      </div>
       {data.cheat && (
         <ScoreBar
           label="CheatMeter · career"
