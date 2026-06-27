@@ -40,6 +40,19 @@ export interface ReplayNade {
   x: number;
   y: number;
   dur: number;
+  by: number; // thrower player index, -1 if unknown
+}
+
+// Per-player, per-round aggregates (economy, damage, flashes). Fields are
+// omitted when zero, so treat them as optional.
+export interface ReplayPlayerStat {
+  i: number;
+  equip?: number; // equipment value at freeze-time end
+  buy?: "pistol" | "eco" | "force" | "full" | string;
+  dmg?: number; // health damage dealt to enemies
+  utilDmg?: number; // of dmg, from grenades/molotov
+  flashed?: number; // enemies flashed
+  flashDur?: number; // total enemy blind seconds dealt
 }
 
 export interface ReplayBomb {
@@ -59,6 +72,7 @@ export interface ReplayRound {
   kills: ReplayKill[];
   nades: ReplayNade[];
   bomb: ReplayBomb[];
+  stats?: ReplayPlayerStat[]; // per-player aggregates (older parses lack this)
 }
 
 export interface ReplayMeta {

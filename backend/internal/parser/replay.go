@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/golang/geo/r3"
 	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
@@ -59,10 +60,24 @@ type ReplayRound struct {
 	Reason string        `json:"reason"`
 	CT     []int         `json:"ct"` // player indices on CT this round
 	T      []int         `json:"t"`  // player indices on T this round
-	Frames []ReplayFrame `json:"frames"`
-	Kills  []ReplayKill  `json:"kills"`
-	Nades  []ReplayNade  `json:"nades"`
-	Bomb   []ReplayBomb  `json:"bomb"`
+	Frames []ReplayFrame      `json:"frames"`
+	Kills  []ReplayKill       `json:"kills"`
+	Nades  []ReplayNade       `json:"nades"`
+	Bomb   []ReplayBomb       `json:"bomb"`
+	Stats  []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
+}
+
+// ReplayPlayerStat carries the per-player, per-round aggregates that need event
+// data beyond positions/kills: economy (buy), damage (ADR/util) and flashes.
+// Aggregated (not raw events) to keep the stored JSON compact.
+type ReplayPlayerStat struct {
+	I        int     `json:"i"`                  // player index
+	Equip    int     `json:"equip,omitempty"`    // equipment value at freeze-time end
+	Buy      string  `json:"buy,omitempty"`      // pistol | eco | force | full
+	Dmg      int     `json:"dmg,omitempty"`      // health damage dealt to enemies
+	UtilDmg  int     `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
+	Flashed  int     `json:"flashed,omitempty"`  // enemies flashed
+	FlashDur float64 `json:"flashDur,omitempty"` // total enemy blind seconds dealt
 }
 
 // ReplayFrame is one downsampled snapshot. T is seconds since round start.
@@ -99,6 +114,7 @@ type ReplayNade struct {
 	X    int32   `json:"x"`
 	Y    int32   `json:"y"`
 	Dur  float64 `json:"dur"`
+	By   int     `json:"by"` // thrower player index, -1 if unknown
 }
 
 type ReplayBomb struct {
@@ -140,6 +156,9 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onInferno)
 	p.RegisterEventHandler(rc.onFlash)
 	p.RegisterEventHandler(rc.onHE)
+	p.RegisterEventHandler(rc.onFreezeEnd)
+	p.RegisterEventHandler(rc.onPlayerHurt)
+	p.RegisterEventHandler(rc.onPlayerFlashed)
 
 	// v5 dropped Parser.Header(); the map name arrives in the server-info net
 	// message early in the stream, so capture it there.
@@ -196,9 +215,26 @@ type replayCollector struct {
 	roundCount    int
 
 	cur      *ReplayRound
+	stat     map[int]*ReplayPlayerStat // per-round per-player aggregates
 	roundT0  float64
 	capEvery float64
 	lastCap  float64
+}
+
+// stats returns the per-round accumulator for a player index, creating it lazily.
+func (rc *replayCollector) stats(i int) *ReplayPlayerStat {
+	if i < 0 {
+		return nil
+	}
+	if rc.stat == nil {
+		rc.stat = map[int]*ReplayPlayerStat{}
+	}
+	s := rc.stat[i]
+	if s == nil {
+		s = &ReplayPlayerStat{I: i}
+		rc.stat[i] = s
+	}
+	return s
 }
 
 func mapNameOf(p dem.Parser) string {
@@ -262,6 +298,7 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	}
 	rc.lastCap = -1e9
 	rc.cur = &ReplayRound{Number: rc.roundCount + 1}
+	rc.stat = map[int]*ReplayPlayerStat{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -282,11 +319,23 @@ func (rc *replayCollector) onRoundEnd(e events.RoundEnd) {
 	}
 	rc.cur.Winner = teamStr(e.Winner)
 	rc.cur.Reason = reasonString(e.Reason)
+	// Flush per-player aggregates (sorted by index for stable output).
+	if len(rc.stat) > 0 {
+		idxs := make([]int, 0, len(rc.stat))
+		for i := range rc.stat {
+			idxs = append(idxs, i)
+		}
+		sort.Ints(idxs)
+		for _, i := range idxs {
+			rc.cur.Stats = append(rc.cur.Stats, *rc.stat[i])
+		}
+	}
 	rc.roundCount++
 	if rc.emit != nil {
 		rc.emit(*rc.cur)
 	}
 	rc.cur = nil // release the round's frames immediately
+	rc.stat = nil
 }
 
 func (rc *replayCollector) onFrameDone(events.FrameDone) {
@@ -382,19 +431,83 @@ func (rc *replayCollector) onBombDefuseStart(events.BombDefuseStart) {
 func (rc *replayCollector) onBombDefused(events.BombDefused) { x, y := rc.bombXY(); rc.addBomb("defuse", x, y) }
 func (rc *replayCollector) onBombExplode(events.BombExplode) { x, y := rc.bombXY(); rc.addBomb("explode", x, y) }
 
-func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64) {
+func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *common.Player) {
 	if rc.cur == nil {
 		return
 	}
 	rc.cur.Nades = append(rc.cur.Nades, ReplayNade{
 		T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Dur: dur,
+		By: rc.playerIndex(by),
 	})
 }
 
-func (rc *replayCollector) onSmoke(e events.SmokeStart)         { rc.addNade("smoke", e.Position, 18) }
-func (rc *replayCollector) onInferno(e events.FireGrenadeStart) { rc.addNade("molotov", e.Position, 7) }
-func (rc *replayCollector) onFlash(e events.FlashExplode)       { rc.addNade("flash", e.Position, 0) }
-func (rc *replayCollector) onHE(e events.HeExplode)             { rc.addNade("he", e.Position, 0) }
+func (rc *replayCollector) onSmoke(e events.SmokeStart)         { rc.addNade("smoke", e.Position, 18, e.Thrower) }
+func (rc *replayCollector) onInferno(e events.FireGrenadeStart) { rc.addNade("molotov", e.Position, 7, e.Thrower) }
+func (rc *replayCollector) onFlash(e events.FlashExplode)       { rc.addNade("flash", e.Position, 0, e.Thrower) }
+func (rc *replayCollector) onHE(e events.HeExplode)             { rc.addNade("he", e.Position, 0, e.Thrower) }
+
+// onFreezeEnd snapshots each player's buy (equipment value + a coarse buy type)
+// at the moment the round goes live.
+func (rc *replayCollector) onFreezeEnd(events.RoundFreezetimeEnd) {
+	if rc.cur == nil || rc.p.GameState().IsWarmupPeriod() {
+		return
+	}
+	for _, pl := range rc.p.GameState().Participants().Playing() {
+		s := rc.stats(rc.playerIndex(pl))
+		if s == nil {
+			continue
+		}
+		equip := pl.EquipmentValueFreezeTimeEnd()
+		if equip == 0 {
+			equip = pl.EquipmentValueCurrent()
+		}
+		s.Equip = equip
+		s.Buy = buyType(equip, rc.cur.Number)
+	}
+}
+
+// onPlayerHurt accumulates enemy damage dealt (and the grenade/fire share of it).
+func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
+	if rc.cur == nil || e.Attacker == nil || e.Player == nil || e.Attacker.Team == e.Player.Team {
+		return
+	}
+	s := rc.stats(rc.playerIndex(e.Attacker))
+	if s == nil {
+		return
+	}
+	s.Dmg += e.HealthDamage
+	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
+		s.UtilDmg += e.HealthDamage
+	}
+}
+
+// onPlayerFlashed credits the flasher with enemies blinded + blind-seconds.
+func (rc *replayCollector) onPlayerFlashed(e events.PlayerFlashed) {
+	if rc.cur == nil || e.Attacker == nil || e.Player == nil || e.Attacker.Team == e.Player.Team {
+		return
+	}
+	s := rc.stats(rc.playerIndex(e.Attacker))
+	if s == nil {
+		return
+	}
+	s.Flashed++
+	s.FlashDur += round2(e.FlashDuration().Seconds())
+}
+
+// buyType is a coarse economy bucket from equipment value (MR12 pistol rounds).
+func buyType(equip, roundNum int) string {
+	if roundNum == 1 || roundNum == 13 {
+		return "pistol"
+	}
+	switch {
+	case equip < 2000:
+		return "eco"
+	case equip < 4000:
+		return "force"
+	default:
+		return "full"
+	}
+}
 
 func i32(v float64) int32     { return int32(math.Round(v)) }
 func round2(v float64) float64 { return math.Round(v*100) / 100 }

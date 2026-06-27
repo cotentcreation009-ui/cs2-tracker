@@ -62,8 +62,8 @@ function PlayerCard({ p }: { p: PlayerInsight }) {
       </div>
 
       <div className="mt-2 grid grid-cols-4 gap-1.5">
+        <Stat label="ADR" value={p.adr.toFixed(0)} />
         <Stat label="HS%" value={`${p.hsPct.toFixed(0)}%`} />
-        <Stat label="Assist*" value={`${p.assistsApprox}`} />
         <Stat label="Trade K" value={`${p.tradeKills}`} sub={`${p.tradeKillPct.toFixed(0)}%`} />
         <Stat label="Multi-K" value={`${p.multiKillRounds}`} sub="rounds" />
       </div>
@@ -99,6 +99,19 @@ function PlayerCard({ p }: { p: PlayerInsight }) {
         </div>
       )}
 
+      {(p.utilThrown.total > 0 || p.utilDamage > 0 || p.enemiesFlashed > 0) && (
+        <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+          {p.utilThrown.smoke > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.smoke} smoke</span>}
+          {p.utilThrown.flash > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.flash} flash</span>}
+          {p.utilThrown.he > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.he} HE</span>}
+          {p.utilThrown.molotov > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.molotov} molly</span>}
+          {p.enemiesFlashed > 0 && (
+            <span className="pill bg-brand/10 text-brand">{p.enemiesFlashed} flashed · {p.flashDuration.toFixed(0)}s</span>
+          )}
+          {p.utilDamage > 0 && <span className="pill bg-bad/10 text-bad">{p.utilDamage} util dmg</span>}
+        </div>
+      )}
+
       {area.rounds > 0 && (
         <div className="mt-2.5">
           <div className="flex justify-between text-[11px] text-muted">
@@ -114,6 +127,15 @@ function PlayerCard({ p }: { p: PlayerInsight }) {
             <div style={{ width: `${(area.mid / areaTotal) * 100}%`, background: "#f5b942" }} />
             <div style={{ width: `${(area.b / areaTotal) * 100}%`, background: "#5b9dff" }} />
           </div>
+        </div>
+      )}
+
+      {p.buys.pistol + p.buys.eco + p.buys.force + p.buys.full > 0 && (
+        <div className="mt-2 flex items-center justify-between text-[10px]">
+          <span className="text-muted">Buys</span>
+          <span className="text-faint">
+            {p.buys.full} full · {p.buys.force} force · {p.buys.eco} eco · {p.buys.pistol} pistol
+          </span>
         </div>
       )}
     </div>
@@ -149,7 +171,7 @@ export default function PlayerInsights({
       <div className="card-2 px-4 py-3">
         <div className="mb-2 flex items-center gap-2">
           <span className="stat-label">Utility used</span>
-          <span className="pill bg-panel text-faint">match-wide · no per-player thrower</span>
+          <span className="pill bg-panel text-faint">match total</span>
           <span className="ml-auto text-xs text-muted tabular-nums">
             {u.perRound.toFixed(1)} / round
           </span>

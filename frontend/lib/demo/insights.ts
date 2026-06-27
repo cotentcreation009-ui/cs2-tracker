@@ -25,6 +25,9 @@ export interface PlayerInsight {
   tradeKills: number; tradedDeaths: number; tradeKillPct: number;
   multiKills: MultiKillTally; multiKillRounds: number;
   favoriteWeapons: FavoriteWeapon[]; area: AreaTendency;
+  adr: number; utilDamage: number; enemiesFlashed: number; flashDuration: number;
+  utilThrown: { smoke: number; molotov: number; flash: number; he: number; decoy: number; total: number };
+  buys: { pistol: number; eco: number; force: number; full: number };
 }
 
 export interface SiteAnchor {
@@ -42,11 +45,11 @@ export interface InsightsResult {
 const TRADE_WINDOW = 5; // seconds
 
 export const PLAYER_INSIGHTS_LIMITATIONS = [
-  "Grenades carry no thrower in our data, so utility is reported match-wide, not per player (the old app attributed every nade + flash-blind + util damage to its owner).",
-  "No damage / ADR, no flash-assist or blind-duration, no util-damage, no economy — so impact rating and HS-damage splits are unavailable.",
-  "Assists are a trade-proximity proxy (no real assist event exists in our data).",
-  "Map areas (A / B / Mid) are inferred from observed bomb-plant spots and map center — there is no zone database, so they are directional, not named-zone tendencies.",
-  "Clutch / 1vX detection needs per-tick weapon-fire + zone data we do not have.",
+  "ADR is enemy health-damage per round; it can differ slightly from official (no per-hit overkill cap).",
+  "Flash stats are enemies blinded + blind-seconds dealt, not flash-assists (we don't tie a flash to a teammate's kill).",
+  "Assists are a trade-proximity proxy (our data has no assist event).",
+  "Economy is a coarse equipment-value bucket (pistol / eco / force / full), not real money or a full loadout.",
+  "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones. Clutch / 1vX needs per-tick data we don't capture.",
 ].join(" ");
 
 const sideOf = (r: ReplayRound, i: number, meta: ReplayMeta): "CT" | "T" | "" => {
@@ -111,6 +114,9 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     openK: number; openD: number; tradeK: number; tradedD: number;
     mk: MultiKillTally; mkRounds: number; weapons: Map<string, number>;
     a: number; b: number; mid: number; areaRounds: number;
+    dmg: number; utilDmg: number; flashed: number; flashDur: number;
+    util: { smoke: number; molotov: number; flash: number; he: number; decoy: number };
+    buys: { pistol: number; eco: number; force: number; full: number };
   }
   const acc = new Map<number, Acc>();
   const get = (i: number): Acc => {
@@ -118,7 +124,10 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     if (!a) {
       a = { rounds: 0, kills: 0, deaths: 0, hs: 0, assists: 0, openK: 0, openD: 0,
         tradeK: 0, tradedD: 0, mk: { k2: 0, k3: 0, k4: 0, k5: 0 }, mkRounds: 0,
-        weapons: new Map(), a: 0, b: 0, mid: 0, areaRounds: 0 };
+        weapons: new Map(), a: 0, b: 0, mid: 0, areaRounds: 0,
+        dmg: 0, utilDmg: 0, flashed: 0, flashDur: 0,
+        util: { smoke: 0, molotov: 0, flash: 0, he: 0, decoy: 0 },
+        buys: { pistol: 0, eco: 0, force: 0, full: 0 } };
       acc.set(i, a);
     }
     return a;
@@ -203,14 +212,28 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       }
     }
 
-    // match-wide utility
+    // per-player aggregates (economy, damage, flashes) from this round's stats
+    for (const s of r.stats ?? []) {
+      const a = get(s.i);
+      a.dmg += s.dmg ?? 0;
+      a.utilDmg += s.utilDmg ?? 0;
+      a.flashed += s.flashed ?? 0;
+      a.flashDur += s.flashDur ?? 0;
+      if (s.buy === "pistol") a.buys.pistol++;
+      else if (s.buy === "eco") a.buys.eco++;
+      else if (s.buy === "force") a.buys.force++;
+      else if (s.buy === "full") a.buys.full++;
+    }
+
+    // utility — match-wide totals + per-thrower attribution (nade.by)
     for (const n of r.nades) {
       util.total++;
-      if (n.k === "smoke") util.smoke++;
-      else if (n.k === "molotov" || n.k === "inferno" || n.k === "incgrenade") util.molotov++;
-      else if (n.k === "flash") util.flash++;
-      else if (n.k === "he") util.he++;
-      else if (n.k === "decoy") util.decoy++;
+      const a = n.by >= 0 ? get(n.by) : null;
+      if (n.k === "smoke") { util.smoke++; if (a) a.util.smoke++; }
+      else if (n.k === "molotov" || n.k === "inferno" || n.k === "incgrenade") { util.molotov++; if (a) a.util.molotov++; }
+      else if (n.k === "flash") { util.flash++; if (a) a.util.flash++; }
+      else if (n.k === "he") { util.he++; if (a) a.util.he++; }
+      else if (n.k === "decoy") { util.decoy++; if (a) a.util.decoy++; }
     }
   }
   util.perRound = rounds.length ? util.total / rounds.length : 0;
@@ -233,6 +256,13 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       tradeKillPct: a.kills ? (a.tradeK / a.kills) * 100 : 0,
       multiKills: a.mk, multiKillRounds: a.mkRounds, favoriteWeapons,
       area: { a: a.a, b: a.b, mid: a.mid, rounds: a.areaRounds },
+      adr: a.rounds ? a.dmg / a.rounds : 0,
+      utilDamage: a.utilDmg, enemiesFlashed: a.flashed, flashDuration: a.flashDur,
+      utilThrown: {
+        ...a.util,
+        total: a.util.smoke + a.util.molotov + a.util.flash + a.util.he + a.util.decoy,
+      },
+      buys: a.buys,
     });
   }
   players.sort((x, y) => y.kills - x.kills);
