@@ -230,17 +230,26 @@ export function computeSuspicion(
     ] as [number | null, number][]
   ).filter((p): p is [number, number] => p[0] != null);
   const mw = mechParts.reduce((a, p) => a + p[1], 0);
-  const mech = mw ? mechParts.reduce((a, p) => a + p[0] * p[1], 0) / mw : 0;
+  const mean = mw ? mechParts.reduce((a, p) => a + p[0] * p[1], 0) / mw : 0;
 
-  // Score: mechanics drive it. The cross-platform gap (Leetify only) then works
-  // BOTH ways — a big gap amplifies mechanics and adds on top; a near-zero gap
-  // is exculpatory. No gap to cross-check → mechanics mostly stand. A ban floors
-  // the score high.
+  // The direct aimbot/triggerbot tells. Two superhuman ones (e.g. 99 aim + an
+  // inhuman reaction) should drive the score up on their own — a plain weighted
+  // mean lets ordinary skill-linked stats (K/D, HS%) average them back down, so
+  // blend the breadth (mean) with the PEAK of the strongest core tells.
+  const core = [sReaction, sPreaim, sAim, sAccuracy]
+    .filter((v): v is number => v != null)
+    .sort((a, b) => b - a);
+  const peak = core.length === 0 ? 0 : core.length === 1 ? core[0] : (core[0] + core[1]) / 2;
+  const mech = core.length ? Math.max(mean, 0.4 * mean + 0.6 * peak) : mean;
+
+  // Score: mechanics drive it. The cross-platform gap (Leetify only) works BOTH
+  // ways — a big gap amplifies + adds on top; a near-zero gap is exculpatory. No
+  // gap to cross-check → mechanics mostly stand. A ban floors the score high.
   let score: number;
   if (sGap != null) {
-    score = mech * (0.55 + 0.45 * (sGap / 100)) + sGap * 0.3;
+    score = mech * (0.6 + 0.4 * (sGap / 100)) + sGap * 0.25;
   } else {
-    score = mech * 0.8;
+    score = mech * 0.9;
   }
   if (banned) score = Math.max(score, 85);
   score = clamp(score);
