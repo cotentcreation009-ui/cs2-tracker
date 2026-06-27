@@ -85,10 +85,10 @@ function deriveSiteAnchor(rounds: ReplayRound[]): SiteAnchor {
   const plants: { x: number; y: number }[] = [];
   let cx = 0, cy = 0, cn = 0;
   for (const r of rounds) {
-    for (const b of r.bomb) {
+    for (const b of r.bomb ?? []) {
       if (b.k === "plant" || b.k === "plant_start") plants.push({ x: b.x, y: b.y });
     }
-    for (const k of r.kills) { cx += k.vx; cy += k.vy; cn++; }
+    for (const k of r.kills ?? []) { cx += k.vx; cy += k.vy; cn++; }
   }
   const center = cn ? { x: cx / cn, y: cy / cn } : { x: 0, y: 0 };
   if (plants.length < 2) {
@@ -138,7 +138,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     const onSide = new Set<number>([...(r.ct ?? []), ...(r.t ?? [])]);
     for (const i of onSide) get(i).rounds++;
 
-    const kills = [...r.kills].sort((x, y) => x.t - y.t);
+    const kills = [...(r.kills ?? [])].sort((x, y) => x.t - y.t);
 
     // opening duel = first real kill of the round
     const opener = kills.find((k) => k.k >= 0 && k.v >= 0);
@@ -194,7 +194,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     // area lean: each player's mean position this round -> nearest anchor
     if (anchor.a || anchor.b) {
       const sum = new Map<number, { x: number; y: number; n: number }>();
-      for (const f of r.frames) for (const p of f.p) {
+      for (const f of r.frames ?? []) for (const p of f.p) {
         if (p.h <= 0) continue;
         const s = sum.get(p.i) ?? { x: 0, y: 0, n: 0 };
         s.x += p.x; s.y += p.y; s.n++; sum.set(p.i, s);
@@ -226,7 +226,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     }
 
     // utility — match-wide totals + per-thrower attribution (nade.by)
-    for (const n of r.nades) {
+    for (const n of r.nades ?? []) {
       util.total++;
       const a = n.by >= 0 ? get(n.by) : null;
       if (n.k === "smoke") { util.smoke++; if (a) a.util.smoke++; }

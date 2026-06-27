@@ -74,6 +74,22 @@ export async function listMatches(): Promise<MatchSummary[]> {
   return all.sort((a, b) => b.savedAt - a.savedAt);
 }
 
+// Go marshals empty slices as JSON null, so coerce every round's arrays to []
+// (and nade thrower to a number) once on load — keeps the replay viewer and all
+// analysis views null-safe no matter how sparse a round is.
+function normalizeRound(r: ReplayRound): ReplayRound {
+  return {
+    ...r,
+    ct: r.ct ?? [],
+    t: r.t ?? [],
+    frames: r.frames ?? [],
+    kills: r.kills ?? [],
+    nades: (r.nades ?? []).map((n) => ({ ...n, by: n.by ?? -1 })),
+    bomb: r.bomb ?? [],
+    stats: r.stats ?? [],
+  };
+}
+
 export async function getMatch(
   id: string,
 ): Promise<{ summary: MatchSummary; rounds: ReplayRound[] } | null> {
@@ -87,7 +103,7 @@ export async function getMatch(
   );
   db.close();
   if (!summary || !data) return null;
-  return { summary, rounds: data.rounds };
+  return { summary, rounds: (data.rounds ?? []).map(normalizeRound) };
 }
 
 export async function renameMatch(id: string, name: string): Promise<void> {
