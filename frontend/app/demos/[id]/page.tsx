@@ -10,12 +10,14 @@ import { mapLabel } from "@/lib/format";
 import RouteAnalytics from "@/components/demo/RouteAnalytics";
 import WeaponInsights from "@/components/demo/WeaponInsights";
 import PlayerInsights from "@/components/demo/PlayerInsights";
+import { StrategyMap } from "@/components/demo/StrategyMap";
 
 const TABS = [
   { k: "replay", label: "Replay" },
   { k: "routes", label: "Routes" },
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Insights" },
+  { k: "map", label: "Heatmap" },
 ] as const;
 type Tab = (typeof TABS)[number]["k"];
 
@@ -405,12 +407,13 @@ export default function ReplayPage() {
               </span>
             </div>
           </div>
-          <Link
-            href={`/demos/${id}/map`}
+          <button
+            type="button"
+            onClick={() => setTab("map")}
             className="btn btn-ghost shrink-0 text-xs"
           >
-            Strategy map →
-          </Link>
+            Heatmap →
+          </button>
         </div>
       </section>
 
@@ -435,6 +438,7 @@ export default function ReplayPage() {
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} />}
+      {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} />}
 
       {tab === "replay" && (
         <>

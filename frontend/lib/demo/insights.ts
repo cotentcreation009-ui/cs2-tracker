@@ -28,6 +28,16 @@ export interface PlayerInsight {
   adr: number; utilDamage: number; enemiesFlashed: number; flashDuration: number;
   utilThrown: { smoke: number; molotov: number; flash: number; he: number; decoy: number; total: number };
   buys: { pistol: number; eco: number; force: number; full: number };
+  utilNades: UtilThrow[]; // every grenade this player threw (for the map view)
+}
+
+// One grenade landing, attributed to a thrower — used to plot a player's utility
+// on the radar and spot repeated setups.
+export interface UtilThrow {
+  kind: string; // smoke | molotov | flash | he | decoy
+  x: number;
+  y: number;
+  round: number;
 }
 
 export interface SiteAnchor {
@@ -117,6 +127,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     dmg: number; utilDmg: number; flashed: number; flashDur: number;
     util: { smoke: number; molotov: number; flash: number; he: number; decoy: number };
     buys: { pistol: number; eco: number; force: number; full: number };
+    nadeList: UtilThrow[];
   }
   const acc = new Map<number, Acc>();
   const get = (i: number): Acc => {
@@ -127,7 +138,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         weapons: new Map(), a: 0, b: 0, mid: 0, areaRounds: 0,
         dmg: 0, utilDmg: 0, flashed: 0, flashDur: 0,
         util: { smoke: 0, molotov: 0, flash: 0, he: 0, decoy: 0 },
-        buys: { pistol: 0, eco: 0, force: 0, full: 0 } };
+        buys: { pistol: 0, eco: 0, force: 0, full: 0 }, nadeList: [] };
       acc.set(i, a);
     }
     return a;
@@ -225,15 +236,18 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       else if (s.buy === "full") a.buys.full++;
     }
 
-    // utility — match-wide totals + per-thrower attribution (nade.by)
+    // utility — match-wide totals + per-thrower attribution (nade.by) + the
+    // landing position so the UI can plot a player's throws on the map.
     for (const n of r.nades ?? []) {
       util.total++;
       const a = n.by >= 0 ? get(n.by) : null;
-      if (n.k === "smoke") { util.smoke++; if (a) a.util.smoke++; }
-      else if (n.k === "molotov" || n.k === "inferno" || n.k === "incgrenade") { util.molotov++; if (a) a.util.molotov++; }
-      else if (n.k === "flash") { util.flash++; if (a) a.util.flash++; }
-      else if (n.k === "he") { util.he++; if (a) a.util.he++; }
-      else if (n.k === "decoy") { util.decoy++; if (a) a.util.decoy++; }
+      let kind = "";
+      if (n.k === "smoke") { util.smoke++; kind = "smoke"; if (a) a.util.smoke++; }
+      else if (n.k === "molotov" || n.k === "inferno" || n.k === "incgrenade") { util.molotov++; kind = "molotov"; if (a) a.util.molotov++; }
+      else if (n.k === "flash") { util.flash++; kind = "flash"; if (a) a.util.flash++; }
+      else if (n.k === "he") { util.he++; kind = "he"; if (a) a.util.he++; }
+      else if (n.k === "decoy") { util.decoy++; kind = "decoy"; if (a) a.util.decoy++; }
+      if (a && kind) a.nadeList.push({ kind, x: n.x, y: n.y, round: r.n });
     }
   }
   util.perRound = rounds.length ? util.total / rounds.length : 0;
@@ -263,6 +277,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         total: a.util.smoke + a.util.molotov + a.util.flash + a.util.he + a.util.decoy,
       },
       buys: a.buys,
+      utilNades: a.nadeList,
     });
   }
   players.sort((x, y) => y.kills - x.kills);
