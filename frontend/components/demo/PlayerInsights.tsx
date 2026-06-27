@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeInsights,
@@ -8,6 +8,9 @@ import {
   PLAYER_INSIGHTS_LIMITATIONS,
   type PlayerInsight,
 } from "@/lib/demo/insights";
+import { RadarMap, KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
+
+const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
 
 const CT = "#5b9dff";
 const T = "#e7b53c";
@@ -34,7 +37,41 @@ function SplitBar({ a, b, aHex, bHex }: { a: number; b: number; aHex: string; bH
   );
 }
 
-function PlayerCard({ p }: { p: PlayerInsight }) {
+// Clickable utility chip — opens the map view for this player + grenade kind.
+function UtilPill({
+  kind,
+  n,
+  label,
+  onClick,
+}: {
+  kind: string;
+  n: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`Show ${label} placements on the map`}
+      className="pill bg-panel text-muted transition hover:bg-panel2 hover:text-ink"
+    >
+      <span
+        className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
+        style={{ background: KIND_COLOR[kind] }}
+      />
+      {n} {label}
+    </button>
+  );
+}
+
+function PlayerCard({
+  p,
+  onUtil,
+}: {
+  p: PlayerInsight;
+  onUtil: (player: PlayerInsight, kind: string) => void;
+}) {
   const hex = sideHex(p.team);
   const mk = p.multiKills;
   const area = p.area;
@@ -100,11 +137,11 @@ function PlayerCard({ p }: { p: PlayerInsight }) {
       )}
 
       {(p.utilThrown.total > 0 || p.utilDamage > 0 || p.enemiesFlashed > 0) && (
-        <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
-          {p.utilThrown.smoke > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.smoke} smoke</span>}
-          {p.utilThrown.flash > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.flash} flash</span>}
-          {p.utilThrown.he > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.he} HE</span>}
-          {p.utilThrown.molotov > 0 && <span className="pill bg-panel text-muted">{p.utilThrown.molotov} molly</span>}
+        <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px]">
+          {p.utilThrown.smoke > 0 && <UtilPill kind="smoke" n={p.utilThrown.smoke} label="smoke" onClick={() => onUtil(p, "smoke")} />}
+          {p.utilThrown.flash > 0 && <UtilPill kind="flash" n={p.utilThrown.flash} label="flash" onClick={() => onUtil(p, "flash")} />}
+          {p.utilThrown.he > 0 && <UtilPill kind="he" n={p.utilThrown.he} label="HE" onClick={() => onUtil(p, "he")} />}
+          {p.utilThrown.molotov > 0 && <UtilPill kind="molotov" n={p.utilThrown.molotov} label="molly" onClick={() => onUtil(p, "molotov")} />}
           {p.enemiesFlashed > 0 && (
             <span className="pill bg-brand/10 text-brand">{p.enemiesFlashed} flashed · {p.flashDuration.toFixed(0)}s</span>
           )}
@@ -150,6 +187,9 @@ export default function PlayerInsights({
   rounds: ReplayRound[];
 }) {
   const data = useMemo(() => computeInsights(meta, rounds), [meta, rounds]);
+  const [view, setView] = useState<{ player: PlayerInsight; kind: string } | null>(
+    null,
+  );
   if (!data.players.length) {
     return (
       <div className="card px-4 py-6 text-sm text-muted">
@@ -161,9 +201,17 @@ export default function PlayerInsights({
 
   return (
     <div className="space-y-4">
+      <p className="text-[11px] text-faint">
+        Tip: click a player&apos;s utility chip to see where they throw it on the
+        map — tight clusters across rounds reveal a repeatable setup.
+      </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {data.players.map((p) => (
-          <PlayerCard key={p.i} p={p} />
+          <PlayerCard
+            key={p.i}
+            p={p}
+            onUtil={(player, kind) => setView({ player, kind })}
+          />
         ))}
       </div>
 
@@ -189,6 +237,99 @@ export default function PlayerInsights({
         <span className="font-semibold text-muted">Data notes:</span>{" "}
         {PLAYER_INSIGHTS_LIMITATIONS}
       </p>
+
+      {view && (
+        <UtilMapModal
+          meta={meta}
+          player={view.player}
+          kind={view.kind}
+          onKind={(k) => setView((v) => (v ? { ...v, kind: k } : v))}
+          onClose={() => setView(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal: a player's grenade placements plotted on the map radar, with a kind
+// switcher. Repeated spots across rounds reveal a setup.
+function UtilMapModal({
+  meta,
+  player,
+  kind,
+  onKind,
+  onClose,
+}: {
+  meta: ReplayMeta;
+  player: PlayerInsight;
+  kind: string;
+  onKind: (k: string) => void;
+  onClose: () => void;
+}) {
+  const kinds = useMemo(() => {
+    const set = new Set(player.utilNades.map((n) => n.kind));
+    return UTIL_KINDS.filter((k) => set.has(k));
+  }, [player]);
+  const dots = useMemo(
+    () => player.utilNades.filter((n) => n.kind === kind),
+    [player, kind],
+  );
+  const roundsHit = new Set(dots.map((d) => d.round)).size;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="card-2 w-full max-w-lg p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate font-bold">{player.name}</div>
+            <div className="stat-label">utility placement map</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-ghost px-2 py-1 text-xs"
+          >
+            ✕ Close
+          </button>
+        </div>
+
+        <div className="mb-3 flex flex-wrap gap-1">
+          {kinds.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onKind(k)}
+              className={`pill transition ${
+                k === kind
+                  ? "bg-brand/15 text-brand"
+                  : "bg-panel text-muted hover:text-ink"
+              }`}
+            >
+              <span
+                className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
+                style={{ background: KIND_COLOR[k] }}
+              />
+              {KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
+
+        <RadarMap map={meta.map} dots={dots} className="mx-auto max-w-115" />
+
+        <p className="mt-3 text-center text-xs text-muted">
+          <span className="font-semibold text-ink">{dots.length}</span>{" "}
+          {(KIND_LABEL[kind] ?? kind).toLowerCase()} placement
+          {dots.length === 1 ? "" : "s"} across{" "}
+          <span className="font-semibold text-ink">{roundsHit}</span> round
+          {roundsHit === 1 ? "" : "s"} — tight clusters mean a repeatable setup.
+        </p>
+      </div>
     </div>
   );
 }
