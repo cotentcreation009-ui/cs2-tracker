@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, timeAgo } from "@/lib/format";
+import { radarImage } from "@/lib/maps/calibration";
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 const SOURCES = [
   { key: "all", label: "All" },
@@ -183,6 +186,188 @@ function MapDetail({ ms, map }: { ms: LeetifyRecentMatch[]; map: string }) {
   );
 }
 
+interface MapRow {
+  map: string;
+  ms: LeetifyRecentMatch[];
+  n: number;
+  w: number;
+  l: number;
+  winPct: number;
+}
+
+// Round win rate across a map's matches (sum rounds won / total rounds). NaN
+// when no match carries a score.
+function roundWinPct(ms: LeetifyRecentMatch[]): number {
+  let won = 0,
+    total = 0;
+  for (const m of ms) {
+    if (m.score?.length === 2) {
+      won += m.score[0];
+      total += m.score[0] + m.score[1];
+    }
+  }
+  return total ? (won / total) * 100 : NaN;
+}
+
+// Circular map icon (radar thumbnail) with a short-label fallback if the asset
+// is missing.
+function MapIcon({ map }: { map: string }) {
+  const [ok, setOk] = useState(true);
+  const short = map.replace("de_", "").slice(0, 3).toUpperCase();
+  return ok ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={radarImage(map)}
+      alt={mapLabel(map)}
+      onError={() => setOk(false)}
+      draggable={false}
+      className="h-8 w-8 rounded-full border border-line2 bg-panel2 object-cover"
+    />
+  ) : (
+    <span className="grid h-8 w-8 place-items-center rounded-full border border-line2 bg-panel2 text-[9px] font-bold text-muted">
+      {short}
+    </span>
+  );
+}
+
+const RADAR = 240;
+const RC = RADAR / 2;
+const RR = 78;
+
+/**
+ * MapWinRadar — a spider chart of per-map win rate (by rounds or matches), with
+ * a map icon at each vertex and a best/worst footer. Reacts to the section's
+ * window + queue filters via the rows it's given.
+ */
+function MapWinRadar({ rows }: { rows: MapRow[] }) {
+  const [metric, setMetric] = useState<"rounds" | "matches">("rounds");
+
+  const reliable = rows.filter((r) => r.n >= 3);
+  const base = (reliable.length >= 3 ? reliable : rows.filter((r) => r.n >= 1)).slice(0, 9);
+  // fixed angular order (by name) so vertices don't jump as values change
+  const data = [...base].sort((a, b) => a.map.localeCompare(b.map));
+  const hasRounds = data.some((r) => Number.isFinite(roundWinPct(r.ms)));
+  const useMetric = metric === "rounds" && !hasRounds ? "matches" : metric;
+  const valOf = (r: MapRow) => {
+    if (useMetric === "matches") return r.winPct;
+    const rp = roundWinPct(r.ms);
+    return Number.isFinite(rp) ? rp : r.winPct;
+  };
+
+  if (data.length < 3) return null;
+
+  const N = data.length;
+  const ang = (i: number) => -Math.PI / 2 + (i / N) * Math.PI * 2;
+  const ptAt = (i: number, frac: number) => ({
+    x: RC + Math.cos(ang(i)) * RR * frac,
+    y: RC + Math.sin(ang(i)) * RR * frac,
+  });
+
+  const vals = data.map(valOf);
+  const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const col = winColor(avg);
+  const polyPts = data
+    .map((_, i) => ptAt(i, clamp(vals[i], 0, 100) / 100))
+    .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+    .join(" ");
+  const ring = (frac: number) =>
+    data.map((_, i) => ptAt(i, frac)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+  const ranked = data.map((r) => ({ r, v: valOf(r) })).sort((a, b) => b.v - a.v);
+  const best = ranked[0];
+  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
+
+  return (
+    <div className="card-2 mb-3 px-4 py-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold">Map Win Rates</h3>
+        <div className="flex rounded-lg border border-line bg-panel p-0.5">
+          {(["rounds", "matches"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMetric(m)}
+              disabled={m === "rounds" && !hasRounds}
+              className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize transition ${
+                useMetric === m ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+              } ${m === "rounds" && !hasRounds ? "opacity-40" : ""}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="relative mx-auto aspect-square w-full max-w-xs">
+        <svg
+          viewBox={`0 0 ${RADAR} ${RADAR}`}
+          className="absolute inset-0 h-full w-full overflow-visible"
+        >
+          {[0.25, 0.5, 0.75, 1].map((f) => (
+            <polygon
+              key={f}
+              points={ring(f)}
+              fill="none"
+              stroke="var(--color-line)"
+              strokeWidth={f === 0.5 ? 1.2 : 0.7}
+              strokeDasharray={f === 0.5 ? "3 3" : undefined}
+              opacity={f === 0.5 ? 0.85 : 0.5}
+            />
+          ))}
+          {data.map((_, i) => {
+            const o = ptAt(i, 1);
+            return (
+              <line key={i} x1={RC} y1={RC} x2={o.x} y2={o.y} stroke="var(--color-line)" strokeWidth={0.6} opacity={0.4} />
+            );
+          })}
+          <polygon points={polyPts} fill={`${col}33`} stroke={col} strokeWidth={2} strokeLinejoin="round" />
+          {data.map((_, i) => {
+            const p = ptAt(i, clamp(vals[i], 0, 100) / 100);
+            return <circle key={i} cx={p.x} cy={p.y} r={2.6} fill={col} stroke="#04060e" strokeWidth={0.8} />;
+          })}
+          <circle cx={RC} cy={RC} r={1.5} fill="var(--color-faint)" />
+        </svg>
+
+        {data.map((r, i) => {
+          const o = ptAt(i, 1.17);
+          return (
+            <div
+              key={r.map}
+              title={`${mapLabel(r.map)} · ${valOf(r).toFixed(0)}% ${useMetric === "rounds" ? "rounds" : "matches"}`}
+              className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%` }}
+            >
+              <MapIcon map={r.map} />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-line bg-panel/60 px-3 py-2">
+          <div className="stat-label">Best</div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="truncate text-sm font-semibold capitalize">{mapLabel(best.r.map)}</span>
+            <span className="text-sm font-bold tabular-nums text-good">{best.v.toFixed(0)}%</span>
+          </div>
+        </div>
+        {worst && (
+          <div className="rounded-lg border border-line bg-panel/60 px-3 py-2">
+            <div className="stat-label">Worst</div>
+            <div className="flex items-center justify-between gap-1">
+              <span className="truncate text-sm font-semibold capitalize">{mapLabel(worst.r.map)}</span>
+              <span className="text-sm font-bold tabular-nums text-bad">{worst.v.toFixed(0)}%</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mt-1.5 text-center text-[10px] text-faint">
+        win rate by {useMetric} · {data.length} maps · 50% = dashed ring
+      </div>
+    </div>
+  );
+}
+
 /**
  * MapStrength plots per-map win rate as a diverging dot chart on a Loss↔Win
  * axis (dot at the win rate, connected to 50%, sized by games). Click a map to
@@ -307,6 +492,8 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
           )}
         </div>
       )}
+
+      <MapWinRadar rows={rows} />
 
       <div className="card-2 px-4 py-4">
         {rows.length === 0 ? (
