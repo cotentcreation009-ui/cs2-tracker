@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { hasCalibration, radarImage, worldToRadar } from "@/lib/maps/calibration";
-import { KIND_COLOR } from "./RadarMap";
+import { radarImage } from "@/lib/maps/calibration";
+import type { Projection } from "@/lib/demo/projection";
 import type { UtilThrow } from "@/lib/demo/insights";
+import { KIND_COLOR } from "./RadarMap";
+import { ZONE_COLOR, type Zone } from "@/lib/maps/zones";
 
 const SIZE = 600;
-const TRAVEL = 0.55; // s — arc flight time
-const STAGGER = 0.45; // s — gap between successive throws
-const BLOOM = 1.2; // s — bloom expand
-const HOLD = 1.8; // s — pause before the loop restarts
 
 // Bloom radius as a fraction of the radar, per grenade kind.
 const BLOOM_R: Record<string, number> = {
@@ -45,18 +43,23 @@ function dot(
 }
 
 /**
- * Animated utility map: replays each grenade arcing from the thrower to its
- * landing spot and blooming, on a loop. Repeated throws stack on the same spot,
- * so a consistent setup reads instantly. Calibrated maps use the real radar;
- * uncalibrated maps auto-scale to the throws' bounding box.
+ * Animated utility map. Each grenade arcs from the thrower to its landing and
+ * blooms, on a loop, using the shared match projection so it aligns with every
+ * other lens. With a single throw it runs in "solo" mode — slower, with a
+ * persistent dashed trajectory — so you can study one exact lineup. Optional
+ * zone polygons (call-outs) are drawn underneath on calibrated maps.
  */
 export function UtilThrowMap({
   map,
+  proj,
   throws,
+  zones = [],
   className = "",
 }: {
   map: string;
+  proj: Projection;
   throws: UtilThrow[];
+  zones?: Zone[];
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,7 +68,7 @@ export function UtilThrowMap({
   const rafRef = useRef(0);
   const startRef = useRef(0);
 
-  const calibrated = hasCalibration(map);
+  const calibrated = proj.calibrated;
 
   useEffect(() => {
     let alive = true;
@@ -89,32 +92,15 @@ export function UtilThrowMap({
 
   useEffect(() => {
     startRef.current = 0;
+    const solo = throws.length === 1;
+    const TRAVEL = solo ? 0.95 : 0.55;
+    const STAGGER = solo ? 0 : 0.45;
+    const BLOOM = solo ? 1.6 : 1.2;
+    const HOLD = solo ? 1.2 : 1.8;
 
-    // bounding box for uncalibrated auto-scale
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    if (!calibrated) {
-      for (const t of throws) {
-        for (const [x, y] of [
-          [t.ox, t.oy],
-          [t.x, t.y],
-        ]) {
-          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-        }
-      }
-    }
-    const sx = maxX - minX || 1;
-    const sy = maxY - minY || 1;
-    const pad = 0.08;
     const place = (x: number, y: number) => {
-      if (calibrated) {
-        const r = worldToRadar(map, x, y);
-        return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: SIZE / 2, y: SIZE / 2 };
-      }
-      return {
-        x: (pad + ((x - minX) / sx) * (1 - 2 * pad)) * SIZE,
-        y: (pad + ((maxY - y) / sy) * (1 - 2 * pad)) * SIZE,
-      };
+      const r = proj.project(x, y);
+      return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: SIZE / 2, y: SIZE / 2 };
     };
 
     const total = throws.length
@@ -147,13 +133,56 @@ export function UtilThrowMap({
         }
       }
 
+      // zone call-outs (only meaningful when calibrated — radar-normalized)
+      if (calibrated) {
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        for (const z of zones) {
+          if (z.points.length < 3) continue;
+          ctx.beginPath();
+          z.points.forEach((p, i) => {
+            const x = p.x * SIZE, y = p.y * SIZE;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.closePath();
+          const zc = ZONE_COLOR[z.kind] ?? "#8a7dff";
+          ctx.fillStyle = hexA(zc, 0.08);
+          ctx.fill();
+          ctx.strokeStyle = hexA(zc, 0.35);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          const cx = (z.points.reduce((s, p) => s + p.x, 0) / z.points.length) * SIZE;
+          const cy = (z.points.reduce((s, p) => s + p.y, 0) / z.points.length) * SIZE;
+          ctx.fillStyle = "rgba(230,238,248,0.45)";
+          ctx.fillText(z.name, cx, cy);
+        }
+        ctx.textAlign = "left";
+      }
+
+      // solo: persistent dashed trajectory so the lineup reads at a glance
+      if (solo) {
+        const t = throws[0];
+        const color = KIND_COLOR[t.kind] ?? "#5b9dff";
+        const o = place(t.ox, t.oy);
+        const l = place(t.x, t.y);
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = hexA(color, 0.4);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(o.x, o.y);
+        ctx.lineTo(l.x, l.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        dot(ctx, o.x, o.y, 3, color, 0.75);
+      }
+
       throws.forEach((t, i) => {
         const color = KIND_COLOR[t.kind] ?? "#5b9dff";
         const o = place(t.ox, t.oy);
         const land = place(t.x, t.y);
         const local = elapsed - i * STAGGER;
 
-        // persistent faint landing marker so the cluster is always visible
         dot(ctx, land.x, land.y, 2.5, color, 0.5);
         if (local < 0) return;
 
@@ -161,7 +190,7 @@ export function UtilThrowMap({
           const k = local / TRAVEL;
           const px = o.x + (land.x - o.x) * k;
           const py = o.y + (land.y - o.y) * k - Math.sin(Math.PI * k) * 48;
-          dot(ctx, px, py, 3.5, color, 0.95);
+          dot(ctx, px, py, solo ? 4.5 : 3.5, color, 0.95);
         } else if (local < TRAVEL + BLOOM) {
           const k = (local - TRAVEL) / BLOOM;
           const R = (BLOOM_R[t.kind] ?? 0.05) * SIZE * easeOut(k);
@@ -180,7 +209,7 @@ export function UtilThrowMap({
 
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [map, throws, calibrated]);
+  }, [proj, throws, zones, calibrated, map]);
 
   return (
     <div className={`relative ${className}`}>

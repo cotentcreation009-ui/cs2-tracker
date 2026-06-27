@@ -43,6 +43,18 @@ export interface UtilThrow {
   round: number;
 }
 
+// A cluster of one player's throws of a kind that land near the same spot — the
+// core of "they smoke here every round". cx/cy are world-space (so callers can
+// classify the landing into a zone); avgT is seconds since round start.
+export interface UtilSpot {
+  kind: string;
+  cx: number;
+  cy: number;
+  count: number;
+  avgT: number;
+  throws: UtilThrow[]; // members, sorted by round
+}
+
 export interface SiteAnchor {
   a: { x: number; y: number } | null; b: { x: number; y: number } | null; center: { x: number; y: number };
 }
@@ -138,6 +150,55 @@ function throwerOriginAt(
     }
   }
   return best;
+}
+
+// clusterUtilThrows groups throws (typically one kind) by landing proximity in
+// radar-normalized space, surfacing "this exact spot, N times". `project` maps
+// world→0..1 (pass buildProjection().project); `threshold` is the max normalized
+// distance to join a cluster (~7% of the radar). Sorted by count desc.
+export function clusterUtilThrows(
+  throws: UtilThrow[],
+  project: (x: number, y: number) => { x: number; y: number } | null,
+  threshold = 0.07,
+): UtilSpot[] {
+  const clusters: { nx: number; ny: number; members: UtilThrow[] }[] = [];
+  for (const tw of throws) {
+    const n = project(tw.x, tw.y);
+    if (!n) {
+      clusters.push({ nx: Number.POSITIVE_INFINITY, ny: 0, members: [tw] });
+      continue;
+    }
+    let best: (typeof clusters)[number] | null = null;
+    let bestD = threshold;
+    for (const c of clusters) {
+      const d = Math.hypot(c.nx - n.x, c.ny - n.y);
+      if (d <= bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+    if (best) {
+      best.members.push(tw);
+      const k = best.members.length;
+      best.nx = (best.nx * (k - 1) + n.x) / k;
+      best.ny = (best.ny * (k - 1) + n.y) / k;
+    } else {
+      clusters.push({ nx: n.x, ny: n.y, members: [tw] });
+    }
+  }
+  return clusters
+    .map((c) => {
+      const members = c.members.slice().sort((a, b) => a.round - b.round);
+      return {
+        kind: members[0].kind,
+        cx: members.reduce((s, m) => s + m.x, 0) / members.length,
+        cy: members.reduce((s, m) => s + m.y, 0) / members.length,
+        count: members.length,
+        avgT: members.reduce((s, m) => s + m.t, 0) / members.length,
+        throws: members,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
 }
 
 export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): InsightsResult {
