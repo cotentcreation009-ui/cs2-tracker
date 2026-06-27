@@ -25,99 +25,88 @@ const SPREADS: { key: Spread; label: string; mult: number }[] = [
 ];
 
 // classic heat gradient (low → high): blue → cyan → green → yellow → red
-const HEAT_STOPS: [number, number, number, number][] = [
-  [0.0, 36, 64, 200],
-  [0.3, 0, 200, 224],
-  [0.5, 36, 210, 96],
-  [0.72, 244, 222, 52],
-  [1.0, 240, 58, 40],
-];
 const HEAT_CSS =
   "linear-gradient(90deg, rgb(36,64,200), rgb(0,200,224), rgb(36,210,96), rgb(244,222,52), rgb(240,58,40))";
 
-function heatColor(t: number): [number, number, number] {
-  for (let i = 1; i < HEAT_STOPS.length; i++) {
-    if (t <= HEAT_STOPS[i][0]) {
-      const [t0, r0, g0, b0] = HEAT_STOPS[i - 1];
-      const [t1, r1, g1, b1] = HEAT_STOPS[i];
-      const f = (t - t0) / (t1 - t0 || 1);
-      return [
-        Math.round(r0 + (r1 - r0) * f),
-        Math.round(g0 + (g1 - g0) * f),
-        Math.round(b0 + (b1 - b0) * f),
-      ];
-    }
-  }
-  const l = HEAT_STOPS[HEAT_STOPS.length - 1];
-  return [l[1], l[2], l[3]];
+// 256-entry RGB lookup built once from the gradient (simpleheat-style palette).
+let GRAD: Uint8ClampedArray | null = null;
+function heatGradient(): Uint8ClampedArray {
+  if (GRAD) return GRAD;
+  const c = document.createElement("canvas");
+  c.width = 1;
+  c.height = 256;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0.0, "#1736b4");
+  g.addColorStop(0.45, "#2440c8");
+  g.addColorStop(0.6, "#00c8e0");
+  g.addColorStop(0.72, "#24d260");
+  g.addColorStop(0.85, "#f4de34");
+  g.addColorStop(1.0, "#f03a28");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1, 256);
+  GRAD = ctx.getImageData(0, 0, 1, 256).data;
+  return GRAD;
 }
 
-type HeatPt = { x: number; y: number; w?: number; r?: number };
+// soft circular brush (grayscale, blurred via shadow) — cached per (radius,blur).
+const BRUSHES = new Map<string, HTMLCanvasElement>();
+function heatBrush(r: number, blur: number): HTMLCanvasElement {
+  const key = `${r}:${blur}`;
+  const hit = BRUSHES.get(key);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  const r2 = r + blur;
+  c.width = c.height = r2 * 2;
+  const ctx = c.getContext("2d")!;
+  ctx.shadowOffsetX = ctx.shadowOffsetY = r2 * 2;
+  ctx.shadowBlur = blur;
+  ctx.shadowColor = "black";
+  ctx.beginPath();
+  ctx.arc(-r2, -r2, r, 0, Math.PI * 2, true);
+  ctx.closePath();
+  ctx.fill();
+  BRUSHES.set(key, c);
+  return c;
+}
 
-// Classic normalized heatmap: accumulate (optionally weighted) intensity on an
-// offscreen canvas, normalize to a high percentile (so one super-hot pixel
-// doesn't wash everything red), then colorize through the gradient + composite.
-function classicHeat(
+type HeatPt = { x: number; y: number; w?: number };
+
+// simpleheat-style KDE: stamp a soft brush per point with alpha = value/max
+// (accumulating via source-over), then colorize the accumulated alpha through
+// the gradient. `max` is a fixed density target, so colour reflects how MUCH a
+// spot is occupied — not merely whether anyone passed through it. Areas with
+// little density stay translucent, which is what gives the map readable contrast.
+function drawHeat(
   ctx: CanvasRenderingContext2D,
   off: HTMLCanvasElement,
   pts: HeatPt[],
-  radius: number,
+  opts: { radius: number; blur: number; max: number; minOpacity?: number },
 ) {
   if (!pts.length) return;
   const octx = off.getContext("2d", { willReadFrequently: true });
   if (!octx) return;
   octx.clearRect(0, 0, SIZE, SIZE);
-  octx.globalCompositeOperation = "lighter";
-  for (const p of pts) {
-    const rad = p.r ?? radius;
-    // cap a single splat so it can't saturate on its own — held spots get hot
-    // from many accumulating still-frames, not one huge weight.
-    const a = Math.min(0.85, 0.26 * (p.w ?? 1));
-    if (a <= 0) continue;
-    const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
-    g.addColorStop(0, `rgba(255,255,255,${a})`);
-    g.addColorStop(1, "rgba(255,255,255,0)");
-    octx.fillStyle = g;
-    octx.fillRect(p.x - rad, p.y - rad, rad * 2, rad * 2);
-  }
   octx.globalCompositeOperation = "source-over";
+  const brush = heatBrush(opts.radius, opts.blur);
+  const r2 = opts.radius + opts.blur;
+  const minO = opts.minOpacity ?? 0.05;
+  for (const p of pts) {
+    octx.globalAlpha = Math.min(Math.max((p.w ?? 1) / opts.max, minO), 1);
+    octx.drawImage(brush, p.x - r2, p.y - r2);
+  }
+  octx.globalAlpha = 1;
 
   const img = octx.getImageData(0, 0, SIZE, SIZE);
   const d = img.data;
-  // normalize to the ~99th percentile of non-zero intensity, not the raw max
-  const hist = new Uint32Array(256);
-  let nz = 0;
+  const grad = heatGradient();
   for (let i = 0; i < d.length; i += 4) {
-    const v = d[i];
-    if (v > 0) {
-      hist[v]++;
-      nz++;
-    }
-  }
-  if (!nz) return;
-  let acc = 0;
-  let norm = 255;
-  const cut = nz * 0.99;
-  for (let v = 0; v < 256; v++) {
-    acc += hist[v];
-    if (acc >= cut) {
-      norm = Math.max(1, v);
-      break;
-    }
-  }
-  for (let i = 0; i < d.length; i += 4) {
-    const v = d[i];
-    if (v === 0) {
-      d[i + 3] = 0;
-      continue;
-    }
-    const t = Math.min(1, v / norm);
-    const [r, g, b] = heatColor(t);
-    d[i] = r;
-    d[i + 1] = g;
-    d[i + 2] = b;
-    // steep low-end ramp so only genuine density shows colour
-    d[i + 3] = Math.round(Math.min(1, Math.pow(t, 1.3) * 1.05) * 235);
+    const a = d[i + 3]; // accumulated alpha 0..255 = density
+    if (a === 0) continue;
+    const j = a * 4;
+    d[i] = grad[j];
+    d[i + 1] = grad[j + 1];
+    d[i + 2] = grad[j + 2];
   }
   octx.putImageData(img, 0, 0);
   ctx.drawImage(off, 0, 0);
@@ -227,65 +216,69 @@ export function StrategyMap({
     const off = getOff();
 
     if (active.has("positions")) {
-      // Residence-time heatmap: weight each sample by how long the player dwells
-      // roughly in place (not raw sample count), and ramp spots they anchor to.
-      // So a corridor everyone merely runs through fades, while a held angle —
-      // even a jiggle-peek that keeps returning to cover — burns red.
+      // Where players HOLD position — only stationary samples count, so transit
+      // corridors drop out entirely and held angles stand out. Buy-phase spawn
+      // camping is excluded so it doesn't dominate. Density (overlap across
+      // rounds/players), normalized to a fixed target, drives the colour.
       const pts: HeatPt[] = [];
       for (const rd of scoped) {
         const frames = rd.frames ?? [];
+        const freezeEnd = rd.freezeEnd ?? 15; // skip buy time (older parses: ~15s)
+        const fullBuy = new Set<number>();
+        for (const s of rd.stats ?? []) if (s.buy === "full") fullBuy.add(s.i);
         const prev = new Map<number, { x: number; y: number; t: number }>();
-        const hold = new Map<number, { x: number; y: number; secs: number }>();
-        for (let fi = 0; fi < frames.length; fi += 1) {
-          const f = frames[fi];
+        for (const f of frames) {
+          if (f.t < freezeEnd) continue;
           for (const p of f.p) {
             if (!playerOk(p.i) || p.h <= 0) continue;
             const pr = prev.get(p.i);
             prev.set(p.i, { x: p.x, y: p.y, t: f.t });
             if (!pr || !sideOk(sideOfRound(rd, p.i))) continue;
-            const dt = Math.min(4, Math.max(0.1, f.t - pr.t));
-            // Classify "rest" by DISPLACEMENT over the interval — robust to the
-            // ~1Hz capture (instantaneous speed smears jiggles): barely moved =
-            // held the whole interval; a long step = in transit.
-            const dist = Math.hypot(p.x - pr.x, p.y - pr.y);
-            const rest = dist < 64 ? 1 : dist < 220 ? Math.pow(1 - (dist - 64) / 156, 2) : 0;
-            if (rest <= 0.04) {
-              hold.delete(p.i);
-              continue;
-            }
-            // Hold bonus: while the player stays near an anchor, keep summing
-            // time so spots they truly sit on ramp up super-linearly.
-            const h = hold.get(p.i);
-            let heldSecs = rest * dt;
-            if (h && Math.hypot(p.x - h.x, p.y - h.y) < 110) {
-              h.secs += rest * dt;
-              heldSecs = h.secs;
-            } else {
-              hold.set(p.i, { x: p.x, y: p.y, secs: rest * dt });
-            }
-            const w = rest * dt * (1 + Math.min(2.2, heldSecs / 2.5));
-            // firmly-held → a tighter, sharper blob; partial rest → normal splat
-            const r = (rest > 0.7 ? 19 : 30) * spreadMult;
+            const dt = f.t - pr.t;
+            if (dt <= 0 || dt > 3) continue; // gap (respawn / round seam)
+            const speed = Math.hypot(p.x - pr.x, p.y - pr.y) / dt; // u/s
+            if (speed > 110) continue; // running through — not a hold
+            const still = speed < 35 ? 2 : 1; // planted vs slow-walking
+            const w = still * (fullBuy.has(p.i) ? 1.6 : 1);
             const c = toPx(p.x, p.y);
-            pts.push({ x: c.x, y: c.y, w, r });
+            pts.push({ x: c.x, y: c.y, w });
           }
         }
       }
-      classicHeat(ctx, off, pts, 30 * spreadMult);
+      // fixed density target (simpleheat-style): solo needs less overlap to go
+      // red than a whole team; scale gently with how many rounds are in scope.
+      const base = focusPlayer != null ? 4.5 : 14;
+      const max = base * Math.max(0.3, Math.min(1.4, scoped.length / 20));
+      drawHeat(ctx, off, pts, {
+        radius: Math.round(9 * spreadMult),
+        blur: Math.round(7 * spreadMult),
+        max,
+        minOpacity: 0.08,
+      });
     }
     if (active.has("kills")) {
-      const pts: { x: number; y: number }[] = [];
+      const pts: HeatPt[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
           if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
-      classicHeat(ctx, off, pts, 26 * spreadMult);
+      drawHeat(ctx, off, pts, {
+        radius: Math.round(11 * spreadMult),
+        blur: Math.round(8 * spreadMult),
+        max: (focusPlayer != null ? 2 : 5) * Math.max(0.4, Math.min(1.3, scoped.length / 20)),
+        minOpacity: 0.1,
+      });
     }
     if (active.has("deaths")) {
-      const pts: { x: number; y: number }[] = [];
+      const pts: HeatPt[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
           if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
-      classicHeat(ctx, off, pts, 26 * spreadMult);
+      drawHeat(ctx, off, pts, {
+        radius: Math.round(11 * spreadMult),
+        blur: Math.round(8 * spreadMult),
+        max: (focusPlayer != null ? 2 : 5) * Math.max(0.4, Math.min(1.3, scoped.length / 20)),
+        minOpacity: 0.1,
+      });
     }
     if (active.has("nades")) {
       for (const rd of scoped)
@@ -446,8 +439,9 @@ export function StrategyMap({
           {side !== "all" && <div className="mt-1">{side} side only.</div>}
           {active.has("positions") && (
             <div className="mt-1">
-              Position density is weighted by dwell time — bright = where players hold,
-              not corridors they run through.
+              Shows where players <span className="font-semibold text-ink">hold position</span> —
+              only stationary time counts, so run-through corridors and buy-phase spawns drop out.
+              Brightest = most-held.
             </div>
           )}
           {active.has("nades") && (

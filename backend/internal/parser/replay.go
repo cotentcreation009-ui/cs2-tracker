@@ -55,11 +55,12 @@ type ReplayPlayer struct {
 }
 
 type ReplayRound struct {
-	Number int           `json:"n"`
-	Winner string        `json:"winner"`
-	Reason string        `json:"reason"`
-	CT     []int         `json:"ct"` // player indices on CT this round
-	T      []int         `json:"t"`  // player indices on T this round
+	Number    int     `json:"n"`
+	Winner    string  `json:"winner"`
+	Reason    string  `json:"reason"`
+	FreezeEnd float64 `json:"freezeEnd,omitempty"` // seconds since round start when buy time ends
+	CT        []int   `json:"ct"`                  // player indices on CT this round
+	T         []int   `json:"t"`                   // player indices on T this round
 	Frames []ReplayFrame      `json:"frames"`
 	Kills  []ReplayKill       `json:"kills"`
 	Nades  []ReplayNade       `json:"nades"`
@@ -680,6 +681,7 @@ func (rc *replayCollector) onFreezeEnd(events.RoundFreezetimeEnd) {
 	if rc.cur == nil || rc.p.GameState().IsWarmupPeriod() {
 		return
 	}
+	rc.cur.FreezeEnd = round2(rc.rt()) // round goes live — used to drop buy-phase spawn camping
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		s := rc.stats(rc.playerIndex(pl))
 		if s == nil {

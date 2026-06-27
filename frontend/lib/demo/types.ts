@@ -71,6 +71,7 @@ export interface ReplayRound {
   n: number;
   winner: "CT" | "T" | "";
   reason: string;
+  freezeEnd?: number; // seconds since round start when buy time ends (older parses lack this)
   ct: number[]; // player indices on CT this round
   t: number[]; // player indices on T this round
   frames: ReplayFrame[];
