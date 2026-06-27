@@ -20,6 +20,7 @@ import (
 	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/msg"
 )
 
 // captureHz is how many position snapshots/second we keep. 1 Hz matches the
@@ -140,6 +141,14 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onFlash)
 	p.RegisterEventHandler(rc.onHE)
 
+	// v5 dropped Parser.Header(); the map name arrives in the server-info net
+	// message early in the stream, so capture it there.
+	p.RegisterNetMessageHandler(func(m *msg.CSVCMsg_ServerInfo) {
+		if n := m.GetMapName(); n != "" {
+			rc.serverMapName = n
+		}
+	})
+
 	// demoinfocs can abort mid-demo on CS2 protocol drift (e.g. "unable to find
 	// existing entity N" — the demo is from a newer build than the parser fully
 	// supports). Rounds completed before that point were emitted with a
@@ -149,8 +158,13 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 		return nil, fmt.Errorf("parser: replay parse: %w", err)
 	}
 
+	mapName := rc.serverMapName
+	if mapName == "" {
+		mapName = mapNameOf(p)
+	}
+
 	return &ReplayMeta{
-		Map:      mapNameOf(p),
+		Map:      mapName,
 		TickRate: p.TickRate(),
 		FrameHz:  captureHz,
 		Players:  rc.players,
@@ -175,10 +189,11 @@ type replayCollector struct {
 	p    dem.Parser
 	emit func(ReplayRound)
 
-	started    bool
-	players    []ReplayPlayer
-	idx        map[uint64]int
-	roundCount int
+	started       bool
+	serverMapName string
+	players       []ReplayPlayer
+	idx           map[uint64]int
+	roundCount    int
 
 	cur      *ReplayRound
 	roundT0  float64

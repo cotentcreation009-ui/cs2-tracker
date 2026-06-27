@@ -21,6 +21,7 @@ import (
 	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/common"
 	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/events"
+	"github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs/msg"
 )
 
 // HashFile returns the hex-encoded SHA-256 of a file. The worker stamps this on
@@ -79,6 +80,13 @@ func Parse(r io.Reader) (result *models.ParsedMatch, err error) {
 	p.RegisterEventHandler(c.onMVP)
 	p.RegisterEventHandler(c.onRoundEnd)
 
+	// v5 dropped Parser.Header(); the map name arrives in the server-info message.
+	p.RegisterNetMessageHandler(func(m *msg.CSVCMsg_ServerInfo) {
+		if n := m.GetMapName(); n != "" {
+			c.serverMapName = n
+		}
+	})
+
 	if err = p.ParseToEnd(); err != nil {
 		return nil, fmt.Errorf("parser: parse demo: %w", err)
 	}
@@ -89,7 +97,8 @@ func Parse(r io.Reader) (result *models.ParsedMatch, err error) {
 type collector struct {
 	p dem.Parser
 
-	matchStarted bool
+	serverMapName string
+	matchStarted  bool
 	rt           *RoundTracker
 	roundNum     int // completed rounds so far
 
@@ -411,8 +420,11 @@ func (c *collector) addRoundWinToRoster(winner int) {
 }
 
 func (c *collector) finish() *models.ParsedMatch {
-	// v5 dropped Parser.Header(); the map name comes from the game rules convars.
-	mapName := c.p.GameState().Rules().ConVars()["mp_mapname"]
+	// v5 dropped Parser.Header(); prefer the server-info map name, then convars.
+	mapName := c.serverMapName
+	if mapName == "" {
+		mapName = c.p.GameState().Rules().ConVars()["mp_mapname"]
+	}
 	if mapName == "" {
 		mapName = "unknown"
 	}
