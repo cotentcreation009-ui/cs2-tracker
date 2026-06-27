@@ -209,23 +209,34 @@ function roundWinPct(ms: LeetifyRecentMatch[]): number {
   return total ? (won / total) * 100 : NaN;
 }
 
-// Circular map icon (radar thumbnail) with a short-label fallback if the asset
-// is missing.
+// Map icon: real map logo, falling back to the radar thumbnail, then a short
+// label. Shows the map name on hover so each vertex is identifiable.
 function MapIcon({ map }: { map: string }) {
-  const [ok, setOk] = useState(true);
+  const logo = radarImage(map).replace(/radar\.png$/, "logo.png");
+  const radar = radarImage(map);
+  const [stage, setStage] = useState(0); // 0 = logo, 1 = radar, 2 = label
   const short = map.replace("de_", "").slice(0, 3).toUpperCase();
-  return ok ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={radarImage(map)}
-      alt={mapLabel(map)}
-      onError={() => setOk(false)}
-      draggable={false}
-      className="h-8 w-8 rounded-full border border-line2 bg-panel2 object-cover"
-    />
-  ) : (
-    <span className="grid h-8 w-8 place-items-center rounded-full border border-line2 bg-panel2 text-[9px] font-bold text-muted">
-      {short}
+  return (
+    <span className="group relative grid place-items-center">
+      {stage >= 2 ? (
+        <span className="grid h-9 w-9 place-items-center rounded-full border border-line2 bg-panel2 text-[9px] font-bold text-muted">
+          {short}
+        </span>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={stage === 0 ? logo : radar}
+          alt={mapLabel(map)}
+          onError={() => setStage((s) => s + 1)}
+          draggable={false}
+          className={`h-9 w-9 rounded-full border border-line2 bg-panel2/80 ${
+            stage === 0 ? "object-contain p-0.5" : "object-cover"
+          }`}
+        />
+      )}
+      <span className="pointer-events-none absolute -bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-bg/95 px-1.5 py-0.5 text-[9px] font-semibold text-ink opacity-0 shadow transition-opacity group-hover:opacity-100">
+        {mapLabel(map)}
+      </span>
     </span>
   );
 }
