@@ -62,6 +62,13 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     setSelected(null);
   }, [view.side, view.focusPlayer, view.scopeRound, mode]);
 
+  // reset zoom/pan when the context changes, so a zoomed-in view from a previous
+  // round/side/player doesn't leave the new selection off-screen
+  useEffect(() => {
+    setZoom(1);
+    setCenter({ x: 50, y: 50 });
+  }, [view.side, view.focusPlayer, view.scopeRound]);
+
   // native non-passive wheel zoom (so the page doesn't scroll while zooming)
   useEffect(() => {
     const el = wrapRef.current;
@@ -250,6 +257,11 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 {zoom.toFixed(1)}× · drag to pan
               </div>
             )}
+            {scopedRound && killMarks.length === 0 && deathMarks.length === 0 && (
+              <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
+                Round {scopedRound.n} — no eliminations
+              </div>
+            )}
             {!calibrated && <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">{meta.map} uncalibrated — auto-scaled</div>}
           </div>
 
@@ -320,6 +332,8 @@ function RoundDetail({
   const nades = [...(round.nades ?? [])].sort((a, b) => a.t - b.t);
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  const sideOfIdx = (i: number): Side =>
+    round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : meta.players[i]?.team === "T" ? "T" : "CT";
 
   const status = (i: number) => {
     const death = kills.find((k) => k.v === i);
@@ -415,7 +429,7 @@ function RoundDetail({
               {kills.filter((k) => k.k >= 0).map((k, i) => (
                 <div key={i} className="flex items-center gap-1.5 text-[11px]">
                   <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(k.t)}</span>
-                  <span className="truncate font-medium" style={{ color: sideHex(round.ct?.includes(k.k) ? "CT" : "T") }}>{name(k.k)}</span>
+                  <span className="truncate font-medium" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
                   <span className="text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
                   <span className="ml-auto truncate text-muted">{name(k.v)}</span>
                 </div>

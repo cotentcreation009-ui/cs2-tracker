@@ -90,6 +90,10 @@ export function UtilThrowMap({
     };
   }, [map, calibrated]);
 
+  // stable signature so the animation only restarts when the throws actually
+  // change, not on every unrelated parent re-render
+  const throwsSig = throws.map((t) => `${t.round}:${t.t}:${t.kind}`).join("|");
+
   useEffect(() => {
     startRef.current = 0;
     const solo = throws.length === 1;
@@ -161,20 +165,23 @@ export function UtilThrowMap({
       }
 
       // solo: persistent dashed trajectory so the lineup reads at a glance
+      // (only when both ends actually project onto the map)
       if (solo) {
         const t = throws[0];
-        const color = KIND_COLOR[t.kind] ?? "#5b9dff";
-        const o = place(t.ox, t.oy);
-        const l = place(t.x, t.y);
-        ctx.setLineDash([5, 4]);
-        ctx.strokeStyle = hexA(color, 0.4);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(o.x, o.y);
-        ctx.lineTo(l.x, l.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        dot(ctx, o.x, o.y, 3, color, 0.75);
+        const op = proj.project(t.ox, t.oy);
+        const lp = proj.project(t.x, t.y);
+        if (op && lp) {
+          const color = KIND_COLOR[t.kind] ?? "#5b9dff";
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = hexA(color, 0.4);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(op.x * SIZE, op.y * SIZE);
+          ctx.lineTo(lp.x * SIZE, lp.y * SIZE);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          dot(ctx, op.x * SIZE, op.y * SIZE, 3, color, 0.75);
+        }
       }
 
       throws.forEach((t, i) => {
@@ -209,7 +216,8 @@ export function UtilThrowMap({
 
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [proj, throws, zones, calibrated, map]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proj, throwsSig, zones, calibrated, map]);
 
   return (
     <div className={`relative ${className}`}>
