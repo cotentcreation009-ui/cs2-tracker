@@ -10,7 +10,6 @@ import {
   PLAYER_INSIGHTS_LIMITATIONS,
   type PlayerInsight,
   type UtilThrow,
-  type UtilSpot,
 } from "@/lib/demo/insights";
 import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
@@ -259,41 +258,7 @@ function PlayerCard({
   );
 }
 
-// One clustered landing spot ("smokes A Main 4×, usually early").
-function SpotRow({
-  spot,
-  zone,
-  timing,
-  onClick,
-}: {
-  spot: UtilSpot;
-  zone: string | null;
-  timing: Timing;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-lg border border-line px-3 py-2 text-left transition hover:bg-panel/50"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-ink">
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[spot.kind] }} />
-          {zone ?? "Unlabeled spot"}
-        </span>
-        <span className="shrink-0 text-xs font-bold tabular-nums text-brand">{spot.count}×</span>
-      </div>
-      <div className="mt-1 flex items-center gap-2 text-[10px] text-faint">
-        <TimingBadge timing={timing} />
-        <span>avg {mmss(spot.avgT)}</span>
-        <span className="ml-auto">view throws →</span>
-      </div>
-    </button>
-  );
-}
-
-// One individual throw inside a spot — click to play its lineup solo.
+// One individual throw — click to play its lineup solo on the map.
 function ThrowRow({
   tw,
   zone,
@@ -338,8 +303,7 @@ export default function PlayerInsights({
   view: DemoView;
 }) {
   const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
-  const [spotIdx, setSpotIdx] = useState<number | null>(null);
-  const [selThrow, setSelThrow] = useState<UtilThrow | null>(null);
+  const [throwIdx, setThrowIdx] = useState<number | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
@@ -429,14 +393,12 @@ export default function PlayerInsights({
   // reset the drill-down when the scope, side, or focused player changes
   useEffect(() => {
     setKindSel(null);
-    setSpotIdx(null);
-    setSelThrow(null);
+    setThrowIdx(null);
   }, [view.scopeRound, view.side]);
   // kind is player-scoped (see pickedKind), so changing player resets it
-  // implicitly; only the spot/throw drill-down needs an explicit reset here.
+  // implicitly; only the throw selection needs an explicit reset here.
   useEffect(() => {
-    setSpotIdx(null);
-    setSelThrow(null);
+    setThrowIdx(null);
   }, [focusI]);
 
   if (!players.length) {
@@ -471,25 +433,31 @@ export default function PlayerInsights({
       : selKinds[0] ?? null);
   const selThrows =
     selPlayer && activeKind
-      ? selPlayer.utilNades.filter((n) => n.kind === activeKind)
+      ? selPlayer.utilNades
+          .filter((n) => n.kind === activeKind)
+          .slice()
+          .sort((a, b) => a.round - b.round || a.t - b.t)
       : [];
   const spots = activeKind ? clusterUtilThrows(selThrows, (x, y) => proj.project(x, y)) : [];
-  const activeSpot = spotIdx != null && spots[spotIdx] ? spots[spotIdx] : null;
-  const soloThrow = selThrow && selThrows.includes(selThrow) ? selThrow : null;
-  const mapThrows = soloThrow ? [soloThrow] : activeSpot ? activeSpot.throws : selThrows;
+  const soloThrow = throwIdx != null && selThrows[throwIdx] ? selThrows[throwIdx] : null;
+  const mapThrows = soloThrow ? [soloThrow] : selThrows;
   const zoneOf = (x: number, y: number) =>
     classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  const stepThrow = (d: number) =>
+    setThrowIdx((i) => {
+      if (!selThrows.length) return null;
+      const next = (i ?? -1) + d;
+      return Math.max(0, Math.min(selThrows.length - 1, next < 0 ? 0 : next));
+    });
 
   const pickUtil = (player: PlayerInsight, k: string) => {
     view.setFocusPlayer(player.i);
     setKindSel({ i: player.i, kind: k });
-    setSpotIdx(null);
-    setSelThrow(null);
+    setThrowIdx(null);
   };
   const pickKind = (k: string) => {
     if (focusI != null) setKindSel({ i: focusI, kind: k });
-    setSpotIdx(null);
-    setSelThrow(null);
+    setThrowIdx(null);
   };
 
   return (
@@ -561,60 +529,68 @@ export default function PlayerInsights({
 
               <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} zones={zones} />
 
-              {/* drill-down: spots → throws → solo */}
-              {activeSpot ? (
-                <div className="mt-2 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSpotIdx(null);
-                        setSelThrow(null);
-                      }}
-                      className="text-[11px] text-muted hover:text-ink"
-                    >
-                      ← all {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} spots
-                    </button>
-                    <span className="text-[11px] text-faint">
-                      {zoneOf(activeSpot.cx, activeSpot.cy) ?? "spot"} · {activeSpot.count}×
+              {/* step through each throw */}
+              <div className="mt-2 flex items-center gap-2">
+                <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" className="btn btn-ghost px-2 py-1 text-xs">◀</button>
+                <div className="min-w-0 flex-1 text-center text-[11px]">
+                  {soloThrow ? (
+                    <span>
+                      <span className="font-semibold text-ink">Throw {(throwIdx ?? 0) + 1}/{selThrows.length}</span>
+                      <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
+                      {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
                     </span>
-                  </div>
-                  {soloThrow && (
-                    <p className="text-center text-[11px] text-brand">
-                      Replaying round {soloThrow.round} — thrown {mmss(soloThrow.t)}, dashed line is the lineup.
-                    </p>
+                  ) : (
+                    <span className="text-muted">
+                      {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — step ▶ or pick one
+                    </span>
                   )}
-                  {activeSpot.throws.map((tw) => (
-                    <ThrowRow
-                      key={`${tw.round}-${tw.t}`}
-                      tw={tw}
-                      zone={zoneOf(tw.x, tw.y)}
-                      timing={timingOf(tw.t)}
-                      active={soloThrow === tw}
-                      onClick={() => setSelThrow(soloThrow === tw ? null : tw)}
-                    />
-                  ))}
                 </div>
-              ) : (
-                <div className="mt-2 space-y-1.5">
-                  <p className="text-center text-xs text-muted">
-                    <span className="font-semibold text-ink">{selThrows.length}</span>{" "}
-                    {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} across{" "}
-                    <span className="font-semibold text-ink">{spots.length}</span> spot
-                    {spots.length === 1 ? "" : "s"} — tap one to study its throws.
-                  </p>
-                  {spots.map((s, i) => (
-                    <SpotRow
-                      key={i}
-                      spot={s}
-                      zone={zoneOf(s.cx, s.cy)}
-                      timing={timingOf(s.avgT)}
-                      onClick={() => {
-                        setSpotIdx(i);
-                        setSelThrow(null);
-                      }}
-                    />
-                  ))}
+                {soloThrow && (
+                  <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost px-2 py-1 text-[10px]">all</button>
+                )}
+                <button type="button" onClick={() => stepThrow(1)} title="Next throw" className="btn btn-ghost px-2 py-1 text-xs">▶</button>
+              </div>
+              {soloThrow && (
+                <p className="mt-1 text-center text-[10px] text-brand">
+                  dashed line = thrown from → landed · {timingOf(soloThrow.t)}
+                </p>
+              )}
+
+              {/* every throw of this kind */}
+              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1">
+                {selThrows.map((tw, i) => (
+                  <ThrowRow
+                    key={`${tw.round}-${tw.t}-${i}`}
+                    tw={tw}
+                    zone={zoneOf(tw.x, tw.y)}
+                    timing={timingOf(tw.t)}
+                    active={throwIdx === i}
+                    onClick={() => setThrowIdx(throwIdx === i ? null : i)}
+                  />
+                ))}
+              </div>
+
+              {/* common spots — tendency summary */}
+              {spots.length > 1 && (
+                <div className="mt-2 border-t border-line pt-2">
+                  <div className="stat-label mb-1">Common spots</div>
+                  <div className="flex flex-wrap gap-1">
+                    {spots.slice(0, 6).map((sp, i) => {
+                      const z = zoneOf(sp.cx, sp.cy);
+                      const first = selThrows.indexOf(sp.throws[0]);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => first >= 0 && setThrowIdx(first)}
+                          title={`${sp.count}× · usually ${timingOf(sp.avgT)} · avg ${mmss(sp.avgT)}`}
+                          className="pill bg-panel text-muted hover:text-ink"
+                        >
+                          {z ?? "spot"} ×{sp.count}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </>
