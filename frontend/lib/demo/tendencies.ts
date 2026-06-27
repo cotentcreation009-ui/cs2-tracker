@@ -7,6 +7,9 @@
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { buildProjection } from "@/lib/demo/projection";
 import { getActiveZones, classifyPosition } from "@/lib/maps/zones";
+import { weaponLabel, type PlayerInsight } from "@/lib/demo/insights";
+
+const SNIPERS = /awp|ssg|scar-20|g3sg1|scout/i;
 
 export interface PlayerTendencies {
   steamId: string;
@@ -151,35 +154,61 @@ export function computeTendencies(
   return out;
 }
 
-// tendencySummary turns tendencies into compact, pre-interpreted lines for the AI
-// prompt. Gated on a usable sample so we don't over-read tiny demos.
-export function tendencySummary(t: PlayerTendencies | undefined): string[] {
-  if (!t || t.rounds < 5) return [];
+// playstyleSummary turns a player's demo stats + positioning tendencies into
+// plain-English, scouting-style lines — for the AI prompt AND the card display.
+// Natural wording (no "Nth percentile"), each gated so we don't over-read.
+export function playstyleSummary(p: PlayerInsight, t?: PlayerTendencies): string[] {
   const lines: string[] = [];
 
-  if (t.spacePct >= 70) lines.push(`Positioning: takes uncontested space — ${t.spacePct}th pct distance from enemies (avoids early contact).`);
-  else if (t.spacePct <= 30) lines.push(`Positioning: seeks contact — only ${t.spacePct}th pct distance from enemies (often first to engage).`);
+  // --- positioning / role / movement (from per-frame tendencies) ---
+  if (t && t.rounds >= 5) {
+    if (t.spacePct >= 70) lines.push("Positioning: plays for space — usually holds away from enemies, rarely takes first contact.");
+    else if (t.spacePct <= 25) lines.push("Positioning: plays up front — often the first into contact (entry).");
 
-  if (t.lurkPct >= 75) lines.push(`Role: lurker — plays detached from the team (${t.lurkPct}th pct distance from teammates).`);
-  else if (t.lurkPct <= 25) lines.push(`Role: plays tight with the team (stacks).`);
+    if (t.lurkPct >= 75) lines.push("Role: lurker — frequently splits off from the team.");
+    else if (t.lurkPct <= 20) lines.push("Role: plays grouped with the team (stacks).");
 
-  // Zone-derived lines only when we actually classified zones (calibrated map
-  // with samples) — otherwise 0 rotations would falsely read as "anchors".
-  if (t.zoneSamples >= 12) {
-    if (t.rotationsPerRound >= 1.6) lines.push(`Movement: rotates a lot (${t.rotationsPerRound.toFixed(1)} zone changes/round) — roams the map.`);
-    else if (t.rotationsPerRound <= 0.5) lines.push(`Movement: holds position (${t.rotationsPerRound.toFixed(1)} zone changes/round) — anchors.`);
+    if (t.zoneSamples >= 12) {
+      if (t.rotationsPerRound >= 1.6) lines.push("Movement: roams — rotates between areas a lot.");
+      else if (t.rotationsPerRound <= 0.5) lines.push("Movement: anchor — tends to hold one area.");
 
-    const lean = (side: "ct" | "t", z: { a: number; b: number; mid: number }) => {
-      const top = (["a", "b", "mid"] as const).reduce((m, k) => (z[k] > z[m] ? k : m), "a" as "a" | "b" | "mid");
-      const share = z[top];
-      if (share >= 0.55) {
-        const label = top === "mid" ? "Mid" : top.toUpperCase();
-        lines.push(`Site lean (${side.toUpperCase()}): ${Math.round(share * 100)}% ${label} — predictable.`);
-      }
-    };
-    lean("ct", t.ct);
-    lean("t", t.t);
+      const lean = (side: "CT" | "T", z: { a: number; b: number; mid: number }) => {
+        const top = (["a", "b", "mid"] as const).reduce((m, k) => (z[k] > z[m] ? k : m), "a" as "a" | "b" | "mid");
+        if (z[top] >= 0.55) {
+          const label = top === "mid" ? "Mid" : top.toUpperCase();
+          lines.push(`Predictable on ${side}: ${Math.round(z[top] * 100)}% of the time around ${label}.`);
+        }
+      };
+      lean("CT", t.ct);
+      lean("T", t.t);
+    }
   }
+
+  // --- weapon preference ---
+  const fav = p.favoriteWeapons?.[0];
+  if (fav && fav.kills >= 3) {
+    if (SNIPERS.test(fav.weapon)) lines.push(`Weapon: AWPer — ${fav.kills} sniper kills.`);
+    else lines.push(`Weapon: favours the ${weaponLabel(fav.weapon)} (${fav.kills} kills).`);
+  }
+
+  // --- economy / buy discipline ---
+  const nb = p.buys.eco + p.buys.force + p.buys.full;
+  if (nb >= 5) {
+    const ecoPct = p.buys.eco / nb;
+    const forcePct = p.buys.force / nb;
+    if (ecoPct <= 0.12) lines.push("Economy: disciplined — rarely ecos, buys when the team buys.");
+    else if (ecoPct >= 0.4) lines.push("Economy: saves a lot — ecos frequently.");
+    if (forcePct >= 0.3) lines.push("Economy: force-buys often — aggressive with money.");
+  }
+
+  // --- entry / opening-duel outcome ---
+  if (p.openingAttempts >= 4) {
+    if (p.openingWinPct >= 60) lines.push(`Opening duels: strong — wins ${p.openingWinPct.toFixed(0)}% of first contacts.`);
+    else if (p.openingWinPct <= 35) lines.push(`Opening duels: shaky — wins only ${p.openingWinPct.toFixed(0)}% of first contacts.`);
+  }
+
+  // --- trade discipline ---
+  if (p.deaths >= 6 && p.tradeKillPct >= 35) lines.push(`Trading: refrags well — ${p.tradeKillPct.toFixed(0)}% of kills are trades.`);
 
   return lines;
 }
