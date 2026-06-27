@@ -7,7 +7,7 @@ import { radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, ZONE_COLOR, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
-import { weaponLabel } from "@/lib/demo/insights";
+import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const CT = "#5b9dff";
@@ -21,6 +21,10 @@ const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.max(0, Math.rou
 
 interface Props { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView; }
 type ViewMode = "common" | "individual";
+
+// shared cross-highlight selection between the map and the round-detail lists
+type Active = { kind: "util" | "kill" | "player"; id: number } | null;
+const sameActive = (a: Active, b: Active) => !!a && !!b && a.kind === b.kind && a.id === b.id;
 
 function reasonLabel(reason: string, winner: string): string {
   const k = (reason || "").toLowerCase();
@@ -39,8 +43,14 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const [zones, setZones] = useState<Zone[]>([]);
   const [zoom, setZoom] = useState(1);
   const [center, setCenter] = useState({ x: 50, y: 50 });
+  const [hover, setHover] = useState<Active>(null);
+  const [pin, setPin] = useState<Active>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; y: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  const active = pin ?? hover;
+  const onHover = (a: Active) => setHover(a);
+  const onPin = (a: Active) => setPin((cur) => (sameActive(cur, a) ? null : a));
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
   const calibrated = proj.calibrated;
@@ -60,16 +70,15 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
 
   useEffect(() => {
     setSelected(null);
+    setHover(null);
+    setPin(null);
   }, [view.side, view.focusPlayer, view.scopeRound, mode]);
 
-  // reset zoom/pan when the context changes, so a zoomed-in view from a previous
-  // round/side/player doesn't leave the new selection off-screen
   useEffect(() => {
     setZoom(1);
     setCenter({ x: 50, y: 50 });
   }, [view.side, view.focusPlayer, view.scopeRound]);
 
-  // native non-passive wheel zoom (so the page doesn't scroll while zooming)
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -86,7 +95,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     return { x: clamp(c.x, half, 100 - half), y: clamp(c.y, half, 100 - half) };
   };
   const onDown = (e: React.MouseEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY };
+    drag.current = { x: e.clientX, y: e.clientY, moved: false };
   };
   const onMove = (e: React.MouseEvent) => {
     if (!drag.current || !wrapRef.current) return;
@@ -94,7 +103,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     const span = 100 / zoom;
     const dx = ((e.clientX - drag.current.x) / rect.width) * span;
     const dy = ((e.clientY - drag.current.y) / rect.height) * span;
-    drag.current = { x: e.clientX, y: e.clientY };
+    if (Math.abs(e.clientX - drag.current.x) + Math.abs(e.clientY - drag.current.y) > 2) drag.current.moved = true;
+    drag.current = { x: e.clientX, y: e.clientY, moved: drag.current.moved };
     setCenter((c) => clampCenter({ x: c.x - dx, y: c.y - dy }, zoom));
   };
   const onUp = () => {
@@ -132,16 +142,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     return source.flatMap((c) => c.paths.map((p) => ({ path: p, winRate: c.winRate, emphasis: !!selectedCluster })));
   }, [mode, individualPaths, clusters, selectedCluster]);
 
-  // map markers: a scoped round shows its kills/deaths/util/bomb; otherwise a
-  // drilled-in cluster shows its kills/deaths.
-  const killMarks = scopedRound
-    ? (scopedRound.kills ?? []).filter((k) => k.k >= 0).map((k) => ({ x: k.kx, y: k.ky }))
-    : selectedCluster?.killPositions ?? [];
-  const deathMarks = scopedRound
-    ? (scopedRound.kills ?? []).map((k) => ({ x: k.vx, y: k.vy }))
-    : selectedCluster?.deathPositions ?? [];
-  const nadeMarks = scopedRound ? scopedRound.nades ?? [] : [];
-  const bombMark = scopedRound ? (scopedRound.bomb ?? []).find((b) => b.k === "plant") ?? null : null;
+  // cluster markers (non-scoped view)
+  const clusterKills = selectedCluster?.killPositions ?? [];
+  const clusterDeaths = selectedCluster?.deathPositions ?? [];
 
   const summary = useMemo(() => {
     const ps = individualPaths;
@@ -172,13 +175,21 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const viewBox = `${cc.x - half} ${cc.y - half} ${2 * half} ${2 * half}`;
   const s = 1 / zoom; // keep marker sizes visually constant while zoomed
 
+  const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
+  const sideOfIdx = (r: ReplayRound, i: number): Side =>
+    r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : meta.players[i]?.team === "T" ? "T" : "CT";
+  const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
+
+  // dim helper: when something is active, fade the unrelated
+  const dim = (related: boolean) => (active && !related ? 0.18 : 1);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Seg value={mode} onChange={(v) => { setMode(v); setSelected(null); }}
           options={[{ key: "common", label: "Common routes" }, { key: "individual", label: "All paths" }]} />
         <span className="text-[11px] text-faint">
-          Pick a player, round &amp; side in the toolbar. Choose a round to see its full breakdown.
+          Pick a player, round &amp; side in the toolbar. Choose a round to see its full breakdown — then hover or click anything to link the map and the lists.
         </span>
       </div>
 
@@ -189,7 +200,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             onMouseDown={onDown}
             onMouseMove={onMove}
             onMouseUp={onUp}
-            onMouseLeave={onUp}
+            onMouseLeave={() => { onUp(); }}
             className={`relative aspect-square w-full max-w-200 overflow-hidden rounded-xl border border-line bg-panel2 ${
               zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""
             }`}
@@ -218,8 +229,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
               {/* routes */}
               {drawnPaths.map(({ path, winRate, emphasis }) => {
                 const d = pathD(path, pt); if (!d) return null;
+                const related = !active || (active.kind === "player" && path.playerIndex === active.id);
                 return (
-                  <g key={path.key}>
+                  <g key={path.key} opacity={dim(related)}>
                     <path d={d} fill="none" stroke={winColor(winRate, emphasis ? 0.9 : 0.4)}
                       strokeWidth={(emphasis ? 0.8 : 0.32) * s} strokeLinecap="round" strokeLinejoin="round" />
                     <StartEnd path={path} winRate={winRate} pt={pt} scale={s} />
@@ -227,21 +239,92 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 );
               })}
 
-              {/* kills (X) + deaths (ring) */}
-              {killMarks.map((k, i) => { const c = pt(k.x, k.y); if (!c) return null;
-                return <g key={`k${i}`} stroke="#46d369" strokeWidth={0.5 * s}>
-                  <line x1={c.x - s} y1={c.y - s} x2={c.x + s} y2={c.y + s} />
-                  <line x1={c.x + s} y1={c.y - s} x2={c.x - s} y2={c.y + s} /></g>; })}
-              {deathMarks.map((dp, i) => { const c = pt(dp.x, dp.y); if (!c) return null;
-                return <circle key={`d${i}`} cx={c.x} cy={c.y} r={0.9 * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />; })}
+              {scopedRound ? (
+                <>
+                  {/* util: origin → landing, interactive */}
+                  {(scopedRound.nades ?? []).map((n, i) => {
+                    const c = pt(n.x, n.y); if (!c) return null;
+                    const col = KIND_COLOR[n.k] ?? "#8a7dff";
+                    const o = n.by >= 0 ? throwOrigin(scopedRound, n.by, n.t) : null;
+                    const oc = o ? pt(o.x, o.y) : null;
+                    const related = !active
+                      ? true
+                      : active.kind === "util"
+                        ? active.id === i
+                        : active.kind === "player"
+                          ? n.by === active.id
+                          : false;
+                    const on = sameActive(active, { kind: "util", id: i });
+                    const z = zoneOf(n.x, n.y);
+                    return (
+                      <g
+                        key={`n${i}`}
+                        opacity={dim(related)}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={() => onHover({ kind: "util", id: i })}
+                        onMouseLeave={() => onHover(null)}
+                        onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onPin({ kind: "util", id: i }); }}
+                      >
+                        <title>{`${n.k}${n.by >= 0 ? ` · ${name(n.by)}` : ""} · ${mmss(n.t)}${z ? ` · ${z}` : ""}`}</title>
+                        {oc && <line x1={oc.x} y1={oc.y} x2={c.x} y2={c.y} stroke={col} strokeWidth={(on ? 0.7 : 0.4) * s} strokeDasharray={`${1.4 * s} ${1 * s}`} opacity={on ? 1 : 0.6} />}
+                        {oc && <circle cx={oc.x} cy={oc.y} r={0.7 * s} fill={col} opacity={0.85} />}
+                        <circle cx={c.x} cy={c.y} r={(on ? 1.7 : 1.1) * s} fill={`${col}dd`} stroke="#04060e" strokeWidth={0.25 * s} />
+                        <circle cx={c.x} cy={c.y} r={2.6 * s} fill="transparent" pointerEvents="all" />
+                      </g>
+                    );
+                  })}
 
-              {/* util landings (scoped round) */}
-              {nadeMarks.map((n, i) => { const c = pt(n.x, n.y); if (!c) return null;
-                return <circle key={`n${i}`} cx={c.x} cy={c.y} r={1 * s} fill={(KIND_COLOR[n.k] ?? "#8a7dff") + "cc"} stroke="#04060e" strokeWidth={0.2 * s} />; })}
+                  {/* kills: killer X + victim ring, interactive */}
+                  {(scopedRound.kills ?? []).map((k, i) => {
+                    if (k.k < 0) return null;
+                    const kc = pt(k.kx, k.ky);
+                    const vc = pt(k.vx, k.vy); if (!vc) return null;
+                    const related = !active
+                      ? true
+                      : active.kind === "kill"
+                        ? active.id === i
+                        : active.kind === "player"
+                          ? k.k === active.id || k.v === active.id
+                          : false;
+                    const on = sameActive(active, { kind: "kill", id: i });
+                    return (
+                      <g
+                        key={`k${i}`}
+                        opacity={dim(related)}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={() => onHover({ kind: "kill", id: i })}
+                        onMouseLeave={() => onHover(null)}
+                        onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onPin({ kind: "kill", id: i }); }}
+                      >
+                        <title>{`${name(k.k)} ${weaponLabel(k.w)}${k.hs ? " (hs)" : ""} → ${name(k.v)} · ${mmss(k.t)}`}</title>
+                        {kc && on && <line x1={kc.x} y1={kc.y} x2={vc.x} y2={vc.y} stroke="#f5694a" strokeWidth={0.4 * s} opacity={0.8} />}
+                        {kc && <g stroke="#46d369" strokeWidth={0.5 * s}>
+                          <line x1={kc.x - (on ? 1.4 : 1) * s} y1={kc.y - (on ? 1.4 : 1) * s} x2={kc.x + (on ? 1.4 : 1) * s} y2={kc.y + (on ? 1.4 : 1) * s} />
+                          <line x1={kc.x + (on ? 1.4 : 1) * s} y1={kc.y - (on ? 1.4 : 1) * s} x2={kc.x - (on ? 1.4 : 1) * s} y2={kc.y + (on ? 1.4 : 1) * s} />
+                        </g>}
+                        <circle cx={vc.x} cy={vc.y} r={(on ? 1.3 : 0.9) * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />
+                        <circle cx={vc.x} cy={vc.y} r={2.4 * s} fill="transparent" pointerEvents="all" />
+                      </g>
+                    );
+                  })}
 
-              {/* bomb plant */}
-              {bombMark && (() => { const c = pt(bombMark.x, bombMark.y); if (!c) return null;
-                return <g key="bomb"><circle cx={c.x} cy={c.y} r={1.4 * s} fill="#f5694a" /><text x={c.x} y={c.y - 2 * s} fill="#fff" fontSize={2.6 * s} textAnchor="middle" fontWeight="bold">C4</text></g>; })()}
+                  {/* bomb plant */}
+                  {(scopedRound.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => {
+                    const c = pt(b.x, b.y); if (!c) return null;
+                    return <g key={`b${i}`}><circle cx={c.x} cy={c.y} r={1.4 * s} fill="#f5694a" /><text x={c.x} y={c.y - 2 * s} fill="#fff" fontSize={2.6 * s} textAnchor="middle" fontWeight="bold">C4</text></g>;
+                  })}
+                </>
+              ) : (
+                <>
+                  {/* cluster kills/deaths (aggregate view) */}
+                  {clusterKills.map((k, i) => { const c = pt(k.x, k.y); if (!c) return null;
+                    return <g key={`ck${i}`} stroke="#46d369" strokeWidth={0.5 * s}>
+                      <line x1={c.x - s} y1={c.y - s} x2={c.x + s} y2={c.y + s} />
+                      <line x1={c.x + s} y1={c.y - s} x2={c.x - s} y2={c.y + s} /></g>; })}
+                  {clusterDeaths.map((dp, i) => { const c = pt(dp.x, dp.y); if (!c) return null;
+                    return <circle key={`cd${i}`} cx={c.x} cy={c.y} r={0.9 * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />; })}
+                </>
+              )}
             </svg>
 
             {/* zoom controls */}
@@ -252,12 +335,12 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 <button type="button" onClick={resetView} title="Reset zoom" className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-[10px] backdrop-blur hover:text-brand">⤢</button>
               )}
             </div>
-            {zoom > 1 && (
+            {(zoom > 1 || pin) && (
               <div className="pointer-events-none absolute left-2 top-2 rounded-full bg-bg/70 px-2 py-0.5 text-[10px] text-muted backdrop-blur">
-                {zoom.toFixed(1)}× · drag to pan
+                {zoom > 1 ? `${zoom.toFixed(1)}× · drag to pan` : ""}{zoom > 1 && pin ? " · " : ""}{pin ? "pinned — click again to clear" : ""}
               </div>
             )}
-            {scopedRound && killMarks.length === 0 && deathMarks.length === 0 && (
+            {scopedRound && (scopedRound.kills ?? []).filter((k) => k.k >= 0).length === 0 && (
               <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
                 Round {scopedRound.n} — no eliminations
               </div>
@@ -273,7 +356,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             <Legend swatch={KIND_COLOR.flash} label="flash" />
             <Legend swatch={KIND_COLOR.he} label="HE" />
             <Legend swatch={KIND_COLOR.molotov} label="molly" />
-            {scopedRound && <span className="ml-auto">scroll / +/− to zoom</span>}
+            {scopedRound && <span className="ml-auto">dashed = util throw → land · scroll to zoom</span>}
           </div>
 
           {!scopedRound && (
@@ -287,9 +370,19 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
           )}
         </div>
 
-        {/* right panel: round breakdown when a round is scoped, else routes */}
+        {/* right panel */}
         {scopedRound ? (
-          <RoundDetail meta={meta} round={scopedRound} zones={zones} score={score} />
+          <RoundDetail
+            meta={meta}
+            round={scopedRound}
+            score={score}
+            active={active}
+            onHover={onHover}
+            onPin={onPin}
+            name={name}
+            sideOfIdx={(i) => sideOfIdx(scopedRound, i)}
+            zoneOf={zoneOf}
+          />
         ) : (
           <div className="card flex max-h-200 flex-col px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
@@ -319,25 +412,34 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
 function RoundDetail({
   meta,
   round,
-  zones,
   score,
+  active,
+  onHover,
+  onPin,
+  name,
+  sideOfIdx,
+  zoneOf,
 }: {
   meta: ReplayMeta;
   round: ReplayRound;
-  zones: Zone[];
   score: { ct: number; t: number } | null;
+  active: Active;
+  onHover: (a: Active) => void;
+  onPin: (a: Active) => void;
+  name: (i: number) => string;
+  sideOfIdx: (i: number) => Side;
+  zoneOf: (x: number, y: number) => string | null;
 }) {
   const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
-  const kills = [...(round.kills ?? [])].sort((a, b) => a.t - b.t);
-  const nades = [...(round.nades ?? [])].sort((a, b) => a.t - b.t);
-  const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
-  const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
-  const sideOfIdx = (i: number): Side =>
-    round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : meta.players[i]?.team === "T" ? "T" : "CT";
+
+  // keep original indices so hover/pin line up with the map markers
+  const nades = (round.nades ?? []).map((n, i) => ({ n, i })).sort((a, b) => a.n.t - b.n.t);
+  const kills = (round.kills ?? []).map((k, i) => ({ k, i })).sort((a, b) => a.k.t - b.k.t);
+  const killsReal = kills.filter((x) => x.k.k >= 0);
 
   const status = (i: number) => {
-    const death = kills.find((k) => k.v === i);
-    const ks = kills.filter((k) => k.k === i).length;
+    const death = (round.kills ?? []).find((k) => k.v === i);
+    const ks = (round.kills ?? []).filter((k) => k.k === i && k.k >= 0).length;
     return { died: !!death, deathT: death?.t ?? null, kills: ks };
   };
   const roster = (ids: number[] | undefined, side: Side) =>
@@ -345,9 +447,18 @@ function RoundDetail({
   const ct = roster(round.ct, "CT");
   const t = roster(round.t, "T");
 
+  // shared row interaction props
+  const rowProps = (a: Active, on: boolean) => ({
+    onMouseEnter: () => onHover(a),
+    onMouseLeave: () => onHover(null),
+    onClick: () => onPin(a),
+    className: `flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition ${
+      on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
+    }`,
+  });
+
   return (
     <div className="card flex max-h-200 flex-col overflow-hidden p-0">
-      {/* winner banner */}
       <div
         className="flex items-center justify-between gap-2 px-4 py-3"
         style={{ background: `linear-gradient(90deg, ${winHex}26, transparent)` }}
@@ -381,16 +492,19 @@ function RoundDetail({
                 </span>
               </div>
               <div className="space-y-0.5">
-                {col.list.map((p) => (
-                  <div key={p.i} className={`flex items-center gap-1.5 text-xs ${p.died ? "text-muted" : "text-ink"}`}>
-                    <span className="w-3 text-center">{p.died ? <span className="text-bad">✕</span> : <span className="text-good">✓</span>}</span>
-                    <span className="truncate">{name(p.i)}</span>
-                    {p.kills > 0 && <span className="ml-auto shrink-0 text-faint">{p.kills}K</span>}
-                    {p.died && p.deathT != null && (
-                      <span className={`shrink-0 tabular-nums text-faint ${p.kills > 0 ? "ml-1.5" : "ml-auto"}`}>{mmss(p.deathT)}</span>
-                    )}
-                  </div>
-                ))}
+                {col.list.map((p) => {
+                  const on = sameActive(active, { kind: "player", id: p.i });
+                  return (
+                    <button key={p.i} type="button" {...rowProps({ kind: "player", id: p.i }, on)}>
+                      <span className="w-3 text-center text-xs">{p.died ? <span className="text-bad">✕</span> : <span className="text-good">✓</span>}</span>
+                      <span className={`truncate text-xs ${p.died ? "text-muted" : "text-ink"}`}>{name(p.i)}</span>
+                      {p.kills > 0 && <span className="ml-auto shrink-0 text-[11px] text-faint">{p.kills}K</span>}
+                      {p.died && p.deathT != null && (
+                        <span className={`shrink-0 text-[11px] tabular-nums text-faint ${p.kills > 0 ? "ml-1.5" : "ml-auto"}`}>{mmss(p.deathT)}</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -403,16 +517,17 @@ function RoundDetail({
             <div className="text-[11px] text-faint">No utility this round.</div>
           ) : (
             <div className="space-y-0.5">
-              {nades.map((n, i) => {
+              {nades.map(({ n, i }) => {
                 const zone = zoneOf(n.x, n.y);
+                const on = sameActive(active, { kind: "util", id: i });
                 return (
-                  <div key={i} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(n.t)}</span>
+                  <button key={i} type="button" {...rowProps({ kind: "util", id: i }, on)}>
+                    <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(n.t)}</span>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
-                    <span className="capitalize text-muted">{n.k}</span>
-                    {n.by >= 0 && <span className="text-faint">· {name(n.by)}</span>}
-                    {zone && <span className="ml-auto truncate text-faint">{zone}</span>}
-                  </div>
+                    <span className="text-[11px] capitalize text-muted">{n.k}</span>
+                    {n.by >= 0 && <span className="text-[11px] text-faint">· {name(n.by)}</span>}
+                    {zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
+                  </button>
                 );
               })}
             </div>
@@ -421,19 +536,22 @@ function RoundDetail({
 
         {/* kill feed */}
         <div>
-          <div className="stat-label mb-1.5">Kills ({kills.filter((k) => k.k >= 0).length})</div>
-          {kills.filter((k) => k.k >= 0).length === 0 ? (
+          <div className="stat-label mb-1.5">Kills ({killsReal.length})</div>
+          {killsReal.length === 0 ? (
             <div className="text-[11px] text-faint">No kills this round.</div>
           ) : (
             <div className="space-y-0.5">
-              {kills.filter((k) => k.k >= 0).map((k, i) => (
-                <div key={i} className="flex items-center gap-1.5 text-[11px]">
-                  <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(k.t)}</span>
-                  <span className="truncate font-medium" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
-                  <span className="text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
-                  <span className="ml-auto truncate text-muted">{name(k.v)}</span>
-                </div>
-              ))}
+              {killsReal.map(({ k, i }) => {
+                const on = sameActive(active, { kind: "kill", id: i });
+                return (
+                  <button key={i} type="button" {...rowProps({ kind: "kill", id: i }, on)}>
+                    <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(k.t)}</span>
+                    <span className="truncate text-[11px] font-medium" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
+                    <span className="text-[11px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
+                    <span className="ml-auto truncate text-[11px] text-muted">{name(k.v)}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
