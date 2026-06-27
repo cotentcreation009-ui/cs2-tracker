@@ -295,7 +295,7 @@ export default function PlayerInsights({
   rounds: ReplayRound[];
   view: DemoView;
 }) {
-  const [kind, setKind] = useState<string | null>(null);
+  const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
   const [spotIdx, setSpotIdx] = useState<number | null>(null);
   const [selThrow, setSelThrow] = useState<UtilThrow | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -350,10 +350,12 @@ export default function PlayerInsights({
 
   // reset the drill-down when the scope, side, or focused player changes
   useEffect(() => {
-    setKind(null);
+    setKindSel(null);
     setSpotIdx(null);
     setSelThrow(null);
   }, [view.scopeRound, view.side]);
+  // kind is player-scoped (see pickedKind), so changing player resets it
+  // implicitly; only the spot/throw drill-down needs an explicit reset here.
   useEffect(() => {
     setSpotIdx(null);
     setSelThrow(null);
@@ -381,12 +383,14 @@ export default function PlayerInsights({
   const selKinds: string[] = selPlayer
     ? UTIL_KINDS.filter((k) => selPlayer.utilNades.some((n) => n.kind === k))
     : [];
+  // honour a kind only if it was chosen for the currently-focused player
+  const pickedKind =
+    kindSel && kindSel.i === focusI && selKinds.includes(kindSel.kind) ? kindSel.kind : null;
   const activeKind =
-    kind && selKinds.includes(kind)
-      ? kind
-      : selPlayer && fallback && fallback.i === selPlayer.i && selKinds.includes(fallback.kind)
-        ? fallback.kind
-        : selKinds[0] ?? null;
+    pickedKind ??
+    (selPlayer && fallback && fallback.i === selPlayer.i && selKinds.includes(fallback.kind)
+      ? fallback.kind
+      : selKinds[0] ?? null);
   const selThrows =
     selPlayer && activeKind
       ? selPlayer.utilNades.filter((n) => n.kind === activeKind)
@@ -400,12 +404,12 @@ export default function PlayerInsights({
 
   const pickUtil = (player: PlayerInsight, k: string) => {
     view.setFocusPlayer(player.i);
-    setKind(k);
+    setKindSel({ i: player.i, kind: k });
     setSpotIdx(null);
     setSelThrow(null);
   };
   const pickKind = (k: string) => {
-    setKind(k);
+    if (focusI != null) setKindSel({ i: focusI, kind: k });
     setSpotIdx(null);
     setSelThrow(null);
   };
