@@ -14,7 +14,7 @@ import PlayerInsights from "@/components/demo/PlayerInsights";
 import { StrategyMap } from "@/components/demo/StrategyMap";
 import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
-import { weaponLabel } from "@/lib/demo/insights";
+import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 
 const TABS = [
@@ -90,11 +90,22 @@ function EventFeed({
   const ended = (round.bomb ?? []).find((b) => (b.k === "defuse" || b.k === "explode") && b.t <= time);
   const defusing = (round.bomb ?? []).some((b) => b.k === "defuse_start" && b.t <= time) && !ended;
 
+  const dead = new Set<number>();
+  for (const k of round.kills ?? []) if (k.v >= 0 && k.t <= time) dead.add(k.v);
+  const ctAlive = (round.ct ?? []).filter((i) => !dead.has(i)).length;
+  const tAlive = (round.t ?? []).filter((i) => !dead.has(i)).length;
+
   return (
     <div className="card px-4 py-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="stat-label">Live feed</span>
         <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
+      </div>
+
+      <div className="mb-2 flex items-center justify-center gap-3 rounded-md bg-panel/50 py-1.5 text-base font-extrabold tabular-nums">
+        <span style={{ color: CT }}>CT {ctAlive}</span>
+        <span className="text-xs font-normal text-faint">alive</span>
+        <span style={{ color: T }}>{tAlive} T</span>
       </div>
 
       {plant && !ended && (
@@ -205,6 +216,13 @@ export default function ReplayPage() {
     return round.frames[round.frames.length - 1].t;
   }, [round]);
 
+  // throw origin per grenade (thrower position at throw time), computed once per
+  // round so the draw loop can show origin → landing without re-deriving it.
+  const nadeOrigins = useMemo(
+    () => (round?.nades ?? []).map((n) => (round && n.by >= 0 ? throwOrigin(round, n.by, n.t) : null)),
+    [round],
+  );
+
   // world -> canvas px (calibrated, else normalize to data bounds)
   const toPx = useMemo(() => {
     if (!meta) return (x: number, y: number) => ({ x, y });
@@ -302,12 +320,30 @@ export default function ReplayPage() {
         }
       }
 
-      // grenades active at t
-      for (const n of round.nades ?? []) {
-        const dur = n.dur || 0.8;
-        if (t < n.t || t > n.t + dur) continue;
+      // grenades active at t — throw origin → landing + a live countdown
+      (round.nades ?? []).forEach((n, ni) => {
+        const life = Math.max(n.dur || 0, UTIL_LIFE[n.k] ?? 1);
+        if (t < n.t || t > n.t + life) return;
         const c = toPx(n.x, n.y);
-        const age = (t - n.t) / dur;
+        const age = (t - n.t) / life;
+        const col = KIND_COLOR[n.k] ?? "#8a7dff";
+
+        // throw origin → landing
+        const o = nadeOrigins[ni];
+        if (o) {
+          const oc = toPx(o.x, o.y);
+          ctx.globalAlpha = 0.5 * (1 - age) + 0.15;
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(oc.x, oc.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
+
         if (n.k === "smoke") {
           ctx.fillStyle = "rgba(210,210,220,0.34)";
           ctx.beginPath();
@@ -328,8 +364,28 @@ export default function ReplayPage() {
           ctx.beginPath();
           ctx.arc(c.x, c.y, 10 + age * 18, 0, 7);
           ctx.fill();
+        } else {
+          ctx.fillStyle = `${col}55`;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 14, 0, 7);
+          ctx.fill();
         }
-      }
+
+        // countdown in the centre for lingering util (smoke / molotov / decoy)
+        if (life >= 4) {
+          const rem = Math.max(0, Math.ceil(life - (t - n.t)));
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(0,0,0,0.6)";
+          ctx.strokeText(`${rem}`, c.x, c.y);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(`${rem}`, c.x, c.y);
+          ctx.textAlign = "left";
+          ctx.textBaseline = "alphabetic";
+        }
+      });
 
       // bomb marker (after plant, until defuse/explode)
       const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= t);
@@ -429,7 +485,7 @@ export default function ReplayPage() {
       }
       setBanner((prev) => (prev === b ? prev : b));
     },
-    [round, duration, toPx, posAt, sideOf, meta],
+    [round, duration, toPx, posAt, sideOf, meta, nadeOrigins],
   );
 
   // animation loop
