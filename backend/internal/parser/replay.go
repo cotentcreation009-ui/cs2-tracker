@@ -87,6 +87,13 @@ type ReplayPlayerStat struct {
 	AimN   int     `json:"aimN,omitempty"`
 	RctMs  float64 `json:"rctMs,omitempty"`
 	Preaim float64 `json:"preaim,omitempty"`
+	Snap   int     `json:"snap,omitempty"` // kills that landed fast despite a far crosshair
+	// Shooting accuracy (firearms only, pump/auto shotguns excluded — see
+	// isFirearm): Shots = bullets fired, Hits = bullets that dealt damage to an
+	// enemy, HsHits = of those, headshots. Volume-independent aim-quality tells.
+	Shots  int `json:"shots,omitempty"`
+	Hits   int `json:"hits,omitempty"`
+	HsHits int `json:"hsHits,omitempty"`
 }
 
 // ReplayFrame is one downsampled snapshot. T is seconds since round start.
@@ -172,6 +179,7 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onFreezeEnd)
 	p.RegisterEventHandler(rc.onPlayerHurt)
 	p.RegisterEventHandler(rc.onPlayerFlashed)
+	p.RegisterEventHandler(rc.onWeaponFire)
 
 	// v5 dropped Parser.Header(); the map name arrives in the server-info net
 	// message early in the stream, so capture it there.
@@ -527,9 +535,18 @@ func (rc *replayCollector) onKill(e events.Kill) {
 			rctMs := (rc.rt() - st) * 1000
 			if rctMs >= 0 && rctMs <= 3000 { // genuine react-and-kill window
 				if s := rc.stats(k.Killer); s != nil {
+					preaim := rc.spotAim[vID][kID]
 					s.AimN++
 					s.RctMs += rctMs
-					s.Preaim += rc.spotAim[vID][kID]
+					s.Preaim += preaim
+					// "snap": killed almost instantly DESPITE the crosshair being
+					// well off-target — i.e. a superhuman correction. (A pre-aimed
+					// angle-hold has a LOW pre-aim offset, so it isn't counted —
+					// that's the point: this flags aim that shouldn't be possible,
+					// not good positioning.)
+					if preaim >= 12 && rctMs <= 300 {
+						s.Snap++
+					}
 				}
 			}
 		}
@@ -708,6 +725,43 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 	s.Dmg += e.HealthDamage
 	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
 		s.UtilDmg += e.HealthDamage
+	}
+	if isFirearm(e.Weapon) {
+		s.Hits++
+		if e.HitGroup == events.HitGroupHead {
+			s.HsHits++
+		}
+	}
+}
+
+// onWeaponFire counts firearm shots for accuracy (hits/shots). Grenades, knife
+// and zeus are excluded so accuracy reflects gunplay only.
+func (rc *replayCollector) onWeaponFire(e events.WeaponFire) {
+	if rc.cur == nil || e.Shooter == nil || !isFirearm(e.Weapon) {
+		return
+	}
+	if s := rc.stats(rc.playerIndex(e.Shooter)); s != nil {
+		s.Shots++
+	}
+}
+
+// isFirearm reports whether a weapon counts toward shot accuracy. Pump/auto
+// shotguns are EXCLUDED: one trigger pull fires many pellets, each landing as a
+// separate damage event, so they'd register one Shot but several Hits and
+// inflate accuracy past 100%. LMGs (M249/Negev) stay — one bullet per shot.
+func isFirearm(w *common.Equipment) bool {
+	if w == nil {
+		return false
+	}
+	switch w.Type {
+	case common.EqSawedOff, common.EqNova, common.EqMag7, common.EqXM1014:
+		return false
+	}
+	switch w.Class() {
+	case common.EqClassPistols, common.EqClassSMG, common.EqClassHeavy, common.EqClassRifle:
+		return true
+	default:
+		return false
 	}
 }
 
