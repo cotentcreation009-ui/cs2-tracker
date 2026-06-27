@@ -131,9 +131,10 @@ function deriveSiteAnchor(rounds: ReplayRound[]): SiteAnchor {
 const d2 = (ax: number, ay: number, bx: number, by: number) =>
   (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
 
-// throwerOriginAt finds a player's position closest to time t in a round — used
-// as the visual origin of a grenade arc on the util map.
-function throwerOriginAt(
+// throwOrigin finds a player's position closest to time t in a round — the
+// visual origin of a grenade arc (where it was thrown from). Shared by every
+// lens that draws utility so they can all show origin → landing.
+export function throwOrigin(
   r: ReplayRound,
   idx: number,
   t: number,
@@ -334,7 +335,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       else if (n.k === "he") { util.he++; kind = "he"; if (a) a.util.he++; }
       else if (n.k === "decoy") { util.decoy++; kind = "decoy"; if (a) a.util.decoy++; }
       if (a && kind) {
-        const o = throwerOriginAt(r, n.by, n.t);
+        const o = throwOrigin(r, n.by, n.t);
         a.nadeList.push({
           kind, x: n.x, y: n.y, round: r.n, t: n.t,
           ox: o?.x ?? n.x, oy: o?.y ?? n.y,
