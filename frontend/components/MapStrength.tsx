@@ -209,6 +209,19 @@ function roundWinPct(ms: LeetifyRecentMatch[]): number {
   return total ? (won / total) * 100 : NaN;
 }
 
+// Rounds won-lost across a map's matches (for the record line in rounds mode).
+function roundRec(ms: LeetifyRecentMatch[]): { won: number; lost: number } {
+  let won = 0,
+    lost = 0;
+  for (const m of ms) {
+    if (m.score?.length === 2) {
+      won += m.score[0];
+      lost += m.score[1];
+    }
+  }
+  return { won, lost };
+}
+
 // Map icon: real map logo, falling back to the radar thumbnail, then a short
 // label. Shows the map name on hover so each vertex is identifiable.
 function MapIcon({ map }: { map: string }) {
@@ -250,39 +263,54 @@ const RR = 78;
  * a map icon at each vertex and a best/worst footer. Reacts to the section's
  * window + queue filters via the rows it's given.
  */
-function MapWinRadar({ rows }: { rows: MapRow[] }) {
-  const [metric, setMetric] = useState<"rounds" | "matches">("rounds");
-
+function MapWinRadar({
+  rows,
+  metric,
+  setMetric,
+  useMetric,
+  hasRounds,
+  valOf,
+}: {
+  rows: MapRow[];
+  metric: "rounds" | "matches";
+  setMetric: (m: "rounds" | "matches") => void;
+  useMetric: "rounds" | "matches";
+  hasRounds: boolean;
+  valOf: (r: MapRow) => number;
+}) {
+  void metric;
   const reliable = rows.filter((r) => r.n >= 3);
   const base = (reliable.length >= 3 ? reliable : rows.filter((r) => r.n >= 1)).slice(0, 9);
   // fixed angular order (by name) so vertices don't jump as values change
   const data = [...base].sort((a, b) => a.map.localeCompare(b.map));
-  const hasRounds = data.some((r) => Number.isFinite(roundWinPct(r.ms)));
-  const useMetric = metric === "rounds" && !hasRounds ? "matches" : metric;
-  const valOf = (r: MapRow) => {
-    if (useMetric === "matches") return r.winPct;
-    const rp = roundWinPct(r.ms);
-    return Number.isFinite(rp) ? rp : r.winPct;
-  };
 
   if (data.length < 3) return null;
 
   const N = data.length;
+  const vals = data.map(valOf);
+
+  // Scale to the data's own range instead of 0–100, so a 43–75% spread fills the
+  // chart rather than bunching near the centre. 50% stays inside the band.
+  const lo = Math.max(0, Math.min(40, Math.min(...vals) - 6));
+  const hi = Math.min(100, Math.max(60, Math.max(...vals) + 6));
+  const span = hi - lo || 1;
+  const frac = (v: number) => clamp((v - lo) / span, 0.06, 1);
+  const frac50 = clamp((50 - lo) / span, 0.06, 1);
+
   const ang = (i: number) => -Math.PI / 2 + (i / N) * Math.PI * 2;
-  const ptAt = (i: number, frac: number) => ({
-    x: RC + Math.cos(ang(i)) * RR * frac,
-    y: RC + Math.sin(ang(i)) * RR * frac,
+  const ptAt = (i: number, f: number) => ({
+    x: RC + Math.cos(ang(i)) * RR * f,
+    y: RC + Math.sin(ang(i)) * RR * f,
   });
 
-  const vals = data.map(valOf);
   const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
   const col = winColor(avg);
   const polyPts = data
-    .map((_, i) => ptAt(i, clamp(vals[i], 0, 100) / 100))
+    .map((_, i) => ptAt(i, frac(vals[i])))
     .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
     .join(" ");
-  const ring = (frac: number) =>
-    data.map((_, i) => ptAt(i, frac)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const ring = (f: number) =>
+    data.map((_, i) => ptAt(i, f)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
   const ranked = data.map((r) => ({ r, v: valOf(r) })).sort((a, b) => b.v - a.v);
   const best = ranked[0];
@@ -314,17 +342,18 @@ function MapWinRadar({ rows }: { rows: MapRow[] }) {
           viewBox={`0 0 ${RADAR} ${RADAR}`}
           className="absolute inset-0 h-full w-full overflow-visible"
         >
-          {[0.25, 0.5, 0.75, 1].map((f) => (
-            <polygon
-              key={f}
-              points={ring(f)}
-              fill="none"
-              stroke="var(--color-line)"
-              strokeWidth={f === 0.5 ? 1.2 : 0.7}
-              strokeDasharray={f === 0.5 ? "3 3" : undefined}
-              opacity={f === 0.5 ? 0.85 : 0.5}
-            />
+          {[0.4, 0.7, 1].map((f) => (
+            <polygon key={f} points={ring(f)} fill="none" stroke="var(--color-line)" strokeWidth={0.7} opacity={0.45} />
           ))}
+          {/* 50% reference ring */}
+          <polygon
+            points={ring(frac50)}
+            fill="none"
+            stroke="var(--color-line2)"
+            strokeWidth={1.2}
+            strokeDasharray="3 3"
+            opacity={0.9}
+          />
           {data.map((_, i) => {
             const o = ptAt(i, 1);
             return (
@@ -333,7 +362,7 @@ function MapWinRadar({ rows }: { rows: MapRow[] }) {
           })}
           <polygon points={polyPts} fill={`${col}33`} stroke={col} strokeWidth={2} strokeLinejoin="round" />
           {data.map((_, i) => {
-            const p = ptAt(i, clamp(vals[i], 0, 100) / 100);
+            const p = ptAt(i, frac(vals[i]));
             return <circle key={i} cx={p.x} cy={p.y} r={2.6} fill={col} stroke="#04060e" strokeWidth={0.8} />;
           })}
           <circle cx={RC} cy={RC} r={1.5} fill="var(--color-faint)" />
@@ -344,7 +373,7 @@ function MapWinRadar({ rows }: { rows: MapRow[] }) {
           return (
             <div
               key={r.map}
-              title={`${mapLabel(r.map)} · ${valOf(r).toFixed(0)}% ${useMetric === "rounds" ? "rounds" : "matches"}`}
+              title={`${mapLabel(r.map)} · ${valOf(r).toFixed(0)}% ${useMetric}`}
               className="absolute -translate-x-1/2 -translate-y-1/2"
               style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%` }}
             >
@@ -394,13 +423,17 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
   const [bucket, setBucket] = useState(maxBucket);
   const [source, setSource] = useState<SourceKey>("all");
   const [open, setOpen] = useState<string | null>(null);
+  // Match win rate is what players mean by "win %", so default there; rounds is
+  // a click away. The metric drives the radar, the list, AND best/worst together
+  // so they never disagree.
+  const [metric, setMetric] = useState<"rounds" | "matches">("matches");
 
   const presentSources = useMemo(() => {
     const set = new Set(matches.map((m) => m.data_source));
     return SOURCES.filter((s) => s.key === "all" || set.has(s.key));
   }, [matches]);
 
-  const { rows, total, best, worst } = useMemo(() => {
+  const { rows, total } = useMemo(() => {
     const scoped = matches
       .filter((m) => source === "all" || m.data_source === source)
       .slice(0, bucket);
@@ -416,26 +449,45 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
       const w = ms.filter((m) => m.outcome === "win").length;
       return { map, ms, n: ms.length, w, l: ms.length - w, winPct: (w / ms.length) * 100 };
     });
-    list.sort((a, b) => {
-      const ra = a.n >= 3 ? 1 : 0;
-      const rb = b.n >= 3 ? 1 : 0;
-      if (ra !== rb) return rb - ra;
-      return b.winPct - a.winPct;
-    });
-    const reliable = list.filter((r) => r.n >= 3);
-    return {
-      rows: list,
-      total: scoped.length,
-      best: reliable[0] ?? null,
-      worst: reliable.length > 1 ? reliable[reliable.length - 1] : null,
-    };
+    return { rows: list, total: scoped.length };
   }, [matches, bucket, source]);
+
+  const hasRounds = useMemo(
+    () => rows.some((r) => Number.isFinite(roundWinPct(r.ms))),
+    [rows],
+  );
+  const useMetric: "rounds" | "matches" = metric === "rounds" && !hasRounds ? "matches" : metric;
+  const valOf = (r: MapRow) => {
+    if (useMetric === "matches") return r.winPct;
+    const rp = roundWinPct(r.ms);
+    return Number.isFinite(rp) ? rp : r.winPct;
+  };
+  const recordOf = (r: MapRow) => {
+    if (useMetric === "matches") return `${r.w}-${r.l}`;
+    const { won, lost } = roundRec(r.ms);
+    return `${won}-${lost}`;
+  };
+  // reliable-first, then by the active metric — so the top of the list is the
+  // same map best/worst calls out.
+  const displayRows = [...rows].sort((a, b) => {
+    const ra = a.n >= 3 ? 1 : 0;
+    const rb = b.n >= 3 ? 1 : 0;
+    if (ra !== rb) return rb - ra;
+    return valOf(b) - valOf(a);
+  });
+  const reliableRows = rows.filter((r) => r.n >= 3);
+  const best = reliableRows.length
+    ? [...reliableRows].sort((a, b) => valOf(b) - valOf(a))[0]
+    : null;
+  const worst = reliableRows.length > 1
+    ? [...reliableRows].sort((a, b) => valOf(a) - valOf(b))[0]
+    : null;
 
   if (matches.length === 0) return null;
 
   const pool = rows.filter((r) => r.n >= 3);
-  const strongMaps = pool.filter((r) => r.winPct >= 55).length;
-  const weakMaps = pool.filter((r) => r.winPct < 45).length;
+  const strongMaps = pool.filter((r) => valOf(r) >= 55).length;
+  const weakMaps = pool.filter((r) => valOf(r) < 45).length;
 
   const COLS = "grid grid-cols-[5rem_1fr_3.5rem_1.25rem] items-center gap-3";
 
@@ -485,12 +537,12 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
           <div className="flex flex-wrap gap-2">
             {best && (
               <span className="pill bg-good/12 capitalize text-good">
-                ▲ Best · {mapLabel(best.map)} {best.winPct.toFixed(0)}%
+                ▲ Best · {mapLabel(best.map)} {valOf(best).toFixed(0)}%
               </span>
             )}
             {worst && (
               <span className="pill bg-bad/12 capitalize text-bad">
-                ▼ Toughest · {mapLabel(worst.map)} {worst.winPct.toFixed(0)}%
+                ▼ Toughest · {mapLabel(worst.map)} {valOf(worst).toFixed(0)}%
               </span>
             )}
           </div>
@@ -504,7 +556,14 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
         </div>
       )}
 
-      <MapWinRadar rows={rows} />
+      <MapWinRadar
+        rows={rows}
+        metric={metric}
+        setMetric={setMetric}
+        useMetric={useMetric}
+        hasRounds={hasRounds}
+        valOf={valOf}
+      />
 
       <div className="card-2 px-4 py-4">
         {rows.length === 0 ? (
@@ -525,11 +584,12 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
             </div>
 
             <div className="space-y-0.5">
-              {rows.map((r) => {
-                const wc = winColor(r.winPct);
+              {displayRows.map((r) => {
+                const pct = valOf(r);
+                const wc = winColor(pct);
                 const dim = r.n < 3;
-                const lo = Math.min(r.winPct, 50);
-                const w = Math.abs(r.winPct - 50);
+                const lo = Math.min(pct, 50);
+                const w = Math.abs(pct - 50);
                 const size = 9 + (Math.min(r.n, 25) / 25) * 7;
                 const isOpen = open === r.map;
                 return (
@@ -563,7 +623,7 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
                         <span
                           className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-bg"
                           style={{
-                            left: `${r.winPct}%`,
+                            left: `${pct}%`,
                             width: size,
                             height: size,
                             background: wc,
@@ -575,10 +635,10 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
 
                       <span className="text-right">
                         <span className="text-sm font-bold tabular-nums" style={{ color: wc }}>
-                          {r.winPct.toFixed(0)}%
+                          {pct.toFixed(0)}%
                         </span>
                         <span className="block text-[10px] tabular-nums text-faint">
-                          {r.w}-{r.l}
+                          {recordOf(r)}
                         </span>
                       </span>
 

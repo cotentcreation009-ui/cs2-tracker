@@ -7,7 +7,7 @@
 // (nades). Gaps are documented in PLAYER_INSIGHTS_LIMITATIONS and surfaced in
 // the UI so numbers are never silently fabricated.
 
-import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
+import type { ReplayMeta, ReplayNade, ReplayRound } from "@/lib/demo/types";
 
 export interface MultiKillTally { k2: number; k3: number; k4: number; k5: number; }
 
@@ -137,15 +137,24 @@ const d2 = (ax: number, ay: number, bx: number, by: number) =>
 // lens that draws utility so they can all show origin → landing.
 export function throwOrigin(
   r: ReplayRound,
-  idx: number,
-  t: number,
+  n: ReplayNade,
 ): { x: number; y: number } | null {
+  // Backend captures the launch point at throw time (ox/oy). It's authoritative;
+  // it only equals the landing (x/y) when the backend couldn't resolve a real
+  // origin, in which case we fall back to the legacy frame-scan below.
+  if (n.ox != null && n.oy != null && (n.ox !== n.x || n.oy !== n.y)) {
+    return { x: n.ox, y: n.oy };
+  }
+  // Legacy demos (no origin field): approximate from the thrower's position at
+  // the frame closest to the throw time. Note n.t is the detonation time, so on
+  // ~1Hz frames this can be off — hence the backend origin is preferred.
+  if (n.by < 0) return null;
   let best: { x: number; y: number } | null = null;
   let bestDt = Infinity;
   for (const f of r.frames ?? []) {
-    const p = f.p.find((pp) => pp.i === idx);
+    const p = f.p.find((pp) => pp.i === n.by);
     if (!p) continue;
-    const dt = Math.abs(f.t - t);
+    const dt = Math.abs(f.t - n.t);
     if (dt < bestDt) {
       bestDt = dt;
       best = { x: p.x, y: p.y };
@@ -341,7 +350,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       else if (n.k === "he") { util.he++; kind = "he"; if (a) a.util.he++; }
       else if (n.k === "decoy") { util.decoy++; kind = "decoy"; if (a) a.util.decoy++; }
       if (a && kind) {
-        const o = throwOrigin(r, n.by, n.t);
+        const o = throwOrigin(r, n);
         a.nadeList.push({
           kind, x: n.x, y: n.y, round: r.n, t: n.t,
           ox: o?.x ?? n.x, oy: o?.y ?? n.y,

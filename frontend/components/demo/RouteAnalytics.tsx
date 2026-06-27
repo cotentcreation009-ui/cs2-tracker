@@ -245,7 +245,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                   {(scopedRound.nades ?? []).map((n, i) => {
                     const c = pt(n.x, n.y); if (!c) return null;
                     const col = KIND_COLOR[n.k] ?? "#8a7dff";
-                    const o = n.by >= 0 ? throwOrigin(scopedRound, n.by, n.t) : null;
+                    const o = throwOrigin(scopedRound, n);
                     const oc = o ? pt(o.x, o.y) : null;
                     const related = !active
                       ? true

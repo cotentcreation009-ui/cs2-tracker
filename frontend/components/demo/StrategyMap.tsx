@@ -52,7 +52,7 @@ function heatColor(t: number): [number, number, number] {
   return [l[1], l[2], l[3]];
 }
 
-type HeatPt = { x: number; y: number; w?: number };
+type HeatPt = { x: number; y: number; w?: number; r?: number };
 
 // Classic normalized heatmap: accumulate (optionally weighted) intensity on an
 // offscreen canvas, normalize to a high percentile (so one super-hot pixel
@@ -69,13 +69,16 @@ function classicHeat(
   octx.clearRect(0, 0, SIZE, SIZE);
   octx.globalCompositeOperation = "lighter";
   for (const p of pts) {
-    const a = 0.26 * (p.w ?? 1);
+    const rad = p.r ?? radius;
+    // cap a single splat so it can't saturate on its own — held spots get hot
+    // from many accumulating still-frames, not one huge weight.
+    const a = Math.min(0.85, 0.26 * (p.w ?? 1));
     if (a <= 0) continue;
-    const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
+    const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
     g.addColorStop(0, `rgba(255,255,255,${a})`);
     g.addColorStop(1, "rgba(255,255,255,0)");
     octx.fillStyle = g;
-    octx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
+    octx.fillRect(p.x - rad, p.y - rad, rad * 2, rad * 2);
   }
   octx.globalCompositeOperation = "source-over";
 
@@ -224,25 +227,47 @@ export function StrategyMap({
     const off = getOff();
 
     if (active.has("positions")) {
-      // Weight each sample by how STILL the player is, so corridors everyone
-      // merely runs through fade and the spots players actually hold stand out.
+      // Residence-time heatmap: weight each sample by how long the player dwells
+      // roughly in place (not raw sample count), and ramp spots they anchor to.
+      // So a corridor everyone merely runs through fades, while a held angle —
+      // even a jiggle-peek that keeps returning to cover — burns red.
       const pts: HeatPt[] = [];
       for (const rd of scoped) {
         const frames = rd.frames ?? [];
         const prev = new Map<number, { x: number; y: number; t: number }>();
-        for (let fi = 0; fi < frames.length; fi += 2) {
+        const hold = new Map<number, { x: number; y: number; secs: number }>();
+        for (let fi = 0; fi < frames.length; fi += 1) {
           const f = frames[fi];
           for (const p of f.p) {
             if (!playerOk(p.i) || p.h <= 0) continue;
             const pr = prev.get(p.i);
             prev.set(p.i, { x: p.x, y: p.y, t: f.t });
             if (!pr || !sideOk(sideOfRound(rd, p.i))) continue;
-            const dt = Math.max(0.1, f.t - pr.t);
-            const speed = Math.hypot(p.x - pr.x, p.y - pr.y) / dt; // units/sec
-            const w = Math.pow(Math.max(0, 1 - speed / 180), 1.5); // ~0 running, 1 still
-            if (w <= 0.03) continue;
+            const dt = Math.min(4, Math.max(0.1, f.t - pr.t));
+            // Classify "rest" by DISPLACEMENT over the interval — robust to the
+            // ~1Hz capture (instantaneous speed smears jiggles): barely moved =
+            // held the whole interval; a long step = in transit.
+            const dist = Math.hypot(p.x - pr.x, p.y - pr.y);
+            const rest = dist < 64 ? 1 : dist < 220 ? Math.pow(1 - (dist - 64) / 156, 2) : 0;
+            if (rest <= 0.04) {
+              hold.delete(p.i);
+              continue;
+            }
+            // Hold bonus: while the player stays near an anchor, keep summing
+            // time so spots they truly sit on ramp up super-linearly.
+            const h = hold.get(p.i);
+            let heldSecs = rest * dt;
+            if (h && Math.hypot(p.x - h.x, p.y - h.y) < 110) {
+              h.secs += rest * dt;
+              heldSecs = h.secs;
+            } else {
+              hold.set(p.i, { x: p.x, y: p.y, secs: rest * dt });
+            }
+            const w = rest * dt * (1 + Math.min(2.2, heldSecs / 2.5));
+            // firmly-held → a tighter, sharper blob; partial rest → normal splat
+            const r = (rest > 0.7 ? 19 : 30) * spreadMult;
             const c = toPx(p.x, p.y);
-            pts.push({ x: c.x, y: c.y, w });
+            pts.push({ x: c.x, y: c.y, w, r });
           }
         }
       }
@@ -268,7 +293,7 @@ export function StrategyMap({
           if (focusPlayer != null && n.by !== focusPlayer) continue;
           const c = toPx(n.x, n.y);
           const col = KIND_COLOR[n.k] ?? "#8a7dff";
-          const o = n.by >= 0 ? throwOrigin(rd, n.by, n.t) : null;
+          const o = throwOrigin(rd, n);
           if (o) {
             const oc = toPx(o.x, o.y);
             ctx.globalAlpha = 0.6;

@@ -11,6 +11,7 @@ import { mapLabel } from "@/lib/format";
 import RouteAnalytics from "@/components/demo/RouteAnalytics";
 import WeaponInsights from "@/components/demo/WeaponInsights";
 import PlayerInsights from "@/components/demo/PlayerInsights";
+import MatchVerdict from "@/components/demo/MatchVerdict";
 import { StrategyMap } from "@/components/demo/StrategyMap";
 import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
@@ -23,6 +24,7 @@ const TABS = [
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Insights" },
   { k: "map", label: "Heatmap" },
+  { k: "verdict", label: "Cheat / AI" },
 ] as const;
 type Tab = (typeof TABS)[number]["k"];
 
@@ -30,6 +32,12 @@ const SIZE = 720; // canvas internal resolution
 const CT = "#5b9dff";
 const T = "#e7b53c";
 const SPEEDS = [1, 2, 4, 8];
+
+// #rrggbb -> rgba() with alpha, for gradients/translucent fills.
+function colA(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
 
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 function lerpAngle(a: number, b: number, k: number): number {
@@ -229,7 +237,7 @@ export default function ReplayPage() {
   // throw origin per grenade (thrower position at throw time), computed once per
   // round so the draw loop can show origin → landing without re-deriving it.
   const nadeOrigins = useMemo(
-    () => (round?.nades ?? []).map((n) => (round && n.by >= 0 ? throwOrigin(round, n.by, n.t) : null)),
+    () => (round?.nades ?? []).map((n) => (round ? throwOrigin(round, n) : null)),
     [round],
   );
 
@@ -447,37 +455,57 @@ export default function ReplayPage() {
         else aliveT++;
         const c = toPx(p.x, p.y);
         const col = pside === "CT" ? CT : T;
-        ctx.globalAlpha = focus != null && p.i !== focus ? 0.22 : 1;
-        // look direction
+        const dim = focus != null && p.i !== focus;
+        ctx.globalAlpha = dim ? 0.45 : 1;
         const rad = (-p.d * Math.PI) / 180;
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 2;
+        const r = 7.5;
+
+        // view wedge — a filled cone showing where the player is looking
+        const coneLen = 26;
+        const half = (33 * Math.PI) / 180; // 33° half-angle (~66° FOV indicator)
+        const cone = ctx.createRadialGradient(c.x, c.y, r - 1, c.x, c.y, coneLen);
+        cone.addColorStop(0, colA(col, 0.6));
+        cone.addColorStop(1, colA(col, 0));
+        ctx.fillStyle = cone;
         ctx.beginPath();
         ctx.moveTo(c.x, c.y);
-        ctx.lineTo(c.x + Math.cos(rad) * 13, c.y + Math.sin(rad) * 13);
-        ctx.stroke();
-        // body
+        ctx.arc(c.x, c.y, coneLen, rad - half, rad + half);
+        ctx.closePath();
+        ctx.fill();
+
+        // body dot: dark contrast ring + bright fill so it pops on any tile
         ctx.beginPath();
-        ctx.arc(c.x, c.y, 6, 0, 7);
+        ctx.arc(c.x, c.y, r, 0, 7);
         ctx.fillStyle = col;
         ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(4,6,14,0.9)";
+        ctx.stroke();
+
         if (p.bomb) {
           ctx.strokeStyle = "#f5694a";
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.arc(c.x, c.y, 9, 0, 7);
+          ctx.arc(c.x, c.y, r + 3.5, 0, 7);
           ctx.stroke();
         }
+
+        // initial, centered
         ctx.fillStyle = "#04060e";
-        ctx.font = "bold 8px sans-serif";
+        ctx.font = "bold 9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
         const label = (meta?.players[p.i]?.name || "?").slice(0, 1).toUpperCase();
-        ctx.fillText(label, c.x - 2.5, c.y + 3);
+        ctx.fillText(label, c.x, c.y + 0.5);
+        ctx.textAlign = "start";
+        ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
+
         if (focus === p.i) {
           ctx.strokeStyle = "#38d6ff";
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.arc(c.x, c.y, 10, 0, 7);
+          ctx.arc(c.x, c.y, r + 4, 0, 7);
           ctx.stroke();
         }
       }
@@ -653,6 +681,7 @@ export default function ReplayPage() {
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
+      {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
         <>
