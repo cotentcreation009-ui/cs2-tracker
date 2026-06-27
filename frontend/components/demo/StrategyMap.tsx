@@ -52,12 +52,15 @@ function heatColor(t: number): [number, number, number] {
   return [l[1], l[2], l[3]];
 }
 
-// Classic normalized heatmap: accumulate intensity on an offscreen canvas, find
-// the peak, then colorize each pixel through the gradient and composite.
+type HeatPt = { x: number; y: number; w?: number };
+
+// Classic normalized heatmap: accumulate (optionally weighted) intensity on an
+// offscreen canvas, normalize to a high percentile (so one super-hot pixel
+// doesn't wash everything red), then colorize through the gradient + composite.
 function classicHeat(
   ctx: CanvasRenderingContext2D,
   off: HTMLCanvasElement,
-  pts: { x: number; y: number }[],
+  pts: HeatPt[],
   radius: number,
 ) {
   if (!pts.length) return;
@@ -66,8 +69,10 @@ function classicHeat(
   octx.clearRect(0, 0, SIZE, SIZE);
   octx.globalCompositeOperation = "lighter";
   for (const p of pts) {
+    const a = 0.26 * (p.w ?? 1);
+    if (a <= 0) continue;
     const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
-    g.addColorStop(0, "rgba(255,255,255,0.32)");
+    g.addColorStop(0, `rgba(255,255,255,${a})`);
     g.addColorStop(1, "rgba(255,255,255,0)");
     octx.fillStyle = g;
     octx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
@@ -76,20 +81,40 @@ function classicHeat(
 
   const img = octx.getImageData(0, 0, SIZE, SIZE);
   const d = img.data;
-  let max = 1;
-  for (let i = 0; i < d.length; i += 4) if (d[i] > max) max = d[i];
+  // normalize to the ~99th percentile of non-zero intensity, not the raw max
+  const hist = new Uint32Array(256);
+  let nz = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i];
+    if (v > 0) {
+      hist[v]++;
+      nz++;
+    }
+  }
+  if (!nz) return;
+  let acc = 0;
+  let norm = 255;
+  const cut = nz * 0.99;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc >= cut) {
+      norm = Math.max(1, v);
+      break;
+    }
+  }
   for (let i = 0; i < d.length; i += 4) {
     const v = d[i];
     if (v === 0) {
       d[i + 3] = 0;
       continue;
     }
-    const t = Math.min(1, v / max);
+    const t = Math.min(1, v / norm);
     const [r, g, b] = heatColor(t);
     d[i] = r;
     d[i + 1] = g;
     d[i + 2] = b;
-    d[i + 3] = Math.round(Math.min(1, t * 1.15 + 0.05) * 235);
+    // steep low-end ramp so only genuine density shows colour
+    d[i + 3] = Math.round(Math.min(1, Math.pow(t, 1.3) * 1.05) * 235);
   }
   octx.putImageData(img, 0, 0);
   ctx.drawImage(off, 0, 0);
@@ -199,18 +224,29 @@ export function StrategyMap({
     const off = getOff();
 
     if (active.has("positions")) {
-      const pts: { x: number; y: number }[] = [];
+      // Weight each sample by how STILL the player is, so corridors everyone
+      // merely runs through fade and the spots players actually hold stand out.
+      const pts: HeatPt[] = [];
       for (const rd of scoped) {
         const frames = rd.frames ?? [];
+        const prev = new Map<number, { x: number; y: number; t: number }>();
         for (let fi = 0; fi < frames.length; fi += 2) {
-          for (const p of frames[fi].p) {
-            if (!playerOk(p.i)) continue;
-            if (!sideOk(sideOfRound(rd, p.i))) continue;
-            pts.push(toPx(p.x, p.y));
+          const f = frames[fi];
+          for (const p of f.p) {
+            if (!playerOk(p.i) || p.h <= 0) continue;
+            const pr = prev.get(p.i);
+            prev.set(p.i, { x: p.x, y: p.y, t: f.t });
+            if (!pr || !sideOk(sideOfRound(rd, p.i))) continue;
+            const dt = Math.max(0.1, f.t - pr.t);
+            const speed = Math.hypot(p.x - pr.x, p.y - pr.y) / dt; // units/sec
+            const w = Math.pow(Math.max(0, 1 - speed / 180), 1.5); // ~0 running, 1 still
+            if (w <= 0.03) continue;
+            const c = toPx(p.x, p.y);
+            pts.push({ x: c.x, y: c.y, w });
           }
         }
       }
-      classicHeat(ctx, off, pts, 34 * spreadMult);
+      classicHeat(ctx, off, pts, 30 * spreadMult);
     }
     if (active.has("kills")) {
       const pts: { x: number; y: number }[] = [];
@@ -383,6 +419,12 @@ export function StrategyMap({
             </div>
           )}
           {side !== "all" && <div className="mt-1">{side} side only.</div>}
+          {active.has("positions") && (
+            <div className="mt-1">
+              Position density is weighted by dwell time — bright = where players hold,
+              not corridors they run through.
+            </div>
+          )}
           {active.has("nades") && (
             <div className="mt-1">Utility shown as throw → landing lines.</div>
           )}
