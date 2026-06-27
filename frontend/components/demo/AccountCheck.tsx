@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { getFaceit, getSteamExtras, getSteamStats, getLeetify } from "@/lib/api";
+import {
+  clientFaceit,
+  clientSteamExtras,
+  clientSteamStats,
+  clientLeetify,
+} from "@/lib/demo/accountClient";
 import { accountScores, verdict, BAND_HEX, BAND_LABEL, TONE_HEX, type AccountScores, type Band } from "@/lib/demo/account";
 
 function ScoreBar({
@@ -41,11 +46,15 @@ export function AccountCheck({
   name,
   matchScore = 0,
   matchStats = "",
+  cheatFactors = "",
+  tendencyLines = [],
 }: {
   steamId: string;
   name: string;
   matchScore?: number;
   matchStats?: string;
+  cheatFactors?: string; // top in-match aim tells, "label value" joined
+  tendencyLines?: string[]; // tactical tendencies from positioning/routes
 }) {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [data, setData] = useState<AccountScores | null>(null);
@@ -63,7 +72,8 @@ export function AccountCheck({
     const summary = [
       `Player: ${name}`,
       matchStats ? `This-match stats: ${matchStats}` : "",
-      `This-match CheatMeter: ${matchScore.toFixed(0)}%`,
+      `This-match CheatMeter: ${matchScore.toFixed(0)}%${cheatFactors ? ` (aim tells: ${cheatFactors})` : ""}`,
+      ...(tendencyLines.length ? ["Playstyle tendencies (from positioning/routes):", ...tendencyLines.map((l) => `- ${l}`)] : []),
       data.cheat
         ? `Career CheatMeter: ${data.cheat.score.toFixed(0)}% — ${
             data.cheat.factors.filter((f) => f.score >= 40).map((f) => `${f.label} ${f.display}`).join(", ") ||
@@ -102,10 +112,10 @@ export function AccountCheck({
     setErr("");
     try {
       const [faceit, extras, steamStats, leetify] = await Promise.all([
-        getFaceit(steamId).catch(() => null),
-        getSteamExtras(steamId).catch(() => null),
-        getSteamStats(steamId).catch(() => null),
-        getLeetify(steamId).catch(() => null),
+        clientFaceit(steamId).catch(() => null),
+        clientSteamExtras(steamId).catch(() => null),
+        clientSteamStats(steamId).catch(() => null),
+        clientLeetify(steamId).catch(() => null),
       ]);
       setData(accountScores(faceit, extras, steamStats, leetify));
       setState("done");

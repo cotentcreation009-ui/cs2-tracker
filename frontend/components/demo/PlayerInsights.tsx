@@ -16,6 +16,7 @@ import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
 import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
 import { demoCheat, BAND_HEX, BAND_LABEL } from "@/lib/demo/cheat";
+import { computeTendencies, tendencySummary, type PlayerTendencies } from "@/lib/demo/tendencies";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
@@ -131,6 +132,7 @@ function PlayerCard({
   focused,
   activeKind,
   lean,
+  tend,
   onFocus,
   onUtil,
 }: {
@@ -138,6 +140,7 @@ function PlayerCard({
   focused: boolean;
   activeKind: string | null;
   lean?: PlayerSiteLean;
+  tend?: PlayerTendencies;
   onFocus: () => void;
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
@@ -285,11 +288,11 @@ function PlayerCard({
         steamId={p.steamId}
         name={p.name}
         matchScore={cheat.score}
-        matchStats={`${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR, opening ${p.openingWinPct.toFixed(0)}%${
-          p.aimSamples >= 5
-            ? `, reaction ${p.reactionMs.toFixed(0)}ms, pre-aim ${p.preaimDeg.toFixed(1)}°`
-            : ""
-        }`}
+        matchStats={`${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR${
+          p.shots >= 40 ? `, acc ${p.accuracy.toFixed(0)}%/HS-acc ${p.hsAccuracy.toFixed(0)}%` : ""
+        }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`}
+        cheatFactors={cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ")}
+        tendencyLines={tendencySummary(tend)}
       />
     </div>
   );
@@ -353,6 +356,9 @@ export default function PlayerInsights({
         : rounds;
     return computeInsights(meta, scoped);
   }, [meta, rounds, view.scopeRound]);
+
+  // tendencies are match-wide (not scoped to one round) — keyed by steamId
+  const tendMap = useMemo(() => computeTendencies(meta, rounds), [meta, rounds]);
 
   const players = useMemo(
     () => data.players.filter((p) => view.side === "all" || p.team === view.side),
@@ -514,6 +520,7 @@ export default function PlayerInsights({
               focused={focusI === p.i}
               activeKind={focusI === p.i ? activeKind : null}
               lean={siteLean.get(p.i)}
+              tend={tendMap.get(p.steamId)}
               onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
               onUtil={pickUtil}
             />
