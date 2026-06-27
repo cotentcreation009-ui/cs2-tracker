@@ -15,7 +15,7 @@ import {
   saveMatch,
   type MatchSummary,
 } from "@/lib/demo/store";
-import { hasCalibration } from "@/lib/maps/calibration";
+import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { mapLabel } from "@/lib/format";
 
 export default function DemosPage() {
@@ -84,21 +84,40 @@ export default function DemosPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Demo analysis <span className="pill bg-brand/15 text-brand">BETA</span>
-          </h1>
-          <p className="mt-1 text-sm text-muted">
-            Upload a CS2 <span className="font-mono">.dem</span> — we parse it on
-            our servers, then save it to your local library for radar replay and
-            analysis. The raw demo is deleted right after parsing.
-          </p>
+      {/* hero */}
+      <section className="card-2 relative overflow-hidden">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/hero-holo.webp"
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-[0.18]"
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(4,6,14,0.35), rgba(14,23,48,0.94))",
+            }}
+          />
         </div>
-        <Link href="/demos/zones" className="btn btn-ghost shrink-0 text-sm">
-          Zone editor
-        </Link>
-      </header>
+        <div className="relative flex flex-wrap items-start justify-between gap-3 px-5 py-6">
+          <div className="max-w-2xl">
+            <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+              Demo analysis{" "}
+              <span className="pill bg-brand/15 align-middle text-brand">BETA</span>
+            </h1>
+            <p className="mt-1.5 text-sm text-muted">
+              Upload a CS2 <span className="font-mono text-ink/80">.dem</span> — we
+              parse it on our servers into a 2D radar replay with route, weapon and
+              player analysis. The raw demo is deleted right after parsing.
+            </p>
+          </div>
+          <Link href="/demos/zones" className="btn btn-ghost shrink-0 text-sm">
+            Zone editor
+          </Link>
+        </div>
+      </section>
 
       {/* dropzone */}
       <div
@@ -113,15 +132,20 @@ export default function DemosPage() {
           const f = e.dataTransfer.files?.[0];
           if (f && !parsing) void handleFile(f);
         }}
-        className={`card-2 flex flex-col items-center justify-center gap-3 px-6 py-10 text-center transition-colors ${
-          dragOver ? "border-brand/60 bg-brand/5" : ""
+        className={`card-2 flex flex-col items-center justify-center gap-3 px-6 py-12 text-center transition ${
+          dragOver
+            ? "border-brand/70 bg-brand/5 ring-2 ring-brand/30"
+            : "hover:border-line/80"
         }`}
       >
         {parsing ? (
           <>
-            <div className="text-sm font-medium text-ink">
-              {phase || "working…"}
+            <div className="grid h-12 w-12 place-items-center rounded-full bg-brand/10 text-brand">
+              <svg viewBox="0 0 24 24" className="h-6 w-6 animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" />
+              </svg>
             </div>
+            <div className="text-sm font-semibold text-ink">{phase || "working…"}</div>
             <div className="h-1.5 w-56 overflow-hidden rounded-full bg-panel">
               <div className="h-full w-1/3 animate-pulse rounded-full bg-linear-to-r from-brand to-brand2" />
             </div>
@@ -138,9 +162,13 @@ export default function DemosPage() {
           </>
         ) : (
           <>
-            <div className="text-3xl opacity-40">⬆</div>
-            <div className="text-sm text-muted">
-              Drag a <span className="font-mono">.dem</span> here, or
+            <div className="grid h-12 w-12 place-items-center rounded-full bg-brand/10 text-brand">
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
+              </svg>
+            </div>
+            <div className="text-base font-semibold text-ink">
+              Drop a <span className="font-mono text-brand">.dem</span> to analyze
             </div>
             <button
               type="button"
@@ -165,72 +193,105 @@ export default function DemosPage() {
       </div>
 
       {error && (
-        <div className="card border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad">
+        <div className="card flex items-center gap-2 border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+          </svg>
           {error}
         </div>
       )}
 
       {/* library */}
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-          Your match library{" "}
-          {list.length > 0 && <span className="text-faint">· {list.length}</span>}
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
+          <span className="h-3.5 w-1 rounded-full bg-linear-to-b from-brand to-brand2" />
+          Your match library
+          {list.length > 0 && (
+            <span className="pill bg-panel text-faint">{list.length}</span>
+          )}
         </h2>
         {list.length === 0 ? (
-          <div className="card px-4 py-6 text-sm text-muted">
+          <div className="card px-4 py-10 text-center text-sm text-muted">
             No demos yet — upload one above to get started.
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {list.map((m) => (
-              <li key={m.id} className="card lift px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold">{m.name}</span>
-                  <span className="pill bg-panel capitalize text-muted">
-                    {mapLabel(m.meta.map)}
-                  </span>
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
-                  <span>{m.meta.rounds} rounds</span>
-                  <span>{m.meta.players.length} players</span>
-                  <span>{new Date(m.savedAt).toLocaleDateString()}</span>
-                  {!hasCalibration(m.meta.map) && (
-                    <span className="text-mid">radar uncalibrated</span>
-                  )}
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Link
-                    href={`/demos/${m.id}`}
-                    className="btn btn-primary px-3 py-1.5 text-xs"
-                  >
-                    Open replay
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {list.map((m) => {
+              const calibrated = hasCalibration(m.meta.map);
+              return (
+                <li key={m.id} className="card lift group overflow-hidden p-0">
+                  <Link href={`/demos/${m.id}`} className="block">
+                    <div className="relative aspect-16/10 overflow-hidden bg-panel2">
+                      {calibrated ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={radarImage(m.meta.map)}
+                          alt={mapLabel(m.meta.map)}
+                          className="absolute inset-0 h-full w-full object-cover opacity-60 transition duration-300 group-hover:scale-105 group-hover:opacity-80"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 grid place-items-center bg-linear-to-br from-panel2 to-panel text-3xl text-faint">
+                          ◎
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-linear-to-t from-[rgba(4,6,14,0.95)] via-[rgba(4,6,14,0.30)] to-transparent" />
+                      <div className="absolute inset-x-3 bottom-2 flex items-end justify-between gap-2">
+                        <span className="truncate text-sm font-bold text-ink drop-shadow">
+                          {m.name}
+                        </span>
+                        <span className="pill shrink-0 bg-black/40 capitalize text-ink backdrop-blur">
+                          {mapLabel(m.meta.map)}
+                        </span>
+                      </div>
+                    </div>
                   </Link>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const n = window.prompt("Rename match", m.name);
-                      if (n && n.trim()) {
-                        await renameMatch(m.id, n.trim());
-                        void refresh();
-                      }
-                    }}
-                    className="btn btn-ghost px-3 py-1.5 text-xs"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await deleteMatch(m.id);
-                      void refresh();
-                    }}
-                    className="btn btn-ghost px-3 py-1.5 text-xs"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </li>
-            ))}
+                  <div className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
+                      <span className="tabular-nums">{m.meta.rounds} rounds</span>
+                      <span className="tabular-nums">
+                        {m.meta.players.length} players
+                      </span>
+                      <span>{new Date(m.savedAt).toLocaleDateString()}</span>
+                      {!calibrated && (
+                        <span className="text-mid">radar uncalibrated</span>
+                      )}
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Link
+                        href={`/demos/${m.id}`}
+                        className="btn btn-primary px-3 py-1.5 text-xs"
+                      >
+                        Open replay
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const n = window.prompt("Rename match", m.name);
+                          if (n && n.trim()) {
+                            await renameMatch(m.id, n.trim());
+                            void refresh();
+                          }
+                        }}
+                        className="btn btn-ghost px-3 py-1.5 text-xs"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await deleteMatch(m.id);
+                          void refresh();
+                        }}
+                        className="btn btn-ghost ml-auto px-3 py-1.5 text-xs text-muted hover:text-bad"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

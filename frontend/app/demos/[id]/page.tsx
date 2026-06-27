@@ -363,22 +363,56 @@ export default function ReplayPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <Link href="/demos" className="text-xs text-muted hover:text-ink">
-            ← Demos
+      <Link href="/demos" className="text-xs text-muted hover:text-ink">
+        ← Demos
+      </Link>
+
+      {/* header */}
+      <section className="card-2 relative overflow-hidden">
+        <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center">
+          {hasCalibration(meta.map) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={radarImage(meta.map)}
+              alt={mapLabel(meta.map)}
+              className="h-16 w-16 shrink-0 rounded-lg border border-line object-cover"
+            />
+          ) : (
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-2xl text-faint">
+              ◎
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-extrabold tracking-tight">
+              {name}
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+              <span className="pill bg-panel capitalize text-ink">
+                {mapLabel(meta.map)}
+              </span>
+              <span className="tabular-nums">{rounds.length} rounds</span>
+              <span className="tabular-nums">{meta.players.length} players</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="font-bold tabular-nums text-[#5b9dff]">
+                  {rounds.filter((r) => r.winner === "CT").length}
+                </span>
+                <span className="text-faint">CT</span>
+                <span className="text-faint">·</span>
+                <span className="font-bold tabular-nums text-[#e7b53c]">
+                  {rounds.filter((r) => r.winner === "T").length}
+                </span>
+                <span className="text-faint">T</span>
+              </span>
+            </div>
+          </div>
+          <Link
+            href={`/demos/${id}/map`}
+            className="btn btn-ghost shrink-0 text-xs"
+          >
+            Strategy map →
           </Link>
-          <h1 className="text-xl font-extrabold tracking-tight">
-            {name}{" "}
-            <span className="pill bg-panel capitalize text-muted">
-              {mapLabel(meta.map)}
-            </span>
-          </h1>
         </div>
-        <Link href={`/demos/${id}/map`} className="btn btn-ghost text-xs">
-          Strategy map →
-        </Link>
-      </div>
+      </section>
 
       {/* analysis tabs */}
       <div className="flex flex-wrap gap-1 border-b border-line">
@@ -387,10 +421,10 @@ export default function ReplayPage() {
             key={tb.k}
             type="button"
             onClick={() => setTab(tb.k)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+            className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition ${
               tab === tb.k
                 ? "border-brand text-ink"
-                : "border-transparent text-muted hover:text-ink"
+                : "border-transparent text-muted hover:border-line hover:text-ink"
             }`}
           >
             {tb.label}
@@ -497,28 +531,49 @@ export default function ReplayPage() {
           </div>
 
           <div className="card px-4 py-3 text-sm">
-            <div className="stat-label mb-2">Round {round.n}</div>
+            <div className="mb-2.5 flex items-center justify-between">
+              <span className="stat-label">Round {round.n}</span>
+              {round.winner && (
+                <span
+                  className="pill font-bold"
+                  style={
+                    round.winner === "CT"
+                      ? { background: "rgba(91,157,255,0.18)", color: "#9cc1ff" }
+                      : { background: "rgba(231,181,60,0.18)", color: "#f0cd78" }
+                  }
+                >
+                  {round.winner} win
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="mb-1 text-xs font-semibold text-[#9cc1ff]">CT</div>
-                {round.ct?.map((i) => (
-                  <div key={i} className="truncate text-xs text-muted">
-                    {meta.players[i]?.name}
-                  </div>
-                ))}
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-[#9cc1ff]">
+                  <span className="h-2 w-2 rounded-full bg-[#5b9dff]" /> CT
+                </div>
+                <div className="space-y-0.5">
+                  {round.ct?.map((i) => (
+                    <div key={i} className="truncate text-xs text-muted">
+                      {meta.players[i]?.name}
+                    </div>
+                  ))}
+                </div>
               </div>
               <div>
-                <div className="mb-1 text-xs font-semibold text-[#f0cd78]">T</div>
-                {round.t?.map((i) => (
-                  <div key={i} className="truncate text-xs text-muted">
-                    {meta.players[i]?.name}
-                  </div>
-                ))}
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-[#f0cd78]">
+                  <span className="h-2 w-2 rounded-full bg-[#e7b53c]" /> T
+                </div>
+                <div className="space-y-0.5">
+                  {round.t?.map((i) => (
+                    <div key={i} className="truncate text-xs text-muted">
+                      {meta.players[i]?.name}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-            <div className="mt-3 text-xs text-faint">
-              {round.kills.length} kills · {round.nades.length} nades ·{" "}
-              {round.winner || "?"} win
+            <div className="mt-3 border-t border-line pt-2 text-xs text-faint">
+              {round.kills.length} kills · {round.nades.length} nades
             </div>
           </div>
         </div>
