@@ -37,8 +37,10 @@ export interface ReplayKill {
 export interface ReplayNade {
   t: number;
   k: "smoke" | "molotov" | "flash" | "he" | "decoy" | string;
-  x: number;
+  x: number; // landing / detonation
   y: number;
+  ox?: number; // throw origin (where the thrower released it)
+  oy?: number;
   dur: number;
   by: number; // thrower player index, -1 if unknown
 }

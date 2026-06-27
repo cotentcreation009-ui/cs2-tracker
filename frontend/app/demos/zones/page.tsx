@@ -34,9 +34,11 @@ export default function ZonesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("none");
   const [draft, setDraft] = useState<{ x: number; y: number }[]>([]);
+  const [drag, setDrag] = useState<{ zoneId: string; idx: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imgOk = useRef(false);
+  const setsRef = useRef<ZoneSet[]>([]);
 
   useEffect(() => {
     setSets(loadCustomSets(map));
@@ -44,7 +46,12 @@ export default function ZonesPage() {
     setEditingId(null);
     setTool("none");
     setDraft([]);
+    setDrag(null);
   }, [map]);
+
+  useEffect(() => {
+    setsRef.current = sets;
+  }, [sets]);
 
   const defaults = useMemo(() => defaultZoneSet(map), [map]);
   const editing = editingId ? sets.find((s) => s.id === editingId) ?? null : null;
@@ -145,6 +152,19 @@ export default function ZonesPage() {
       ctx.fillStyle = "#fff";
       ctx.fillText(z.name, cx, cy - 8);
       ctx.textAlign = "left";
+
+      // draggable handles while editing this set
+      if (editingId) {
+        for (const p of z.points) {
+          ctx.beginPath();
+          ctx.arc(p.x * SIZE, p.y * SIZE, 4.5, 0, 7);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      }
     }
 
     if (draft.length) {
@@ -163,7 +183,7 @@ export default function ZonesPage() {
         ctx.fill();
       }
     }
-  }, [shown, draft]);
+  }, [shown, draft, editingId]);
 
   useEffect(() => {
     imgOk.current = false;
@@ -199,6 +219,59 @@ export default function ZonesPage() {
     setTool("none");
   };
 
+  // --- drag to reposition existing points (select mode: no tool active) ---
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const posOf = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+  };
+  const hitPoint = (nx: number, ny: number): { zoneId: string; idx: number } | null => {
+    if (!editing) return null;
+    const R = 10 / SIZE; // ~10px grab radius in normalized space
+    for (const z of editing.zones) {
+      for (let i = 0; i < z.points.length; i++) {
+        if (Math.abs(z.points[i].x - nx) < R && Math.abs(z.points[i].y - ny) < R) {
+          return { zoneId: z.id, idx: i };
+        }
+      }
+    }
+    return null;
+  };
+  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!editing || tool !== "none") return; // only drag when no draw tool is active
+    const { x, y } = posOf(e);
+    const hit = hitPoint(x, y);
+    if (hit) {
+      setDrag(hit);
+      e.preventDefault();
+    }
+  };
+  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!drag || !editingId) return;
+    const { x, y } = posOf(e);
+    const cx = clamp01(x);
+    const cy = clamp01(y);
+    const next = setsRef.current.map((s) =>
+      s.id === editingId
+        ? {
+            ...s,
+            zones: s.zones.map((z) =>
+              z.id === drag.zoneId
+                ? { ...z, points: z.points.map((p, i) => (i === drag.idx ? { x: cx, y: cy } : p)) }
+                : z,
+            ),
+          }
+        : s,
+    );
+    setsRef.current = next;
+    setSets(next); // re-render only; persist once on release
+  };
+  const endDrag = () => {
+    if (!drag) return;
+    saveCustomSets(map, setsRef.current);
+    setDrag(null);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -224,8 +297,18 @@ export default function ZonesPage() {
           width={SIZE}
           height={SIZE}
           onClick={onClick}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
           className={`aspect-square w-full max-w-160 rounded-xl border border-line bg-panel2 ${
-            editing && tool !== "none" ? "cursor-crosshair" : ""
+            editing && tool !== "none"
+              ? "cursor-crosshair"
+              : drag
+                ? "cursor-grabbing"
+                : editing
+                  ? "cursor-grab"
+                  : ""
           }`}
         />
 
@@ -311,7 +394,11 @@ export default function ZonesPage() {
                   )}
                 </div>
                 <p className="mt-2 text-[11px] text-faint">
-                  {tool === "anchor" ? "Click the map to drop a named point." : tool === "polygon" ? "Click points, then Finish." : "Pick a tool, or edit zones below."}
+                  {tool === "anchor"
+                    ? "Click the map to drop a named point."
+                    : tool === "polygon"
+                      ? "Click points, then Finish."
+                      : "Drag any point on the map to reposition it, or pick a tool / edit zones below."}
                 </p>
               </div>
 

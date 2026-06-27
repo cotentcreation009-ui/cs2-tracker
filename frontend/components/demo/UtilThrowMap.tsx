@@ -168,7 +168,10 @@ export function UtilThrowMap({
       // (only when both ends actually project onto the map)
       if (solo) {
         const t = throws[0];
-        const op = proj.project(t.ox, t.oy);
+        // origin === landing means the origin couldn't be resolved (legacy demo)
+        // — draw no lineup line rather than a zero-length one.
+        const hasOrigin = t.ox !== t.x || t.oy !== t.y;
+        const op = hasOrigin ? proj.project(t.ox, t.oy) : null;
         const lp = proj.project(t.x, t.y);
         if (op && lp) {
           const color = KIND_COLOR[t.kind] ?? "#5b9dff";
@@ -186,20 +189,23 @@ export function UtilThrowMap({
 
       throws.forEach((t, i) => {
         const color = KIND_COLOR[t.kind] ?? "#5b9dff";
+        const hasOrigin = t.ox !== t.x || t.oy !== t.y;
         const o = place(t.ox, t.oy);
         const land = place(t.x, t.y);
         const local = elapsed - i * STAGGER;
+        // no resolved origin → skip the travel arc and bloom at the landing
+        const bloomStart = hasOrigin ? TRAVEL : 0;
 
         dot(ctx, land.x, land.y, 2.5, color, 0.5);
         if (local < 0) return;
 
-        if (local < TRAVEL) {
+        if (hasOrigin && local < TRAVEL) {
           const k = local / TRAVEL;
           const px = o.x + (land.x - o.x) * k;
           const py = o.y + (land.y - o.y) * k - Math.sin(Math.PI * k) * 48;
           dot(ctx, px, py, solo ? 4.5 : 3.5, color, 0.95);
-        } else if (local < TRAVEL + BLOOM) {
-          const k = (local - TRAVEL) / BLOOM;
+        } else if (local < bloomStart + BLOOM) {
+          const k = (local - bloomStart) / BLOOM;
           const R = (BLOOM_R[t.kind] ?? 0.05) * SIZE * easeOut(k);
           const a = t.kind === "flash" ? 1 - k : 0.5 * (1 - k) + 0.18;
           ctx.beginPath();
