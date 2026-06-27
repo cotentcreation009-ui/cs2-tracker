@@ -53,6 +53,9 @@ export interface ReplayPlayerStat {
   utilDmg?: number; // of dmg, from grenades/molotov
   flashed?: number; // enemies flashed
   flashDur?: number; // total enemy blind seconds dealt
+  aimN?: number; // kills with an aim-tell sample (victim became visible first)
+  rctMs?: number; // sum reaction ms (since victim spotted) — average by aimN
+  preaim?: number; // sum crosshair offset (deg) at spot instant — average by aimN
 }
 
 export interface ReplayBomb {

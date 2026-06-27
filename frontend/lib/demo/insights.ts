@@ -26,6 +26,7 @@ export interface PlayerInsight {
   multiKills: MultiKillTally; multiKillRounds: number;
   favoriteWeapons: FavoriteWeapon[]; area: AreaTendency;
   adr: number; utilDamage: number; enemiesFlashed: number; flashDuration: number;
+  reactionMs: number; preaimDeg: number; aimSamples: number;
   utilThrown: { smoke: number; molotov: number; flash: number; he: number; decoy: number; total: number };
   buys: { pistol: number; eco: number; force: number; full: number };
   utilNades: UtilThrow[]; // every grenade this player threw (for the map view)
@@ -212,6 +213,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     mk: MultiKillTally; mkRounds: number; weapons: Map<string, number>;
     a: number; b: number; mid: number; areaRounds: number;
     dmg: number; utilDmg: number; flashed: number; flashDur: number;
+    aimN: number; rctMs: number; preaim: number;
     util: { smoke: number; molotov: number; flash: number; he: number; decoy: number };
     buys: { pistol: number; eco: number; force: number; full: number };
     nadeList: UtilThrow[];
@@ -224,6 +226,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         tradeK: 0, tradedD: 0, mk: { k2: 0, k3: 0, k4: 0, k5: 0 }, mkRounds: 0,
         weapons: new Map(), a: 0, b: 0, mid: 0, areaRounds: 0,
         dmg: 0, utilDmg: 0, flashed: 0, flashDur: 0,
+        aimN: 0, rctMs: 0, preaim: 0,
         util: { smoke: 0, molotov: 0, flash: 0, he: 0, decoy: 0 },
         buys: { pistol: 0, eco: 0, force: 0, full: 0 }, nadeList: [] };
       acc.set(i, a);
@@ -317,6 +320,9 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       a.utilDmg += s.utilDmg ?? 0;
       a.flashed += s.flashed ?? 0;
       a.flashDur += s.flashDur ?? 0;
+      a.aimN += s.aimN ?? 0;
+      a.rctMs += s.rctMs ?? 0;
+      a.preaim += s.preaim ?? 0;
       if (s.buy === "pistol") a.buys.pistol++;
       else if (s.buy === "eco") a.buys.eco++;
       else if (s.buy === "force") a.buys.force++;
@@ -365,6 +371,9 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       area: { a: a.a, b: a.b, mid: a.mid, rounds: a.areaRounds },
       adr: a.rounds ? a.dmg / a.rounds : 0,
       utilDamage: a.utilDmg, enemiesFlashed: a.flashed, flashDuration: a.flashDur,
+      reactionMs: a.aimN ? a.rctMs / a.aimN : 0,
+      preaimDeg: a.aimN ? a.preaim / a.aimN : 0,
+      aimSamples: a.aimN,
       utilThrown: {
         ...a.util,
         total: a.util.smoke + a.util.molotov + a.util.flash + a.util.he + a.util.decoy,

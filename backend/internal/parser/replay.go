@@ -78,6 +78,14 @@ type ReplayPlayerStat struct {
 	UtilDmg  int     `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
 	Flashed  int     `json:"flashed,omitempty"`  // enemies flashed
 	FlashDur float64 `json:"flashDur,omitempty"` // total enemy blind seconds dealt
+	// Aim tells (per-tick): for kills where the victim became visible to this
+	// player shortly before dying. AimN = sample count; sum fields are averaged
+	// on the frontend. RctMs = ms from victim-spotted to the kill (lower = faster
+	// reaction); Preaim = crosshair offset to the victim at the spot instant in
+	// degrees (lower = more precise pre-aim).
+	AimN   int     `json:"aimN,omitempty"`
+	RctMs  float64 `json:"rctMs,omitempty"`
+	Preaim float64 `json:"preaim,omitempty"`
 }
 
 // ReplayFrame is one downsampled snapshot. T is seconds since round start.
@@ -219,6 +227,14 @@ type replayCollector struct {
 	roundT0  float64
 	capEvery float64
 	lastCap  float64
+
+	// aim-tell tracking (per round): victim steamID -> spotter steamID -> state.
+	// spotted = current spotted-by state (for rising-edge detection); spotT =
+	// time the current spotted episode began; spotAim = spotter's crosshair
+	// offset (deg) to the victim at that instant.
+	spotted map[uint64]map[uint64]bool
+	spotT   map[uint64]map[uint64]float64
+	spotAim map[uint64]map[uint64]float64
 }
 
 // stats returns the per-round accumulator for a player index, creating it lazily.
@@ -310,6 +326,9 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 		Stats:  []ReplayPlayerStat{},
 	}
 	rc.stat = map[int]*ReplayPlayerStat{}
+	rc.spotted = map[uint64]map[uint64]bool{}
+	rc.spotT = map[uint64]map[uint64]float64{}
+	rc.spotAim = map[uint64]map[uint64]float64{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -387,6 +406,68 @@ func (rc *replayCollector) onFrameDone(events.FrameDone) {
 	if len(frame.Pos) > 0 {
 		rc.cur.Frames = append(rc.cur.Frames, frame)
 	}
+
+	// Aim-tell tracking: detect the rising edge of "victim spotted by enemy k",
+	// recording the time + k's crosshair offset to the victim at that instant.
+	// onKill reads the latest episode to derive reaction + pre-aim.
+	now := rc.rt()
+	alive := gs.Participants().Playing()
+	for _, v := range alive {
+		if v == nil || v.SteamID64 == 0 || !v.IsAlive() {
+			continue
+		}
+		for _, k := range alive {
+			if k == nil || k.SteamID64 == 0 || k == v || !k.IsAlive() || k.Team == v.Team {
+				continue
+			}
+			seen := v.IsSpottedBy(k)
+			was := rc.spotted[v.SteamID64] != nil && rc.spotted[v.SteamID64][k.SteamID64]
+			if seen && !was {
+				rc.setSpot(v.SteamID64, k.SteamID64, now, aimOffsetDeg(k, v))
+			}
+			rc.setSpotted(v.SteamID64, k.SteamID64, seen)
+		}
+	}
+}
+
+func (rc *replayCollector) setSpotted(v, k uint64, val bool) {
+	if rc.spotted[v] == nil {
+		rc.spotted[v] = map[uint64]bool{}
+	}
+	rc.spotted[v][k] = val
+}
+
+func (rc *replayCollector) setSpot(v, k uint64, t, aim float64) {
+	if rc.spotT[v] == nil {
+		rc.spotT[v] = map[uint64]float64{}
+		rc.spotAim[v] = map[uint64]float64{}
+	}
+	rc.spotT[v][k] = t
+	rc.spotAim[v][k] = aim
+}
+
+// aimOffsetDeg is the angle (degrees) between k's view direction and the vector
+// from k's eyes to v — i.e. how far off the crosshair is from the target.
+func aimOffsetDeg(k, v *common.Player) float64 {
+	ke := k.Position()
+	ve := v.Position()
+	dx, dy, dz := ve.X-ke.X, ve.Y-ke.Y, (ve.Z+50)-(ke.Z+64)
+	dl := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if dl == 0 {
+		return 180
+	}
+	yaw := float64(k.ViewDirectionX()) * math.Pi / 180
+	pitch := float64(k.ViewDirectionY()) * math.Pi / 180
+	ax := math.Cos(yaw) * math.Cos(pitch)
+	ay := math.Sin(yaw) * math.Cos(pitch)
+	az := -math.Sin(pitch)
+	dot := (dx*ax + dy*ay + dz*az) / dl
+	if dot > 1 {
+		dot = 1
+	} else if dot < -1 {
+		dot = -1
+	}
+	return math.Acos(dot) * 180 / math.Pi
 }
 
 func (rc *replayCollector) onKill(e events.Kill) {
@@ -411,6 +492,23 @@ func (rc *replayCollector) onKill(e events.Kill) {
 		k.Kx, k.Ky = i32(kp.X), i32(kp.Y)
 	}
 	rc.cur.Kills = append(rc.cur.Kills, k)
+
+	// Aim tells for the killer: if the victim had become visible to them, how
+	// fast they killed after the victim appeared + how close the crosshair
+	// already was when the victim appeared.
+	if e.Killer != nil && k.Killer >= 0 && rc.spotT[e.Victim.SteamID64] != nil {
+		vID, kID := e.Victim.SteamID64, e.Killer.SteamID64
+		if st, ok := rc.spotT[vID][kID]; ok {
+			rctMs := (rc.rt() - st) * 1000
+			if rctMs >= 0 && rctMs <= 3000 { // genuine react-and-kill window
+				if s := rc.stats(k.Killer); s != nil {
+					s.AimN++
+					s.RctMs += rctMs
+					s.Preaim += rc.spotAim[vID][kID]
+				}
+			}
+		}
+	}
 }
 
 func (rc *replayCollector) bombXY() (int32, int32) {
