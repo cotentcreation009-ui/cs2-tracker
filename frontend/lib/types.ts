@@ -140,6 +140,8 @@ export interface LeetifyRecentMatch {
   map_name: string;
   leetify_rating: number;
   score: number[]; // [team, enemy]
+  rank?: number; // FACEIT level / Premier rating / Competitive rank (per rank_type)
+  rank_type?: number; // 11 = Premier (rank is the rating), 12 = Competitive
   preaim: number;
   reaction_time_ms: number;
   accuracy_head: number;
