@@ -51,7 +51,10 @@ export interface ReplayPlayerStat {
   i: number;
   equip?: number; // equipment value at freeze-time end
   buy?: "pistol" | "eco" | "force" | "full" | string;
+  money?: number; // cash left after buying (freeze-time end)
+  bought?: string[]; // loadout at round start (weapons/armor/kit)
   dmg?: number; // health damage dealt to enemies
+  dmgTo?: Record<string, number>; // damage dealt, by victim player index (even without a kill)
   utilDmg?: number; // of dmg, from grenades/molotov
   flashed?: number; // enemies flashed
   flashDur?: number; // total enemy blind seconds dealt

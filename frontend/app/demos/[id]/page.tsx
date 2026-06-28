@@ -1010,6 +1010,7 @@ export default function ReplayPage() {
               round={round}
               meta={meta}
               i={focusPlayer}
+              rounds={rounds}
               onClose={() => setFocusPlayer(null)}
             />
           ) : (
