@@ -401,11 +401,11 @@ function PlayerCard({
         </div>
       ) : null}
 
-      {p.buys.pistol + p.buys.eco + p.buys.force + p.buys.full > 0 && (
+      {p.buys.pistol + p.buys.eco + p.buys.semi + p.buys.force + p.buys.full > 0 && (
         <div className="mt-2 flex items-center justify-between text-[10px]">
           <span className="text-muted">Buys</span>
           <span className="text-faint">
-            {p.buys.full} full · {p.buys.force} force · {p.buys.eco} eco · {p.buys.pistol} pistol
+            {p.buys.full} full · {p.buys.force} force · {p.buys.semi} semi · {p.buys.eco} eco · {p.buys.pistol} pistol
           </span>
         </div>
       )}
