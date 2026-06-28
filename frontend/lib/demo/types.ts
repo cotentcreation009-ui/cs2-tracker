@@ -51,6 +51,7 @@ export interface ReplayPlayerStat {
   i: number;
   equip?: number; // equipment value at freeze-time end
   buy?: "pistol" | "eco" | "force" | "full" | string;
+  startMoney?: number; // cash at round start (before buying)
   money?: number; // cash left after buying (freeze-time end)
   bought?: string[]; // loadout at round start (weapons/armor/kit)
   dmg?: number; // health damage dealt to enemies

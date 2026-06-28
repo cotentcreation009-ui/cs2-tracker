@@ -51,6 +51,7 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
     won: !!side && round.winner === side,
     buy: stat?.buy ?? null,
     equip: stat?.equip ?? 0,
+    startMoney: stat?.startMoney ?? 0,
     money: stat?.money ?? 0,
     bought: stat?.bought ?? [],
     kills: kills.length,
@@ -161,6 +162,12 @@ export function PlayerRoundCard({
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] uppercase tracking-wider text-faint">Buy</span>
           <span className="text-[11px] tabular-nums">
+            {d.startMoney > 0 && (
+              <>
+                <span className="text-faint">${d.startMoney} start</span>
+                <span className="text-faint"> · </span>
+              </>
+            )}
             <span className="text-muted">${d.money} left</span>
             {loss && (
               <>

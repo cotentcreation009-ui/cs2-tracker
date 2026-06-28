@@ -75,8 +75,9 @@ type ReplayPlayerStat struct {
 	I        int      `json:"i"`               // player index
 	Equip    int      `json:"equip,omitempty"` // equipment value at freeze-time end
 	Buy      string   `json:"buy,omitempty"`   // pistol | eco | force | full
-	Money    int      `json:"money,omitempty"` // cash left after buying (freeze-time end)
-	Bought   []string `json:"bought,omitempty"` // loadout at round start (weapons/armor/kit)
+	StartMoney int    `json:"startMoney,omitempty"` // cash at round start (before buying)
+	Money    int      `json:"money,omitempty"`     // cash left after buying (freeze-time end)
+	Bought   []string `json:"bought,omitempty"`    // loadout at round start (weapons/armor/kit)
 	Dmg      int         `json:"dmg,omitempty"`      // health damage dealt to enemies
 	DmgTo    map[int]int `json:"dmgTo,omitempty"`    // damage dealt, by victim player index (even if not killed)
 	UtilDmg  int         `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
@@ -260,6 +261,9 @@ type replayCollector struct {
 	// whose inferno entity id does NOT match the projectile id.
 	nadeOrigins map[int]throwOrigin
 	moloOrigins []throwOrigin
+	// dedup detonation events by grenade entity id within a short window —
+	// demoinfocs dispatches FlashExplode twice (game-event + Source-1 mimic).
+	nadeSeen map[int]float64
 }
 
 type throwOrigin struct {
@@ -363,6 +367,7 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.spotAim = map[uint64]map[uint64]float64{}
 	rc.nadeOrigins = map[int]throwOrigin{} // entity ids are reused — reset each round
 	rc.moloOrigins = nil
+	rc.nadeSeen = map[int]float64{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -373,6 +378,9 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 			rc.cur.CT = append(rc.cur.CT, i)
 		case common.TeamTerrorists:
 			rc.cur.T = append(rc.cur.T, i)
+		}
+		if s := rc.stats(i); s != nil {
+			s.StartMoney = pl.Money() // cash before the buy phase
 		}
 	}
 }
@@ -402,6 +410,7 @@ func (rc *replayCollector) onRoundEnd(e events.RoundEnd) {
 	rc.stat = nil
 	rc.nadeOrigins = nil
 	rc.moloOrigins = nil
+	rc.nadeSeen = nil
 }
 
 func (rc *replayCollector) onFrameDone(events.FrameDone) {
@@ -614,6 +623,15 @@ func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *
 	if rc.cur == nil {
 		return
 	}
+	// Dedup duplicate detonation dispatches for the same grenade (flashes fire a
+	// game event AND a Source-1 mimic). Same entity id within ~1s = the same
+	// detonation; a far-later reuse of the id is a different grenade, so keep it.
+	if entID >= 0 {
+		if last, seen := rc.nadeSeen[entID]; seen && rc.rt()-last < 1 {
+			return
+		}
+		rc.nadeSeen[entID] = rc.rt()
+	}
 	n := ReplayNade{T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Dur: dur, By: rc.playerIndex(by)}
 	o, ok := throwOrigin{}, false
 	if entID >= 0 {
@@ -750,15 +768,18 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 	if s == nil {
 		return
 	}
-	s.Dmg += e.HealthDamage
+	// HealthDamageTaken excludes over-damage (capped at the victim's remaining HP),
+	// so per-enemy damage can't exceed 100 — HealthDamage is the raw/over-damage.
+	dmg := e.HealthDamageTaken
+	s.Dmg += dmg
 	if vi := rc.playerIndex(e.Player); vi >= 0 {
 		if s.DmgTo == nil {
 			s.DmgTo = map[int]int{}
 		}
-		s.DmgTo[vi] += e.HealthDamage
+		s.DmgTo[vi] += dmg
 	}
 	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
-		s.UtilDmg += e.HealthDamage
+		s.UtilDmg += dmg
 	}
 	if isFirearm(e.Weapon) {
 		s.Hits++
