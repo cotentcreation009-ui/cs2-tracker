@@ -651,7 +651,9 @@ export default function PlayerInsights({
               type="button"
               onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
               title={`Focus ${a.p.name}`}
-              className="flex items-center gap-2 rounded-lg border border-line bg-panel/50 px-3 py-1.5 text-left transition hover:border-brand/40 hover:bg-panel"
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
+                focusI === a.p.i ? "border-brand/50 bg-brand/10" : "border-line bg-panel/50 hover:border-brand/40 hover:bg-panel"
+              }`}
             >
               <span className="text-[10px] uppercase tracking-wider text-faint">{a.label}</span>
               <span className="text-sm font-bold" style={{ color: sideHex(a.p.team) }}>{a.p.name}</span>
