@@ -235,6 +235,9 @@ function PlayerCard({
           {p.kills}
         </span>
         <span className="text-sm text-faint">/ {p.deaths}</span>
+        {p.assistsApprox > 0 && (
+          <span className="text-xs text-faint" title="assists (approx)">/ {p.assistsApprox}a</span>
+        )}
         <span className="text-xs text-muted">
           {p.kd.toFixed(2)} K/D · {p.kpr.toFixed(2)} KPR
         </span>
@@ -568,10 +571,12 @@ export default function PlayerInsights({
   useEffect(() => {
     setThrowIdx(null);
   }, [focusI]);
-  // bring the focused player's card into view (e.g. after an award chip / toolbar pick)
+  // bring the card into view ONLY on an explicit pick (award chip / toolbar / card)
+  // — not the auto-fallback, which would scroll on every tab open.
   useEffect(() => {
-    if (focusI != null) cardRefs.current.get(focusI)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [focusI]);
+    if (view.focusPlayer != null)
+      cardRefs.current.get(view.focusPlayer)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [view.focusPlayer]);
 
   if (!players.length) {
     const lbl =
@@ -617,12 +622,14 @@ export default function PlayerInsights({
   const mapThrows = soloThrow ? [soloThrow] : selThrows;
   const zoneOf = (x: number, y: number) =>
     classifyPosition(meta.map, x, y, zones)?.name ?? null;
-  const stepThrow = (d: number) =>
+  const stepThrow = (d: number) => {
+    setHoverIdx(null); // keyboard/buttons take priority over a transient hover preview
     setThrowIdx((i) => {
       if (!selThrows.length) return null;
       const next = (i ?? -1) + d;
       return Math.max(0, Math.min(selThrows.length - 1, next < 0 ? 0 : next));
     });
+  };
 
   const pickUtil = (player: PlayerInsight, k: string) => {
     view.setFocusPlayer(player.i);
@@ -724,6 +731,7 @@ export default function PlayerInsights({
               stepThrow(1);
             } else if (e.key === "Escape") {
               setThrowIdx(null);
+              setHoverIdx(null);
             }
           }}
         >
