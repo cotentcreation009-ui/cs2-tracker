@@ -489,20 +489,34 @@ function RoundTimeline({
               key={ri}
               type="button"
               onClick={() => onPick(ri)}
-              title={`Round ${r.n} · ${won ? "won" : "lost"} · ${kills}K · ${dmg} dmg · ${died ? "died" : "survived"}${util ? ` · ${util} util` : ""}`}
-              className={`grid h-9 w-7 place-items-center rounded border leading-none transition ${
-                won ? "border-good/40 bg-good/10" : "border-bad/30 bg-bad/10"
-              } ${!side ? "opacity-40" : "hover:brightness-150"} ${active ? "ring-2 ring-brand" : ""}`}
+              title={
+                side == null
+                  ? `Round ${r.n} · did not play`
+                  : `Round ${r.n} · ${won ? "won" : "lost"} · ${kills}K · ${dmg} dmg · ${died ? "died" : "survived"}${util ? ` · ${util} util` : ""}`
+              }
+              className={`grid h-9 w-7 place-items-center rounded border leading-none transition ${active ? "ring-2 ring-brand" : ""} ${
+                side == null
+                  ? "border-line bg-panel/40 opacity-40"
+                  : won
+                    ? "border-good/40 bg-good/10 hover:brightness-150"
+                    : "border-bad/30 bg-bad/10 hover:brightness-150"
+              }`}
             >
-              <span
-                className="text-xs font-bold tabular-nums"
-                style={kills >= 3 ? { color: "#f5b942" } : undefined}
-              >
-                {kills}
-              </span>
-              <span className="mt-0.5 text-[8px]">
-                {died ? <span className="text-bad">✕</span> : <span className="text-good">•</span>}
-              </span>
+              {side == null ? (
+                <span className="text-xs text-faint">–</span>
+              ) : (
+                <>
+                  <span
+                    className="text-xs font-bold tabular-nums"
+                    style={kills >= 3 ? { color: "#f5b942" } : undefined}
+                  >
+                    {kills}
+                  </span>
+                  <span className="mt-0.5 text-[8px]">
+                    {died ? <span className="text-bad">✕</span> : <span className="text-good">•</span>}
+                  </span>
+                </>
+              )}
             </button>
           );
         })}
