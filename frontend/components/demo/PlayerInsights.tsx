@@ -18,6 +18,8 @@ import { UtilThrowMap } from "@/components/demo/UtilThrowMap";
 import { demoCheat, BAND_HEX, BAND_LABEL } from "@/lib/demo/cheat";
 import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
 import { AccountCheck } from "@/components/demo/AccountCheck";
+import { clientFaceit, clientLeetify } from "@/lib/demo/accountClient";
+import type { FaceitProfile, LeetifyProfile } from "@/lib/types";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
@@ -557,25 +559,76 @@ function RoundTimeline({
 
 // Side-by-side stat comparison of two players; the better value in each row is
 // bolded green (deaths/reaction are lower-is-better).
+type CareerSide = { faceit: FaceitProfile | null; leetify: LeetifyProfile | null };
+
 function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; onClose: () => void }) {
-  const rows: { label: string; av: number; bv: number; fmt: (n: number) => string; lower?: boolean; show?: boolean }[] = [
-    { label: "Impact", av: impactRating(a), bv: impactRating(b), fmt: (n) => n.toFixed(2) },
-    { label: "Kills", av: a.kills, bv: b.kills, fmt: (n) => `${n}` },
-    { label: "Deaths", av: a.deaths, bv: b.deaths, fmt: (n) => `${n}`, lower: true },
-    { label: "K/D", av: a.kd, bv: b.kd, fmt: (n) => n.toFixed(2) },
-    { label: "KPR", av: a.kpr, bv: b.kpr, fmt: (n) => n.toFixed(2) },
-    { label: "ADR", av: a.adr, bv: b.adr, fmt: (n) => n.toFixed(0) },
-    { label: "KAST", av: a.kastPct, bv: b.kastPct, fmt: (n) => `${n.toFixed(0)}%` },
-    { label: "HS%", av: a.hsPct, bv: b.hsPct, fmt: (n) => `${n.toFixed(0)}%` },
-    { label: "Opening W%", av: a.openingWinPct, bv: b.openingWinPct, fmt: (n) => `${n.toFixed(0)}%` },
-    { label: "Clutches won", av: a.clutchWon, bv: b.clutchWon, fmt: (n) => `${n}` },
-    { label: "Multi-K rds", av: a.multiKillRounds, bv: b.multiKillRounds, fmt: (n) => `${n}` },
-    { label: "Trade K", av: a.tradeKills, bv: b.tradeKills, fmt: (n) => `${n}` },
-    { label: "Utility", av: a.utilNades.length, bv: b.utilNades.length, fmt: (n) => `${n}` },
-    { label: "Accuracy", av: a.accuracy, bv: b.accuracy, fmt: (n) => `${n.toFixed(0)}%`, show: a.shots >= 20 && b.shots >= 20 },
-    { label: "Reaction", av: a.reactionMs, bv: b.reactionMs, fmt: (n) => `${n.toFixed(0)}ms`, lower: true, show: a.aimSamples >= 5 && b.aimSamples >= 5 },
+  // pull each player's CAREER profile so the demo compare also shows who they are
+  // outside this match (Leetify aim, Premier, FACEIT ELO / K-D / win%).
+  const [career, setCareer] = useState<{ a: CareerSide; b: CareerSide } | null>(null);
+  const [careerState, setCareerState] = useState<"loading" | "done">("loading");
+  useEffect(() => {
+    let cancelled = false;
+    setCareer(null);
+    setCareerState("loading");
+    const grab = (id: string) =>
+      Promise.all([clientFaceit(id).catch(() => null), clientLeetify(id).catch(() => null)]).then(
+        ([faceit, leetify]) => ({ faceit, leetify }),
+      );
+    Promise.all([grab(a.steamId), grab(b.steamId)]).then(([ca, cb]) => {
+      if (cancelled) return;
+      setCareer({ a: ca, b: cb });
+      setCareerState("done");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [a.steamId, b.steamId]);
+
+  const rows: { label: string; av?: number; bv?: number; fmt: (n: number) => string; lower?: boolean; show?: boolean }[] = [
+    { label: "Impact", av: impactRating(a), bv: impactRating(b), fmt: (n: number) => n.toFixed(2) },
+    { label: "Kills", av: a.kills, bv: b.kills, fmt: (n: number) => `${n}` },
+    { label: "Deaths", av: a.deaths, bv: b.deaths, fmt: (n: number) => `${n}`, lower: true },
+    { label: "K/D", av: a.kd, bv: b.kd, fmt: (n: number) => n.toFixed(2) },
+    { label: "KPR", av: a.kpr, bv: b.kpr, fmt: (n: number) => n.toFixed(2) },
+    { label: "ADR", av: a.adr, bv: b.adr, fmt: (n: number) => n.toFixed(0) },
+    { label: "KAST", av: a.kastPct, bv: b.kastPct, fmt: (n: number) => `${n.toFixed(0)}%` },
+    { label: "HS%", av: a.hsPct, bv: b.hsPct, fmt: (n: number) => `${n.toFixed(0)}%` },
+    { label: "Opening W%", av: a.openingWinPct, bv: b.openingWinPct, fmt: (n: number) => `${n.toFixed(0)}%` },
+    { label: "Clutches won", av: a.clutchWon, bv: b.clutchWon, fmt: (n: number) => `${n}` },
+    { label: "Multi-K rds", av: a.multiKillRounds, bv: b.multiKillRounds, fmt: (n: number) => `${n}` },
+    { label: "Trade K", av: a.tradeKills, bv: b.tradeKills, fmt: (n: number) => `${n}` },
+    { label: "Utility", av: a.utilNades.length, bv: b.utilNades.length, fmt: (n: number) => `${n}` },
+    { label: "Accuracy", av: a.accuracy, bv: b.accuracy, fmt: (n: number) => `${n.toFixed(0)}%`, show: a.shots >= 20 && b.shots >= 20 },
+    { label: "Reaction", av: a.reactionMs, bv: b.reactionMs, fmt: (n: number) => `${n.toFixed(0)}ms`, lower: true, show: a.aimSamples >= 5 && b.aimSamples >= 5 },
   ];
-  const winner = (av: number, bv: number, lower?: boolean) => (av === bv ? 0 : (lower ? av < bv : av > bv) ? -1 : 1);
+
+  const careerRows: typeof rows = career
+    ? [
+        { label: "Leetify aim", av: career.a.leetify?.rating.aim, bv: career.b.leetify?.rating.aim, fmt: (n: number) => n.toFixed(1) },
+        { label: "Premier", av: career.a.leetify?.ranks.premier, bv: career.b.leetify?.ranks.premier, fmt: (n: number) => n.toLocaleString() },
+        { label: "FACEIT ELO", av: career.a.faceit?.elo, bv: career.b.faceit?.elo, fmt: (n: number) => `${n}` },
+        { label: "FACEIT lvl", av: career.a.faceit?.skillLevel, bv: career.b.faceit?.skillLevel, fmt: (n: number) => `${n}` },
+        { label: "Career K/D", av: career.a.faceit?.kdRatio, bv: career.b.faceit?.kdRatio, fmt: (n: number) => n.toFixed(2) },
+        { label: "Career win%", av: career.a.faceit?.winRatePct, bv: career.b.faceit?.winRatePct, fmt: (n: number) => `${n.toFixed(0)}%` },
+      ].filter((r) => r.av != null || r.bv != null)
+    : [];
+
+  const winner = (av?: number, bv?: number, lower?: boolean) =>
+    av == null || bv == null || av === bv ? 0 : (lower ? av < bv : av > bv) ? -1 : 1;
+  const Row = (r: (typeof rows)[number]) => {
+    const w = winner(r.av, r.bv, r.lower);
+    return (
+      <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
+        <span className={`text-right tabular-nums ${w === -1 ? "font-bold text-good" : "text-muted"}`}>
+          {r.av == null ? "—" : r.fmt(r.av)}
+        </span>
+        <span className="w-24 text-center text-[10px] uppercase tracking-wider text-faint">{r.label}</span>
+        <span className={`tabular-nums ${w === 1 ? "font-bold text-good" : "text-muted"}`}>
+          {r.bv == null ? "—" : r.fmt(r.bv)}
+        </span>
+      </div>
+    );
+  };
   return (
     <div className="card-2 px-4 py-3">
       <div className="mb-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -587,16 +640,19 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
         </div>
       </div>
       <div className="space-y-0.5">
-        {rows.filter((r) => r.show !== false).map((r) => {
-          const w = winner(r.av, r.bv, r.lower);
-          return (
-            <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
-              <span className={`text-right tabular-nums ${w === -1 ? "font-bold text-good" : "text-muted"}`}>{r.fmt(r.av)}</span>
-              <span className="w-24 text-center text-[10px] uppercase tracking-wider text-faint">{r.label}</span>
-              <span className={`tabular-nums ${w === 1 ? "font-bold text-good" : "text-muted"}`}>{r.fmt(r.bv)}</span>
-            </div>
-          );
-        })}
+        <div className="mb-1 text-center text-[10px] uppercase tracking-wider text-faint">This match</div>
+        {rows.filter((r) => r.show !== false).map(Row)}
+
+        <div className="mt-2 mb-1 border-t border-line pt-2 text-center text-[10px] uppercase tracking-wider text-faint">
+          Career
+        </div>
+        {careerState === "loading" && (
+          <div className="text-center text-[11px] text-faint">loading career stats…</div>
+        )}
+        {careerState === "done" && careerRows.length === 0 && (
+          <div className="text-center text-[11px] text-faint">no public career data for either player</div>
+        )}
+        {careerRows.map(Row)}
       </div>
     </div>
   );
