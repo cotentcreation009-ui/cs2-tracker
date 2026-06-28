@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { weaponLabel } from "@/lib/demo/insights";
+import { classifyBuy } from "@/lib/demo/economy";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 
 const CT = "#5b9dff";
@@ -75,7 +76,6 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
   };
 }
 
-const BUY_LABEL: Record<string, string> = { full: "Full buy", force: "Force buy", eco: "Eco", pistol: "Pistol" };
 
 // Loss bonus the player's team is sitting on entering this round: $1400 + $500
 // per consecutive loss (capped at $3400), reset at the half (side swap). Computed
@@ -164,12 +164,15 @@ export function PlayerRoundCard({
         <span className={`pill ${d.alive ? "bg-good/12 text-good" : "bg-panel text-faint"}`}>
           {d.alive ? "Survived" : "Died"}
         </span>
-        {d.buy && (
-          <span className="pill bg-panel text-muted">
-            {BUY_LABEL[d.buy] ?? d.buy}
-            {d.equip ? ` · $${d.equip}` : ""}
-          </span>
-        )}
+        {d.buy && (() => {
+          const b = classifyBuy(d.equip, round.n);
+          return (
+            <span className="pill bg-panel text-muted" title={b.hint}>
+              <span className={`font-semibold ${b.color}`}>{b.label}</span>
+              {d.equip ? ` · $${d.equip}` : ""}
+            </span>
+          );
+        })()}
       </div>
 
       <div className="mt-2 rounded-md border border-line bg-panel/40 px-2.5 py-1.5">

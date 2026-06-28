@@ -192,12 +192,12 @@ export function playstyleSummary(p: PlayerInsight, t?: PlayerTendencies): string
   }
 
   // --- economy / buy discipline ---
-  const nb = p.buys.eco + p.buys.force + p.buys.full;
+  const nb = p.buys.eco + p.buys.semi + p.buys.force + p.buys.full;
   if (nb >= 5) {
-    const ecoPct = p.buys.eco / nb;
+    const ecoPct = (p.buys.eco + p.buys.semi) / nb; // full saves + half-buys
     const forcePct = p.buys.force / nb;
     if (ecoPct <= 0.12) lines.push("Economy: disciplined — rarely ecos, buys when the team buys.");
-    else if (ecoPct >= 0.4) lines.push("Economy: saves a lot — ecos frequently.");
+    else if (ecoPct >= 0.4) lines.push("Economy: saves a lot — ecos / half-buys frequently.");
     if (forcePct >= 0.3) lines.push("Economy: force-buys often — aggressive with money.");
   }
 

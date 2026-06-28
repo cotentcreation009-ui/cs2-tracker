@@ -8,6 +8,7 @@
 // the UI so numbers are never silently fabricated.
 
 import type { ReplayMeta, ReplayNade, ReplayRound } from "@/lib/demo/types";
+import { classifyBuy, type BuyKey } from "@/lib/demo/economy";
 
 export interface MultiKillTally { k2: number; k3: number; k4: number; k5: number; }
 
@@ -33,7 +34,7 @@ export interface PlayerInsight {
   snapRate: number; // % of aim-sample kills that landed fast despite a far crosshair
   accuracy: number; hsAccuracy: number; shots: number; // firearm accuracy (% of shots that hit / headshot)
   utilThrown: { smoke: number; molotov: number; flash: number; he: number; decoy: number; total: number };
-  buys: { pistol: number; eco: number; force: number; full: number };
+  buys: Record<BuyKey, number>;
   utilNades: UtilThrow[]; // every grenade this player threw (for the map view)
 }
 
@@ -79,7 +80,7 @@ export const PLAYER_INSIGHTS_LIMITATIONS = [
   "ADR is enemy health-damage per round; it can differ slightly from official (no per-hit overkill cap).",
   "Flash stats are enemies blinded + blind-seconds dealt, not flash-assists (we don't tie a flash to a teammate's kill).",
   "Assists are a trade-proximity proxy (our data has no assist event).",
-  "Economy is a coarse equipment-value bucket (pistol / eco / force / full), not real money or a full loadout.",
+  "Economy is a coarse equipment-value bucket (pistol / eco / semi-buy / force / full), not real money or a full loadout.",
   "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones.",
   "KAST counts rounds with a kill, real assist, survival or traded death; clutches (1vX) are reconstructed from the kill timeline, with 1v1s credited to the round winner.",
   "Grenades whose thrower the demo didn't record are counted in match totals but can't be attributed to a player on the map.",
@@ -233,7 +234,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     aimN: number; rctMs: number; preaim: number; snap: number;
     shots: number; hits: number; hsHits: number;
     util: { smoke: number; molotov: number; flash: number; he: number; decoy: number };
-    buys: { pistol: number; eco: number; force: number; full: number };
+    buys: Record<BuyKey, number>;
     nadeList: UtilThrow[];
   }
   const acc = new Map<number, Acc>();
@@ -249,7 +250,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         aimN: 0, rctMs: 0, preaim: 0, snap: 0,
         shots: 0, hits: 0, hsHits: 0,
         util: { smoke: 0, molotov: 0, flash: 0, he: 0, decoy: 0 },
-        buys: { pistol: 0, eco: 0, force: 0, full: 0 }, nadeList: [] };
+        buys: { pistol: 0, eco: 0, semi: 0, force: 0, full: 0 }, nadeList: [] };
       acc.set(i, a);
     }
     return a;
@@ -408,10 +409,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       a.shots += s.shots ?? 0;
       a.hits += s.hits ?? 0;
       a.hsHits += s.hsHits ?? 0;
-      if (s.buy === "pistol") a.buys.pistol++;
-      else if (s.buy === "eco") a.buys.eco++;
-      else if (s.buy === "force") a.buys.force++;
-      else if (s.buy === "full") a.buys.full++;
+      a.buys[classifyBuy(s.equip ?? 0, r.n).key]++;
     }
 
     // utility — match-wide totals + per-thrower attribution (nade.by) + the
