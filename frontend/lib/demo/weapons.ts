@@ -9,7 +9,8 @@
 // per-weapon kill counts + headshot %, weapon-class mix, and the same data
 // sliced per player (their personal weapon breakdown + HS%).
 
-import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
+import type { ReplayMeta, ReplayRound, ReplayPlayerStat } from "@/lib/demo/types";
+import { classifyBuy, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
 
 export type WeaponClass = "rifle" | "sniper" | "smg" | "pistol" | "heavy" | "other";
 
@@ -199,18 +200,29 @@ function statFrom(key: string, a: Acc): WeaponStat {
   };
 }
 
+// Aggregate by the killer (offensive: "kills by weapon") or by the victim
+// (defensive: "deaths by weapon" — keyed on who DIED, but the weapon is always
+// the killer's recorded weapon, i.e. what killed them; never the victim's gun).
+export interface WeaponQuery {
+  by?: "killer" | "victim";
+  focus?: number | null; // limit to one subject (killer in offense, victim in defense)
+}
+
 /**
  * Aggregate all weapon insight data from the kill events of the supplied
- * rounds. Pure — call inside useMemo. `roundFilter` lets the UI scope to a
- * single round (or any subset) by round index.
+ * rounds. Pure — call inside useMemo. `roundFilter` scopes to a round subset;
+ * `query.by` flips between the offensive (killer) and defensive (victim) lens.
  */
 export function computeWeaponInsights(
   meta: ReplayMeta,
   rounds: ReplayRound[],
   roundFilter?: (r: ReplayRound, idx: number) => boolean,
   side: "all" | "CT" | "T" = "all",
+  query: WeaponQuery = {},
 ): WeaponInsightsData {
   if (!meta || !rounds?.length) return EMPTY;
+  const by = query.by ?? "killer";
+  const focus = query.focus ?? null;
 
   const overall = new Map<string, Acc>();
   const byClass = new Map<WeaponClass, Acc>();
@@ -223,8 +235,12 @@ export function computeWeaponInsights(
     if (roundFilter && !roundFilter(r, idx)) return;
     usedRounds++;
     for (const k of r.kills ?? []) {
-      if (k.k < 0) continue; // no killer (e.g. suicide / world) — skip weapon credit
-      if (side !== "all" && sideOfKiller(r, k.k, meta) !== side) continue;
+      // subject = whose stat this event belongs to: the killer (offense) or the
+      // victim (defense). The weapon is always the killer's recorded weapon.
+      const subj = by === "killer" ? k.k : k.v;
+      if (subj < 0) continue; // no killer (suicide/world) in offense; always have a victim
+      if (focus != null && subj !== focus) continue;
+      if (side !== "all" && sideOfKiller(r, subj, meta) !== side) continue;
       const m = weaponMeta(k.w);
       const hs = k.hs ? 1 : 0;
       totalKills++;
@@ -240,10 +256,10 @@ export function computeWeaponInsights(
       c.headshots += hs;
       byClass.set(m.cls, c);
 
-      let pp = perPlayer.get(k.k);
+      let pp = perPlayer.get(subj);
       if (!pp) {
         pp = { total: { kills: 0, headshots: 0 }, weapons: new Map() };
-        perPlayer.set(k.k, pp);
+        perPlayer.set(subj, pp);
       }
       pp.total.kills++;
       pp.total.headshots += hs;
@@ -313,4 +329,99 @@ export function computeWeaponInsights(
     deadliestPlayer: players[0] ?? null,
     rounds: usedRounds,
   };
+}
+
+// --- buy-vs-buy kill matrix (the economy ladder) ---------------------------
+
+export interface BuyMatrix {
+  cells: Record<BuyKey, Record<BuyKey, number>>; // [killerTier][victimTier]
+  rowTotals: Record<BuyKey, number>; // kills by killer tier
+  colTotals: Record<BuyKey, number>; // deaths by victim tier
+  total: number;
+  upset: number; // killer on a weaker buy than the victim ("punching up")
+  even: number; // same buy tier
+  max: number; // busiest cell (for shading)
+  hasData: boolean;
+}
+
+const blankRow = (): Record<BuyKey, number> =>
+  BUY_KEYS.reduce((o, k) => ((o[k] = 0), o), {} as Record<BuyKey, number>);
+
+// computeBuyMatrix joins each kill to BOTH players' per-round economy (equip) so
+// you can see who frags up the buy ladder. Needs r.stats[].equip — degrades to
+// hasData=false when the stats block is absent (older parses). Stats are keyed
+// by an explicit .i field, so we index by a map, never positionally.
+export function computeBuyMatrix(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  roundFilter?: (r: ReplayRound, idx: number) => boolean,
+  side: "all" | "CT" | "T" = "all",
+  focus: number | null = null,
+): BuyMatrix {
+  const cells = BUY_KEYS.reduce((o, k) => ((o[k] = blankRow()), o), {} as Record<BuyKey, Record<BuyKey, number>>);
+  const rowTotals = blankRow();
+  const colTotals = blankRow();
+  let total = 0, upset = 0, even = 0, max = 0, hasData = false;
+  const rank = (k: BuyKey) => BUY_KEYS.indexOf(k); // 0 = full (richest) … 4 = pistol (poorest)
+
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    const stats = r.stats ?? [];
+    if (!stats.length) return; // no economy data this round
+    const byIdx = new Map<number, ReplayPlayerStat>();
+    for (const s of stats) byIdx.set(s.i, s);
+    for (const k of r.kills ?? []) {
+      if (k.k < 0 || k.v < 0) continue;
+      if (focus != null && k.k !== focus) continue;
+      if (side !== "all" && sideOfKiller(r, k.k, meta) !== side) continue;
+      const ks = byIdx.get(k.k);
+      const vs = byIdx.get(k.v);
+      if (!ks || !vs) continue; // need both economies
+      hasData = true;
+      const kt = classifyBuy(ks.equip ?? 0, r.n).key;
+      const vt = classifyBuy(vs.equip ?? 0, r.n).key;
+      const cell = ++cells[kt][vt];
+      if (cell > max) max = cell;
+      rowTotals[kt]++;
+      colTotals[vt]++;
+      total++;
+      const dr = rank(kt) - rank(vt);
+      if (dr > 0) upset++;
+      else if (dr === 0) even++;
+    }
+  });
+
+  return { cells, rowTotals, colTotals, total, upset, even, max, hasData };
+}
+
+// nemesis: the single opponent who killed the focused player most this scope,
+// with the weapon they used most against them. Null if the player wasn't killed.
+export interface Nemesis { i: number; name: string; team: "CT" | "T" | ""; deaths: number; weapon: WeaponMeta }
+
+export function computeNemesis(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  victim: number,
+  roundFilter?: (r: ReplayRound, idx: number) => boolean,
+): Nemesis | null {
+  const byKiller = new Map<number, { n: number; weapons: Map<string, number> }>();
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    for (const k of r.kills ?? []) {
+      if (k.v !== victim || k.k < 0 || k.k === victim) continue;
+      let e = byKiller.get(k.k);
+      if (!e) { e = { n: 0, weapons: new Map() }; byKiller.set(k.k, e); }
+      e.n++;
+      const wk = weaponMeta(k.w).key;
+      e.weapons.set(wk, (e.weapons.get(wk) ?? 0) + 1);
+    }
+  });
+  let best = -1, bestN = 0;
+  let bestWeapons: Map<string, number> | null = null;
+  for (const [i, e] of byKiller) if (e.n > bestN) ((bestN = e.n), (best = i), (bestWeapons = e.weapons));
+  if (best < 0 || !bestWeapons) return null;
+  let topW = "", topN = -1;
+  for (const [wk, n] of bestWeapons) if (n > topN) ((topN = n), (topW = wk));
+  const p = meta.players[best];
+  return { i: best, name: p?.name ?? `Player ${best}`, team: p?.team ?? "", deaths: bestN, weapon: weaponMeta(topW) };
 }
