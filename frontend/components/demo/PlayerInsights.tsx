@@ -178,6 +178,8 @@ function PlayerCard({
   tend,
   onFocus,
   onUtil,
+  onCompare,
+  comparing,
 }: {
   p: PlayerInsight;
   rank?: number;
@@ -187,6 +189,8 @@ function PlayerCard({
   tend?: PlayerTendencies;
   onFocus: () => void;
   onUtil: (player: PlayerInsight, kind: string) => void;
+  onCompare?: () => void;
+  comparing?: boolean;
 }) {
   const hex = sideHex(p.team);
   const mk = p.multiKills;
@@ -222,6 +226,20 @@ function PlayerCard({
             {role}
           </span>
         </button>
+        {onCompare && (
+          <button
+            type="button"
+            onClick={onCompare}
+            title="Add to comparison (pick two)"
+            className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition ${
+              comparing
+                ? "border-brand/50 bg-brand/15 text-brand"
+                : "border-line text-muted hover:bg-panel/50 hover:text-ink"
+            }`}
+          >
+            {comparing ? "✓ vs" : "vs"}
+          </button>
+        )}
         <Link
           href={`/profiles/${p.steamId}`}
           title="Open full career profile"
@@ -498,6 +516,51 @@ function RoundTimeline({
   );
 }
 
+// Side-by-side stat comparison of two players; the better value in each row is
+// bolded green (deaths/reaction are lower-is-better).
+function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; onClose: () => void }) {
+  const rows: { label: string; av: number; bv: number; fmt: (n: number) => string; lower?: boolean; show?: boolean }[] = [
+    { label: "Impact", av: impactRating(a), bv: impactRating(b), fmt: (n) => n.toFixed(2) },
+    { label: "Kills", av: a.kills, bv: b.kills, fmt: (n) => `${n}` },
+    { label: "Deaths", av: a.deaths, bv: b.deaths, fmt: (n) => `${n}`, lower: true },
+    { label: "K/D", av: a.kd, bv: b.kd, fmt: (n) => n.toFixed(2) },
+    { label: "KPR", av: a.kpr, bv: b.kpr, fmt: (n) => n.toFixed(2) },
+    { label: "ADR", av: a.adr, bv: b.adr, fmt: (n) => n.toFixed(0) },
+    { label: "HS%", av: a.hsPct, bv: b.hsPct, fmt: (n) => `${n.toFixed(0)}%` },
+    { label: "Opening W%", av: a.openingWinPct, bv: b.openingWinPct, fmt: (n) => `${n.toFixed(0)}%` },
+    { label: "Multi-K rds", av: a.multiKillRounds, bv: b.multiKillRounds, fmt: (n) => `${n}` },
+    { label: "Trade K", av: a.tradeKills, bv: b.tradeKills, fmt: (n) => `${n}` },
+    { label: "Utility", av: a.utilNades.length, bv: b.utilNades.length, fmt: (n) => `${n}` },
+    { label: "Accuracy", av: a.accuracy, bv: b.accuracy, fmt: (n) => `${n.toFixed(0)}%`, show: a.shots >= 20 && b.shots >= 20 },
+    { label: "Reaction", av: a.reactionMs, bv: b.reactionMs, fmt: (n) => `${n.toFixed(0)}ms`, lower: true, show: a.aimSamples >= 5 && b.aimSamples >= 5 },
+  ];
+  const winner = (av: number, bv: number, lower?: boolean) => (av === bv ? 0 : (lower ? av < bv : av > bv) ? -1 : 1);
+  return (
+    <div className="card-2 px-4 py-3">
+      <div className="mb-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <span className="truncate text-right text-sm font-bold" style={{ color: sideHex(a.team) }}>{a.name}</span>
+        <span className="text-[10px] uppercase tracking-wider text-faint">vs</span>
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-bold" style={{ color: sideHex(b.team) }}>{b.name}</span>
+          <button type="button" onClick={onClose} className="ml-auto shrink-0 text-sm text-faint hover:text-ink" title="Clear comparison">✕</button>
+        </div>
+      </div>
+      <div className="space-y-0.5">
+        {rows.filter((r) => r.show !== false).map((r) => {
+          const w = winner(r.av, r.bv, r.lower);
+          return (
+            <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
+              <span className={`text-right tabular-nums ${w === -1 ? "font-bold text-good" : "text-muted"}`}>{r.fmt(r.av)}</span>
+              <span className="w-24 text-center text-[10px] uppercase tracking-wider text-faint">{r.label}</span>
+              <span className={`tabular-nums ${w === 1 ? "font-bold text-good" : "text-muted"}`}>{r.fmt(r.bv)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function PlayerInsights({
   meta,
   rounds,
@@ -512,6 +575,7 @@ export default function PlayerInsights({
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("impact");
+  const [compare, setCompare] = useState<number[]>([]);
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
@@ -630,7 +694,13 @@ export default function PlayerInsights({
     setKindSel(null);
     setThrowIdx(null);
     setHoverIdx(null);
+    setCompare([]);
   }, [view.scopeRound, view.side]);
+
+  const toggleCompare = (i: number) =>
+    setCompare((c) => (c.includes(i) ? c.filter((x) => x !== i) : [...c, i].slice(-2)));
+  const cmpA = compare[0] != null ? data.players.find((p) => p.i === compare[0]) ?? null : null;
+  const cmpB = compare[1] != null ? data.players.find((p) => p.i === compare[1]) ?? null : null;
   // kind is player-scoped (see pickedKind), so changing player resets it
   // implicitly; only the throw selection needs an explicit reset here.
   useEffect(() => {
@@ -728,6 +798,8 @@ export default function PlayerInsights({
         </div>
       )}
 
+      {cmpA && cmpB && <CompareTable a={cmpA} b={cmpB} onClose={() => setCompare([])} />}
+
       {focusI != null && (
         <RoundTimeline
           rounds={rounds}
@@ -783,6 +855,8 @@ export default function PlayerInsights({
                 tend={tendMap.get(p.steamId)}
                 onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
                 onUtil={pickUtil}
+                onCompare={() => toggleCompare(p.i)}
+                comparing={compare.includes(p.i)}
               />
             </div>
           ))}
