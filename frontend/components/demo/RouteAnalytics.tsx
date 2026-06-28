@@ -8,6 +8,7 @@ import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, ZONE_COLOR, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
+import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
 const CT = "#5b9dff";
@@ -390,18 +391,28 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
 
         {/* right panel */}
         {scopedRound ? (
-          <RoundDetail
-            meta={meta}
-            round={scopedRound}
-            score={score}
-            active={active}
-            focus={typeof playerFilter === "number" ? playerFilter : null}
-            onHover={onHover}
-            onPin={onPin}
-            name={name}
-            sideOfIdx={(i) => sideOfIdx(scopedRound, i)}
-            zoneOf={zoneOf}
-          />
+          <div className="space-y-3">
+            {typeof playerFilter === "number" && (
+              <PlayerRoundCard
+                round={scopedRound}
+                meta={meta}
+                i={playerFilter}
+                onClose={() => view.setFocusPlayer(null)}
+              />
+            )}
+            <RoundDetail
+              meta={meta}
+              round={scopedRound}
+              score={score}
+              active={active}
+              focus={typeof playerFilter === "number" ? playerFilter : null}
+              onHover={onHover}
+              onPin={onPin}
+              name={name}
+              sideOfIdx={(i) => sideOfIdx(scopedRound, i)}
+              zoneOf={zoneOf}
+            />
+          </div>
         ) : (
           <div className="card flex max-h-200 flex-col px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
