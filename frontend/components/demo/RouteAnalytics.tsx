@@ -243,6 +243,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 <>
                   {/* util: origin → landing, interactive */}
                   {(scopedRound.nades ?? []).map((n, i) => {
+                    // when a player is selected, only their own util — not everyone's
+                    if (playerFilter !== "all" && n.by !== playerFilter) return null;
                     const c = pt(n.x, n.y); if (!c) return null;
                     const col = KIND_COLOR[n.k] ?? "#8a7dff";
                     const o = throwOrigin(scopedRound, n);
@@ -277,6 +279,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                   {/* kills: killer X + victim ring, interactive */}
                   {(scopedRound.kills ?? []).map((k, i) => {
                     if (k.k < 0) return null;
+                    // when a player is selected, only their own engagements (their
+                    // kills + their death) — not where other people were fighting
+                    if (playerFilter !== "all" && k.k !== playerFilter && k.v !== playerFilter) return null;
                     const kc = pt(k.kx, k.ky);
                     const vc = pt(k.vx, k.vy); if (!vc) return null;
                     const related = !active
@@ -340,11 +345,24 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 {zoom > 1 ? `${zoom.toFixed(1)}× · drag to pan` : ""}{zoom > 1 && pin ? " · " : ""}{pin ? "pinned — click again to clear" : ""}
               </div>
             )}
-            {scopedRound && (scopedRound.kills ?? []).filter((k) => k.k >= 0).length === 0 && (
-              <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
-                Round {scopedRound.n} — no eliminations
-              </div>
-            )}
+            {scopedRound && (() => {
+              if (playerFilter !== "all") {
+                const pf = playerFilter;
+                const involved =
+                  (scopedRound.kills ?? []).some((k) => k.k >= 0 && (k.k === pf || k.v === pf)) ||
+                  (scopedRound.nades ?? []).some((n) => n.by === pf);
+                return involved ? null : (
+                  <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
+                    No kills or utility for {name(pf)} this round
+                  </div>
+                );
+              }
+              return (scopedRound.kills ?? []).filter((k) => k.k >= 0).length === 0 ? (
+                <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
+                  Round {scopedRound.n} — no eliminations
+                </div>
+              ) : null;
+            })()}
             {!calibrated && <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">{meta.map} uncalibrated — auto-scaled</div>}
           </div>
 
@@ -377,6 +395,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             round={scopedRound}
             score={score}
             active={active}
+            focus={typeof playerFilter === "number" ? playerFilter : null}
             onHover={onHover}
             onPin={onPin}
             name={name}
@@ -414,6 +433,7 @@ function RoundDetail({
   round,
   score,
   active,
+  focus,
   onHover,
   onPin,
   name,
@@ -424,6 +444,7 @@ function RoundDetail({
   round: ReplayRound;
   score: { ct: number; t: number } | null;
   active: Active;
+  focus: number | null;
   onHover: (a: Active) => void;
   onPin: (a: Active) => void;
   name: (i: number) => string;
@@ -432,10 +453,15 @@ function RoundDetail({
 }) {
   const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
 
-  // keep original indices so hover/pin line up with the map markers
-  const nades = (round.nades ?? []).map((n, i) => ({ n, i })).sort((a, b) => a.n.t - b.n.t);
-  const kills = (round.kills ?? []).map((k, i) => ({ k, i })).sort((a, b) => a.k.t - b.k.t);
-  const killsReal = kills.filter((x) => x.k.k >= 0);
+  // keep original indices so hover/pin line up with the map markers. When a
+  // player is selected, the util + kill feeds show only their own actions.
+  const nadesAll = (round.nades ?? []).map((n, i) => ({ n, i })).sort((a, b) => a.n.t - b.n.t);
+  const killsAll = (round.kills ?? []).map((k, i) => ({ k, i })).sort((a, b) => a.k.t - b.k.t);
+  const nades = focus != null ? nadesAll.filter((x) => x.n.by === focus) : nadesAll;
+  const killsReal =
+    focus != null
+      ? killsAll.filter((x) => x.k.k >= 0 && (x.k.k === focus || x.k.v === focus))
+      : killsAll.filter((x) => x.k.k >= 0);
 
   const status = (i: number) => {
     const death = (round.kills ?? []).find((k) => k.v === i);
@@ -469,6 +495,9 @@ function RoundDetail({
             {round.winner ? `${round.winner} win` : "—"}
           </div>
           <div className="text-xs text-muted">{reasonLabel(round.reason, round.winner)}</div>
+          {focus != null && (
+            <div className="mt-0.5 text-[11px] font-semibold text-brand">Showing {name(focus)} only</div>
+          )}
         </div>
         {score && (
           <div className="text-right text-sm font-bold tabular-nums">
@@ -497,7 +526,7 @@ function RoundDetail({
                   return (
                     <button key={p.i} type="button" {...rowProps({ kind: "player", id: p.i }, on)}>
                       <span className="w-3 text-center text-xs">{p.died ? <span className="text-bad">✕</span> : <span className="text-good">✓</span>}</span>
-                      <span className={`truncate text-xs ${p.died ? "text-muted" : "text-ink"}`}>{name(p.i)}</span>
+                      <span className={`truncate text-xs ${p.i === focus ? "font-bold text-brand" : p.died ? "text-muted" : "text-ink"}`}>{name(p.i)}</span>
                       {p.kills > 0 && <span className="ml-auto shrink-0 text-[11px] text-faint">{p.kills}K</span>}
                       {p.died && p.deathT != null && (
                         <span className={`shrink-0 text-[11px] tabular-nums text-faint ${p.kills > 0 ? "ml-1.5" : "ml-auto"}`}>{mmss(p.deathT)}</span>
