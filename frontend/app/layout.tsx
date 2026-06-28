@@ -39,17 +39,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen overflow-x-clip">
         <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
+          <div className="mx-auto flex max-w-[1800px] items-center gap-3 px-4 py-2.5 sm:gap-6 lg:px-8">
             <Link
               href="/"
               className="shrink-0 transition-opacity hover:opacity-90"
             >
               <Logo />
             </Link>
-            <div className="ml-auto flex items-center gap-3">
-              <div className="w-full max-w-md">
-                <SearchBar />
-              </div>
+            {/* search centered between the logo and the nav */}
+            <div className="mx-auto w-full max-w-xl">
+              <SearchBar />
+            </div>
+            <nav className="flex shrink-0 items-center gap-4 sm:gap-5">
               <Link
                 href="/demos"
                 className="link-muted shrink-0 text-sm font-medium"
@@ -62,14 +63,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               >
                 Compare
               </Link>
-            </div>
+            </nav>
           </div>
         </header>
 
         <main className="mx-auto max-w-6xl px-4 pb-24 pt-6">{children}</main>
 
         <footer className="border-t border-line">
-          <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-faint sm:flex-row sm:items-center sm:justify-between">
+          <div className="mx-auto flex max-w-[1800px] flex-col gap-2 px-4 py-6 text-xs text-faint sm:flex-row sm:items-center sm:justify-between lg:px-8">
             <span>
               StatRun · independent CS2 analytics · not affiliated with Valve,
               Steam, Leetify or FACEIT.
