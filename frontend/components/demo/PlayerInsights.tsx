@@ -824,7 +824,7 @@ export default function PlayerInsights({
         />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,400px)]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)] 2xl:grid-cols-[1fr_minmax(0,520px)]">
       {/* left: player cards */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -849,7 +849,7 @@ export default function PlayerInsights({
             </div>
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 min-[1800px]:grid-cols-3">
           {sortedPlayers.map((p, idx) => (
             <div
               key={p.i}
