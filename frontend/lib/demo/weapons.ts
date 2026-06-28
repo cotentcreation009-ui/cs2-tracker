@@ -425,3 +425,125 @@ export function computeNemesis(
   const p = meta.players[best];
   return { i: best, name: p?.name ?? `Player ${best}`, team: p?.team ?? "", deaths: bestN, weapon: weaponMeta(topW) };
 }
+
+// --- head-to-head (player vs player duels) ---------------------------------
+
+export interface PlayerRef { i: number; name: string; team: "CT" | "T" | "" }
+
+export interface Duel {
+  opp: PlayerRef;
+  for: number; // focus killed opp
+  against: number; // opp killed focus
+  net: number; // for - against
+  forWeapon: WeaponMeta | null; // weapon focus used most on opp
+  againstWeapon: WeaponMeta | null; // weapon opp used most on focus
+}
+
+type PairAcc = Map<number, Map<number, { n: number; weapons: Map<string, number> }>>;
+
+// buildPairs counts kills for every ordered (killer, victim) pair. Duels cross
+// sides (you only kill enemies) and players swap sides at the half, so this is
+// intentionally not side-filtered — only round-scoped.
+function buildPairs(rounds: ReplayRound[], roundFilter?: (r: ReplayRound, idx: number) => boolean): PairAcc {
+  const pair: PairAcc = new Map();
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    for (const k of r.kills ?? []) {
+      if (k.k < 0 || k.v < 0 || k.k === k.v) continue;
+      let m = pair.get(k.k);
+      if (!m) { m = new Map(); pair.set(k.k, m); }
+      let e = m.get(k.v);
+      if (!e) { e = { n: 0, weapons: new Map() }; m.set(k.v, e); }
+      e.n++;
+      const wk = weaponMeta(k.w).key;
+      e.weapons.set(wk, (e.weapons.get(wk) ?? 0) + 1);
+    }
+  });
+  return pair;
+}
+
+const topWeaponOf = (weapons: Map<string, number>): WeaponMeta | null => {
+  let best = "", bn = -1;
+  for (const [w, n] of weapons) if (n > bn) ((bn = n), (best = w));
+  return best ? weaponMeta(best) : null;
+};
+
+// computeDuels: the focused player's head-to-head vs every opponent they traded
+// kills with (their kills on each, and each opponent's kills on them).
+export function computeDuels(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  focus: number,
+  roundFilter?: (r: ReplayRound, idx: number) => boolean,
+): Duel[] {
+  const pair = buildPairs(rounds, roundFilter);
+  const mine = pair.get(focus); // focus -> victim
+  const opps = new Set<number>();
+  if (mine) for (const o of mine.keys()) opps.add(o);
+  for (const [killer, m] of pair) if (m.has(focus)) opps.add(killer);
+  const out: Duel[] = [];
+  for (const o of opps) {
+    if (o === focus) continue;
+    const f = mine?.get(o);
+    const a = pair.get(o)?.get(focus);
+    const forN = f?.n ?? 0;
+    const againstN = a?.n ?? 0;
+    const p = meta.players[o];
+    out.push({
+      opp: { i: o, name: p?.name ?? `Player ${o}`, team: p?.team ?? "" },
+      for: forN,
+      against: againstN,
+      net: forN - againstN,
+      forWeapon: f ? topWeaponOf(f.weapons) : null,
+      againstWeapon: a ? topWeaponOf(a.weapons) : null,
+    });
+  }
+  return out.sort((x, y) => y.for + y.against - (x.for + x.against) || y.net - x.net);
+}
+
+export interface DuelMatrix {
+  players: PlayerRef[]; // row/column order (grouped by team, then name)
+  net: number[][]; // net[a][b] = a's kills on b minus b's kills on a
+  for: number[][]; // for[a][b] = a's kills on b
+  maxAbs: number; // largest |net| for shading
+}
+
+// computeDuelMatrix: the full N×N who-out-fragged-whom picture.
+export function computeDuelMatrix(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  roundFilter?: (r: ReplayRound, idx: number) => boolean,
+): DuelMatrix {
+  const pair = buildPairs(rounds, roundFilter);
+  const ids = new Set<number>();
+  for (const [k, m] of pair) {
+    ids.add(k);
+    for (const v of m.keys()) ids.add(v);
+  }
+  const players: PlayerRef[] = [...ids]
+    .map((i) => {
+      const p = meta.players[i];
+      return { i, name: p?.name ?? `Player ${i}`, team: p?.team ?? "" as "CT" | "T" | "" };
+    })
+    .sort((a, b) => (a.team === b.team ? a.name.localeCompare(b.name) : a.team < b.team ? 1 : -1));
+  const at = new Map(players.map((p, n) => [p.i, n]));
+  const raw = players.map(() => players.map(() => 0));
+  for (const [k, m] of pair) {
+    const ri = at.get(k);
+    if (ri == null) continue;
+    for (const [v, e] of m) {
+      const ci = at.get(v);
+      if (ci != null) raw[ri][ci] += e.n;
+    }
+  }
+  let maxAbs = 0;
+  const net = players.map((_, a) =>
+    players.map((_, b) => {
+      if (a === b) return 0;
+      const d = raw[a][b] - raw[b][a];
+      if (Math.abs(d) > maxAbs) maxAbs = Math.abs(d);
+      return d;
+    }),
+  );
+  return { players, net, for: raw, maxAbs };
+}
