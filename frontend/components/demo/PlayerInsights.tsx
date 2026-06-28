@@ -29,6 +29,48 @@ const sideHex = (t: PlayerInsight["team"]) => (t === "T" ? T : CT);
 const mmss = (t: number) =>
   `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`;
 
+// A single at-a-glance "Impact" rating (~1.0 = solid) from kills/round, ADR and
+// survival — for ranking the cards. Labelled Impact, not the official HLTV stat.
+function impactRating(p: PlayerInsight): number {
+  const surv = p.roundsPlayed ? (p.roundsPlayed - p.deaths) / p.roundsPlayed : 0;
+  return Math.max(0, 0.45 * (p.kpr / 0.65) + 0.35 * (p.adr / 78) + 0.2 * (surv / 0.35));
+}
+const ratingHex = (r: number) => (r >= 1.15 ? "#46d369" : r >= 0.85 ? "#f5b942" : "#f5694a");
+
+const SNIPER_RE = /awp|ssg|scar-?20|g3sg1/i;
+// A one-word role from playstyle tendencies + weapon + opening duels.
+function roleOf(p: PlayerInsight, tend?: PlayerTendencies): string {
+  if (SNIPER_RE.test(p.favoriteWeapons?.[0]?.weapon ?? "")) return "AWPer";
+  if (tend && tend.rounds >= 5) {
+    if (tend.lurkPct >= 75) return "Lurker";
+    if (p.openingAttempts >= 4 && tend.spacePct <= 30) return "Entry";
+    if (tend.zoneSamples >= 12 && tend.rotationsPerRound <= 0.5) return "Anchor";
+    if (tend.spacePct >= 70) return "Support";
+  }
+  if (p.openingAttempts >= 5 && p.openingWinPct >= 55) return "Entry";
+  return "Rifler";
+}
+
+type SortKey = "impact" | "kills" | "adr" | "kd" | "hs" | "cheat";
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "impact", label: "Impact" },
+  { key: "kills", label: "Kills" },
+  { key: "adr", label: "ADR" },
+  { key: "kd", label: "K/D" },
+  { key: "hs", label: "HS%" },
+  { key: "cheat", label: "CheatMeter" },
+];
+function sortValue(p: PlayerInsight, key: SortKey): number {
+  switch (key) {
+    case "kills": return p.kills;
+    case "adr": return p.adr;
+    case "kd": return p.kd;
+    case "hs": return p.hsPct;
+    case "cheat": return demoCheat(p).score;
+    default: return impactRating(p);
+  }
+}
+
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-lg bg-panel/50 px-2.5 py-2">
@@ -129,6 +171,7 @@ function LeanRow({ side, l }: { side: "CT" | "T"; l: SideLean }) {
 
 function PlayerCard({
   p,
+  rank,
   focused,
   activeKind,
   lean,
@@ -137,6 +180,7 @@ function PlayerCard({
   onUtil,
 }: {
   p: PlayerInsight;
+  rank?: number;
   focused: boolean;
   activeKind: string | null;
   lean?: PlayerSiteLean;
@@ -151,6 +195,8 @@ function PlayerCard({
   const cheat = demoCheat(p);
   const tLines = playstyleSummary(p, tend);
   const hasAim = p.shots >= 1 || p.aimSamples >= 1;
+  const rating = impactRating(p);
+  const role = roleOf(p, tend);
   return (
     <div
       className={`card lift relative overflow-hidden py-3 pl-3 pr-4 transition ${
@@ -165,9 +211,15 @@ function PlayerCard({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title="Focus this player across all tabs"
         >
+          {rank != null && (
+            <span className="shrink-0 text-xs font-bold tabular-nums text-faint">#{rank}</span>
+          )}
           <span className="truncate font-bold">{p.name}</span>
           <span className="pill shrink-0" style={{ background: `${hex}22`, color: hex }}>
             {p.team || "—"}
+          </span>
+          <span className="pill shrink-0 bg-panel2 text-[10px] text-faint" title="Role inferred from playstyle">
+            {role}
           </span>
         </button>
         <Link
@@ -185,6 +237,14 @@ function PlayerCard({
         <span className="text-sm text-faint">/ {p.deaths}</span>
         <span className="text-xs text-muted">
           {p.kd.toFixed(2)} K/D · {p.kpr.toFixed(2)} KPR
+        </span>
+        <span
+          className="ml-auto rounded-md px-1.5 py-0.5 text-right text-sm font-bold tabular-nums"
+          style={{ color: ratingHex(rating), background: `${ratingHex(rating)}1a` }}
+          title="Impact rating — kills/round, ADR & survival (≈1.0 = solid)"
+        >
+          {rating.toFixed(2)}
+          <span className="ml-1 text-[9px] font-normal uppercase tracking-wider opacity-70">impact</span>
         </span>
       </div>
 
@@ -205,7 +265,7 @@ function PlayerCard({
         </div>
         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-panel">
           <div
-            className="h-full rounded-full"
+            className="bar-grow h-full rounded-full"
             style={{ width: `${cheat.score}%`, background: BAND_HEX[cheat.band] }}
           />
         </div>
@@ -336,17 +396,23 @@ function ThrowRow({
   timing,
   active,
   onClick,
+  onEnter,
+  onLeave,
 }: {
   tw: UtilThrow;
   zone: string | null;
   timing: Timing;
   active: boolean;
   onClick: () => void;
+  onEnter?: () => void;
+  onLeave?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
       className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
         active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
       }`}
@@ -375,7 +441,9 @@ export default function PlayerInsights({
 }) {
   const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
   const [throwIdx, setThrowIdx] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>("impact");
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
 
@@ -395,6 +463,30 @@ export default function PlayerInsights({
     () => data.players.filter((p) => view.side === "all" || p.team === view.side),
     [data, view.side],
   );
+
+  // display order (ranked) — kept separate from `players` so fallback/timing/
+  // lean logic stays order-independent.
+  const sortedPlayers = useMemo(
+    () => [...players].sort((a, b) => sortValue(b, sortKey) - sortValue(a, sortKey)),
+    [players, sortKey],
+  );
+
+  // "best of the match" highlights — quick scan + click to focus.
+  const awards = useMemo(() => {
+    if (!players.length) return [];
+    const top = (fn: (p: PlayerInsight) => number) =>
+      players.reduce((b, p) => (fn(p) > fn(b) ? p : b), players[0]);
+    const out: { label: string; p: PlayerInsight; val: string }[] = [];
+    const frag = top((p) => p.kills);
+    out.push({ label: "Top fragger", p: frag, val: `${frag.kills} kills` });
+    const imp = top((p) => impactRating(p));
+    out.push({ label: "Best impact", p: imp, val: impactRating(imp).toFixed(2) });
+    const entry = top((p) => p.openingKills);
+    if (entry.openingKills > 0) out.push({ label: "Entry king", p: entry, val: `${entry.openingKills} opening K` });
+    const util = top((p) => p.utilNades.length);
+    if (util.utilNades.length > 0) out.push({ label: "Most utility", p: util, val: `${util.utilNades.length} nades` });
+    return out;
+  }, [players]);
 
   const fallback = useMemo(() => {
     let best: PlayerInsight | null = null;
@@ -468,6 +560,7 @@ export default function PlayerInsights({
   useEffect(() => {
     setKindSel(null);
     setThrowIdx(null);
+    setHoverIdx(null);
   }, [view.scopeRound, view.side]);
   // kind is player-scoped (see pickedKind), so changing player resets it
   // implicitly; only the throw selection needs an explicit reset here.
@@ -513,7 +606,9 @@ export default function PlayerInsights({
           .sort((a, b) => a.round - b.round || a.t - b.t)
       : [];
   const spots = activeKind ? clusterUtilThrows(selThrows, (x, y) => proj.project(x, y)) : [];
-  const soloThrow = throwIdx != null && selThrows[throwIdx] ? selThrows[throwIdx] : null;
+  // hovering a throw row previews it on the map; clicking pins it.
+  const shownIdx = hoverIdx ?? throwIdx;
+  const soloThrow = shownIdx != null && selThrows[shownIdx] ? selThrows[shownIdx] : null;
   const mapThrows = soloThrow ? [soloThrow] : selThrows;
   const zoneOf = (x: number, y: number) =>
     classifyPosition(meta.map, x, y, zones)?.name ?? null;
@@ -535,26 +630,68 @@ export default function PlayerInsights({
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,400px)]">
+    <div className="space-y-3">
+      {awards.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {awards.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
+              title={`Focus ${a.p.name}`}
+              className="flex items-center gap-2 rounded-lg border border-line bg-panel/50 px-3 py-1.5 text-left transition hover:border-brand/40 hover:bg-panel"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-faint">{a.label}</span>
+              <span className="text-sm font-bold" style={{ color: sideHex(a.p.team) }}>{a.p.name}</span>
+              <span className="text-[11px] tabular-nums text-muted">{a.val}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,400px)]">
       {/* left: player cards */}
       <div className="space-y-3">
-        <p className="text-[11px] text-faint">
-          Click a player to focus them, then a utility chip to break it down — each
-          spot is a cluster of throws that land together; open a spot to replay any
-          single lineup on the map.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="max-w-md text-[11px] text-faint">
+            Click a player to focus them, then a utility chip to break it down on the map.
+          </p>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] uppercase tracking-wider text-faint">Sort</span>
+            <div className="flex flex-wrap rounded-lg border border-line bg-panel p-0.5">
+              {SORTS.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setSortKey(s.key)}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
+                    sortKey === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {players.map((p) => (
-            <PlayerCard
+          {sortedPlayers.map((p, idx) => (
+            <div
               key={p.i}
-              p={p}
-              focused={focusI === p.i}
-              activeKind={focusI === p.i ? activeKind : null}
-              lean={siteLean.get(p.i)}
-              tend={tendMap.get(p.steamId)}
-              onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
-              onUtil={pickUtil}
-            />
+              className="insight-card-in"
+              style={{ animationDelay: `${Math.min(idx, 9) * 45}ms` }}
+            >
+              <PlayerCard
+                p={p}
+                rank={idx + 1}
+                focused={focusI === p.i}
+                activeKind={focusI === p.i ? activeKind : null}
+                lean={siteLean.get(p.i)}
+                tend={tendMap.get(p.steamId)}
+                onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
+                onUtil={pickUtil}
+              />
+            </div>
           ))}
         </div>
         <p className="text-[11px] leading-relaxed text-faint">
@@ -565,7 +702,22 @@ export default function PlayerInsights({
 
       {/* right: utility explorer */}
       <div className="space-y-3 self-start lg:sticky lg:top-4">
-        <div className="card-2 p-3">
+        <div
+          className="card-2 p-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/40"
+          tabIndex={selThrows.length ? 0 : -1}
+          onKeyDown={(e) => {
+            if (!selThrows.length) return;
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              stepThrow(-1);
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              stepThrow(1);
+            } else if (e.key === "Escape") {
+              setThrowIdx(null);
+            }
+          }}
+        >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="stat-label">Utility breakdown</span>
             {selPlayer && (
@@ -610,13 +762,13 @@ export default function PlayerInsights({
                 <div className="min-w-0 flex-1 text-center text-[11px]">
                   {soloThrow ? (
                     <span>
-                      <span className="font-semibold text-ink">Throw {(throwIdx ?? 0) + 1}/{selThrows.length}</span>
+                      <span className="font-semibold text-ink">Throw {(shownIdx ?? 0) + 1}/{selThrows.length}</span>
                       <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
                       {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
                     </span>
                   ) : (
                     <span className="text-muted">
-                      {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — step ▶ or pick one
+                      {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — hover a row or ◀ ▶ to step
                     </span>
                   )}
                 </div>
@@ -639,8 +791,10 @@ export default function PlayerInsights({
                     tw={tw}
                     zone={zoneOf(tw.x, tw.y)}
                     timing={timingOf(tw.t)}
-                    active={throwIdx === i}
+                    active={shownIdx === i}
                     onClick={() => setThrowIdx(throwIdx === i ? null : i)}
+                    onEnter={() => setHoverIdx(i)}
+                    onLeave={() => setHoverIdx(null)}
                   />
                 ))}
               </div>
@@ -707,6 +861,7 @@ export default function PlayerInsights({
             Edit call-outs →
           </Link>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -146,3 +146,36 @@ body {
     background: var(--color-faint);
   }
 }
+
+/* Insights: staggered card entrance + a bar that grows in from the left. */
+@keyframes insightCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.insight-card-in {
+  animation: insightCardIn 0.3s ease both;
+}
+@keyframes barGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.bar-grow {
+  transform-origin: left center;
+  animation: barGrow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .insight-card-in,
+  .bar-grow {
+    animation: none;
+  }
+}
