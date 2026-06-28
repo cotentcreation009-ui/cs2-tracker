@@ -56,6 +56,7 @@ export interface ReplayPlayerStat {
   startMoney?: number; // cash at round start (before buying)
   money?: number; // cash left after buying (freeze-time end)
   bought?: string[]; // loadout at round start (weapons/armor/kit)
+  pickedUp?: string[]; // guns grabbed off the ground (a dropped weapon), not bought
   dmg?: number; // health damage dealt to enemies
   dmgTo?: Record<string, number>; // damage dealt, by victim player index (even without a kill)
   utilDmg?: number; // of dmg, from grenades/molotov

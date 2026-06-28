@@ -78,6 +78,7 @@ type ReplayPlayerStat struct {
 	StartMoney int    `json:"startMoney,omitempty"` // cash at round start (before buying)
 	Money    int      `json:"money,omitempty"`     // cash left after buying (freeze-time end)
 	Bought   []string `json:"bought,omitempty"`    // loadout at round start (weapons/armor/kit)
+	PickedUp []string `json:"pickedUp,omitempty"`  // guns grabbed off the ground (a dropped weapon), not bought
 	Dmg      int         `json:"dmg,omitempty"`      // health damage dealt to enemies
 	DmgTo    map[int]int `json:"dmgTo,omitempty"`    // damage dealt, by victim player index (even if not killed)
 	UtilDmg  int         `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
@@ -186,6 +187,8 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onPlayerHurt)
 	p.RegisterEventHandler(rc.onPlayerFlashed)
 	p.RegisterEventHandler(rc.onWeaponFire)
+	p.RegisterEventHandler(rc.onItemDrop)
+	p.RegisterEventHandler(rc.onItemPickup)
 
 	// v5 dropped Parser.Header(); the map name arrives in the server-info net
 	// message early in the stream, so capture it there.
@@ -266,6 +269,13 @@ type replayCollector struct {
 	// dedup detonation events by grenade entity id within a short window —
 	// demoinfocs dispatches FlashExplode twice (game-event + Source-1 mimic).
 	nadeSeen map[int]float64
+
+	// dropped-weapon tracking (per round). droppedW holds weapon unique-ids that
+	// are currently on the ground (ItemDrop), so an ItemPickup of one is a genuine
+	// ground pickup (a dropped weapon) rather than a fresh buy — a buy spawns a new
+	// entity with an id we've never seen. pickedSeen dedupes per player+weapon.
+	droppedW   map[string]bool
+	pickedSeen map[string]bool
 }
 
 type throwOrigin struct {
@@ -370,6 +380,8 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.nadeOrigins = map[int]throwOrigin{} // entity ids are reused — reset each round
 	rc.moloOrigins = nil
 	rc.nadeSeen = map[int]float64{}
+	rc.droppedW = map[string]bool{}
+	rc.pickedSeen = map[string]bool{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -793,6 +805,45 @@ func loadout(pl *common.Player) []string {
 		out = append(out, "Defuse Kit")
 	}
 	return out
+}
+
+// onItemDrop marks a weapon as lying on the ground, so a later pickup of the
+// same entity is recognised as a ground pickup rather than a buy.
+func (rc *replayCollector) onItemDrop(e events.ItemDrop) {
+	if rc.cur == nil || e.Weapon == nil {
+		return
+	}
+	rc.droppedW[e.Weapon.UniqueID2().String()] = true
+}
+
+// onItemPickup records guns a player grabbed off the ground — a previously
+// dropped weapon (a teammate's drop or a dead player's gun) — as distinct from a
+// buy, which spawns a brand-new entity id that was never on the ground.
+func (rc *replayCollector) onItemPickup(e events.ItemPickup) {
+	if rc.cur == nil || e.Player == nil || e.Weapon == nil {
+		return
+	}
+	w := e.Weapon
+	if w.Type == common.EqKnife || w.Type == common.EqBomb || w.Class() == common.EqClassGrenade {
+		return // guns only — knife/bomb/utility aren't "dropped weapons" worth noting
+	}
+	id := w.UniqueID2().String()
+	if !rc.droppedW[id] {
+		return // never on the ground → a fresh buy, not a pickup
+	}
+	delete(rc.droppedW, id) // now held by this player
+	i := rc.playerIndex(e.Player)
+	if i < 0 {
+		return
+	}
+	key := fmt.Sprintf("%d:%s", i, id)
+	if rc.pickedSeen[key] {
+		return // already credited this player with this exact weapon
+	}
+	rc.pickedSeen[key] = true
+	if s := rc.stats(i); s != nil {
+		s.PickedUp = append(s.PickedUp, w.String())
+	}
 }
 
 // onPlayerHurt accumulates enemy damage dealt (and the grenade/fire share of it).

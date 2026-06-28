@@ -59,6 +59,7 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
     startMoney: stat?.startMoney ?? 0,
     money: stat?.money ?? 0,
     bought: stat?.bought ?? [],
+    pickedUp: stat?.pickedUp ?? [],
     kills: kills.length,
     hs: kills.filter((k) => k.hs).length,
     alive: !died,
@@ -199,6 +200,20 @@ export function PlayerRoundCard({
         ) : (
           <div className="mt-1 text-[11px] text-faint">Saved — no buy</div>
         )}
+        {d.pickedUp.length > 0 && (() => {
+          const pc = new Map<string, number>();
+          for (const w of d.pickedUp) pc.set(w, (pc.get(w) ?? 0) + 1);
+          const list = [...pc.entries()].map(([w, n]) => (n > 1 ? `${w} ×${n}` : w));
+          return (
+            <div
+              className="mt-1 border-t border-line/60 pt-1 text-[11px] leading-snug"
+              title="Guns this player grabbed off the ground (a dropped weapon) — not bought"
+            >
+              <span className="text-[10px] uppercase tracking-wider text-faint">Picked up </span>
+              <span className="text-mid">↪ {list.join(", ")}</span>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="mt-2 grid grid-cols-4 gap-1.5 text-center">
