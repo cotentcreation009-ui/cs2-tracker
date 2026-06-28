@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -69,11 +70,16 @@ func (s *Server) handleAiAnalyze(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	text, err := client.Analyze(ctx, aiSystemPrompt, req.Summary)
 	if err != nil {
-		// Surface the real provider error (it's diagnostic, not secret) instead of
-		// a generic 500 — e.g. "vertex responded 403" tells the operator to grant
-		// the role / enable the API, rather than a blank "internal error".
+		// Log the full error (incl. any upstream body) server-side, but return a
+		// body-free message to the client: for a provider HTTP error, the provider
+		// + status (the diagnostic bit) so the operator can act; otherwise generic.
 		s.log.Error("ai analyze", "err", err)
-		writeError(w, http.StatusBadGateway, "AI provider error — "+err.Error())
+		msg := "AI provider error — see server logs"
+		var pe *ai.ProviderError
+		if errors.As(err, &pe) {
+			msg = "AI provider error — " + pe.ClientMessage()
+		}
+		writeError(w, http.StatusBadGateway, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"text": text})
