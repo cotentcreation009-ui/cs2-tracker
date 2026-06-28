@@ -82,7 +82,7 @@ func (v *Vertex) Analyze(ctx context.Context, system, user string) (string, erro
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ai: vertex responded %d: %s", resp.StatusCode, snippet(body))
+		return "", &ProviderError{Provider: "vertex", Status: resp.StatusCode, Body: snippet(body)}
 	}
 	var out struct {
 		Candidates []struct {

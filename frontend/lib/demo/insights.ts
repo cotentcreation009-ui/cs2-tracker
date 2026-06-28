@@ -323,11 +323,14 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     for (const k of kills) if (k.v >= 0) diedThisRound.add(k.v);
     const assistThisRound = new Set<number>();
     for (const k of kills) if (k.a && k.a > 0) assistThisRound.add(k.a - 1);
+    // "Survived" = alive in the final 1 Hz frame and not killed — frames only
+    // snapshot alive players, so this mirrors the backend's IsAlive() survivor
+    // set and excludes mid-round disconnects (no death event, no final frame).
+    const lastFrame = r.frames?.length ? r.frames[r.frames.length - 1] : null;
+    const aliveAtEnd = lastFrame ? new Set<number>(lastFrame.p.filter((p) => p.h > 0).map((p) => p.i)) : null;
     for (const i of onSide) {
-      if (
-        perRoundKills.has(i) || assistThisRound.has(i) ||
-        !diedThisRound.has(i) || tradedThisRound.has(i)
-      ) {
+      const survived = (aliveAtEnd ? aliveAtEnd.has(i) : true) && !diedThisRound.has(i);
+      if (perRoundKills.has(i) || assistThisRound.has(i) || survived || tradedThisRound.has(i)) {
         get(i).kastRounds++;
       }
     }

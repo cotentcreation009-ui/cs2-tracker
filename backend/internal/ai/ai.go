@@ -17,6 +17,28 @@ import (
 // ErrNotConfigured is returned when a provider has no credentials.
 var ErrNotConfigured = errors.New("ai: not configured")
 
+// ProviderError is a non-200 reply from a model backend. Error() carries the
+// upstream body for server logs; ClientMessage() is safe to return to API
+// clients — provider + status only, never the upstream body (which can contain
+// GCP project IDs / IAM resource paths on a Vertex 4xx).
+type ProviderError struct {
+	Provider string
+	Status   int
+	Body     string // upstream response snippet — server-side only
+}
+
+func (e *ProviderError) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("ai: %s responded %d: %s", e.Provider, e.Status, e.Body)
+	}
+	return fmt.Sprintf("ai: %s responded %d", e.Provider, e.Status)
+}
+
+// ClientMessage is the body-free message safe to surface to API clients.
+func (e *ProviderError) ClientMessage() string {
+	return fmt.Sprintf("the %s API responded %d — check the service-account role / API enablement (details in server logs)", e.Provider, e.Status)
+}
+
 // Provider is any model backend that can turn a system+user prompt into text.
 type Provider interface {
 	Configured() bool
@@ -70,7 +92,7 @@ func (c *Client) Analyze(ctx context.Context, system, user string) (string, erro
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ai: anthropic responded %d", resp.StatusCode)
+		return "", &ProviderError{Provider: "anthropic", Status: resp.StatusCode}
 	}
 	var out struct {
 		Content []struct {
