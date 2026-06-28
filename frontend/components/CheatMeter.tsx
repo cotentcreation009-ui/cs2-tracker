@@ -21,16 +21,9 @@ import Link from "next/link";
 import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
 import { PremierRank, type PremierPoint } from "@/components/PremierRank";
+import { FaceitRank } from "@/components/FaceitRank";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
-
-function faceitColor(lvl: number): string {
-  if (lvl >= 10) return "#e8332e";
-  if (lvl >= 8) return "#ff7a18";
-  if (lvl >= 5) return "#ffc220";
-  if (lvl >= 2) return "#36cf4a";
-  return "#dfe5ec";
-}
 
 // --- tiny icon set (stroke glyphs) ------------------------------------------
 function Icon({ name, className = "h-4 w-4" }: { name: string; className?: string }) {
@@ -151,13 +144,13 @@ const BANDS: { b: Band; r: string }[] = [
 
 function BandLegend({ band }: { band: Band }) {
   return (
-    <div className="mt-2 grid grid-cols-5 gap-1">
+    <div className="mt-1.5 grid grid-cols-5 gap-1">
       {BANDS.map((x) => {
         const on = x.b === band;
         return (
           <div
             key={x.b}
-            className="rounded-md border px-1 py-1.5 text-center"
+            className="rounded-md border px-1 py-1 text-center"
             style={
               on
                 ? { borderColor: BAND_HEX[band], background: `${BAND_HEX[band]}1f` }
@@ -182,13 +175,13 @@ function BandLegend({ band }: { band: Band }) {
 function ScaleCard({ m }: { m: MetricCard }) {
   const hex = BAND_HEX[m.band];
   return (
-    <div className="card px-4 py-3">
+    <div className="card px-3 py-2.5">
       <div className="flex items-center gap-1.5 stat-label">
         <Icon name={m.icon} className="h-3.5 w-3.5" />
         {m.label}
       </div>
-      <div className="mt-1.5 flex items-center gap-2">
-        <span className="text-2xl font-bold tabular-nums" style={{ color: hex }}>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="text-xl font-bold tabular-nums" style={{ color: hex }}>
           {m.value}
         </span>
         <span
@@ -198,7 +191,7 @@ function ScaleCard({ m }: { m: MetricCard }) {
           {BAND_LABEL[m.band]}
         </span>
       </div>
-      <div className="mt-3">
+      <div className="mt-2">
         <div
           className="relative h-1.5 rounded-full"
           style={{
@@ -220,7 +213,7 @@ function ScaleCard({ m }: { m: MetricCard }) {
           </span>
         </div>
       </div>
-      <div className="mt-2 text-[11px] text-muted">{m.note}</div>
+      <div className="mt-1.5 text-[11px] text-muted">{m.note}</div>
     </div>
   );
 }
@@ -363,7 +356,6 @@ export function CheatMeter({
     .filter((m) => m.rank_type === 11 && (m.rank ?? 0) > 0)
     .map((m) => ({ rating: m.rank as number, date: m.finished_at }));
   const faceitLevel = faceit?.skillLevel || leetify?.ranks?.faceit || 0;
-  const faceitElo = faceit?.elo || leetify?.ranks?.faceit_elo || 0;
   const wingman = leetify?.ranks?.wingman ?? 0;
   const {
     score,
@@ -451,23 +443,11 @@ export function CheatMeter({
       {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
-          {faceitLevel > 0 && (
-            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title={`FACEIT level ${faceitLevel}`}>
-              <span
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black"
-                style={{ background: "#0a0f1c", border: `2px solid ${faceitColor(faceitLevel)}`, color: faceitColor(faceitLevel), boxShadow: `0 0 8px -2px ${faceitColor(faceitLevel)}80` }}
-              >
-                {faceitLevel}
-              </span>
-              <div>
-                <div className="stat-label">FACEIT</div>
-                <div className="text-base font-bold tabular-nums" style={{ color: faceitColor(faceitLevel) }}>
-                  {faceitElo > 0 ? `${faceitElo.toLocaleString("en-US")}` : `Lvl ${faceitLevel}`}
-                  {faceitElo > 0 && <span className="ml-1 text-[10px] font-normal text-faint">ELO</span>}
-                </div>
-              </div>
-            </div>
-          )}
+          <FaceitRank
+            faceit={faceit}
+            levelFallback={leetify?.ranks?.faceit ?? 0}
+            eloFallback={leetify?.ranks?.faceit_elo ?? 0}
+          />
           {wingman > 0 && (
             <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title="Wingman rank">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel2 text-sm font-black text-muted">W</span>
@@ -567,7 +547,7 @@ export function CheatMeter({
 
       {/* metric scale cards */}
       {metrics.length > 0 && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {metrics.map((m) => (
             <ScaleCard key={m.key} m={m} />
           ))}
@@ -576,7 +556,7 @@ export function CheatMeter({
 
       {/* consistency · history · verdict */}
       <div
-        className={`mt-4 grid gap-3 ${
+        className={`mt-3 grid gap-3 ${
           summary.total > 0 ? "lg:grid-cols-[1.25fr_1fr_1fr]" : ""
         }`}
       >
