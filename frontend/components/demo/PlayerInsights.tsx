@@ -433,6 +433,71 @@ function ThrowRow({
   );
 }
 
+// Round-by-round strip for one player: a cell per round (won/lost tint, kills,
+// survived/died), click to scope that round across every tab.
+function RoundTimeline({
+  rounds,
+  meta,
+  i,
+  scope,
+  onPick,
+}: {
+  rounds: ReplayRound[];
+  meta: ReplayMeta;
+  i: number;
+  scope: number | null;
+  onPick: (ri: number) => void;
+}) {
+  if (rounds.length < 2) return null;
+  return (
+    <div className="card-2 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="stat-label">
+          Round-by-round · <span className="text-ink">{meta.players[i]?.name ?? "?"}</span>
+        </span>
+        <span className="text-[10px] text-faint">click a round to scope every tab to it</span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {rounds.map((r, ri) => {
+          const side = r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
+          const won = !!side && r.winner === side;
+          const kills = (r.kills ?? []).filter((k) => k.k === i).length;
+          const died = (r.kills ?? []).some((k) => k.v === i);
+          const dmg = (r.stats ?? []).find((s) => s.i === i)?.dmg ?? 0;
+          const util = (r.nades ?? []).filter((n) => n.by === i).length;
+          const active = scope === ri;
+          return (
+            <button
+              key={ri}
+              type="button"
+              onClick={() => onPick(ri)}
+              title={`Round ${r.n} · ${won ? "won" : "lost"} · ${kills}K · ${dmg} dmg · ${died ? "died" : "survived"}${util ? ` · ${util} util` : ""}`}
+              className={`grid h-9 w-7 place-items-center rounded border leading-none transition ${
+                won ? "border-good/40 bg-good/10" : "border-bad/30 bg-bad/10"
+              } ${!side ? "opacity-40" : "hover:brightness-150"} ${active ? "ring-2 ring-brand" : ""}`}
+            >
+              <span
+                className="text-xs font-bold tabular-nums"
+                style={kills >= 3 ? { color: "#f5b942" } : undefined}
+              >
+                {kills}
+              </span>
+              <span className="mt-0.5 text-[8px]">
+                {died ? <span className="text-bad">✕</span> : <span className="text-good">•</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-faint">
+        <span>number = kills</span>
+        <span><span className="text-good">•</span> survived · <span className="text-bad">✕</span> died</span>
+        <span>green / red = round won / lost</span>
+      </div>
+    </div>
+  );
+}
+
 export default function PlayerInsights({
   meta,
   rounds,
@@ -661,6 +726,16 @@ export default function PlayerInsights({
             </button>
           ))}
         </div>
+      )}
+
+      {focusI != null && (
+        <RoundTimeline
+          rounds={rounds}
+          meta={meta}
+          i={focusI}
+          scope={view.scopeRound}
+          onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
+        />
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,400px)]">
