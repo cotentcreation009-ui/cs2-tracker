@@ -74,7 +74,7 @@ type ReplayRound struct {
 type ReplayPlayerStat struct {
 	I        int      `json:"i"`               // player index
 	Equip    int      `json:"equip,omitempty"` // equipment value at freeze-time end
-	Buy      string   `json:"buy,omitempty"`   // pistol | eco | force | full
+	Buy      string   `json:"buy,omitempty"`   // pistol | eco | semi | force | full
 	StartMoney int    `json:"startMoney,omitempty"` // cash at round start (before buying)
 	Money    int      `json:"money,omitempty"`     // cash left after buying (freeze-time end)
 	Bought   []string `json:"bought,omitempty"`    // loadout at round start (weapons/armor/kit)
@@ -773,10 +773,7 @@ func (rc *replayCollector) onFreezeEnd(events.RoundFreezetimeEnd) {
 		if s == nil {
 			continue
 		}
-		equip := pl.EquipmentValueFreezeTimeEnd()
-		if equip == 0 {
-			equip = pl.EquipmentValueCurrent()
-		}
+		equip := equipValue(pl)
 		s.Equip = equip
 		s.Buy = buyType(equip, rc.cur.Number)
 		s.Money = pl.Money() // cash left after buying
@@ -805,6 +802,51 @@ func loadout(pl *common.Player) []string {
 		out = append(out, "Defuse Kit")
 	}
 	return out
+}
+
+// eqPrice is the CS2 buy-menu cost per equipment type. The demo's
+// m_unFreezetimeEndEquipmentValue property is unreliable (often stale on the
+// freeze-end tick, reporting a previous round's value), so we value the loadout
+// ourselves. Default spawn pistols are $0 (not paid for). Prices as of 2024.
+var eqPrice = map[common.EquipmentType]int{
+	common.EqGlock: 0, common.EqUSP: 0, common.EqP2000: 0,
+	common.EqP250: 300, common.EqDualBerettas: 300, common.EqFiveSeven: 500,
+	common.EqTec9: 500, common.EqCZ: 500, common.EqDeagle: 700, common.EqRevolver: 600,
+	common.EqMac10: 1050, common.EqMP9: 1250, common.EqMP7: 1500, common.EqMP5: 1500,
+	common.EqUMP: 1200, common.EqP90: 2350, common.EqBizon: 1400,
+	common.EqGalil: 1800, common.EqFamas: 2050, common.EqAK47: 2700, common.EqM4A4: 3100,
+	common.EqM4A1: 2900, common.EqSG553: 3000, common.EqAUG: 3300,
+	common.EqSSG08: 1700, common.EqAWP: 4750,
+	common.EqScar20: 5000, common.EqG3SG1: 5000,
+	common.EqNova: 1050, common.EqXM1014: 2000, common.EqSawedOff: 1100,
+	common.EqMag7: 1300, common.EqM249: 5200, common.EqNegev: 1700,
+	common.EqFlash: 200, common.EqHE: 300, common.EqSmoke: 300, common.EqMolotov: 400,
+	common.EqIncendiary: 600, common.EqDecoy: 50, common.EqZeus: 200,
+}
+
+// equipValue sums the buy-menu worth of a player's gear (weapons + grenades +
+// armor + kit) — a reliable stand-in for the demo's flaky freeze-end equipment
+// value, and guaranteed to match the loadout we display.
+func equipValue(pl *common.Player) int {
+	if pl == nil {
+		return 0
+	}
+	v := 0
+	for _, w := range pl.Weapons() {
+		if w != nil {
+			v += eqPrice[w.Type] // knife/bomb/unknown → 0
+		}
+	}
+	if pl.Armor() > 0 {
+		v += 650
+		if pl.HasHelmet() {
+			v += 350
+		}
+	}
+	if pl.HasDefuseKit() {
+		v += 400
+	}
+	return v
 }
 
 // onItemDrop marks a weapon as lying on the ground, so a later pickup of the
@@ -925,13 +967,16 @@ func (rc *replayCollector) onPlayerFlashed(e events.PlayerFlashed) {
 }
 
 // buyType is a coarse economy bucket from equipment value (MR12 pistol rounds).
+// Buckets mirror the frontend classifier (lib/demo/economy.ts).
 func buyType(equip, roundNum int) string {
 	if roundNum == 1 || roundNum == 13 {
 		return "pistol"
 	}
 	switch {
-	case equip < 2000:
+	case equip < 1000:
 		return "eco"
+	case equip < 2500:
+		return "semi"
 	case equip < 4000:
 		return "force"
 	default:
