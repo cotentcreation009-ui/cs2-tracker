@@ -194,7 +194,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
         </span>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <div className="space-y-3">
           <div
             ref={wrapRef}
@@ -202,7 +202,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             onMouseMove={onMove}
             onMouseUp={onUp}
             onMouseLeave={() => { onUp(); }}
-            className={`relative aspect-square w-full max-w-200 overflow-hidden rounded-xl border border-line bg-panel2 ${
+            className={`relative aspect-square w-full max-w-240 overflow-hidden rounded-xl border border-line bg-panel2 ${
               zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""
             }`}
           >
@@ -310,6 +310,18 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                         </g>}
                         <circle cx={vc.x} cy={vc.y} r={(on ? 1.3 : 0.9) * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />
                         <circle cx={vc.x} cy={vc.y} r={2.4 * s} fill="transparent" pointerEvents="all" />
+                        {on && (
+                          <g fontSize={2.9 * s} fontWeight="bold" textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.8 * s} strokeLinejoin="round">
+                            {kc && (
+                              <text x={kc.x} y={kc.y - 2.4 * s} fill={sideHex(sideOfIdx(scopedRound, k.k))}>
+                                {name(k.k)}
+                              </text>
+                            )}
+                            <text x={vc.x} y={vc.y + 4.2 * s} fill="#f5694a">
+                              ☠ {name(k.v)}
+                            </text>
+                          </g>
+                        )}
                       </g>
                     );
                   })}
@@ -397,6 +409,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 round={scopedRound}
                 meta={meta}
                 i={playerFilter}
+                rounds={rounds}
                 onClose={() => view.setFocusPlayer(null)}
               />
             )}
@@ -414,7 +427,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             />
           </div>
         ) : (
-          <div className="card flex max-h-200 flex-col px-4 py-3">
+          <div className="card flex max-h-240 flex-col px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="stat-label">{mode === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
               {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
@@ -495,7 +508,7 @@ function RoundDetail({
   });
 
   return (
-    <div className="card flex max-h-200 flex-col overflow-hidden p-0">
+    <div className="card flex max-h-240 flex-col overflow-hidden p-0">
       <div
         className="flex items-center justify-between gap-2 px-4 py-3"
         style={{ background: `linear-gradient(90deg, ${winHex}26, transparent)` }}
@@ -586,9 +599,10 @@ function RoundDetail({
                 return (
                   <button key={i} type="button" {...rowProps({ kind: "kill", id: i }, on)}>
                     <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(k.t)}</span>
-                    <span className="truncate text-[11px] font-medium" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
-                    <span className="text-[11px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
-                    <span className="ml-auto truncate text-[11px] text-muted">{name(k.v)}</span>
+                    <span className="max-w-26 truncate text-[11px] font-semibold" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
+                    <span className="shrink-0 text-[10px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
+                    <span className="shrink-0 text-faint">▸</span>
+                    <span className="ml-auto max-w-26 truncate text-[11px] font-medium" style={{ color: sideHex(sideOfIdx(k.v)) }}>{name(k.v)}</span>
                   </button>
                 );
               })}

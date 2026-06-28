@@ -72,13 +72,16 @@ type ReplayRound struct {
 // data beyond positions/kills: economy (buy), damage (ADR/util) and flashes.
 // Aggregated (not raw events) to keep the stored JSON compact.
 type ReplayPlayerStat struct {
-	I        int     `json:"i"`                  // player index
-	Equip    int     `json:"equip,omitempty"`    // equipment value at freeze-time end
-	Buy      string  `json:"buy,omitempty"`      // pistol | eco | force | full
-	Dmg      int     `json:"dmg,omitempty"`      // health damage dealt to enemies
-	UtilDmg  int     `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
-	Flashed  int     `json:"flashed,omitempty"`  // enemies flashed
-	FlashDur float64 `json:"flashDur,omitempty"` // total enemy blind seconds dealt
+	I        int      `json:"i"`               // player index
+	Equip    int      `json:"equip,omitempty"` // equipment value at freeze-time end
+	Buy      string   `json:"buy,omitempty"`   // pistol | eco | force | full
+	Money    int      `json:"money,omitempty"` // cash left after buying (freeze-time end)
+	Bought   []string `json:"bought,omitempty"` // loadout at round start (weapons/armor/kit)
+	Dmg      int         `json:"dmg,omitempty"`      // health damage dealt to enemies
+	DmgTo    map[int]int `json:"dmgTo,omitempty"`    // damage dealt, by victim player index (even if not killed)
+	UtilDmg  int         `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
+	Flashed  int         `json:"flashed,omitempty"`  // enemies flashed
+	FlashDur float64     `json:"flashDur,omitempty"` // total enemy blind seconds dealt
 	// Aim tells (per-tick): for kills where the victim became visible to this
 	// player shortly before dying. AimN = sample count; sum fields are averaged
 	// on the frontend. RctMs = ms from victim-spotted to the kill (lower = faster
@@ -710,7 +713,32 @@ func (rc *replayCollector) onFreezeEnd(events.RoundFreezetimeEnd) {
 		}
 		s.Equip = equip
 		s.Buy = buyType(equip, rc.cur.Number)
+		s.Money = pl.Money() // cash left after buying
+		s.Bought = loadout(pl)
 	}
+}
+
+// loadout is the player's weapons + armor + kit at freeze-time end — i.e. what
+// they're playing the round with (knife/bomb excluded).
+func loadout(pl *common.Player) []string {
+	var out []string
+	for _, w := range pl.Weapons() {
+		if w == nil || w.Type == common.EqKnife || w.Type == common.EqBomb {
+			continue
+		}
+		out = append(out, w.String())
+	}
+	if pl.Armor() > 0 {
+		if pl.HasHelmet() {
+			out = append(out, "Kevlar + Helmet")
+		} else {
+			out = append(out, "Kevlar Vest")
+		}
+	}
+	if pl.HasDefuseKit() {
+		out = append(out, "Defuse Kit")
+	}
+	return out
 }
 
 // onPlayerHurt accumulates enemy damage dealt (and the grenade/fire share of it).
@@ -723,6 +751,12 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		return
 	}
 	s.Dmg += e.HealthDamage
+	if vi := rc.playerIndex(e.Player); vi >= 0 {
+		if s.DmgTo == nil {
+			s.DmgTo = map[int]int{}
+		}
+		s.DmgTo[vi] += e.HealthDamage
+	}
 	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
 		s.UtilDmg += e.HealthDamage
 	}
