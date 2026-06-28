@@ -252,23 +252,40 @@ export function ProfileView({
         </>
       )}
 
-      {/* Recent form & trends */}
+      {/* Recent form & trends — collapsed by default (the CheatMeter hero
+          already shows recent W/L + a consistency trend), available on demand. */}
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <section className="space-y-4">
-          <SectionTitle>Recent form &amp; trends</SectionTitle>
-          <LiveForm matches={leetify.recent_matches} />
-          {leetify.recent_matches.length > 1 && (
-            <LiveTrendChart matches={leetify.recent_matches} />
-          )}
-          <div className="text-right">
-            <Link
-              href={`/profiles/${player.steamId64}/matches`}
-              className="text-sm font-medium text-brand hover:underline"
+        <details className="group card-2 px-5 py-4">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted [&::-webkit-details-marker]:hidden">
+            <span className="h-3.5 w-1 rounded-full bg-linear-to-b from-brand to-brand2" />
+            Recent form &amp; trends
+            <span className="ml-2 text-[10px] font-normal normal-case text-faint">last {leetify.recent_matches.length}</span>
+            <svg
+              className="ml-auto h-4 w-4 text-faint transition-transform group-open:rotate-180"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
             >
-              View all matches →
-            </Link>
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </summary>
+          <div className="mt-4 space-y-4">
+            <LiveForm matches={leetify.recent_matches} />
+            {leetify.recent_matches.length > 1 && (
+              <LiveTrendChart matches={leetify.recent_matches} />
+            )}
+            <div className="text-right">
+              <Link
+                href={`/profiles/${player.steamId64}/matches`}
+                className="text-sm font-medium text-brand hover:underline"
+              >
+                View all matches →
+              </Link>
+            </div>
           </div>
-        </section>
+        </details>
       )}
 
       {/* Skill breakdown */}
