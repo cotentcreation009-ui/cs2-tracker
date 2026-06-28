@@ -9,31 +9,46 @@ import {
   clientLeetify,
 } from "@/lib/demo/accountClient";
 import { accountScores, verdict, BAND_HEX, BAND_LABEL, TONE_HEX, type AccountScores, type Band } from "@/lib/demo/account";
+import { band5 } from "@/lib/suspicion";
 
+// One score bar with the inputs/reasons that drove it listed beneath (the
+// "stats used"), so the number is explainable rather than a black box.
 function ScoreBar({
   label,
   score,
   band,
   reasons,
+  hint,
 }: {
   label: string;
   score: number;
   band: Band;
   reasons: string[];
+  hint?: string;
 }) {
   return (
-    <div title={reasons.join(" · ")}>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-muted">{label}</span>
-        <span className="font-bold tabular-nums" style={{ color: BAND_HEX[band] }}>
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="text-muted">
+          {label}
+          {hint && <span className="ml-1 text-[10px] text-faint">· {hint}</span>}
+        </span>
+        <span className="shrink-0 font-bold tabular-nums" style={{ color: BAND_HEX[band] }}>
           {score.toFixed(0)}% {BAND_LABEL[band]}
         </span>
       </div>
-      <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-panel">
-        <div className="h-full rounded-full" style={{ width: `${score}%`, background: BAND_HEX[band] }} />
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-panel">
+        <div className="bar-grow h-full rounded-full" style={{ width: `${score}%`, background: BAND_HEX[band] }} />
       </div>
       {reasons.length > 0 && (
-        <div className="mt-0.5 truncate text-[10px] text-faint">{reasons.join(" · ")}</div>
+        <ul className="mt-1 space-y-0.5">
+          {reasons.map((r, k) => (
+            <li key={k} className="flex gap-1 text-[10px] leading-snug text-faint">
+              <span className="text-line2">›</span>
+              <span>{r}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -153,19 +168,51 @@ export function AccountCheck({
           <div className="text-[10px] text-muted">{v.evidence.join(" · ")}</div>
         )}
       </div>
-      {data.cheat && (
+      {/* CheatMeter: this match vs career, each with the stats behind it */}
+      <div className="space-y-2 border-t border-line pt-2">
+        <div className="stat-label">
+          CheatMeter · aim anomaly{" "}
+          <span className="font-normal normal-case text-faint">(not proof)</span>
+        </div>
         <ScoreBar
-          label="CheatMeter · career"
-          score={data.cheat.score}
-          band={data.cheat.band}
-          reasons={data.cheat.factors.filter((f) => f.score >= 40).slice(0, 3).map((f) => `${f.label} ${f.display}`)}
+          label="This match"
+          score={matchScore}
+          band={band5(matchScore)}
+          reasons={cheatFactors ? cheatFactors.split(", ").filter(Boolean) : []}
+        />
+        {data.cheat && (
+          <ScoreBar
+            label="Career"
+            score={data.cheat.score}
+            band={data.cheat.band}
+            reasons={data.cheat.factors.filter((f) => f.score >= 40).slice(0, 4).map((f) => `${f.label} ${f.display}`)}
+          />
+        )}
+      </div>
+
+      {data.smurf && (
+        <ScoreBar
+          label="Smurf"
+          hint="low investment + high skill"
+          score={data.smurf.score}
+          band={data.smurf.band}
+          reasons={data.smurf.reasons.length ? data.smurf.reasons : ["no strong smurf signals"]}
         />
       )}
-      {data.smurf && <ScoreBar label="Smurf" score={data.smurf.score} band={data.smurf.band} reasons={data.smurf.reasons} />}
-      {data.boosted && <ScoreBar label="Boosted" score={data.boosted.score} band={data.boosted.band} reasons={data.boosted.reasons} />}
+      {data.boosted && (
+        <ScoreBar
+          label="Boosted"
+          hint="high rank, weak mechanics"
+          score={data.boosted.score}
+          band={data.boosted.band}
+          reasons={data.boosted.reasons.length ? data.boosted.reasons : ["no strong boosted signals"]}
+        />
+      )}
       {data.trust != null && (
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-muted">Trust</span>
+        <div className="flex items-center justify-between border-t border-line pt-1.5 text-[11px]">
+          <span className="text-muted">
+            Trust <span className="text-[10px] text-faint">· 100 − strongest flag{data.banned ? " − ban" : ""}</span>
+          </span>
           <span
             className="font-bold tabular-nums"
             style={{ color: data.trust >= 60 ? "#46d369" : data.trust >= 35 ? "#f5b942" : "#f5694a" }}
@@ -185,7 +232,7 @@ export function AccountCheck({
           </button>
         )}
         {aiState === "loading" && <div className="text-[11px] text-faint">Analysing {name}…</div>}
-        {aiState === "error" && <div className="text-[11px] text-bad">{aiErr}</div>}
+        {aiState === "error" && <div className="text-[11px] text-bad">AI couldn&apos;t run — {aiErr}</div>}
         {aiState === "done" && (
           <p className="whitespace-pre-line text-[11px] leading-relaxed text-muted">{aiText}</p>
         )}
