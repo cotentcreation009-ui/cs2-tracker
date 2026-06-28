@@ -73,6 +73,9 @@ export function PremierRank({ premier, history }: { premier: number; history: Pr
 }
 
 function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const [pinned, setPinned] = useState<number | null>(null);
+  const shown = hover ?? pinned;
   const ratings = pts.map((p) => p.rating);
   const min = Math.min(...ratings);
   const max = Math.max(...ratings);
@@ -92,31 +95,59 @@ function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
+  const xPct = (i: number) => (pts.length > 1 ? (i / (pts.length - 1)) * 100 : 50);
+  const yPct = (i: number) => (xy[i][1] / H) * 100;
 
   return (
     <div className="mt-2 rounded-xl border border-line bg-panel/40 p-4">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span className="stat-label">Premier rating history</span>
-        <span className="text-[11px] text-faint">{pts.length} Premier matches</span>
+        <span className="text-[11px] text-faint">{pts.length} Premier matches · click a point</span>
         <span className="ml-auto flex items-center gap-3 text-xs">
           <span className="text-muted">Peak <b className="tabular-nums" style={{ color: premierColor(peak) }}>{peak.toLocaleString("en-US")}</b></span>
           <span className="text-muted">Now <b className="tabular-nums" style={{ color: cur }}>{current.toLocaleString("en-US")}</b></span>
         </span>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-24 w-full">
-        <defs>
-          <linearGradient id="pmHistFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={cur} stopOpacity="0.28" />
-            <stop offset="100%" stopColor={cur} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={`${path} L${W},${H} L0,${H} Z`} fill="url(#pmHistFill)" />
-        <path d={path} fill="none" stroke={cur} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-        {xy.map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r={2.2} fill={premierColor(pts[i].rating)} />
+      <div className="relative h-24 w-full" onMouseLeave={() => setHover(null)}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+          <defs>
+            <linearGradient id="pmHistFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={cur} stopOpacity="0.28" />
+              <stop offset="100%" stopColor={cur} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={`${path} L${W},${H} L0,${H} Z`} fill="url(#pmHistFill)" />
+          <path d={path} fill="none" stroke={cur} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          {xy.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={shown === i ? 3.6 : 2.2} fill={premierColor(pts[i].rating)} />
+          ))}
+        </svg>
+        {/* clickable / hoverable hit points */}
+        {pts.map((p, i) => (
+          <button
+            key={i}
+            type="button"
+            onMouseEnter={() => setHover(i)}
+            onClick={() => setPinned((s) => (s === i ? null : i))}
+            title={`${fmtDate(p.date)} · ${p.rating.toLocaleString("en-US")}`}
+            aria-label={`${fmtDate(p.date)}: ${p.rating}`}
+            className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{ left: `${xPct(i)}%`, top: `${yPct(i)}%` }}
+          />
         ))}
-      </svg>
+        {shown != null && (
+          <div
+            className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-line2 bg-bg/95 px-2 py-1 text-center text-[11px] shadow-lg"
+            style={{ left: `${xPct(shown)}%`, top: `calc(${yPct(shown)}% - 6px)` }}
+          >
+            <div className="text-faint">{fmtDate(pts[shown].date)}</div>
+            <div className="font-bold tabular-nums" style={{ color: premierColor(pts[shown].rating) }}>
+              {pts[shown].rating.toLocaleString("en-US")}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {recent.map((p, i) => {
