@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
   computeBuyMatrix,
   computeNemesis,
+  computeDuels,
+  computeDuelMatrix,
   weaponMeta,
   type PlayerWeaponStat,
   type WeaponStat,
@@ -458,6 +460,139 @@ function PlayerCard({ p, open, onToggle }: { p: PlayerWeaponStat; open: boolean;
   );
 }
 
+// --- head-to-head (player vs player) ---------------------------------------
+
+function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
+  const focus = view.focusPlayer;
+  const roundFilter = useMemo(
+    () => (view.scopeRound == null ? undefined : (_r: ReplayRound, idx: number) => idx === view.scopeRound),
+    [view.scopeRound],
+  );
+  const duels = useMemo(
+    () => (focus != null ? computeDuels(meta, rounds, focus, roundFilter) : []),
+    [meta, rounds, focus, roundFilter],
+  );
+  const matrix = useMemo(
+    () => (focus == null ? computeDuelMatrix(meta, rounds, roundFilter) : null),
+    [meta, rounds, focus, roundFilter],
+  );
+  const focusName = focus != null ? meta.players[focus]?.name : null;
+
+  // focused player → their duel list vs every opponent
+  if (focus != null) {
+    return (
+      <div className="card-2 px-5 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="stat-label">Head-to-head · {focusName}</h3>
+          <span className="text-[10px] text-faint">your kills vs theirs · click to switch player</span>
+        </div>
+        {duels.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted">No duels in this scope.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {duels.map((d) => {
+              const tot = d.for + d.against || 1;
+              const col = teamColor(d.opp.team);
+              const netCol = d.net > 0 ? "var(--color-good)" : d.net < 0 ? "var(--color-bad)" : "var(--color-faint)";
+              return (
+                <button
+                  key={d.opp.i}
+                  type="button"
+                  onClick={() => view.setFocusPlayer(d.opp.i)}
+                  title={`${d.for} kills${d.forWeapon ? ` (mostly ${d.forWeapon.label})` : ""} · ${d.against} deaths${d.againstWeapon ? ` (mostly ${d.againstWeapon.label})` : ""}`}
+                  className="flex w-full items-center gap-2 rounded px-1 py-1 text-left transition hover:bg-panel/60"
+                >
+                  <span className="w-28 shrink-0 truncate text-[12px] font-semibold" style={{ color: col }}>
+                    {d.opp.name}
+                  </span>
+                  <span className="w-12 shrink-0 text-right text-[12px] tabular-nums">
+                    <span className="font-bold text-good">{d.for}</span>
+                    <span className="text-faint">–</span>
+                    <span className="font-bold text-bad">{d.against}</span>
+                  </span>
+                  <span className="relative flex h-2 flex-1 overflow-hidden rounded-full bg-panel">
+                    <span className="h-full" style={{ width: `${(d.for / tot) * 100}%`, background: "var(--color-good)" }} />
+                    <span className="h-full" style={{ width: `${(d.against / tot) * 100}%`, background: "var(--color-bad)" }} />
+                  </span>
+                  {d.forWeapon && <WeaponBadge w={{ ...d.forWeapon, kills: 0, headshots: 0, hsPct: 0 }} size={14} />}
+                  <span className="w-9 shrink-0 text-right text-[12px] font-bold tabular-nums" style={{ color: netCol }}>
+                    {d.net > 0 ? `+${d.net}` : d.net}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-2 text-[10px] text-faint">
+          <span className="text-good">green</span> = your kills, <span className="text-bad">red</span> = your deaths to them. Spans the whole match (duels cross sides).
+        </div>
+      </div>
+    );
+  }
+
+  // no focus → full net-frag matrix
+  if (!matrix || matrix.players.length === 0) return null;
+  const { players, net, maxAbs } = matrix;
+  return (
+    <div className="card-2 px-5 py-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="stat-label">Head-to-head · net frags</h3>
+        <span className="text-[10px] text-faint">row vs column · green = row leads · click a name</span>
+      </div>
+      <div className="overflow-x-auto">
+        <div
+          className="inline-grid gap-0.5 text-[11px]"
+          style={{ gridTemplateColumns: `minmax(7rem,auto) repeat(${players.length}, 1.9rem)` }}
+        >
+          <div />
+          {players.map((p, j) => (
+            <div key={p.i} title={p.name} className="grid place-items-center text-[9px] font-semibold" style={{ color: teamColor(p.team) }}>
+              {j + 1}
+            </div>
+          ))}
+          {players.map((p, a) => (
+            <Fragment key={p.i}>
+              <button
+                type="button"
+                onClick={() => view.setFocusPlayer(p.i)}
+                className="flex items-center gap-1 truncate pr-1 text-left transition hover:text-ink"
+                style={{ color: teamColor(p.team) }}
+              >
+                <span className="w-4 shrink-0 text-faint">{a + 1}</span>
+                <span className="truncate font-semibold">{p.name}</span>
+              </button>
+              {players.map((q, b) => {
+                if (a === b) return <div key={q.i} className="grid h-7 place-items-center text-line2">·</div>;
+                const v = net[a][b];
+                const inten = maxAbs ? Math.abs(v) / maxAbs : 0;
+                const bg =
+                  v > 0
+                    ? `color-mix(in srgb, var(--color-good) ${Math.round(15 + inten * 55)}%, var(--color-panel))`
+                    : v < 0
+                      ? `color-mix(in srgb, var(--color-bad) ${Math.round(15 + inten * 55)}%, var(--color-panel))`
+                      : "var(--color-panel)";
+                return (
+                  <div
+                    key={q.i}
+                    title={`${p.name} vs ${q.name}: ${matrix.for[a][b]}–${matrix.for[b][a]} (net ${v > 0 ? "+" : ""}${v})`}
+                    className="grid h-7 place-items-center rounded tabular-nums"
+                    style={{ background: bg, color: v !== 0 ? "var(--color-ink)" : "var(--color-faint)" }}
+                  >
+                    {v > 0 ? `+${v}` : v || "0"}
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+      </div>
+      <div className="mt-2 text-[10px] text-faint">
+        Numbers index the rows. Each cell = that row player&apos;s net kills against the column player (whole match).
+      </div>
+    </div>
+  );
+}
+
 // --- main -------------------------------------------------------------------
 
 export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
@@ -562,6 +697,9 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           empty="No deaths in this scope."
         />
       </div>
+
+      {/* head-to-head duels */}
+      <HeadToHead meta={meta} rounds={rounds} view={view} />
 
       {/* economy ladder */}
       <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
