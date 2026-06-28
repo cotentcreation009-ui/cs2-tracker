@@ -605,6 +605,7 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
   const careerRows: typeof rows = career
     ? [
         { label: "Leetify aim", av: career.a.leetify?.rating.aim, bv: career.b.leetify?.rating.aim, fmt: (n: number) => n.toFixed(1) },
+        { label: "Leetify clutch", av: career.a.leetify?.rating.clutch, bv: career.b.leetify?.rating.clutch, fmt: (n: number) => n.toFixed(1) },
         { label: "Premier", av: career.a.leetify?.ranks.premier, bv: career.b.leetify?.ranks.premier, fmt: (n: number) => n.toLocaleString() },
         { label: "FACEIT ELO", av: career.a.faceit?.elo, bv: career.b.faceit?.elo, fmt: (n: number) => `${n}` },
         { label: "FACEIT lvl", av: career.a.faceit?.skillLevel, bv: career.b.faceit?.skillLevel, fmt: (n: number) => `${n}` },
