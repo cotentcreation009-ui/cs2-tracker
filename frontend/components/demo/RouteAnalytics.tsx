@@ -411,6 +411,10 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 i={playerFilter}
                 rounds={rounds}
                 onClose={() => view.setFocusPlayer(null)}
+                onUtilHover={(id) => onHover(id == null ? null : { kind: "util", id })}
+                onUtilPin={(id) => onPin({ kind: "util", id })}
+                activeUtilId={active?.kind === "util" ? active.id : null}
+                zoneOf={zoneOf}
               />
             )}
             <RoundDetail
@@ -563,29 +567,31 @@ function RoundDetail({
           ))}
         </div>
 
-        {/* util timeline */}
-        <div>
-          <div className="stat-label mb-1.5">Utility ({nades.length})</div>
-          {nades.length === 0 ? (
-            <div className="text-[11px] text-faint">No utility this round.</div>
-          ) : (
-            <div className="space-y-0.5">
-              {nades.map(({ n, i }) => {
-                const zone = zoneOf(n.x, n.y);
-                const on = sameActive(active, { kind: "util", id: i });
-                return (
-                  <button key={i} type="button" {...rowProps({ kind: "util", id: i }, on)}>
-                    <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(n.t)}</span>
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
-                    <span className="text-[11px] capitalize text-muted">{n.k}</span>
-                    {n.by >= 0 && <span className="text-[11px] text-faint">· {name(n.by)}</span>}
-                    {zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {/* util timeline — hidden when a player is focused (it's in their card above) */}
+        {focus == null && (
+          <div>
+            <div className="stat-label mb-1.5">Utility ({nades.length})</div>
+            {nades.length === 0 ? (
+              <div className="text-[11px] text-faint">No utility this round.</div>
+            ) : (
+              <div className="space-y-0.5">
+                {nades.map(({ n, i }) => {
+                  const zone = zoneOf(n.x, n.y);
+                  const on = sameActive(active, { kind: "util", id: i });
+                  return (
+                    <button key={i} type="button" {...rowProps({ kind: "util", id: i }, on)}>
+                      <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(n.t)}</span>
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
+                      <span className="text-[11px] capitalize text-muted">{n.k}</span>
+                      {n.by >= 0 && <span className="text-[11px] text-faint">· {name(n.by)}</span>}
+                      {zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* kill feed */}
         <div>

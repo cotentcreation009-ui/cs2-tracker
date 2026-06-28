@@ -1011,6 +1011,7 @@ export default function ReplayPage() {
               meta={meta}
               i={focusPlayer}
               rounds={rounds}
+              zoneOf={(x, y) => classifyPosition(meta.map, x, y, zones)?.name ?? null}
               onClose={() => setFocusPlayer(null)}
             />
           ) : (

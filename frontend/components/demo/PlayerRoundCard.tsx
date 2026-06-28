@@ -27,7 +27,11 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
   const side: "CT" | "T" | "" = round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "";
   const kills = (round.kills ?? []).filter((k) => k.k === i);
   const died = (round.kills ?? []).some((k) => k.v === i);
-  const nades = (round.nades ?? []).filter((n) => n.by === i).sort((a, b) => a.t - b.t);
+  // keep each nade's ORIGINAL index so the list can cross-highlight the map
+  const nades = (round.nades ?? [])
+    .map((n, ni) => ({ ...n, ni }))
+    .filter((n) => n.by === i)
+    .sort((a, b) => a.t - b.t);
   const shots = stat?.shots ?? 0;
   const wc = new Map<string, number>();
   for (const k of kills) wc.set(k.w, (wc.get(k.w) ?? 0) + 1);
@@ -108,13 +112,23 @@ export function PlayerRoundCard({
   i,
   rounds,
   onClose,
+  onUtilHover,
+  onUtilPin,
+  activeUtilId,
+  zoneOf,
 }: {
   round: ReplayRound;
   meta: ReplayMeta;
   i: number;
   rounds?: ReplayRound[];
   onClose: () => void;
+  // optional map cross-link: hover/click a util row to highlight it on the map
+  onUtilHover?: (nadeIndex: number | null) => void;
+  onUtilPin?: (nadeIndex: number) => void;
+  activeUtilId?: number | null;
+  zoneOf?: (x: number, y: number) => string | null;
 }) {
+  const utilInteractive = !!onUtilHover || !!onUtilPin;
   const d = computePlayerRound(round, meta, i);
   const col = d.side === "T" ? T : CT;
   const loss = rounds ? lossInfo(rounds, round, i) : null;
@@ -235,15 +249,40 @@ export function PlayerRoundCard({
 
       {d.nades.length > 0 && (
         <div className="mt-2">
-          <div className="text-[10px] uppercase tracking-wider text-faint">Utility thrown</div>
+          <div className="text-[10px] uppercase tracking-wider text-faint">
+            Utility thrown{utilInteractive && <span className="ml-1 normal-case text-faint">· hover to find on map</span>}
+          </div>
           <div className="mt-0.5 space-y-0.5">
-            {d.nades.map((n, k) => (
-              <div key={k} className="flex items-center gap-1.5 text-[11px]">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
-                <span className="capitalize text-muted">{n.k}</span>
-                <span className="ml-auto tabular-nums text-faint">{mmss(n.t)}</span>
-              </div>
-            ))}
+            {d.nades.map((n) => {
+              const zone = zoneOf?.(n.x, n.y);
+              const on = activeUtilId != null && activeUtilId === n.ni;
+              const inner = (
+                <>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
+                  <span className="capitalize text-muted">{n.k}</span>
+                  {zone && <span className="truncate text-faint">· {zone}</span>}
+                  <span className="ml-auto shrink-0 tabular-nums text-faint">{mmss(n.t)}</span>
+                </>
+              );
+              return utilInteractive ? (
+                <button
+                  key={n.ni}
+                  type="button"
+                  onMouseEnter={() => onUtilHover?.(n.ni)}
+                  onMouseLeave={() => onUtilHover?.(null)}
+                  onClick={() => onUtilPin?.(n.ni)}
+                  className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] transition ${
+                    on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
+                  }`}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <div key={n.ni} className="flex items-center gap-1.5 px-1 text-[11px]">
+                  {inner}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
