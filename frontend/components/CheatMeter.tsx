@@ -86,7 +86,7 @@ function Gauge({ score, hex }: { score: number; hex: string }) {
   const [nx, ny] = pol(score, r - 16);
   const ticks = [0, 25, 50, 75, 100];
   return (
-    <svg viewBox="0 0 260 165" className="w-full max-w-[340px]">
+    <svg viewBox="0 0 260 165" className="mt-1 w-full max-w-[240px]">
       <defs>
         <linearGradient id="cm-arc" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#46d369" />
@@ -381,22 +381,22 @@ export function CheatMeter({
   const pct = (v: number) => (summary.total ? (v / summary.total) * 100 : 0);
 
   return (
-    <section className="card-2 px-5 py-5">
+    <section className="card-2 px-5 py-4">
       {/* identity hero — the whole profile lives inside the CheatMeter view */}
-      <div className="mb-5 flex flex-col gap-4 border-b border-line/60 pb-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex min-w-0 items-center gap-4">
+      <div className="mb-4 flex flex-col gap-3 border-b border-line/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <div className="shrink-0 rounded-2xl bg-linear-to-br from-brand to-brand2 p-[2px] shadow-[0_0_26px_-6px_rgba(91,157,255,0.55)]">
             {player.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={player.avatarUrl} alt={player.personaName} className="h-16 w-16 rounded-[14px] object-cover" />
+              <img src={player.avatarUrl} alt={player.personaName} className="h-14 w-14 rounded-[12px] object-cover" />
             ) : (
-              <div className="grid h-16 w-16 place-items-center rounded-[14px] bg-panel text-2xl font-bold text-faint">
+              <div className="grid h-14 w-14 place-items-center rounded-[12px] bg-panel text-xl font-bold text-faint">
                 {(player.personaName || "?").slice(0, 1).toUpperCase()}
               </div>
             )}
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-extrabold leading-tight sm:text-3xl">
+            <h1 className="truncate text-2xl font-extrabold leading-tight">
               {player.personaName || player.steamId64}
             </h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -449,7 +449,7 @@ export function CheatMeter({
 
       {/* ranks — Premier (click for rating history) · FACEIT · Wingman */}
       {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
-        <div className="mb-5 flex flex-wrap items-center gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
           {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
           {faceitLevel > 0 && (
             <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title={`FACEIT level ${faceitLevel}`}>
@@ -480,7 +480,7 @@ export function CheatMeter({
         </div>
       )}
 
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
           <Icon name="shield" className="h-4 w-4" />
         </span>
@@ -490,7 +490,7 @@ export function CheatMeter({
       </div>
 
       {/* top: scope · gauge · factors */}
-      <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)_300px]">
+      <div className="grid gap-4 lg:grid-cols-[170px_280px_minmax(0,1fr)]">
         {/* analysis scope */}
         <div className="space-y-2">
           <div className="rounded-xl border border-line bg-panel/40 p-3">
@@ -514,7 +514,7 @@ export function CheatMeter({
         {/* gauge */}
         <div className="flex flex-col items-center text-center">
           <div className="stat-label">Cheating likelihood</div>
-          <div className={`text-5xl font-extrabold tabular-nums ${BAND_TEXT[band]}`}>
+          <div className={`text-4xl font-extrabold tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
           </div>
           <div className={`text-sm font-bold uppercase ${BAND_TEXT[band]}`}>
@@ -522,20 +522,22 @@ export function CheatMeter({
           </div>
           <div className="text-xs text-muted">{subtitle}</div>
           <Gauge score={score} hex={hex} />
-          <div className="w-full max-w-[340px]">
+          <div className="w-full max-w-[260px]">
             <BandLegend band={band} />
           </div>
         </div>
 
-        {/* factors */}
+        {/* factors — two columns to use the width and stay compact */}
         <div>
-          <div className="stat-label mb-1">Factors analyzed</div>
-          <ul className="divide-y divide-line/60">
-            {factors.map((f) => (
+          <div className="stat-label mb-1.5">Factors analyzed <span className="font-normal normal-case text-faint">· biggest drivers first</span></div>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {[...factors]
+              .sort((a, b) => b.score - a.score || Number(!!b.primary) - Number(!!a.primary))
+              .map((f) => (
               <li
                 key={f.key}
-                className={`flex items-center gap-2.5 py-2 ${
-                  f.primary ? "rounded-lg border border-brand/30 bg-brand/5 px-2" : ""
+                className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${
+                  f.primary ? "border border-brand/30 bg-brand/5" : "bg-panel/40"
                 }`}
               >
                 <span
@@ -565,7 +567,7 @@ export function CheatMeter({
 
       {/* metric scale cards */}
       {metrics.length > 0 && (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {metrics.map((m) => (
             <ScaleCard key={m.key} m={m} />
           ))}
@@ -574,7 +576,7 @@ export function CheatMeter({
 
       {/* consistency · history · verdict */}
       <div
-        className={`mt-5 grid gap-3 ${
+        className={`mt-4 grid gap-3 ${
           summary.total > 0 ? "lg:grid-cols-[1.25fr_1fr_1fr]" : ""
         }`}
       >
