@@ -5,6 +5,7 @@ import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { throwOrigin } from "@/lib/demo/insights";
+import { loadZones, classifyPosition } from "@/lib/maps/zones";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import type { DemoView, SideFilter } from "@/components/demo/MatchToolbar";
 
@@ -179,6 +180,8 @@ export function StrategyMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 
+  const zones = useMemo(() => loadZones(meta.map), [meta.map]);
+
   const sideOfRound = useCallback((rd: ReplayRound, i: number): SideFilter => {
     if (rd.ct?.includes(i)) return "CT";
     if (rd.t?.includes(i)) return "T";
@@ -315,6 +318,48 @@ export function StrategyMap({
     redraw();
   }, [redraw]);
 
+  // per-call-out breakdown — where players hold + where kills/deaths land,
+  // honouring the side/round/player scope. Turns the heat blob into named info.
+  const zoneStats = useMemo(() => {
+    if (!zones.length) return [];
+    const sideOk = (s: SideFilter) => side === "all" || s === side;
+    const playerOk = (i: number) => focusPlayer == null || i === focusPlayer;
+    const scoped = scopeRound != null && rounds[scopeRound] ? [rounds[scopeRound]] : rounds;
+    const m = new Map<string, { name: string; hold: number; kills: number; deaths: number }>();
+    const z = (name: string) => {
+      let v = m.get(name);
+      if (!v) {
+        v = { name, hold: 0, kills: 0, deaths: 0 };
+        m.set(name, v);
+      }
+      return v;
+    };
+    for (const rd of scoped) {
+      const freezeEnd = rd.freezeEnd ?? 15;
+      for (const f of rd.frames ?? []) {
+        if (f.t < freezeEnd) continue;
+        for (const p of f.p) {
+          if (p.h <= 0 || !playerOk(p.i) || !sideOk(sideOfRound(rd, p.i))) continue;
+          const c = classifyPosition(meta.map, p.x, p.y, zones);
+          if (c) z(c.name).hold++;
+        }
+      }
+      for (const k of rd.kills ?? []) {
+        if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) {
+          const c = classifyPosition(meta.map, k.kx, k.ky, zones);
+          if (c) z(c.name).kills++;
+        }
+        if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) {
+          const c = classifyPosition(meta.map, k.vx, k.vy, zones);
+          if (c) z(c.name).deaths++;
+        }
+      }
+    }
+    const arr = [...m.values()];
+    const maxHold = Math.max(1, ...arr.map((v) => v.hold));
+    return arr.map((v) => ({ ...v, holdPct: v.hold / maxHold })).sort((a, b) => b.hold - a.hold);
+  }, [zones, rounds, scopeRound, side, focusPlayer, meta.map, sideOfRound]);
+
   const toggle = (l: Layer) =>
     setActive((prev) => {
       const next = new Set(prev);
@@ -336,13 +381,21 @@ export function StrategyMap({
   const heatOn = active.has("positions") || active.has("kills") || active.has("deaths");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-      <canvas
-        ref={canvasRef}
-        width={SIZE}
-        height={SIZE}
-        className="aspect-square w-full max-w-200 rounded-xl border border-line bg-panel2"
-      />
+    <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr] 2xl:grid-cols-[1.9fr_1fr]">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold">
+            Heat map <span className="font-normal text-faint">· {[...active].join(" · ") || "—"}</span>
+          </h3>
+          {focusName && <span className="pill bg-panel text-xs text-ink">{focusName}</span>}
+        </div>
+        <canvas
+          ref={canvasRef}
+          width={SIZE}
+          height={SIZE}
+          className="aspect-square w-full rounded-xl border border-line bg-panel2"
+        />
+      </div>
 
       <div className="space-y-3">
         <div className="card px-4 py-3">
@@ -420,6 +473,36 @@ export function StrategyMap({
             Export PNG
           </button>
         </div>
+
+        {zoneStats.length > 0 && (
+          <div className="card px-4 py-3">
+            <div className="stat-label mb-2">
+              Zone breakdown <span className="font-normal lowercase text-faint">· hold · K/D in zone</span>
+            </div>
+            <div className="space-y-1.5">
+              {zoneStats.slice(0, 9).map((z) => (
+                <div key={z.name} className="flex items-center gap-2 text-xs">
+                  <span className="w-24 shrink-0 truncate text-muted" title={z.name}>{z.name}</span>
+                  <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
+                    <span
+                      className="bar-grow absolute inset-y-0 left-0 rounded-full bg-brand"
+                      style={{ width: `${Math.max(3, z.holdPct * 100)}%` }}
+                    />
+                  </span>
+                  <span className="w-12 shrink-0 text-right tabular-nums">
+                    <span className="text-good">{z.kills}</span>
+                    <span className="text-faint">/</span>
+                    <span className="text-bad">{z.deaths}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] text-faint">
+              bar = time held · <span className="text-good">kills</span> / <span className="text-bad">deaths</span> in that call-out
+            </div>
+          </div>
+        )}
+
         <div className="card px-4 py-3 text-xs text-muted">
           {scopeRound != null && rounds[scopeRound] ? (
             <>
