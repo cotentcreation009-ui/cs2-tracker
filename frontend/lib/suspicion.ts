@@ -88,6 +88,7 @@ export interface Suspicion {
   subtitle: string;
   verdict: string;
   confidence: number;
+  lowConfidence: boolean; // thin data — public band is capped, read is hedged
   factors: SusFactor[];
   metrics: MetricCard[];
   queues: QueueStat[];
@@ -380,27 +381,44 @@ export function computeSuspicion(
     97,
   );
 
-  const subtitle: string = {
-    verylow: "No unusual patterns detected",
-    low: "Mostly normal, a couple of points above average",
-    moderate: "Some stats sit above the expected range",
-    high: "Highly suspicious behaviour detected",
-    veryhigh: "Multiple strong anomalies detected",
-  }[band];
-  const verdict: string = {
-    verylow: "Stats are consistent with legit play across the board.",
-    low: "A stat or two runs hot, but nothing a skilled player wouldn't show.",
-    moderate: "A few indicators sit outside the norm — worth a glance.",
-    high: "Multiple behavioural indicators are above the expected range of legit players.",
-    veryhigh: "Several indicators are significantly outside the expected range of legit players.",
-  }[band];
+  // Confidence gates the PUBLIC band: thin data (no Leetify / few matches) can't
+  // assert a high-risk label. The raw score still drives the gauge needle, but
+  // the band/verdict are capped so a low-confidence read never publicly claims
+  // "High"/"Very High" on a player page.
+  const BAND_ORDER: Band[] = ["verylow", "low", "moderate", "high", "veryhigh"];
+  const capBand = (b: Band, max: Band): Band =>
+    BAND_ORDER.indexOf(b) > BAND_ORDER.indexOf(max) ? max : b;
+  let displayBand = band;
+  if (confidence < 40) displayBand = capBand(displayBand, "moderate");
+  else if (confidence < 55) displayBand = capBand(displayBand, "high");
+  const lowConfidence = confidence < 55;
+
+  const subtitle: string = lowConfidence
+    ? "Limited data — low-confidence read"
+    : {
+        verylow: "No unusual patterns detected",
+        low: "Mostly normal, a couple of points above average",
+        moderate: "Some stats sit above the expected range",
+        high: "Highly suspicious behaviour detected",
+        veryhigh: "Multiple strong anomalies detected",
+      }[displayBand];
+  const verdict: string = lowConfidence
+    ? "Not enough public data for a confident read — treat this as indicative only."
+    : {
+        verylow: "Stats are consistent with legit play across the board.",
+        low: "A stat or two runs hot, but nothing a skilled player wouldn't show.",
+        moderate: "A few indicators sit outside the norm — worth a glance.",
+        high: "Multiple behavioural indicators are above the expected range of legit players.",
+        veryhigh: "Several indicators are significantly outside the expected range of legit players.",
+      }[displayBand];
 
   return {
     score,
-    band,
+    band: displayBand,
     subtitle,
     verdict,
     confidence,
+    lowConfidence,
     factors: F,
     metrics,
     queues,

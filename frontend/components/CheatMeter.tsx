@@ -363,6 +363,7 @@ export function CheatMeter({
     subtitle,
     verdict,
     confidence,
+    lowConfidence,
     factors,
     metrics,
     summary,
@@ -467,6 +468,14 @@ export function CheatMeter({
         <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
         <span className="pill bg-brand/15 text-brand">BETA</span>
         <span className="text-xs text-faint">Advanced CS2 player analysis</span>
+        {lowConfidence && (
+          <span
+            className="pill bg-mid/15 text-mid"
+            title={`Confidence ${confidence}/100 — thin data, so the risk band is capped and hedged`}
+          >
+            Low confidence · limited data
+          </span>
+        )}
       </div>
 
       {/* top: scope · gauge · factors */}
