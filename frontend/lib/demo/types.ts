@@ -43,6 +43,7 @@ export interface ReplayNade {
   oy?: number;
   dur: number;
   by: number; // thrower player index, -1 if unknown
+  dmg?: Record<string, number>; // damage this grenade dealt, by victim index (HE/molotov)
 }
 
 // Per-player, per-round aggregates (economy, damage, flashes). Fields are

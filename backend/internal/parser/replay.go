@@ -135,8 +135,9 @@ type ReplayNade struct {
 	Y    int32   `json:"y"`  // landing / detonation Y
 	Ox   int32   `json:"ox"` // throw-origin X (where the thrower released it)
 	Oy   int32   `json:"oy"` // throw-origin Y
-	Dur  float64 `json:"dur"`
-	By   int     `json:"by"` // thrower player index, -1 if unknown
+	Dur  float64     `json:"dur"`
+	By   int         `json:"by"`            // thrower player index, -1 if unknown
+	Dmg  map[int]int `json:"dmg,omitempty"` // damage this grenade dealt, by victim index (HE/molotov)
 }
 
 type ReplayBomb struct {
@@ -651,6 +652,34 @@ func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *
 	rc.cur.Nades = append(rc.cur.Nades, n)
 }
 
+// addNadeDamage attributes grenade damage to the most recent matching nade this
+// round (same thrower + kind, within the grenade's active window) so the util
+// list can show what each HE/molotov did and to whom.
+func (rc *replayCollector) addNadeDamage(by int, kind string, victim, dmg int) {
+	if rc.cur == nil || by < 0 {
+		return
+	}
+	window := 2.0 // HE damages at the explosion tick
+	if kind == "molotov" {
+		window = 10.0 // a fire burns for several seconds
+	}
+	now := rc.rt()
+	for i := len(rc.cur.Nades) - 1; i >= 0; i-- {
+		n := &rc.cur.Nades[i]
+		if n.By != by || n.Kind != kind {
+			continue
+		}
+		if now-n.T > window {
+			return // most recent matching grenade is too old — leave unattributed
+		}
+		if n.Dmg == nil {
+			n.Dmg = map[int]int{}
+		}
+		n.Dmg[victim] += dmg
+		return
+	}
+}
+
 // popMolo finds and removes the best molotov throw-origin: prefer the same
 // thrower, then the oldest throw (infernos ignite in throw order). Returns
 // ok=false when the queue is empty.
@@ -772,7 +801,8 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 	// so per-enemy damage can't exceed 100 — HealthDamage is the raw/over-damage.
 	dmg := e.HealthDamageTaken
 	s.Dmg += dmg
-	if vi := rc.playerIndex(e.Player); vi >= 0 {
+	vi := rc.playerIndex(e.Player)
+	if vi >= 0 {
 		if s.DmgTo == nil {
 			s.DmgTo = map[int]int{}
 		}
@@ -780,6 +810,9 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 	}
 	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
 		s.UtilDmg += dmg
+		if k := kindOfEq(e.Weapon.Type); vi >= 0 && (k == "he" || k == "molotov") {
+			rc.addNadeDamage(rc.playerIndex(e.Attacker), k, vi, dmg)
+		}
 	}
 	if isFirearm(e.Weapon) {
 		s.Hits++

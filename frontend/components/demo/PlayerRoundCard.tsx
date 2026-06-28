@@ -256,13 +256,27 @@ export function PlayerRoundCard({
             {d.nades.map((n) => {
               const zone = zoneOf?.(n.x, n.y);
               const on = activeUtilId != null && activeUtilId === n.ni;
+              const dmgEntries = n.dmg
+                ? Object.entries(n.dmg)
+                    .map(([v, dd]) => ({ name: meta.players[Number(v)]?.name ?? "?", dmg: dd }))
+                    .sort((a, b) => b.dmg - a.dmg)
+                : [];
+              const dmgTotal = dmgEntries.reduce((s, x) => s + x.dmg, 0);
               const inner = (
-                <>
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
-                  <span className="capitalize text-muted">{n.k}</span>
-                  {zone && <span className="truncate text-faint">· {zone}</span>}
-                  <span className="ml-auto shrink-0 tabular-nums text-faint">{mmss(n.t)}</span>
-                </>
+                <span className="block w-full">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
+                    <span className="capitalize text-muted">{n.k}</span>
+                    {zone && <span className="truncate text-faint">· {zone}</span>}
+                    <span className="ml-auto shrink-0 tabular-nums text-faint">{mmss(n.t)}</span>
+                  </span>
+                  {dmgTotal > 0 && (
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 pl-3 text-[10px]">
+                      <span className="font-semibold text-bad">{dmgTotal} dmg</span>
+                      <span className="text-faint">→ {dmgEntries.map((x) => `${x.name} ${x.dmg}`).join(", ")}</span>
+                    </span>
+                  )}
+                </span>
               );
               return utilInteractive ? (
                 <button
@@ -271,14 +285,14 @@ export function PlayerRoundCard({
                   onMouseEnter={() => onUtilHover?.(n.ni)}
                   onMouseLeave={() => onUtilHover?.(null)}
                   onClick={() => onUtilPin?.(n.ni)}
-                  className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] transition ${
+                  className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
                     on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
                   }`}
                 >
                   {inner}
                 </button>
               ) : (
-                <div key={n.ni} className="flex items-center gap-1.5 px-1 text-[11px]">
+                <div key={n.ni} className="block px-1 text-[11px]">
                   {inner}
                 </div>
               );
