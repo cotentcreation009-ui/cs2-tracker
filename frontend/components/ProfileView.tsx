@@ -29,6 +29,7 @@ import { RecordRecent } from "@/components/RecordRecent";
 import { SteamStatsPanel } from "@/components/SteamStatsPanel";
 import { CrossSource } from "@/components/CrossSource";
 import { CheatMeter } from "@/components/CheatMeter";
+import { computeSuspicion } from "@/lib/suspicion";
 import Link from "next/link";
 import {
   flag,
@@ -86,6 +87,10 @@ export function ProfileView({
     ? (Date.now() - steamCreated.getTime()) / (365.25 * 24 * 3600 * 1000)
     : null;
 
+  // The CheatMeter is the page hero when there's enough data to analyze; it
+  // self-hides otherwise, in which case we fall back to the plain hero below.
+  const showMeter = !!computeSuspicion(leetify, faceit, steamStats)?.hasEnough;
+
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career.clutchesWon + career.clutchesLost;
@@ -109,6 +114,30 @@ export function ProfileView({
           avatarUrl: player.avatarUrl,
         }}
       />
+
+      {/* CheatMeter is the hero when there's enough data — full-bleed, with the
+          full identity + Premier/FACEIT/Wingman ranks folded in. */}
+      {showMeter && (
+        <div className="full-bleed px-4 lg:px-6">
+          <CheatMeter
+            player={player}
+            leetify={leetify}
+            faceit={faceit}
+            steamStats={steamStats}
+            steamExtras={steamExtras}
+            rating={hasData ? career.rating : null}
+            generatedOn={new Date().toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
+          />
+        </div>
+      )}
+
+      {/* Fallback hero for accounts without enough data for the CheatMeter */}
+      {!showMeter && (
+        <>
       {/* Profile hero */}
       <section className="card-2 relative overflow-hidden">
         {/* faint brand banner (reuses the hero artwork) */}
@@ -220,22 +249,7 @@ export function ProfileView({
       </section>
 
       <RankStrip leetify={leetify} faceit={faceit} />
-
-      {/* Integrity check — top of page, right below the ranks. Renders for any
-          account with usable data (Leetify, FACEIT or Steam stats); it
-          self-hides when there genuinely isn't enough to analyze. */}
-      {(leetify || faceit || steamStats) && (
-        <CheatMeter
-          player={player}
-          leetify={leetify}
-          faceit={faceit}
-          steamStats={steamStats}
-          generatedOn={new Date().toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          })}
-        />
+        </>
       )}
 
       {/* Recent form & trends */}

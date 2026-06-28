@@ -94,6 +94,8 @@ type RecentMatch struct {
 	MapName       string  `json:"map_name"`
 	LeetifyRating float64 `json:"leetify_rating"`
 	Score         []int   `json:"score"`
+	Rank          int     `json:"rank"`      // FACEIT level / Premier rating / Competitive rank (per RankType)
+	RankType      int     `json:"rank_type"` // 11 = Premier (Rank is the rating), 12 = Competitive; 0 when absent
 
 	Preaim               float64 `json:"preaim"`
 	ReactionTimeMs       float64 `json:"reaction_time_ms"`

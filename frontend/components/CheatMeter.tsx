@@ -2,6 +2,7 @@ import type {
   FaceitProfile,
   LeetifyProfile,
   Player,
+  SteamExtras,
   SteamGameStats,
 } from "@/lib/types";
 import {
@@ -16,6 +17,20 @@ import {
   type Suspicion,
 } from "@/lib/suspicion";
 import { flag, fmt } from "@/lib/format";
+import Link from "next/link";
+import { ShareButton } from "@/components/ShareButton";
+import { RatingRing } from "@/components/RatingRing";
+import { PremierRank, type PremierPoint } from "@/components/PremierRank";
+
+const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
+
+function faceitColor(lvl: number): string {
+  if (lvl >= 10) return "#e8332e";
+  if (lvl >= 8) return "#ff7a18";
+  if (lvl >= 5) return "#ffc220";
+  if (lvl >= 2) return "#36cf4a";
+  return "#dfe5ec";
+}
 
 // --- tiny icon set (stroke glyphs) ------------------------------------------
 function Icon({ name, className = "h-4 w-4" }: { name: string; className?: string }) {
@@ -322,16 +337,34 @@ export function CheatMeter({
   leetify,
   faceit,
   steamStats,
+  steamExtras,
+  rating,
   generatedOn,
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
   faceit?: FaceitProfile | null;
   steamStats?: SteamGameStats | null;
+  steamExtras?: SteamExtras | null;
+  rating?: number | null;
   generatedOn?: string;
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats);
   if (!sus || !sus.hasEnough) return null;
+
+  // identity + ranks for the hero (everything visible in the CheatMeter view)
+  const steamCreated = player.steamCreatedAt ? new Date(player.steamCreatedAt) : null;
+  const ageY =
+    steamCreated && !Number.isNaN(steamCreated.getTime())
+      ? (Date.now() - steamCreated.getTime()) / (365.25 * 24 * 3600 * 1000)
+      : null;
+  const premier = leetify?.ranks?.premier ?? 0;
+  const premierHistory: PremierPoint[] = (leetify?.recent_matches ?? [])
+    .filter((m) => m.rank_type === 11 && (m.rank ?? 0) > 0)
+    .map((m) => ({ rating: m.rank as number, date: m.finished_at }));
+  const faceitLevel = faceit?.skillLevel || leetify?.ranks?.faceit || 0;
+  const faceitElo = faceit?.elo || leetify?.ranks?.faceit_elo || 0;
+  const wingman = leetify?.ranks?.wingman ?? 0;
   const {
     score,
     band,
@@ -349,6 +382,104 @@ export function CheatMeter({
 
   return (
     <section className="card-2 px-5 py-5">
+      {/* identity hero — the whole profile lives inside the CheatMeter view */}
+      <div className="mb-5 flex flex-col gap-4 border-b border-line/60 pb-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="shrink-0 rounded-2xl bg-linear-to-br from-brand to-brand2 p-[2px] shadow-[0_0_26px_-6px_rgba(91,157,255,0.55)]">
+            {player.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={player.avatarUrl} alt={player.personaName} className="h-16 w-16 rounded-[14px] object-cover" />
+            ) : (
+              <div className="grid h-16 w-16 place-items-center rounded-[14px] bg-panel text-2xl font-bold text-faint">
+                {(player.personaName || "?").slice(0, 1).toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-extrabold leading-tight sm:text-3xl">
+              {player.personaName || player.steamId64}
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {steamExtras?.personaState != null && steamExtras.personaState > 0 && (
+                <span className="pill bg-good/15 text-good">
+                  <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                  {PERSONA[steamExtras.personaState] || "Online"}
+                </span>
+              )}
+              {steamExtras?.visibility === 1 && <span className="pill bg-mid/15 text-mid">Private profile</span>}
+              {player.countryCode && (
+                <span className="pill bg-panel text-muted">
+                  {flag(player.countryCode)} {player.countryCode}
+                </span>
+              )}
+              {ageY != null && (
+                <span className="pill bg-panel text-muted" title={`Steam account created ${steamCreated?.toLocaleDateString()}`}>
+                  {ageY.toFixed(1)}y on Steam
+                </span>
+              )}
+              {steamExtras != null && steamExtras.steamLevel > 0 && (
+                <span className="pill bg-panel text-muted">Steam lvl {steamExtras.steamLevel}</span>
+              )}
+              {steamExtras != null && steamExtras.friends > 0 && (
+                <span className="pill bg-panel text-muted">{steamExtras.friends.toLocaleString("en-US")} friends</span>
+              )}
+              {steamExtras?.friendCode && <span className="pill bg-panel font-mono text-muted">{steamExtras.friendCode}</span>}
+              {player.profileUrl && (
+                <a href={player.profileUrl} target="_blank" rel="noreferrer" className="pill bg-panel text-muted transition hover:text-ink">
+                  Steam ↗
+                </a>
+              )}
+            </div>
+            <div className="mt-1.5 font-mono text-[11px] text-faint">{player.steamId64}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 sm:flex-col sm:items-end">
+          {rating != null && <RatingRing rating={rating} />}
+          <div className="flex gap-2">
+            <ShareButton label="Share" />
+            <Link
+              href={`/compare?a=${player.steamId64}`}
+              className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+            >
+              Compare
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* ranks — Premier (click for rating history) · FACEIT · Wingman */}
+      {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
+          {faceitLevel > 0 && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title={`FACEIT level ${faceitLevel}`}>
+              <span
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black"
+                style={{ background: "#0a0f1c", border: `2px solid ${faceitColor(faceitLevel)}`, color: faceitColor(faceitLevel), boxShadow: `0 0 8px -2px ${faceitColor(faceitLevel)}80` }}
+              >
+                {faceitLevel}
+              </span>
+              <div>
+                <div className="stat-label">FACEIT</div>
+                <div className="text-base font-bold tabular-nums" style={{ color: faceitColor(faceitLevel) }}>
+                  {faceitElo > 0 ? `${faceitElo.toLocaleString("en-US")}` : `Lvl ${faceitLevel}`}
+                  {faceitElo > 0 && <span className="ml-1 text-[10px] font-normal text-faint">ELO</span>}
+                </div>
+              </div>
+            </div>
+          )}
+          {wingman > 0 && (
+            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title="Wingman rank">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel2 text-sm font-black text-muted">W</span>
+              <div>
+                <div className="stat-label">Wingman</div>
+                <div className="text-base font-bold tabular-nums text-ink">#{wingman}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
           <Icon name="shield" className="h-4 w-4" />
@@ -358,71 +489,26 @@ export function CheatMeter({
         <span className="text-xs text-faint">Advanced CS2 player analysis</span>
       </div>
 
-      {/* top: player · gauge · factors */}
-      <div className="grid gap-5 lg:grid-cols-[230px_minmax(0,1fr)_300px]">
-        {/* player card + scope */}
+      {/* top: scope · gauge · factors */}
+      <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)_300px]">
+        {/* analysis scope */}
         <div className="space-y-2">
-          <div className="rounded-xl border border-line bg-panel/40 p-3">
-            <div className="flex items-center gap-3">
-              {player.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={player.avatarUrl}
-                  alt={player.personaName}
-                  className="h-14 w-14 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="grid h-14 w-14 place-items-center rounded-lg bg-panel2 text-lg font-bold text-faint">
-                  {(player.personaName || "?").slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="truncate font-bold">{player.personaName}</span>
-                  {leetify && (
-                    <span className="grid h-4 w-4 place-items-center rounded bg-brand/20 text-[9px] font-black text-brand">
-                      L
-                    </span>
-                  )}
-                </div>
-                <div className="truncate font-mono text-[10px] text-faint">
-                  {player.steamId64}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
-                  {player.countryCode && (
-                    <span>
-                      {flag(player.countryCode)} {player.countryCode}
-                    </span>
-                  )}
-                  {player.profileUrl && (
-                    <a
-                      href={player.profileUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:text-ink"
-                    >
-                      Steam ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
           <div className="rounded-xl border border-line bg-panel/40 p-3">
             <div className="stat-label">Analysis scope</div>
             <div className="mt-1 text-sm text-ink">
               {scope.hours != null && (
-                <span className="font-semibold tabular-nums">
-                  {fmt(Math.round(scope.hours))}h
-                </span>
+                <span className="font-semibold tabular-nums">{fmt(Math.round(scope.hours))}h</span>
               )}
               {scope.hours != null && <span className="text-faint"> playtime · </span>}
-              <span className="font-semibold tabular-nums">
-                {fmt(scope.matches)}
-              </span>
+              <span className="font-semibold tabular-nums">{fmt(scope.matches)}</span>
               <span className="text-faint"> matches</span>
             </div>
           </div>
+          {generatedOn && (
+            <div className="rounded-xl border border-line bg-panel/40 p-3 text-[11px] text-faint">
+              Generated {generatedOn}
+            </div>
+          )}
         </div>
 
         {/* gauge */}
