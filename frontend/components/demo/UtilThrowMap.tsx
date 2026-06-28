@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { radarImage } from "@/lib/maps/calibration";
 import type { Projection } from "@/lib/demo/projection";
 import type { UtilThrow } from "@/lib/demo/insights";
@@ -70,6 +70,68 @@ export function UtilThrowMap({
 
   const calibrated = proj.calibrated;
 
+  // zoom/pan viewport in SIZE-space px (screen = world*scale + offset)
+  const [vp, setVp] = useState({ scale: 1, ox: 0, oy: 0 });
+  const vpRef = useRef(vp);
+  const dragRef = useRef<{ cx: number; cy: number; ox: number; oy: number } | null>(null);
+  const setViewport = useCallback((v: { scale: number; ox: number; oy: number }) => {
+    vpRef.current = v;
+    setVp(v);
+  }, []);
+  const clampVp = useCallback((scale: number, ox: number, oy: number) => {
+    const s = Math.max(1, Math.min(6, scale));
+    const min = SIZE * (1 - s);
+    return { scale: s, ox: Math.max(min, Math.min(0, ox)), oy: Math.max(min, Math.min(0, oy)) };
+  }, []);
+  const zoomBy = (factor: number) => {
+    const cur = vpRef.current;
+    const ns = Math.max(1, Math.min(6, cur.scale * factor));
+    if (ns === cur.scale) return;
+    const k = ns / cur.scale;
+    const c = SIZE / 2;
+    setViewport(clampVp(ns, c - (c - cur.ox) * k, c - (c - cur.oy) * k));
+  };
+  const onDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const v = vpRef.current;
+    dragRef.current = { cx: e.clientX, cy: e.clientY, ox: v.ox, oy: v.oy };
+  };
+  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    const cv = canvasRef.current;
+    if (!d || !cv) return;
+    const rect = cv.getBoundingClientRect();
+    const dx = ((e.clientX - d.cx) / rect.width) * SIZE;
+    const dy = ((e.clientY - d.cy) / rect.height) * SIZE;
+    setViewport(clampVp(vpRef.current.scale, d.ox + dx, d.oy + dy));
+  };
+  const onUp = () => {
+    dragRef.current = null;
+  };
+
+  // reset zoom when the map changes
+  useEffect(() => {
+    setViewport({ scale: 1, ox: 0, oy: 0 });
+  }, [map, setViewport]);
+
+  // wheel-zoom toward the cursor (non-passive so the page doesn't scroll)
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = cv.getBoundingClientRect();
+      const mx = ((e.clientX - rect.left) / rect.width) * SIZE;
+      const my = ((e.clientY - rect.top) / rect.height) * SIZE;
+      const cur = vpRef.current;
+      const ns = Math.max(1, Math.min(6, cur.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      if (ns === cur.scale) return;
+      const k = ns / cur.scale;
+      setViewport(clampVp(ns, mx - (mx - cur.ox) * k, my - (my - cur.oy) * k));
+    };
+    cv.addEventListener("wheel", onWheel, { passive: false });
+    return () => cv.removeEventListener("wheel", onWheel);
+  }, [clampVp, setViewport]);
+
   useEffect(() => {
     let alive = true;
     imgOk.current = false;
@@ -121,6 +183,12 @@ export function UtilThrowMap({
       const elapsed = ((ts - startRef.current) / 1000) % total;
 
       ctx.clearRect(0, 0, SIZE, SIZE);
+      // everything draws inside the zoom/pan transform (radar + lineups scale
+      // together); cleared above in screen space first.
+      const vpc = vpRef.current;
+      ctx.save();
+      ctx.translate(vpc.ox, vpc.oy);
+      ctx.scale(vpc.scale, vpc.scale);
       if (imgOk.current && imgRef.current) {
         ctx.globalAlpha = 0.6;
         ctx.drawImage(imgRef.current, 0, 0, SIZE, SIZE);
@@ -218,6 +286,7 @@ export function UtilThrowMap({
           dot(ctx, land.x, land.y, 3, color, 1);
         }
       });
+      ctx.restore();
     };
 
     rafRef.current = requestAnimationFrame(frame);
@@ -231,8 +300,45 @@ export function UtilThrowMap({
         ref={canvasRef}
         width={SIZE}
         height={SIZE}
-        className="aspect-square w-full rounded-xl border border-line bg-panel2"
+        onMouseDown={onDown}
+        onMouseMove={onMove}
+        onMouseUp={onUp}
+        onMouseLeave={onUp}
+        className={`aspect-square w-full select-none rounded-xl border border-line bg-panel2 ${
+          vp.scale > 1 ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
       />
+      <div className="absolute right-2 top-2 flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={() => zoomBy(1.3)}
+          title="Zoom in (scroll on the map)"
+          aria-label="Zoom in"
+          className="grid h-6 w-6 place-items-center rounded-md border border-line2 bg-bg/80 text-sm font-bold backdrop-blur transition hover:text-brand"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomBy(1 / 1.3)}
+          title="Zoom out"
+          aria-label="Zoom out"
+          className="grid h-6 w-6 place-items-center rounded-md border border-line2 bg-bg/80 text-sm font-bold backdrop-blur transition hover:text-brand"
+        >
+          −
+        </button>
+        {vp.scale > 1 && (
+          <button
+            type="button"
+            onClick={() => setViewport({ scale: 1, ox: 0, oy: 0 })}
+            title="Reset zoom"
+            aria-label="Reset zoom"
+            className="grid h-6 w-6 place-items-center rounded-md border border-line2 bg-bg/80 text-[10px] backdrop-blur transition hover:text-brand"
+          >
+            ⤢
+          </button>
+        )}
+      </div>
       {!calibrated && throws.length > 0 && (
         <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">
           {map} radar uncalibrated — auto-scaled

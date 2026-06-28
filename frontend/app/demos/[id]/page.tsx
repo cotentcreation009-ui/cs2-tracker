@@ -718,7 +718,7 @@ export default function ReplayPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="full-bleed space-y-4 px-4 lg:px-6">
       <Link href="/demos" className="text-xs text-muted hover:text-ink">
         ← Demos
       </Link>

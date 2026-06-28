@@ -179,3 +179,10 @@ body {
     animation: none;
   }
 }
+
+/* Break a child out of the centered max-width container to the viewport edges
+   (for the wide demo workspace). Body clips overflow-x so 100vw can't scroll. */
+.full-bleed {
+  width: 100vw;
+  margin-inline: calc(50% - 50vw);
+}
