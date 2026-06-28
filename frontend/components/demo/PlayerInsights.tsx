@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeInsights,
@@ -85,8 +85,8 @@ function SplitBar({ a, b, aHex, bHex }: { a: number; b: number; aHex: string; bH
   const total = a + b || 1;
   return (
     <div className="flex h-1.5 overflow-hidden rounded-full bg-panel">
-      <div style={{ width: `${(a / total) * 100}%`, background: aHex }} />
-      <div style={{ width: `${(b / total) * 100}%`, background: bHex }} />
+      <div className="bar-grow" style={{ width: `${(a / total) * 100}%`, background: aHex }} />
+      <div className="bar-grow" style={{ width: `${(b / total) * 100}%`, background: bHex }} />
     </div>
   );
 }
@@ -161,9 +161,9 @@ function LeanRow({ side, l }: { side: "CT" | "T"; l: SideLean }) {
         </span>
       </div>
       <div className="mt-0.5 flex h-1.5 overflow-hidden rounded-full bg-panel">
-        <div style={{ width: `${aw}%`, background: "#f5694a" }} />
-        <div style={{ width: `${mw}%`, background: "#f5b942" }} />
-        <div style={{ width: `${bw}%`, background: "#5b9dff" }} />
+        <div className="bar-grow" style={{ width: `${aw}%`, background: "#f5694a" }} />
+        <div className="bar-grow" style={{ width: `${mw}%`, background: "#f5b942" }} />
+        <div className="bar-grow" style={{ width: `${bw}%`, background: "#5b9dff" }} />
       </div>
     </div>
   );
@@ -348,9 +348,9 @@ function PlayerCard({
             </span>
           </div>
           <div className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-panel">
-            <div style={{ width: `${(area.a / areaTotal) * 100}%`, background: "#f5694a" }} />
-            <div style={{ width: `${(area.mid / areaTotal) * 100}%`, background: "#f5b942" }} />
-            <div style={{ width: `${(area.b / areaTotal) * 100}%`, background: "#5b9dff" }} />
+            <div className="bar-grow" style={{ width: `${(area.a / areaTotal) * 100}%`, background: "#f5694a" }} />
+            <div className="bar-grow" style={{ width: `${(area.mid / areaTotal) * 100}%`, background: "#f5b942" }} />
+            <div className="bar-grow" style={{ width: `${(area.b / areaTotal) * 100}%`, background: "#5b9dff" }} />
           </div>
         </div>
       ) : null}
@@ -444,6 +444,7 @@ export default function PlayerInsights({
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("impact");
+  const cardRefs = useRef(new Map<number, HTMLDivElement>());
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
 
@@ -567,6 +568,10 @@ export default function PlayerInsights({
   useEffect(() => {
     setThrowIdx(null);
   }, [focusI]);
+  // bring the focused player's card into view (e.g. after an award chip / toolbar pick)
+  useEffect(() => {
+    if (focusI != null) cardRefs.current.get(focusI)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [focusI]);
 
   if (!players.length) {
     const lbl =
@@ -678,7 +683,11 @@ export default function PlayerInsights({
           {sortedPlayers.map((p, idx) => (
             <div
               key={p.i}
-              className="insight-card-in"
+              ref={(el) => {
+                if (el) cardRefs.current.set(p.i, el);
+                else cardRefs.current.delete(p.i);
+              }}
+              className="insight-card-in scroll-mt-4"
               style={{ animationDelay: `${Math.min(idx, 9) * 45}ms` }}
             >
               <PlayerCard
@@ -758,7 +767,7 @@ export default function PlayerInsights({
 
               {/* step through each throw */}
               <div className="mt-2 flex items-center gap-2">
-                <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" className="btn btn-ghost px-2 py-1 text-xs">◀</button>
+                <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost px-2 py-1 text-xs">◀</button>
                 <div className="min-w-0 flex-1 text-center text-[11px]">
                   {soloThrow ? (
                     <span>
@@ -775,7 +784,7 @@ export default function PlayerInsights({
                 {soloThrow && (
                   <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost px-2 py-1 text-[10px]">all</button>
                 )}
-                <button type="button" onClick={() => stepThrow(1)} title="Next throw" className="btn btn-ghost px-2 py-1 text-xs">▶</button>
+                <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost px-2 py-1 text-xs">▶</button>
               </div>
               {soloThrow && (
                 <p className="mt-1 text-center text-[10px] text-brand">
@@ -812,6 +821,8 @@ export default function PlayerInsights({
                           key={i}
                           type="button"
                           onClick={() => first >= 0 && setThrowIdx(first)}
+                          onMouseEnter={() => first >= 0 && setHoverIdx(first)}
+                          onMouseLeave={() => setHoverIdx(null)}
                           title={`${sp.count}× · usually ${timingOf(sp.avgT)} · avg ${mmss(sp.avgT)}`}
                           className="pill bg-panel text-muted hover:text-ink"
                         >
