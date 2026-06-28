@@ -69,7 +69,11 @@ func (s *Server) handleAiAnalyze(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	text, err := client.Analyze(ctx, aiSystemPrompt, req.Summary)
 	if err != nil {
-		s.serverError(w, "ai analyze", err)
+		// Surface the real provider error (it's diagnostic, not secret) instead of
+		// a generic 500 — e.g. "vertex responded 403" tells the operator to grant
+		// the role / enable the API, rather than a blank "internal error".
+		s.log.Error("ai analyze", "err", err)
+		writeError(w, http.StatusBadGateway, "AI provider error — "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"text": text})
