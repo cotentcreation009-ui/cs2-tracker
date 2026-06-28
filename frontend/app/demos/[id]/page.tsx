@@ -180,6 +180,143 @@ function EventFeed({
   );
 }
 
+// Everything a player did THIS round (distinct from career stats) for the
+// click-to-select detail panel.
+function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: number) {
+  const stat = (round.stats ?? []).find((s) => s.i === i);
+  const side: "CT" | "T" | "" = round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "";
+  const kills = (round.kills ?? []).filter((k) => k.k === i);
+  const died = (round.kills ?? []).some((k) => k.v === i);
+  const nades = (round.nades ?? []).filter((n) => n.by === i).sort((a, b) => a.t - b.t);
+  const shots = stat?.shots ?? 0;
+  const wc = new Map<string, number>();
+  for (const k of kills) wc.set(k.w, (wc.get(k.w) ?? 0) + 1);
+  const topWeapon = [...wc.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  return {
+    name: meta.players[i]?.name ?? "?",
+    steamId: meta.players[i]?.steamId ?? "",
+    side,
+    won: !!side && round.winner === side,
+    buy: stat?.buy ?? null,
+    equip: stat?.equip ?? 0,
+    kills: kills.length,
+    hs: kills.filter((k) => k.hs).length,
+    alive: !died,
+    dmg: stat?.dmg ?? 0,
+    utilDmg: stat?.utilDmg ?? 0,
+    shots,
+    acc: shots ? Math.min(100, ((stat?.hits ?? 0) / shots) * 100) : null,
+    hsAcc: shots ? Math.min(100, ((stat?.hsHits ?? 0) / shots) * 100) : null,
+    reaction: stat?.aimN ? (stat.rctMs ?? 0) / stat.aimN : null,
+    flashed: stat?.flashed ?? 0,
+    flashDur: stat?.flashDur ?? 0,
+    nades,
+    topWeapon,
+  };
+}
+
+const BUY_LABEL: Record<string, string> = { full: "Full buy", force: "Force buy", eco: "Eco", pistol: "Pistol" };
+
+function RStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-md border border-line bg-panel/50 px-1 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-faint">{label}</div>
+      <div className="text-sm font-bold tabular-nums">{value}</div>
+      {sub ? <div className="text-[9px] text-faint">{sub}</div> : null}
+    </div>
+  );
+}
+
+function PlayerRoundCard({
+  round,
+  meta,
+  i,
+  onClose,
+}: {
+  round: ReplayRound;
+  meta: ReplayMeta;
+  i: number;
+  onClose: () => void;
+}) {
+  const d = computePlayerRound(round, meta, i);
+  const col = d.side === "T" ? T : CT;
+  return (
+    <div className="card px-4 py-3" style={{ borderColor: `${col}55` }}>
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: col }} />
+        <span className="truncate text-sm font-bold">{d.name}</span>
+        <span className="pill shrink-0" style={{ background: `${col}22`, color: col }}>
+          {d.side || "—"}
+        </span>
+        {d.steamId && (
+          <Link
+            href={`/profiles/${d.steamId}`}
+            className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted transition hover:bg-panel/50 hover:text-ink"
+          >
+            Profile →
+          </Link>
+        )}
+        <button type="button" onClick={onClose} className="ml-auto shrink-0 text-sm text-faint hover:text-ink" title="Close">
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className={`pill ${d.won ? "bg-good/15 text-good" : "bg-bad/15 text-bad"}`}>
+          {d.won ? "Won round" : "Lost round"}
+        </span>
+        <span className={`pill ${d.alive ? "bg-good/12 text-good" : "bg-panel text-faint"}`}>
+          {d.alive ? "Survived" : "Died"}
+        </span>
+        {d.buy && (
+          <span className="pill bg-panel text-muted">
+            {BUY_LABEL[d.buy] ?? d.buy}
+            {d.equip ? ` · $${d.equip}` : ""}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 grid grid-cols-4 gap-1.5 text-center">
+        <RStat label="Kills" value={`${d.kills}`} sub={d.hs ? `${d.hs} hs` : undefined} />
+        <RStat label="Damage" value={`${d.dmg}`} sub={d.utilDmg ? `${d.utilDmg} util` : undefined} />
+        <RStat label="Accuracy" value={d.acc != null ? `${d.acc.toFixed(0)}%` : "—"} sub={d.shots ? `${d.shots} shots` : undefined} />
+        <RStat label="Reaction" value={d.reaction != null ? `${d.reaction.toFixed(0)}ms` : "—"} />
+      </div>
+
+      {d.topWeapon && (
+        <div className="mt-2 text-[11px] text-muted">
+          Top weapon: <span className="text-ink">{weaponLabel(d.topWeapon)}</span>
+        </div>
+      )}
+
+      {d.flashed > 0 && (
+        <div className="mt-1.5 text-[11px] text-muted">
+          Flashed <span className="text-ink">{d.flashed}</span> {d.flashed === 1 ? "enemy" : "enemies"} · {d.flashDur.toFixed(1)}s blind
+        </div>
+      )}
+
+      {d.nades.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[10px] uppercase tracking-wider text-faint">Utility thrown</div>
+          <div className="mt-0.5 space-y-0.5">
+            {d.nades.map((n, k) => (
+              <div key={k} className="flex items-center gap-1.5 text-[11px]">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#8a7dff" }} />
+                <span className="capitalize text-muted">{n.k}</span>
+                <span className="ml-auto tabular-nums text-faint">{mmss(n.t)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-2 border-t border-line pt-1.5 text-[10px] text-faint">
+        Round {round.n} · {reasonLabel(round.reason, round.winner)} · click another dot or ✕ to close
+      </div>
+    </div>
+  );
+}
+
 export default function ReplayPage() {
   const { id } = useParams<{ id: string }>();
   const [meta, setMeta] = useState<ReplayMeta | null>(null);
@@ -208,6 +345,43 @@ export default function ReplayPage() {
   const rafRef = useRef(0);
   const lastTs = useRef(0);
 
+  // map zoom/pan viewport, in SIZE-space px: screen = world*scale + offset.
+  const [vp, setVp] = useState({ scale: 1, ox: 0, oy: 0 });
+  const vpRef = useRef(vp); // mirror so the rAF draw reads it without rebuilding
+  const dragRef = useRef<{ cx: number; cy: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const movedRef = useRef(false); // true when the last gesture was a pan (suppress the click)
+
+  const clampVp = useCallback((scale: number, ox: number, oy: number) => {
+    const s = clamp(scale, 1, 6);
+    const min = SIZE * (1 - s);
+    return { scale: s, ox: clamp(ox, min, 0), oy: clamp(oy, min, 0) };
+  }, []);
+  const setViewport = useCallback((v: { scale: number; ox: number; oy: number }) => {
+    vpRef.current = v;
+    setVp(v);
+  }, []);
+  // zoom toward an internal-px point (mx,my), keeping that point fixed
+  const zoomAt = useCallback(
+    (mx: number, my: number, factor: number) => {
+      const cur = vpRef.current;
+      const ns = clamp(cur.scale * factor, 1, 6);
+      if (ns === cur.scale) return;
+      const k = ns / cur.scale;
+      setViewport(clampVp(ns, mx - (mx - cur.ox) * k, my - (my - cur.oy) * k));
+    },
+    [clampVp, setViewport],
+  );
+  // client coords -> internal SIZE-space px (canvas buffer is fixed at SIZE)
+  const toInternal = useCallback((clientX: number, clientY: number) => {
+    const cv = canvasRef.current;
+    if (!cv) return { x: 0, y: 0 };
+    const rect = cv.getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width) * SIZE,
+      y: ((clientY - rect.top) / rect.height) * SIZE,
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -229,9 +403,17 @@ export default function ReplayPage() {
   }, [id]);
 
   const round = rounds[roundIdx];
+  // Play to the round's TRUE end. Frame capture stops the instant RoundEnd fires
+  // (~1s before the deciding action at 1Hz), but kills/bomb/util are timestamped
+  // right up to it — so take the max of all event times + a short tail, else the
+  // final kill / bomb explode / defuse gets cut off.
   const duration = useMemo(() => {
-    if (!round?.frames.length) return 0;
-    return round.frames[round.frames.length - 1].t;
+    if (!round) return 0;
+    let d = round.frames.length ? round.frames[round.frames.length - 1].t : 0;
+    for (const k of round.kills ?? []) d = Math.max(d, k.t);
+    for (const b of round.bomb ?? []) d = Math.max(d, b.t);
+    for (const n of round.nades ?? []) d = Math.max(d, n.t + (n.dur || 0));
+    return d + 1.5;
   }, [round]);
 
   // throw origin per grenade (thrower position at throw time), computed once per
@@ -317,8 +499,17 @@ export default function ReplayPage() {
       const ctx = cv.getContext("2d");
       if (!ctx) return;
 
-      // background
+      // background — cleared in screen space; everything else draws inside the
+      // zoom/pan transform, with marker sizes divided by the zoom (s) so dots,
+      // cones, labels and kill marks stay a constant on-screen size.
       ctx.clearRect(0, 0, SIZE, SIZE);
+      const vpc = vpRef.current;
+      const z = vpc.scale;
+      const s = 1 / z;
+      ctx.save();
+      ctx.translate(vpc.ox, vpc.oy);
+      ctx.scale(z, z);
+
       if (imgOk.current && imgRef.current) {
         ctx.globalAlpha = 0.9;
         ctx.drawImage(imgRef.current, 0, 0, SIZE, SIZE);
@@ -327,7 +518,7 @@ export default function ReplayPage() {
         ctx.fillStyle = "#0a1020";
         ctx.fillRect(0, 0, SIZE, SIZE);
         ctx.strokeStyle = "rgba(56,214,255,0.07)";
-        ctx.lineWidth = 1;
+        ctx.lineWidth = s;
         for (let g = 0; g <= SIZE; g += SIZE / 16) {
           ctx.beginPath();
           ctx.moveTo(g, 0);
@@ -352,8 +543,8 @@ export default function ReplayPage() {
           const oc = toPx(o.x, o.y);
           ctx.globalAlpha = 0.5 * (1 - age) + 0.15;
           ctx.strokeStyle = col;
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([5, 4]);
+          ctx.lineWidth = 1.5 * s;
+          ctx.setLineDash([5 * s, 4 * s]);
           ctx.beginPath();
           ctx.moveTo(oc.x, oc.y);
           ctx.lineTo(c.x, c.y);
@@ -392,10 +583,10 @@ export default function ReplayPage() {
         // countdown in the centre for lingering util (smoke / molotov / decoy)
         if (life >= 4) {
           const rem = Math.max(0, Math.ceil(life - (t - n.t)));
-          ctx.font = "bold 11px sans-serif";
+          ctx.font = `bold ${11 * s}px sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.lineWidth = 3;
+          ctx.lineWidth = 3 * s;
           ctx.strokeStyle = "rgba(0,0,0,0.6)";
           ctx.strokeText(`${rem}`, c.x, c.y);
           ctx.fillStyle = "#fff";
@@ -414,29 +605,30 @@ export default function ReplayPage() {
         const c = toPx(plant.x, plant.y);
         ctx.fillStyle = "#f5694a";
         ctx.beginPath();
-        ctx.arc(c.x, c.y, 5, 0, 7);
+        ctx.arc(c.x, c.y, 5 * s, 0, 7);
         ctx.fill();
         ctx.fillStyle = "#fff";
-        ctx.font = "bold 9px sans-serif";
-        ctx.fillText("C4", c.x - 8, c.y - 8);
+        ctx.font = `bold ${9 * s}px sans-serif`;
+        ctx.fillText("C4", c.x - 8 * s, c.y - 8 * s);
       }
 
       // recent kills: X on victim for 4s, killer line for 1.5s
       for (const ki of round.kills ?? []) {
         if (ki.t > t || t - ki.t > 4) continue;
         const v = toPx(ki.vx, ki.vy);
+        const xr = 5 * s;
         ctx.strokeStyle = "#f5694a";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 * s;
         ctx.beginPath();
-        ctx.moveTo(v.x - 5, v.y - 5);
-        ctx.lineTo(v.x + 5, v.y + 5);
-        ctx.moveTo(v.x + 5, v.y - 5);
-        ctx.lineTo(v.x - 5, v.y + 5);
+        ctx.moveTo(v.x - xr, v.y - xr);
+        ctx.lineTo(v.x + xr, v.y + xr);
+        ctx.moveTo(v.x + xr, v.y - xr);
+        ctx.lineTo(v.x - xr, v.y + xr);
         ctx.stroke();
         if (t - ki.t < 1.5 && ki.k >= 0) {
           const a = toPx(ki.kx, ki.ky);
           ctx.strokeStyle = "rgba(245,105,74,0.5)";
-          ctx.lineWidth = 1;
+          ctx.lineWidth = 1 * s;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(v.x, v.y);
@@ -456,14 +648,14 @@ export default function ReplayPage() {
         const c = toPx(p.x, p.y);
         const col = pside === "CT" ? CT : T;
         const dim = focus != null && p.i !== focus;
-        ctx.globalAlpha = dim ? 0.45 : 1;
+        ctx.globalAlpha = dim ? 0.4 : 1;
         const rad = (-p.d * Math.PI) / 180;
-        const r = 7.5;
+        const r = 7.5 * s;
 
         // view wedge — a filled cone showing where the player is looking
-        const coneLen = 26;
+        const coneLen = 26 * s;
         const half = (33 * Math.PI) / 180; // 33° half-angle (~66° FOV indicator)
-        const cone = ctx.createRadialGradient(c.x, c.y, r - 1, c.x, c.y, coneLen);
+        const cone = ctx.createRadialGradient(c.x, c.y, Math.max(0, r - s), c.x, c.y, coneLen);
         cone.addColorStop(0, colA(col, 0.6));
         cone.addColorStop(1, colA(col, 0));
         ctx.fillStyle = cone;
@@ -478,37 +670,38 @@ export default function ReplayPage() {
         ctx.arc(c.x, c.y, r, 0, 7);
         ctx.fillStyle = col;
         ctx.fill();
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 * s;
         ctx.strokeStyle = "rgba(4,6,14,0.9)";
         ctx.stroke();
 
         if (p.bomb) {
           ctx.strokeStyle = "#f5694a";
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 2.5 * s;
           ctx.beginPath();
-          ctx.arc(c.x, c.y, r + 3.5, 0, 7);
+          ctx.arc(c.x, c.y, r + 3.5 * s, 0, 7);
           ctx.stroke();
         }
 
         // initial, centered
         ctx.fillStyle = "#04060e";
-        ctx.font = "bold 9px sans-serif";
+        ctx.font = `bold ${9 * s}px sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const label = (meta?.players[p.i]?.name || "?").slice(0, 1).toUpperCase();
-        ctx.fillText(label, c.x, c.y + 0.5);
+        ctx.fillText(label, c.x, c.y + 0.5 * s);
         ctx.textAlign = "start";
         ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
 
         if (focus === p.i) {
           ctx.strokeStyle = "#38d6ff";
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 2.5 * s;
           ctx.beginPath();
-          ctx.arc(c.x, c.y, r + 4, 0, 7);
+          ctx.arc(c.x, c.y, r + 4 * s, 0, 7);
           ctx.stroke();
         }
       }
+      ctx.restore();
 
       // advisory banner (round result is shown as a popup, not here)
       let b = "";
@@ -550,6 +743,54 @@ export default function ReplayPage() {
     setTime(tRef.current);
   };
 
+  // --- map pan + click-to-select ---
+  const onCanvasDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const v = vpRef.current;
+    dragRef.current = { cx: e.clientX, cy: e.clientY, ox: v.ox, oy: v.oy, moved: false };
+  };
+  const onCanvasMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    const cv = canvasRef.current;
+    if (!d || !cv) return; // only pans while the button is held (down → up/leave)
+    const rect = cv.getBoundingClientRect();
+    const dx = ((e.clientX - d.cx) / rect.width) * SIZE;
+    const dy = ((e.clientY - d.cy) / rect.height) * SIZE;
+    if (Math.abs(e.clientX - d.cx) + Math.abs(e.clientY - d.cy) > 3) d.moved = true;
+    setViewport(clampVp(vpRef.current.scale, d.ox + dx, d.oy + dy));
+  };
+  const onCanvasUp = () => {
+    // carry the "was a pan" flag to the click that fires next, then clear drag so
+    // a button-less hover never pans.
+    movedRef.current = dragRef.current?.moved ?? false;
+    dragRef.current = null;
+  };
+  const onCanvasLeave = () => {
+    dragRef.current = null;
+  };
+  const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (movedRef.current) {
+      movedRef.current = false;
+      return; // that was a pan, not a select
+    }
+    if (!round) return;
+    const { x: mx, y: my } = toInternal(e.clientX, e.clientY);
+    const v = vpRef.current;
+    const wx = (mx - v.ox) / v.scale; // back to toPx (SIZE) space
+    const wy = (my - v.oy) / v.scale;
+    let best = -1;
+    let bestD = Infinity;
+    for (const p of posAt(round, tRef.current)) {
+      const c = toPx(p.x, p.y);
+      const dd = Math.hypot(c.x - wx, c.y - wy);
+      if (dd < bestD) {
+        bestD = dd;
+        best = p.i;
+      }
+    }
+    // hit radius in SIZE-space (~dot + slop); divide by scale so it's consistent
+    if (best >= 0 && bestD <= 16 / v.scale) setFocusPlayer(focusPlayer === best ? null : best);
+  };
+
   // keep the focus highlight live without rebuilding the draw loop
   useEffect(() => {
     focusRef.current = focusPlayer;
@@ -564,7 +805,21 @@ export default function ReplayPage() {
     setTime(0);
     playRef.current = false;
     setPlaying(false);
-  }, [scopeRound, rounds.length]);
+    setViewport({ scale: 1, ox: 0, oy: 0 }); // each round starts unzoomed
+  }, [scopeRound, rounds.length, setViewport]);
+
+  // wheel-zoom toward the cursor (non-passive so the page doesn't scroll)
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { x, y } = toInternal(e.clientX, e.clientY);
+      zoomAt(x, y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    };
+    cv.addEventListener("wheel", onWheel, { passive: false });
+    return () => cv.removeEventListener("wheel", onWheel);
+  }, [toInternal, zoomAt, tab]);
 
   if (loading) return <div className="card px-5 py-6 text-sm text-muted">Loading replay…</div>;
   if (!meta || !round)
@@ -687,13 +942,49 @@ export default function ReplayPage() {
         <>
       <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
         {/* radar */}
-        <div className="relative">
+        <div className="relative w-full max-w-160">
           <canvas
             ref={canvasRef}
             width={SIZE}
             height={SIZE}
-            className="aspect-square w-full max-w-160 rounded-xl border border-line bg-panel2"
+            onMouseDown={onCanvasDown}
+            onMouseMove={onCanvasMove}
+            onMouseUp={onCanvasUp}
+            onMouseLeave={onCanvasLeave}
+            onClick={onCanvasClick}
+            className={`aspect-square w-full select-none rounded-xl border border-line bg-panel2 ${
+              vp.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+            }`}
           />
+          {/* zoom controls */}
+          <div className="absolute right-2 top-2 flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => zoomAt(SIZE / 2, SIZE / 2, 1.3)}
+              title="Zoom in (scroll on the map)"
+              className="grid h-7 w-7 place-items-center rounded-md border border-line2 bg-bg/80 text-base font-bold backdrop-blur transition hover:bg-panel"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomAt(SIZE / 2, SIZE / 2, 1 / 1.3)}
+              title="Zoom out"
+              className="grid h-7 w-7 place-items-center rounded-md border border-line2 bg-bg/80 text-base font-bold backdrop-blur transition hover:bg-panel"
+            >
+              −
+            </button>
+            {vp.scale > 1 && (
+              <button
+                type="button"
+                onClick={() => setViewport({ scale: 1, ox: 0, oy: 0 })}
+                title="Reset zoom"
+                className="grid h-7 w-7 place-items-center rounded-md border border-line2 bg-bg/80 text-xs backdrop-blur transition hover:bg-panel"
+              >
+                ⟲
+              </button>
+            )}
+          </div>
           {banner && !finished && (
             <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-line2 bg-bg/80 px-3 py-1 text-xs font-semibold backdrop-blur">
               {banner}
@@ -849,6 +1140,19 @@ export default function ReplayPage() {
               </div>
             )}
           </div>
+
+          {focusPlayer != null ? (
+            <PlayerRoundCard
+              round={round}
+              meta={meta}
+              i={focusPlayer}
+              onClose={() => setFocusPlayer(null)}
+            />
+          ) : (
+            <div className="rounded-lg border border-dashed border-line px-3 py-2 text-[11px] text-faint">
+              Tip: scroll to zoom · drag to pan · click a player dot for their round detail.
+            </div>
+          )}
 
           <EventFeed round={round} time={time} meta={meta} zones={zones} />
 
