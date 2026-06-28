@@ -156,13 +156,19 @@ export function computeSuspicion(
     };
   }).filter((q): q is QueueStat => q !== null);
 
-  let gap: number | null = null;
+  let gap: number | null = null; // raw rating gap (for display)
+  let gapEff = 0; // sample-confidence-shrunk gap (for scoring)
   const faceitQ = queues.find((q) => q.source === "faceit");
   const off = queues.filter((q) => q.source !== "faceit");
   const offN = off.reduce((a, q) => a + q.n, 0);
   if (faceitQ && faceitQ.n >= 3 && offN >= 3) {
     const offAvg = off.reduce((a, q) => a + q.avgRating * q.n, 0) / offN;
     gap = offAvg - faceitQ.avgRating;
+    // A difference of two ~n means is mostly noise on thin samples (SE rivals
+    // the band), so shrink toward 0 — only sustained gaps from ~10+/side count
+    // fully; a 3v3 sample contributes ~12%.
+    const conf = Math.min(1, (Math.min(faceitQ.n, offN) - 2) / 8);
+    gapEff = gap * conf;
   }
 
   const kd = faceit?.kdRatio || steamKd(steamStats);
@@ -184,11 +190,11 @@ export function computeSuspicion(
   let hsDisplay = "—";
   let hsLabel = "HS accuracy";
   let hsDetail = "share of hits on the head";
-  let hsLo: [string, string] = ["20%", "Typical"];
-  let hsHi: [string, string] = ["42%", "Extreme"];
+  let hsLo: [string, string] = ["25%", "Typical"];
+  let hsHi: [string, string] = ["50%", "Extreme"];
   if (s && s.accuracy_head > 0) {
     hsValue = s.accuracy_head;
-    sHs = up(hsValue, 20, 42);
+    sHs = up(hsValue, 25, 50);
     hsDisplay = `${hsValue.toFixed(0)}%`;
   } else {
     const hsPct =
@@ -205,27 +211,37 @@ export function computeSuspicion(
     }
   }
 
+  // Calibration reference (recompute if you touch the anchors/weights below):
+  //   typical legit (650ms/12°/aim70)            → ~2   very low
+  //   strong pro, no gap (480ms/6.5°/aim92)      → ~40  low (must NOT reach High)
+  //   blatant aimbot, no gap (380ms/2°/aim99)    → ~89  very high
+  //   same aimbot but cross-platform-consistent  → ~89  very high (not exonerated)
+  //   no mechanical data (K/D + HS% only)        → capped at 39 (Moderate)
+
   // --- sub-scores (0 = normal, 100 = extreme) ---
-  // Strict thresholds: only genuinely superhuman values ramp up, NOT pro-level
-  // skill (e.g. preaim must beat ~5° and reaction ~450ms before it counts).
-  const sGap = gap != null ? up(gap, 0.1, 0.9) : null;
-  const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 630, 440) : null;
-  const sPreaim = s && s.preaim > 0 ? down(s.preaim, 11, 4.5) : null;
-  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 78, 99) : null;
+  // up()/down() are LINEAR ramps: 0 at the benign anchor, 100 at the superhuman
+  // anchor (clamped). Anchors sit in genuinely superhuman territory so fast-pro
+  // values stay modest (≈480ms reaction → ~44, 6.5° preaim → ~42), reserving the
+  // top of the range for inhuman triggerbot/aimbot values.
+  const sGap = gap != null ? up(gapEff, 0.2, 1.0) : null;
+  const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 560, 380) : null;
+  const sPreaim = s && s.preaim > 0 ? down(s.preaim, 9, 3) : null;
+  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 85, 100) : null;
+  // Steam lifetime accuracy is all-mode (DM/casual inflate it) — shown as a
+  // context card but NOT fed into the score.
   const sAccuracy = accuracyPct > 0 ? up(accuracyPct, 24, 40) : null;
   const sKd = kd > 0 ? up(kd, 1.0, 2.0) : null;
 
   // Mechanical-anomaly composite — reaction, crosshair placement and aim are the
-  // most direct aimbot/triggerbot tells; shot accuracy is the strongest tell we
-  // have without Leetify; HS% and K/D are lighter, skill-linked support. Weights
-  // renormalise over whatever signals are actually present.
+  // most direct aimbot/triggerbot tells; HS% and K/D are lighter, skill-linked
+  // support. Steam lifetime accuracy is deliberately NOT scored (all-mode noise).
+  // Weights renormalise over whatever signals are actually present.
   const mechParts: [number, number][] = (
     [
-      [sReaction, 0.22],
-      [sPreaim, 0.2],
-      [sAim, 0.16],
-      [sAccuracy, 0.16],
-      [sHs, 0.14],
+      [sReaction, 0.24],
+      [sPreaim, 0.22],
+      [sAim, 0.18],
+      [sHs, 0.1],
       [sKd, 0.12],
     ] as [number | null, number][]
   ).filter((p): p is [number, number] => p[0] != null);
@@ -236,22 +252,34 @@ export function computeSuspicion(
   // inhuman reaction) should drive the score up on their own — a plain weighted
   // mean lets ordinary skill-linked stats (K/D, HS%) average them back down, so
   // blend the breadth (mean) with the PEAK of the strongest core tells.
-  const core = [sReaction, sPreaim, sAim, sAccuracy]
+  const core = [sReaction, sPreaim, sAim]
     .filter((v): v is number => v != null)
     .sort((a, b) => b - a);
   const peak = core.length === 0 ? 0 : core.length === 1 ? core[0] : (core[0] + core[1]) / 2;
-  const mech = core.length ? Math.max(mean, 0.4 * mean + 0.6 * peak) : mean;
+  // Need ≥2 mechanical tells before the peak can lift the score (one hot stat
+  // can't pin it), and a softer 0.45 peak weight so two pro-level tells don't
+  // over-amplify a legit player.
+  const mech = core.length >= 2 ? Math.max(mean, 0.55 * mean + 0.45 * peak) : mean;
 
   // Score: mechanics drive it. The cross-platform gap (Leetify only) works BOTH
   // ways — a big gap amplifies + adds on top; a near-zero gap is exculpatory. No
   // gap to cross-check → mechanics mostly stand. A ban floors the score high.
   let score: number;
   if (sGap != null) {
-    score = mech * (0.6 + 0.4 * (sGap / 100)) + sGap * 0.25;
+    // A big cross-platform gap amplifies; a near-zero gap nudges down only
+    // slightly. gap=0 must equal the no-gap baseline (mech*0.9) so having FACEIT
+    // data can never LOWER a score — the old 0.6 floor exonerated cross-platform-
+    // consistent cheaters (a uniform aimbot dropped from ~90 to ~60).
+    score = mech * (0.9 + 0.1 * (sGap / 100)) + sGap * 0.25;
   } else {
     score = mech * 0.9;
   }
-  if (banned) score = Math.max(score, 85);
+  // No mechanical (Leetify) tells → only skill-linked stats; cap below High so a
+  // FACEIT/Steam-only K/D + HS% read can't publicly assert High/Very High.
+  if (core.length === 0) score = Math.min(score, 39);
+  // A recorded ban is a strong flag, but we can't inspect its type or age, so
+  // floor at High rather than asserting Very High ("multiple strong anomalies").
+  if (banned) score = Math.max(score, 70);
   score = clamp(score);
   const band = band5(score);
 
@@ -315,11 +343,11 @@ export function computeSuspicion(
     });
 
   if (s && s.reaction_time_ms > 0)
-    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 630, 440), "630ms", "Human", "440ms", "Inhuman");
+    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 560, 380), "560ms", "Human", "380ms", "Inhuman");
   if (s && s.preaim > 0)
-    card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 11, 4.5), "11°", "Typical", "4.5°", "Inhuman");
+    card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 9, 3), "9°", "Typical", "3°", "Inhuman");
   if (leetify && leetify.rating.aim > 0)
-    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 78, 99), "78", "High", "99", "Extreme");
+    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 85, 100), "85", "High", "100", "Extreme");
   if (sAccuracy != null)
     card("accuracy", "target", "Shot accuracy", `${accuracyPct.toFixed(0)}%`, up(accuracyPct, 24, 40), "24%", "Typical", "40%", "Inhuman");
   if (sKd != null)
