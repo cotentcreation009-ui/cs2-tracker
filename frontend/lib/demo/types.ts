@@ -32,6 +32,7 @@ export interface ReplayKill {
   vy: number;
   w: string;
   hs?: boolean;
+  a?: number; // assisting player index + 1 (0/undefined = none)
 }
 
 export interface ReplayNade {

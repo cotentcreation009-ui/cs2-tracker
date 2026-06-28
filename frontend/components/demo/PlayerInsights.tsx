@@ -294,9 +294,9 @@ function PlayerCard({
 
       <div className="mt-2 grid grid-cols-4 gap-1.5">
         <Stat label="ADR" value={p.adr.toFixed(0)} />
+        <Stat label="KAST" value={`${p.kastPct.toFixed(0)}%`} />
         <Stat label="HS%" value={`${p.hsPct.toFixed(0)}%`} />
         <Stat label="Trade K" value={`${p.tradeKills}`} sub={`${p.tradeKillPct.toFixed(0)}%`} />
-        <Stat label="Multi-K" value={`${p.multiKillRounds}`} sub="rounds" />
       </div>
 
       {hasAim && (
@@ -319,6 +319,29 @@ function PlayerCard({
           <SplitBar a={p.openingKills} b={p.openingDeaths} aHex="#46d369" bHex="#f5694a" />
         </div>
       </div>
+
+      {p.clutchTotal > 0 && (
+        <div className="mt-2.5">
+          <div className="flex justify-between text-[11px] text-muted">
+            <span>Clutches (1vX)</span>
+            <span className="tabular-nums">
+              {p.clutchWon}/{p.clutchTotal} won
+              {p.clutchBest > 0 && <span className="text-brand"> · best 1v{p.clutchBest}</span>}
+            </span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {p.clutchBySize.map((c) => (
+              <span
+                key={c.size}
+                className={`pill ${c.won > 0 ? "bg-good/15 text-good" : "bg-panel text-faint"}`}
+                title={`${c.won} of ${c.total} 1v${c.size} clutches won`}
+              >
+                1v{c.size}: {c.won}/{c.total}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(mk.k3 + mk.k4 + mk.k5 > 0 || mk.k2 > 0) && (
         <div className="mt-2 flex flex-wrap gap-1">
@@ -400,7 +423,9 @@ function PlayerCard({
         steamId={p.steamId}
         name={p.name}
         matchScore={cheat.score}
-        matchStats={`${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR${
+        matchStats={`${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR, KAST ${p.kastPct.toFixed(0)}%${
+          p.clutchTotal > 0 ? `, clutches ${p.clutchWon}/${p.clutchTotal}` : ""
+        }${
           p.shots >= 40 ? `, acc ${p.accuracy.toFixed(0)}%/HS-acc ${p.hsAccuracy.toFixed(0)}%` : ""
         }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`}
         cheatFactors={cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ")}
@@ -540,8 +565,10 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
     { label: "K/D", av: a.kd, bv: b.kd, fmt: (n) => n.toFixed(2) },
     { label: "KPR", av: a.kpr, bv: b.kpr, fmt: (n) => n.toFixed(2) },
     { label: "ADR", av: a.adr, bv: b.adr, fmt: (n) => n.toFixed(0) },
+    { label: "KAST", av: a.kastPct, bv: b.kastPct, fmt: (n) => `${n.toFixed(0)}%` },
     { label: "HS%", av: a.hsPct, bv: b.hsPct, fmt: (n) => `${n.toFixed(0)}%` },
     { label: "Opening W%", av: a.openingWinPct, bv: b.openingWinPct, fmt: (n) => `${n.toFixed(0)}%` },
+    { label: "Clutches won", av: a.clutchWon, bv: b.clutchWon, fmt: (n) => `${n}` },
     { label: "Multi-K rds", av: a.multiKillRounds, bv: b.multiKillRounds, fmt: (n) => `${n}` },
     { label: "Trade K", av: a.tradeKills, bv: b.tradeKills, fmt: (n) => `${n}` },
     { label: "Utility", av: a.utilNades.length, bv: b.utilNades.length, fmt: (n) => `${n}` },

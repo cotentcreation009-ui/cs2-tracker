@@ -126,6 +126,7 @@ type ReplayKill struct {
 	Vy       int32   `json:"vy"`
 	Weapon   string  `json:"w"`
 	Headshot bool    `json:"hs,omitempty"`
+	Assister int     `json:"a,omitempty"` // assisting player index + 1 (0 = none), enemy of victim only
 }
 
 type ReplayNade struct {
@@ -536,6 +537,12 @@ func (rc *replayCollector) onKill(e events.Kill) {
 	if e.Killer != nil {
 		kp := e.Killer.Position()
 		k.Kx, k.Ky = i32(kp.X), i32(kp.Y)
+	}
+	// real assist (enemy of the victim), stored +1 so 0 = none survives omitempty
+	if e.Assister != nil && e.Victim != nil && e.Assister.Team != e.Victim.Team {
+		if ai := rc.playerIndex(e.Assister); ai >= 0 {
+			k.Assister = ai + 1
+		}
 	}
 	rc.cur.Kills = append(rc.cur.Kills, k)
 
