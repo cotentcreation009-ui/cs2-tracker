@@ -23,6 +23,9 @@ export interface PlayerInsight {
   headshots: number; hsPct: number;
   openingKills: number; openingDeaths: number; openingAttempts: number; openingWinPct: number;
   tradeKills: number; tradedDeaths: number; tradeKillPct: number;
+  kastPct: number; // % of rounds with a kill, assist, survival or traded death
+  clutchWon: number; clutchTotal: number; clutchBest: number; // 1vX won / attempted / biggest won
+  clutchBySize: { size: number; won: number; total: number }[];
   multiKills: MultiKillTally; multiKillRounds: number;
   favoriteWeapons: FavoriteWeapon[]; area: AreaTendency;
   adr: number; utilDamage: number; enemiesFlashed: number; flashDuration: number;
@@ -77,7 +80,8 @@ export const PLAYER_INSIGHTS_LIMITATIONS = [
   "Flash stats are enemies blinded + blind-seconds dealt, not flash-assists (we don't tie a flash to a teammate's kill).",
   "Assists are a trade-proximity proxy (our data has no assist event).",
   "Economy is a coarse equipment-value bucket (pistol / eco / force / full), not real money or a full loadout.",
-  "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones. Clutch / 1vX needs per-tick data we don't capture.",
+  "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones.",
+  "KAST counts rounds with a kill, real assist, survival or traded death; clutches (1vX) are reconstructed from the kill timeline, with 1v1s credited to the round winner.",
   "Grenades whose thrower the demo didn't record are counted in match totals but can't be attributed to a player on the map.",
 ].join(" ");
 
@@ -221,6 +225,8 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
   interface Acc {
     rounds: number; kills: number; deaths: number; hs: number; assists: number;
     openK: number; openD: number; tradeK: number; tradedD: number;
+    kastRounds: number; clutchWon: number; clutchTotal: number; clutchBest: number;
+    clutchBySize: Map<number, { w: number; t: number }>;
     mk: MultiKillTally; mkRounds: number; weapons: Map<string, number>;
     a: number; b: number; mid: number; areaRounds: number;
     dmg: number; utilDmg: number; flashed: number; flashDur: number;
@@ -235,7 +241,9 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     let a = acc.get(i);
     if (!a) {
       a = { rounds: 0, kills: 0, deaths: 0, hs: 0, assists: 0, openK: 0, openD: 0,
-        tradeK: 0, tradedD: 0, mk: { k2: 0, k3: 0, k4: 0, k5: 0 }, mkRounds: 0,
+        tradeK: 0, tradedD: 0, kastRounds: 0, clutchWon: 0, clutchTotal: 0, clutchBest: 0,
+        clutchBySize: new Map(),
+        mk: { k2: 0, k3: 0, k4: 0, k5: 0 }, mkRounds: 0,
         weapons: new Map(), a: 0, b: 0, mid: 0, areaRounds: 0,
         dmg: 0, utilDmg: 0, flashed: 0, flashDur: 0,
         aimN: 0, rctMs: 0, preaim: 0, snap: 0,
@@ -295,6 +303,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         get(k.k).assists++; // proximity proxy
       }
     }
+    const tradedThisRound = new Set<number>();
     for (const k of kills) {
       if (k.v < 0 || k.k < 0) continue;
       const victimSide = sideOf(r, k.v, meta);
@@ -302,7 +311,63 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         (p) => p !== k && p.v === k.k && p.k >= 0 &&
           sideOf(r, p.k, meta) === victimSide && p.t - k.t >= 0 && p.t - k.t <= TRADE_WINDOW,
       );
-      if (traded) get(k.v).tradedD++;
+      if (traded) {
+        get(k.v).tradedD++;
+        tradedThisRound.add(k.v);
+      }
+    }
+
+    // KAST: a round "counts" for a player if they got a Kill, an Assist (real
+    // assister, if the demo recorded one), Survived to round end, or were Traded.
+    const diedThisRound = new Set<number>();
+    for (const k of kills) if (k.v >= 0) diedThisRound.add(k.v);
+    const assistThisRound = new Set<number>();
+    for (const k of kills) if (k.a && k.a > 0) assistThisRound.add(k.a - 1);
+    for (const i of onSide) {
+      if (
+        perRoundKills.has(i) || assistThisRound.has(i) ||
+        !diedThisRound.has(i) || tradedThisRound.has(i)
+      ) {
+        get(i).kastRounds++;
+      }
+    }
+
+    // Clutch (1vX): walk the kill timeline; the first player left as the last
+    // alive on their side (with enemies remaining) is "in the clutch". A 1v1 is
+    // credited to the round winner. Won if their side takes the round.
+    {
+      const aliveCT = new Set<number>(r.ct ?? []);
+      const aliveT = new Set<number>(r.t ?? []);
+      let cPlayer = -1, cSize = 0;
+      let cSide: "CT" | "T" | "" = "";
+      for (const k of kills) {
+        if (k.v < 0) continue;
+        if (aliveCT.has(k.v)) aliveCT.delete(k.v);
+        else if (aliveT.has(k.v)) aliveT.delete(k.v);
+        if (cPlayer >= 0) continue;
+        const ctOne = aliveCT.size === 1, tOne = aliveT.size === 1;
+        if (ctOne && tOne) {
+          if (r.winner === "CT") { cPlayer = [...aliveCT][0]; cSize = 1; cSide = "CT"; }
+          else if (r.winner === "T") { cPlayer = [...aliveT][0]; cSize = 1; cSide = "T"; }
+        } else if (ctOne && aliveT.size >= 1) {
+          cPlayer = [...aliveCT][0]; cSize = aliveT.size; cSide = "CT";
+        } else if (tOne && aliveCT.size >= 1) {
+          cPlayer = [...aliveT][0]; cSize = aliveCT.size; cSide = "T";
+        }
+      }
+      if (cPlayer >= 0 && cSide) {
+        const a = get(cPlayer);
+        a.clutchTotal++;
+        const won = r.winner === cSide;
+        if (won) {
+          a.clutchWon++;
+          if (cSize > a.clutchBest) a.clutchBest = cSize;
+        }
+        const rec = a.clutchBySize.get(cSize) ?? { w: 0, t: 0 };
+        rec.t++;
+        if (won) rec.w++;
+        a.clutchBySize.set(cSize, rec);
+      }
     }
 
     // area lean: each player's mean position this round -> nearest anchor
@@ -384,6 +449,11 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       openingWinPct: a.openK + a.openD ? (a.openK / (a.openK + a.openD)) * 100 : 0,
       tradeKills: a.tradeK, tradedDeaths: a.tradedD,
       tradeKillPct: a.kills ? (a.tradeK / a.kills) * 100 : 0,
+      kastPct: a.rounds ? (a.kastRounds / a.rounds) * 100 : 0,
+      clutchWon: a.clutchWon, clutchTotal: a.clutchTotal, clutchBest: a.clutchBest,
+      clutchBySize: [...a.clutchBySize.entries()]
+        .map(([size, rec]) => ({ size, won: rec.w, total: rec.t }))
+        .sort((x, y) => x.size - y.size),
       multiKills: a.mk, multiKillRounds: a.mkRounds, favoriteWeapons,
       area: { a: a.a, b: a.b, mid: a.mid, rounds: a.areaRounds },
       adr: a.rounds ? a.dmg / a.rounds : 0,
