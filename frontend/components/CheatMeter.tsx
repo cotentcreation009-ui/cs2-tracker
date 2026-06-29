@@ -419,31 +419,29 @@ export function CheatMeter({
         </div>
       </div>
 
-      {/* ranks — Premier (click for rating history) · FACEIT · Wingman */}
-      {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
-          <FaceitRank
-            faceit={faceit}
-            levelFallback={leetify?.ranks?.faceit ?? 0}
-            eloFallback={leetify?.ranks?.faceit_elo ?? 0}
-          />
-          {wingman > 0 && (
-            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title="Wingman rank">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel2 text-sm font-black text-muted">W</span>
-              <div>
-                <div className="stat-label">Wingman</div>
-                <div className="text-base font-bold tabular-nums text-ink">#{wingman}</div>
-              </div>
+      {/* ranks + steam profile (left) · name + meter (centered) · factors (right) */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
+        {/* left: ranks + steam profile + analysis scope */}
+        <div className="space-y-3">
+          {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
+              <FaceitRank
+                faceit={faceit}
+                levelFallback={leetify?.ranks?.faceit ?? 0}
+                eloFallback={leetify?.ranks?.faceit_elo ?? 0}
+              />
+              {wingman > 0 && (
+                <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title="Wingman rank">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel2 text-sm font-black text-muted">W</span>
+                  <div>
+                    <div className="stat-label">Wingman</div>
+                    <div className="text-base font-bold tabular-nums text-ink">#{wingman}</div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* steam profile (left) · name + meter (centered) · factors (right) */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
-        {/* left: steam profile + analysis scope */}
-        <div className="space-y-3">
           <div className="space-y-1.5">
             <div className="stat-label">Steam profile</div>
             <div className="flex flex-wrap gap-1.5">
