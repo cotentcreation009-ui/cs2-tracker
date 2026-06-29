@@ -514,6 +514,10 @@ export function CheatMeter({
           <div className="w-full max-w-[260px]">
             <BandLegend band={band} />
           </div>
+          <p className="mt-2 max-w-[300px] text-[10px] leading-snug text-faint">
+            Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
+            Skilled legit players score high too.
+          </p>
         </div>
 
         {/* factors — two columns to use the width and stay compact */}
