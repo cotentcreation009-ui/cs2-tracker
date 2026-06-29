@@ -342,7 +342,7 @@ export function CheatMeter({
   rating?: number | null;
   generatedOn?: string;
 }) {
-  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats);
+  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras);
   if (!sus || !sus.hasEnough) return null;
 
   // identity + ranks for the hero (everything visible in the CheatMeter view)

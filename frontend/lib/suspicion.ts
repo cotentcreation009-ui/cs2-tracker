@@ -1,4 +1,4 @@
-import type { FaceitProfile, LeetifyProfile, SteamGameStats } from "@/lib/types";
+import type { FaceitProfile, LeetifyProfile, SteamExtras, SteamGameStats } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // CheatMeter suspicion / anomaly engine.
@@ -126,6 +126,7 @@ export function computeSuspicion(
   leetify: LeetifyProfile | null | undefined,
   faceit: FaceitProfile | null | undefined,
   steamStats: SteamGameStats | null | undefined,
+  steamExtras?: SteamExtras | null,
 ): Suspicion | null {
   // Work from whatever sources exist. Leetify gives the strongest mechanical
   // tells (reaction / crosshair / aim); Steam stats (shot accuracy, HS%, K/D)
@@ -173,8 +174,21 @@ export function computeSuspicion(
   }
 
   const kd = faceit?.kdRatio || steamKd(steamStats);
-  const banCount = leetify?.bans?.length ?? 0;
-  const banned = banCount > 0;
+
+  // Bans — prefer Steam's typed + dated GetPlayerBans over Leetify's opaque
+  // (length-only) array. The floor scales with type + freshness so an old game
+  // ban doesn't assert the same "Very High" as a fresh VAC.
+  const vacBans = steamExtras?.numberOfVacBans ?? 0;
+  const gameBans = steamExtras?.numberOfGameBans ?? 0;
+  const daysSinceBan = steamExtras?.daysSinceLastBan ?? 0;
+  const steamBanned = (steamExtras?.vacBanned ?? false) || vacBans > 0 || gameBans > 0;
+  const leetifyBanCount = leetify?.bans?.length ?? 0;
+  const banned = steamBanned || leetifyBanCount > 0;
+  const banFresh = daysSinceBan > 0 && daysSinceBan <= 365;
+  let banFloor = 0;
+  if (vacBans > 0 || (steamExtras?.vacBanned ?? false)) banFloor = banFresh ? 85 : 65;
+  else if (gameBans > 0) banFloor = banFresh ? 78 : 52;
+  else if (leetifyBanCount > 0) banFloor = 70; // opaque Leetify ban — no type/age
 
   // Universal signals available without Leetify, from Steam's App-730 totals.
   const ss = steamStats?.stats;
@@ -278,9 +292,9 @@ export function computeSuspicion(
   // No mechanical (Leetify) tells → only skill-linked stats; cap below High so a
   // FACEIT/Steam-only K/D + HS% read can't publicly assert High/Very High.
   if (core.length === 0) score = Math.min(score, 39);
-  // A recorded ban is a strong flag, but we can't inspect its type or age, so
-  // floor at High rather than asserting Very High ("multiple strong anomalies").
-  if (banned) score = Math.max(score, 70);
+  // Floor scales with ban type + freshness (fresh VAC 85 → old game ban 52);
+  // opaque Leetify-only bans floor at 70.
+  if (banFloor > 0) score = Math.max(score, banFloor);
   score = clamp(score);
   const band = band5(score);
 
@@ -304,13 +318,22 @@ export function computeSuspicion(
   add("hs", "target", hsLabel, hsDisplay, hsDetail, sHs);
   add("aim", "cross", "Aim rating", leetify ? leetify.rating.aim.toFixed(1) : "—", "aim quality (Leetify)", sAim);
   add("kd", "target", "K/D ratio", kd > 0 ? kd.toFixed(2) : "—", "kills per death", sKd);
-  if (leetify) {
+  if (leetify || steamExtras) {
+    const banDisplay =
+      vacBans > 0 ? `${vacBans} VAC` : gameBans > 0 ? `${gameBans} game` : leetifyBanCount > 0 ? `${leetifyBanCount}` : "Clean";
+    const banDetail = steamBanned
+      ? daysSinceBan > 0
+        ? `last ban ${daysSinceBan}d ago`
+        : "ban on record (Steam)"
+      : leetifyBanCount > 0
+        ? "bans on record (Leetify)"
+        : "no bans on record";
     F.push({
       key: "bans",
       icon: "shield",
       label: "Ban / VAC history",
-      display: banned ? `${banCount}` : "Clean",
-      detail: "bans on record (Leetify)",
+      display: banDisplay,
+      detail: banDetail,
       score: banned ? 100 : 0,
       band: band5(banned ? 100 : 0),
     });
