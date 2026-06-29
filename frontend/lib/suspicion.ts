@@ -221,6 +221,7 @@ export function computeSuspicion(
   // Calibration reference (recompute if you touch the anchors/weights below):
   //   typical legit (650ms/12°/aim70)            → ~2   very low
   //   strong pro, no gap (480ms/6.5°/aim92)      → ~40  low (must NOT reach High)
+  //   near-max aim + fast reaction (99/436ms), normal K/D/HS → ~61 High
   //   blatant aimbot, no gap (380ms/2°/aim99)    → ~89  very high
   //   same aimbot but cross-platform-consistent  → ~89  very high (not exonerated)
   //   no mechanical data (K/D + HS% only)        → capped at 39 (Moderate)
@@ -264,9 +265,10 @@ export function computeSuspicion(
     .sort((a, b) => b - a);
   const peak = core.length === 0 ? 0 : core.length === 1 ? core[0] : (core[0] + core[1]) / 2;
   // Need ≥2 mechanical tells before the peak can lift the score (one hot stat
-  // can't pin it), and a softer 0.45 peak weight so two pro-level tells don't
-  // over-amplify a legit player.
-  const mech = core.length >= 2 ? Math.max(mean, 0.55 * mean + 0.45 * peak) : mean;
+  // can't pin it). The stretched endpoints already keep pro-level tells modest
+  // (~45), so a 0.6 peak weight only fires High when TWO tells are genuinely
+  // extreme (e.g. a near-max 99 aim + a fast reaction), not for strong pros.
+  const mech = core.length >= 2 ? Math.max(mean, 0.4 * mean + 0.6 * peak) : mean;
 
   // Score: mechanics drive it. The cross-platform gap (Leetify only) works BOTH
   // ways — a big gap amplifies + adds on top; a near-zero gap is exculpatory. No
