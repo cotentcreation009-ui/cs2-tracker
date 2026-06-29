@@ -16,6 +16,13 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		X-Frame-Options "SAMEORIGIN"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+		# CSP is permissive on script/style ('unsafe-inline' — Next.js ships inline
+		# bootstrap scripts and Tailwind inlines styles) and on https: images (Steam
+		# avatar CDNs), but locks down object/base/frame-ancestors/form-action. The
+		# app has no dangerouslySetInnerHTML sink, so this is defense-in-depth +
+		# clickjacking protection. Tighten to nonces later if an HTML sink is added.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
 		-Server
 	}
 
