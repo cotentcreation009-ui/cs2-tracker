@@ -375,23 +375,40 @@ export function CheatMeter({
 
   return (
     <section className="card-2 px-5 py-4">
-      {/* header: CheatMeter title (left) · Share / Compare (right) */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-line/60 pb-4">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
-          <Icon name="shield" className="h-4 w-4" />
-        </span>
-        <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
-        <span className="pill bg-brand/15 text-brand">BETA</span>
-        <span className="text-xs text-faint">Advanced CS2 player analysis</span>
-        {lowConfidence && (
-          <span
-            className="pill bg-mid/15 text-mid"
-            title={`Confidence ${confidence}/100 — thin data, so the risk band is capped and hedged`}
-          >
-            Low confidence · limited data
+      {/* top row: title (left) · player name over the meter (center) · actions (right) */}
+      <div className="mb-4 grid grid-cols-1 items-center gap-2 border-b border-line/60 pb-4 lg:grid-cols-[1fr_auto_1fr]">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
+            <Icon name="shield" className="h-4 w-4" />
           </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
+          <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
+          <span className="pill bg-brand/15 text-brand">BETA</span>
+          {lowConfidence && (
+            <span
+              className="pill bg-mid/15 text-mid"
+              title={`Confidence ${confidence}/100 — thin data, so the risk band is capped and hedged`}
+            >
+              Low confidence
+            </span>
+          )}
+        </div>
+        {/* center: player name + avatar, on the top row, over the meter below */}
+        <div className="flex min-w-0 items-center justify-center gap-2.5">
+          <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
+            {player.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
+            ) : (
+              <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
+                {(player.personaName || "?").slice(0, 1).toUpperCase()}
+              </div>
+            )}
+          </div>
+          <span className="truncate text-2xl font-extrabold leading-tight">
+            {player.personaName || player.steamId64}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 lg:justify-end">
           <ShareButton label="Share" />
           <Link
             href={`/compare?a=${player.steamId64}`}
@@ -481,23 +498,8 @@ export function CheatMeter({
           )}
         </div>
 
-        {/* center: player name directly over the meter */}
+        {/* center: the meter */}
         <div className="flex flex-col items-center text-center">
-          <div className="mb-3 flex max-w-full items-center gap-2.5">
-            <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
-              {player.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
-              ) : (
-                <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
-                  {(player.personaName || "?").slice(0, 1).toUpperCase()}
-                </div>
-              )}
-            </div>
-            <span className="truncate text-2xl font-extrabold leading-tight">
-              {player.personaName || player.steamId64}
-            </span>
-          </div>
           <div className="stat-label">Cheating likelihood</div>
           <div className={`text-6xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
