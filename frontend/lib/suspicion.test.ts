@@ -98,6 +98,21 @@ describe("CheatMeter calibration probes", () => {
     expect(sus!.band === "high" || sus!.band === "veryhigh").toBe(false);
   });
 
+  it("near-max aim + fast reaction (normal K/D/HS) → High, not Moderate", () => {
+    // "Kiwi"-type: aim 99.4 (beyond pro) + 436ms reaction, but normal K/D/HS.
+    // Two genuinely-extreme aim tells should tip into High; normal output stats
+    // keep it out of Very High.
+    const sus = computeSuspicion(
+      mkLeetify({ reaction: 436, preaim: 7.8, aim: 99.4, head: 27 }),
+      mkFaceit({ kd: 1.09, hs: 27 }),
+      null,
+    );
+    expect(sus!.gap).toBeNull(); // no FACEIT cross-check in recent matches
+    expect(sus!.score).toBeGreaterThanOrEqual(60); // High, not Moderate
+    expect(sus!.score).toBeLessThan(80); // not Very High (K/D + HS are normal)
+    expect(sus!.band).toBe("high");
+  });
+
   it("blatant aimbot (no gap) → Very High", () => {
     const sus = computeSuspicion(mkLeetify({ reaction: 380, preaim: 2, aim: 99, head: 80 }), null, null);
     expect(sus!.score).toBeGreaterThanOrEqual(80);
