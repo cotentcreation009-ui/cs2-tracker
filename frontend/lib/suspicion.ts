@@ -105,14 +105,6 @@ const up = (v: number, lo: number, hi: number) =>
 const down = (v: number, benign: number, sus: number) =>
   clamp(((benign - v) / (benign - sus)) * 100);
 
-const steamKd = (steamStats?: SteamGameStats | null): number => {
-  const s = steamStats?.stats;
-  if (!s) return 0;
-  const k = s["total_kills"] ?? 0;
-  const d = s["total_deaths"] ?? 0;
-  return d > 0 ? k / d : 0;
-};
-
 const noteFor = (band: Band): string =>
   ({
     verylow: "Within normal range",
@@ -173,7 +165,9 @@ export function computeSuspicion(
     gapEff = gap * conf;
   }
 
-  const kd = faceit?.kdRatio || steamKd(steamStats);
+  // K/D from FACEIT career only — Steam's lifetime all-mode K/D is too noisy to
+  // score (and would otherwise be the lone signal on a Steam-only account).
+  const kd = faceit?.kdRatio ?? 0;
 
   // Bans — prefer Steam's typed + dated GetPlayerBans over Leetify's opaque
   // (length-only) array. The floor scales with type + freshness so an old game
@@ -190,16 +184,16 @@ export function computeSuspicion(
   else if (gameBans > 0) banFloor = banFresh ? 78 : 52;
   else if (leetifyBanCount > 0) banFloor = 70; // opaque Leetify ban — no type/age
 
-  // Universal signals available without Leetify, from Steam's App-730 totals.
+  // Steam App-730 totals are LIFETIME + all-mode (DM/casual/community), so they
+  // are kept as a context card only — shot accuracy is shown but not scored.
   const ss = steamStats?.stats;
-  const steamKills = ss?.["total_kills"] ?? 0;
   const steamFired = ss?.["total_shots_fired"] ?? 0;
   const accuracyPct =
     steamFired > 0 ? ((ss?.["total_shots_hit"] ?? 0) / steamFired) * 100 : 0;
 
   // Headshot signal: prefer Leetify's head-accuracy (its own scale); else fall
-  // back to HS% of kills from FACEIT or Steam — a different metric, so a
-  // different threshold and label.
+  // back to FACEIT's HS% of kills (a different metric → different threshold).
+  // Steam lifetime HS% is NOT used — all-mode noise.
   let sHs: number | null = null;
   let hsValue = 0;
   let hsDisplay = "—";
@@ -212,9 +206,7 @@ export function computeSuspicion(
     sHs = up(hsValue, 25, 50);
     hsDisplay = `${hsValue.toFixed(0)}%`;
   } else {
-    const hsPct =
-      faceit?.hsPct ||
-      (steamKills > 0 ? ((ss?.["total_kills_headshot"] ?? 0) / steamKills) * 100 : 0);
+    const hsPct = faceit?.hsPct ?? 0;
     if (hsPct > 0) {
       hsValue = hsPct;
       sHs = up(hsValue, 45, 72);
