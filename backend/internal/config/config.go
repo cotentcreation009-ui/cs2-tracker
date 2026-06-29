@@ -115,10 +115,10 @@ func Load() (*Config, error) {
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),
 		DemoMaxBytes:       int64(getInt("DEMO_MAX_MB", 600)) << 20,
 		DemoURLTTL:         getDuration("DEMO_URL_TTL", 15*time.Minute),
-		CacheTTL:          getDuration("CACHE_TTL", 5*time.Minute),
-		ExternalCacheTTL:  getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
-		RateLimitRPS:      getFloat("RATE_LIMIT_RPS", 10),
-		RateLimitBurst:    getInt("RATE_LIMIT_BURST", 20),
+		CacheTTL:           getDuration("CACHE_TTL", 5*time.Minute),
+		ExternalCacheTTL:   getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
+		RateLimitRPS:       getFloat("RATE_LIMIT_RPS", 10),
+		RateLimitBurst:     getInt("RATE_LIMIT_BURST", 20),
 	}
 
 	if cfg.DatabaseURL == "" {
