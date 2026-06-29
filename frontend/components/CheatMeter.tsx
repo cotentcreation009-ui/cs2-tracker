@@ -478,8 +478,11 @@ export function CheatMeter({
         )}
       </div>
 
-      {/* meter — centered focal point with the cheating-likelihood % */}
-      <div className="mb-5 flex flex-col items-center text-center">
+      {/* meter (left) · factors (right) */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+        {/* left column: meter + analysis scope */}
+        <div className="space-y-4">
+          <div className="flex flex-col items-center text-center">
         <div className="stat-label">Cheating likelihood</div>
         <div className={`text-5xl font-extrabold tabular-nums ${BAND_TEXT[band]}`}>
           {score.toFixed(0)}%
@@ -494,12 +497,10 @@ export function CheatMeter({
           Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
           Skilled legit players score high too.
         </p>
-      </div>
+          </div>
 
-      {/* scope + factors */}
-      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-        {/* analysis scope */}
-        <div className="space-y-2">
+          {/* analysis scope */}
+          <div className="space-y-2">
           <div className="rounded-xl border border-line bg-panel/40 p-3">
             <div className="stat-label">Analysis scope</div>
             <div className="mt-1 text-sm text-ink">
@@ -516,9 +517,10 @@ export function CheatMeter({
               Generated {generatedOn}
             </div>
           )}
+          </div>
         </div>
 
-        {/* factors — two columns to use the width and stay compact */}
+        {/* factors — right of the meter, two columns to use the width */}
         <div>
           <div className="stat-label mb-1.5">Factors analyzed <span className="font-normal normal-case text-faint">· biggest drivers first</span></div>
           <ul className="grid gap-1.5 sm:grid-cols-2">
