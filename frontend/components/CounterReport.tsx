@@ -4,6 +4,7 @@ import type {
   SteamGameStats,
 } from "@/lib/types";
 import { mapLabel } from "@/lib/format";
+import { computeMapPlan } from "@/lib/mapplan";
 
 type Tip = { title: string; tip: string };
 
@@ -31,11 +32,30 @@ const WEAPONS: Record<string, string> = {
 };
 const weaponLabel = (w: string) => WEAPONS[w] ?? w.toUpperCase();
 
-function MapRow({ map, pct, w, l }: { map: string; pct: number; w: number; l: number }) {
+function MapRow({
+  map,
+  pct,
+  w,
+  l,
+  tag,
+}: {
+  map: string;
+  pct: number;
+  w: number;
+  l: number;
+  tag?: "main" | "small";
+}) {
   return (
-    <div className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2">
-      <span className="truncate text-sm font-medium capitalize">
-        {mapLabel(map)}
+    <div
+      className={`grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 ${tag === "small" ? "opacity-60" : ""}`}
+    >
+      <span className="flex min-w-0 items-center gap-1 text-sm font-medium capitalize">
+        {tag === "main" && (
+          <span title="their most-played map" className="shrink-0 text-brand">
+            ★
+          </span>
+        )}
+        <span className="truncate">{mapLabel(map)}</span>
       </span>
       <div className="relative h-2 overflow-hidden rounded-full bg-panel">
         <span className="absolute left-1/2 top-0 h-full w-px bg-line2" />
@@ -44,11 +64,14 @@ function MapRow({ map, pct, w, l }: { map: string; pct: number; w: number; l: nu
           style={{ width: `${pct}%`, background: pctColor(pct) }}
         />
       </div>
-      <span className="w-14 text-right text-xs tabular-nums">
+      <span className="w-16 text-right text-xs tabular-nums">
         <span className="font-semibold">{pct.toFixed(0)}%</span>{" "}
         <span className="text-faint">
           {w}-{l}
         </span>
+        {tag === "small" && (
+          <span className="block text-[9px] leading-tight text-faint">small sample</span>
+        )}
       </span>
     </div>
   );
@@ -134,20 +157,11 @@ export function CounterReport({
   if (!weak.length)
     weak.push({ title: "No glaring weakness", tip: "Win the utility war, avoid their best map, and grind for picks." });
 
-  // --- map plan ---
-  const byMap = new Map<string, { n: number; w: number }>();
-  for (const m of recent) {
-    const k = m.map_name || "unknown";
-    const e = byMap.get(k) || { n: 0, w: 0 };
-    e.n += 1;
-    if (m.outcome === "win") e.w += 1;
-    byMap.set(k, e);
-  }
-  const ranked = [...byMap.entries()]
-    .filter(([, e]) => e.n >= 3)
-    .map(([map, e]) => ({ map, n: e.n, w: e.w, l: e.n - e.w, pct: (e.w / e.n) * 100 }));
-  const pick = [...ranked].sort((a, b) => a.pct - b.pct).slice(0, 3);
-  const ban = [...ranked].sort((a, b) => b.pct - a.pct).slice(0, 3);
+  // --- map plan (sample-aware; surfaces the most-played "main" — see lib/mapplan) ---
+  const { pick, ban, main, hasMain, mainStrong, hasSoftMap, totalReal } =
+    computeMapPlan(recent);
+  const mapTag = (m: { map: string; n: number }): "main" | "small" | undefined =>
+    main && m.map === main.map ? "main" : m.n < 5 ? "small" : undefined;
 
   // --- weapon tendencies (Steam, public profiles) ---
   const ws = steamStats?.stats;
@@ -169,7 +183,10 @@ export function CounterReport({
 
   // --- one-line game plan ---
   const planBits: string[] = [];
-  if (pick[0]) planBits.push(`pick ${mapLabel(pick[0].map)}`);
+  const softMap = pick.find((p) => p.adj < 50);
+  if (softMap) planBits.push(`pick ${mapLabel(softMap.map)}`);
+  else if (hasMain && main) planBits.push(`avoid their main ${mapLabel(main.map)}`);
+  else if (pick[0]) planBits.push(`target ${mapLabel(pick[0].map)}`);
   if (weakerSide) planBits.push(`attack their ${weakerSide} side`);
   const topWeak = weak.find((x) => x.title !== "No glaring weakness");
   if (topWeak) planBits.push(topWeak.title.toLowerCase());
@@ -266,24 +283,54 @@ export function CounterReport({
         </div>
       </div>
 
+      {/* most-played "main" map — the comfort pick a raw win-rate sort hides */}
+      {hasMain && main && (
+        <div className="mt-4 flex items-start gap-3 rounded-xl border border-brand/25 bg-brand/[0.06] px-4 py-3">
+          <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand/15 text-brand">
+            ★
+          </span>
+          <div className="text-sm leading-relaxed">
+            <span className="font-semibold capitalize">Main map — {mapLabel(main.map)}.</span>{" "}
+            <span className="text-muted">
+              {main.n} of {totalReal} recent games ({main.pct.toFixed(0)}%, {main.w}-{main.l}) — far
+              more than any other map.{" "}
+              {mainStrong
+                ? "Their comfort map and a likely first-pick; banning it denies their most-practiced map."
+                : "Even if it isn't their highest win-rate, it's their most-practiced map and most reliable read — think twice before picking into it."}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* map plan */}
       {(pick.length > 0 || ban.length > 0) && (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <div>
-            <div className="stat-label mb-2 text-good">Pick these maps</div>
+            <div className="stat-label mb-2 text-good">
+              {hasSoftMap ? "Pick these maps" : "Their weakest maps"}
+            </div>
             <div className="space-y-1.5">
               {pick.length ? (
-                pick.map((m) => <MapRow key={m.map} {...m} />)
+                pick.map((m) => (
+                  <MapRow key={m.map} map={m.map} pct={m.pct} w={m.w} l={m.l} tag={mapTag(m)} />
+                ))
               ) : (
                 <span className="text-xs text-faint">not enough data</span>
               )}
             </div>
+            {!hasSoftMap && pick.length > 0 && (
+              <p className="mt-1.5 text-[10px] leading-snug text-faint">
+                No losing map — they win on all of these; pick their lowest only if forced.
+              </p>
+            )}
           </div>
           <div>
             <div className="stat-label mb-2 text-bad">Ban these maps</div>
             <div className="space-y-1.5">
               {ban.length ? (
-                ban.map((m) => <MapRow key={m.map} {...m} />)
+                ban.map((m) => (
+                  <MapRow key={m.map} map={m.map} pct={m.pct} w={m.w} l={m.l} tag={mapTag(m)} />
+                ))
               ) : (
                 <span className="text-xs text-faint">not enough data</span>
               )}
@@ -313,7 +360,9 @@ export function CounterReport({
 
       <p className="mt-4 border-t border-line pt-3 text-[11px] text-faint">
         Derived from {name}&apos;s recent Leetify/FACEIT/Steam stats — a scouting
-        aid, not a guarantee. Map %s are over the last {recent.length} matches.
+        aid, not a guarantee. Map order is sample-adjusted (small samples pulled
+        toward 50% so a lucky few games can&apos;t outrank a proven record); %s are
+        over the last {recent.length} matches.
       </p>
     </section>
   );
