@@ -89,7 +89,7 @@ export function ProfileView({
 
   // The CheatMeter is the page hero when there's enough data to analyze; it
   // self-hides otherwise, in which case we fall back to the plain hero below.
-  const showMeter = !!computeSuspicion(leetify, faceit, steamStats)?.hasEnough;
+  const showMeter = !!computeSuspicion(leetify, faceit, steamStats, steamExtras)?.hasEnough;
 
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;

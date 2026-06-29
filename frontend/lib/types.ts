@@ -230,6 +230,11 @@ export interface SteamExtras {
   steamLevel: number; // 0 when hidden / no key
   personaState?: number; // -1 unknown, 0 offline, >0 online/away/busy/snooze
   visibility?: number; // 0 unknown, 1 private, 3 public
+  vacBanned?: boolean;
+  numberOfVacBans?: number;
+  numberOfGameBans?: number;
+  daysSinceLastBan?: number; // days since most recent VAC/game ban (0 if none)
+  economyBan?: string; // "none" | "probation" | "banned"
 }
 
 export interface IngestJob {

@@ -291,6 +291,59 @@ func (c *Client) GetSteamLevel(ctx context.Context, steamID uint64) (int, error)
 	return out.Response.PlayerLevel, nil
 }
 
+// --- GetPlayerBans ----------------------------------------------------------
+
+// PlayerBans is the subset of GetPlayerBans we surface — typed + dated ban
+// status (unlike Leetify's opaque bans array).
+type PlayerBans struct {
+	VACBanned        bool
+	NumberOfVACBans  int
+	DaysSinceLastBan int // days since the most recent VAC/game ban (0 if none)
+	NumberOfGameBans int
+	EconomyBan       string // "none" | "probation" | "banned"
+	CommunityBanned  bool
+}
+
+type playerBansResponse struct {
+	Players []struct {
+		CommunityBanned  bool   `json:"CommunityBanned"`
+		VACBanned        bool   `json:"VACBanned"`
+		NumberOfVACBans  int    `json:"NumberOfVACBans"`
+		DaysSinceLastBan int    `json:"DaysSinceLastBan"`
+		NumberOfGameBans int    `json:"NumberOfGameBans"`
+		EconomyBan       string `json:"EconomyBan"`
+	} `json:"players"`
+}
+
+// GetPlayerBans returns VAC / game / economy ban status for a player. Requires
+// a key; returns a zero value (no bans) when the player isn't found.
+func (c *Client) GetPlayerBans(ctx context.Context, steamID uint64) (PlayerBans, error) {
+	if c.apiKey == "" {
+		return PlayerBans{}, ErrNoAPIKey
+	}
+	q := url.Values{}
+	q.Set("key", c.apiKey)
+	q.Set("steamids", strconv.FormatUint(steamID, 10))
+
+	var out playerBansResponse
+	if err := c.getJSON(ctx, "/ISteamUser/GetPlayerBans/v1/", q, &out,
+		http.StatusUnauthorized, http.StatusForbidden); err != nil {
+		return PlayerBans{}, err
+	}
+	if len(out.Players) == 0 {
+		return PlayerBans{}, nil
+	}
+	p := out.Players[0]
+	return PlayerBans{
+		VACBanned:        p.VACBanned,
+		NumberOfVACBans:  p.NumberOfVACBans,
+		DaysSinceLastBan: p.DaysSinceLastBan,
+		NumberOfGameBans: p.NumberOfGameBans,
+		EconomyBan:       p.EconomyBan,
+		CommunityBanned:  p.CommunityBanned,
+	}, nil
+}
+
 // --- ResolveSteamID convenience --------------------------------------------
 
 // ResolveSteamID accepts either a raw SteamID64 (17-digit numeric string) or a

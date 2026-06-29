@@ -381,12 +381,17 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 	out, _, err := cachedExternal(s, r.Context(), cache.SteamExtrasKey(id),
 		func() (map[string]any, error) {
 			o := map[string]any{
-				"steamId64":    strconv.FormatUint(id, 10),
-				"friendCode":   steam.FriendCode(id),
-				"friends":      0,
-				"steamLevel":   0,
-				"personaState": -1, // -1 = unknown; 0 = offline, >0 = online/away/busy
-				"visibility":   0,  // 0 = unknown; 1 = private, 3 = public
+				"steamId64":        strconv.FormatUint(id, 10),
+				"friendCode":       steam.FriendCode(id),
+				"friends":          0,
+				"steamLevel":       0,
+				"personaState":     -1, // -1 = unknown; 0 = offline, >0 = online/away/busy
+				"visibility":       0,  // 0 = unknown; 1 = private, 3 = public
+				"vacBanned":        false,
+				"numberOfVacBans":  0,
+				"numberOfGameBans": 0,
+				"daysSinceLastBan": 0,
+				"economyBan":       "none",
 			}
 			if s.steam.HasKey() {
 				// Independent calls — run them concurrently (write to locals to
@@ -394,7 +399,8 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 				var wg sync.WaitGroup
 				var friends, level int
 				var personaState, visibility = -1, 0
-				wg.Add(3)
+				var bans steam.PlayerBans
+				wg.Add(4)
 				go func() {
 					defer wg.Done()
 					if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
@@ -414,11 +420,22 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 						visibility = sums[0].CommunityVisibilityState
 					}
 				}()
+				go func() {
+					defer wg.Done()
+					if b, e := s.steam.GetPlayerBans(r.Context(), id); e == nil {
+						bans = b
+					}
+				}()
 				wg.Wait()
 				o["friends"] = friends
 				o["steamLevel"] = level
 				o["personaState"] = personaState
 				o["visibility"] = visibility
+				o["vacBanned"] = bans.VACBanned
+				o["numberOfVacBans"] = bans.NumberOfVACBans
+				o["numberOfGameBans"] = bans.NumberOfGameBans
+				o["daysSinceLastBan"] = bans.DaysSinceLastBan
+				o["economyBan"] = bans.EconomyBan
 			}
 			return o, nil
 		})
