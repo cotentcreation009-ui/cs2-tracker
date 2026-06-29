@@ -420,7 +420,7 @@ export function CheatMeter({
       </div>
 
       {/* ranks + steam profile (left) · name + meter (centered) · factors (right) */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
         {/* left: ranks + steam profile + analysis scope */}
         <div className="space-y-3">
           {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
@@ -442,6 +442,7 @@ export function CheatMeter({
               )}
             </div>
           )}
+          <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="stat-label">Steam profile</div>
             <div className="flex flex-wrap gap-1.5">
@@ -477,23 +478,27 @@ export function CheatMeter({
             </div>
             <div className="font-mono text-[11px] text-faint">{player.steamId64}</div>
           </div>
-          {rating != null && <RatingRing rating={rating} />}
-          <div className="rounded-xl border border-line bg-panel/40 p-3">
-            <div className="stat-label">Analysis scope</div>
-            <div className="mt-1 text-sm text-ink">
-              {scope.hours != null && (
-                <span className="font-semibold tabular-nums">{fmt(Math.round(scope.hours))}h</span>
-              )}
-              {scope.hours != null && <span className="text-faint"> playtime · </span>}
-              <span className="font-semibold tabular-nums">{fmt(scope.matches)}</span>
-              <span className="text-faint"> matches</span>
+          {/* scope + generated — beside the steam profile */}
+          <div className="space-y-2">
+            {rating != null && <RatingRing rating={rating} />}
+            <div className="rounded-xl border border-line bg-panel/40 p-3">
+              <div className="stat-label">Analysis scope</div>
+              <div className="mt-1 text-sm text-ink">
+                {scope.hours != null && (
+                  <span className="font-semibold tabular-nums">{fmt(Math.round(scope.hours))}h</span>
+                )}
+                {scope.hours != null && <span className="text-faint"> playtime · </span>}
+                <span className="font-semibold tabular-nums">{fmt(scope.matches)}</span>
+                <span className="text-faint"> matches</span>
+              </div>
             </div>
+            {generatedOn && (
+              <div className="rounded-xl border border-line bg-panel/40 p-3 text-[11px] text-faint">
+                Generated {generatedOn}
+              </div>
+            )}
           </div>
-          {generatedOn && (
-            <div className="rounded-xl border border-line bg-panel/40 p-3 text-[11px] text-faint">
-              Generated {generatedOn}
-            </div>
-          )}
+        </div>
         </div>
 
         {/* center: the meter */}
