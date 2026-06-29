@@ -106,7 +106,9 @@ export function ProfileView({
   const mvpsPerMatch = career.matches > 0 ? career.mvps / career.matches : 0;
 
   return (
-    <div className="space-y-5">
+    // Full-bleed: the whole stats page uses the viewport width, matching the
+    // CheatMeter hero (the page <main> otherwise caps content at max-w-6xl).
+    <div className="full-bleed space-y-5 px-4 lg:px-6">
       <RecordRecent
         player={{
           steamId64: player.steamId64,
@@ -118,21 +120,19 @@ export function ProfileView({
       {/* CheatMeter is the hero when there's enough data — full-bleed, with the
           full identity + Premier/FACEIT/Wingman ranks folded in. */}
       {showMeter && (
-        <div className="full-bleed px-4 lg:px-6">
-          <CheatMeter
-            player={player}
-            leetify={leetify}
-            faceit={faceit}
-            steamStats={steamStats}
-            steamExtras={steamExtras}
-            rating={hasData ? career.rating : null}
-            generatedOn={new Date().toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          />
-        </div>
+        <CheatMeter
+          player={player}
+          leetify={leetify}
+          faceit={faceit}
+          steamStats={steamStats}
+          steamExtras={steamExtras}
+          rating={hasData ? career.rating : null}
+          generatedOn={new Date().toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })}
+        />
       )}
 
       {/* Fallback hero for accounts without enough data for the CheatMeter */}
