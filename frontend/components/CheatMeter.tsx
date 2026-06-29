@@ -375,68 +375,30 @@ export function CheatMeter({
 
   return (
     <section className="card-2 px-5 py-4">
-      {/* identity hero — the whole profile lives inside the CheatMeter view */}
-      <div className="mb-4 flex flex-col gap-3 border-b border-line/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="shrink-0 rounded-2xl bg-linear-to-br from-brand to-brand2 p-[2px] shadow-[0_0_26px_-6px_rgba(91,157,255,0.55)]">
-            {player.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={player.avatarUrl} alt={player.personaName} className="h-14 w-14 rounded-[12px] object-cover" />
-            ) : (
-              <div className="grid h-14 w-14 place-items-center rounded-[12px] bg-panel text-xl font-bold text-faint">
-                {(player.personaName || "?").slice(0, 1).toUpperCase()}
-              </div>
-            )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-extrabold leading-tight">
-              {player.personaName || player.steamId64}
-            </h1>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {steamExtras?.personaState != null && steamExtras.personaState > 0 && (
-                <span className="pill bg-good/15 text-good">
-                  <span className="h-1.5 w-1.5 rounded-full bg-good" />
-                  {PERSONA[steamExtras.personaState] || "Online"}
-                </span>
-              )}
-              {steamExtras?.visibility === 1 && <span className="pill bg-mid/15 text-mid">Private profile</span>}
-              {player.countryCode && (
-                <span className="pill bg-panel text-muted">
-                  {flag(player.countryCode)} {player.countryCode}
-                </span>
-              )}
-              {ageY != null && (
-                <span className="pill bg-panel text-muted" title={`Steam account created ${steamCreated?.toLocaleDateString()}`}>
-                  {ageY.toFixed(1)}y on Steam
-                </span>
-              )}
-              {steamExtras != null && steamExtras.steamLevel > 0 && (
-                <span className="pill bg-panel text-muted">Steam lvl {steamExtras.steamLevel}</span>
-              )}
-              {steamExtras != null && steamExtras.friends > 0 && (
-                <span className="pill bg-panel text-muted">{steamExtras.friends.toLocaleString("en-US")} friends</span>
-              )}
-              {steamExtras?.friendCode && <span className="pill bg-panel font-mono text-muted">{steamExtras.friendCode}</span>}
-              {player.profileUrl && (
-                <a href={player.profileUrl} target="_blank" rel="noreferrer" className="pill bg-panel text-muted transition hover:text-ink">
-                  Steam ↗
-                </a>
-              )}
-            </div>
-            <div className="mt-1.5 font-mono text-[11px] text-faint">{player.steamId64}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 sm:flex-col sm:items-end">
-          {rating != null && <RatingRing rating={rating} />}
-          <div className="flex gap-2">
-            <ShareButton label="Share" />
-            <Link
-              href={`/compare?a=${player.steamId64}`}
-              className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
-            >
-              Compare
-            </Link>
-          </div>
+      {/* header: CheatMeter title (left) · Share / Compare (right) */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-line/60 pb-4">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
+          <Icon name="shield" className="h-4 w-4" />
+        </span>
+        <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
+        <span className="pill bg-brand/15 text-brand">BETA</span>
+        <span className="text-xs text-faint">Advanced CS2 player analysis</span>
+        {lowConfidence && (
+          <span
+            className="pill bg-mid/15 text-mid"
+            title={`Confidence ${confidence}/100 — thin data, so the risk band is capped and hedged`}
+          >
+            Low confidence · limited data
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <ShareButton label="Share" />
+          <Link
+            href={`/compare?a=${player.steamId64}`}
+            className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+          >
+            Compare
+          </Link>
         </div>
       </div>
 
@@ -461,27 +423,46 @@ export function CheatMeter({
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
-          <Icon name="shield" className="h-4 w-4" />
-        </span>
-        <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
-        <span className="pill bg-brand/15 text-brand">BETA</span>
-        <span className="text-xs text-faint">Advanced CS2 player analysis</span>
-        {lowConfidence && (
-          <span
-            className="pill bg-mid/15 text-mid"
-            title={`Confidence ${confidence}/100 — thin data, so the risk band is capped and hedged`}
-          >
-            Low confidence · limited data
-          </span>
-        )}
-      </div>
-
-      {/* scope (left) · meter (centered) · factors (right column) */}
+      {/* steam profile (left) · name + meter (centered) · factors (right) */}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
-        {/* left: analysis scope */}
-        <div className="space-y-2">
+        {/* left: steam profile + analysis scope */}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <div className="stat-label">Steam profile</div>
+            <div className="flex flex-wrap gap-1.5">
+              {steamExtras?.personaState != null && steamExtras.personaState > 0 && (
+                <span className="pill bg-good/15 text-good">
+                  <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                  {PERSONA[steamExtras.personaState] || "Online"}
+                </span>
+              )}
+              {steamExtras?.visibility === 1 && <span className="pill bg-mid/15 text-mid">Private</span>}
+              {player.countryCode && (
+                <span className="pill bg-panel text-muted">
+                  {flag(player.countryCode)} {player.countryCode}
+                </span>
+              )}
+              {ageY != null && (
+                <span className="pill bg-panel text-muted" title={`Steam account created ${steamCreated?.toLocaleDateString()}`}>
+                  {ageY.toFixed(1)}y on Steam
+                </span>
+              )}
+              {steamExtras != null && steamExtras.steamLevel > 0 && (
+                <span className="pill bg-panel text-muted">Steam lvl {steamExtras.steamLevel}</span>
+              )}
+              {steamExtras != null && steamExtras.friends > 0 && (
+                <span className="pill bg-panel text-muted">{steamExtras.friends.toLocaleString("en-US")} friends</span>
+              )}
+              {steamExtras?.friendCode && <span className="pill bg-panel font-mono text-muted">{steamExtras.friendCode}</span>}
+              {player.profileUrl && (
+                <a href={player.profileUrl} target="_blank" rel="noreferrer" className="pill bg-panel text-muted transition hover:text-ink">
+                  Steam ↗
+                </a>
+              )}
+            </div>
+            <div className="font-mono text-[11px] text-faint">{player.steamId64}</div>
+          </div>
+          {rating != null && <RatingRing rating={rating} />}
           <div className="rounded-xl border border-line bg-panel/40 p-3">
             <div className="stat-label">Analysis scope</div>
             <div className="mt-1 text-sm text-ink">
@@ -500,8 +481,23 @@ export function CheatMeter({
           )}
         </div>
 
-        {/* center: the meter */}
+        {/* center: player name directly over the meter */}
         <div className="flex flex-col items-center text-center">
+          <div className="mb-3 flex max-w-full items-center gap-2.5">
+            <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
+              {player.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
+              ) : (
+                <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
+                  {(player.personaName || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <span className="truncate text-2xl font-extrabold leading-tight">
+              {player.personaName || player.steamId64}
+            </span>
+          </div>
           <div className="stat-label">Cheating likelihood</div>
           <div className={`text-6xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
