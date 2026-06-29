@@ -478,8 +478,26 @@ export function CheatMeter({
         )}
       </div>
 
-      {/* top: scope · gauge · factors */}
-      <div className="grid gap-4 lg:grid-cols-[170px_280px_minmax(0,1fr)]">
+      {/* meter — centered focal point with the cheating-likelihood % */}
+      <div className="mb-5 flex flex-col items-center text-center">
+        <div className="stat-label">Cheating likelihood</div>
+        <div className={`text-5xl font-extrabold tabular-nums ${BAND_TEXT[band]}`}>
+          {score.toFixed(0)}%
+        </div>
+        <div className={`text-sm font-bold uppercase ${BAND_TEXT[band]}`}>{RISK_LABEL[band]}</div>
+        <div className="text-xs text-muted">{subtitle}</div>
+        <Gauge score={score} hex={hex} />
+        <div className="w-full max-w-[300px]">
+          <BandLegend band={band} />
+        </div>
+        <p className="mt-2 max-w-[340px] text-[10px] leading-snug text-faint">
+          Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
+          Skilled legit players score high too.
+        </p>
+      </div>
+
+      {/* scope + factors */}
+      <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
         {/* analysis scope */}
         <div className="space-y-2">
           <div className="rounded-xl border border-line bg-panel/40 p-3">
@@ -498,26 +516,6 @@ export function CheatMeter({
               Generated {generatedOn}
             </div>
           )}
-        </div>
-
-        {/* gauge */}
-        <div className="flex flex-col items-center text-center">
-          <div className="stat-label">Cheating likelihood</div>
-          <div className={`text-4xl font-extrabold tabular-nums ${BAND_TEXT[band]}`}>
-            {score.toFixed(0)}%
-          </div>
-          <div className={`text-sm font-bold uppercase ${BAND_TEXT[band]}`}>
-            {RISK_LABEL[band]}
-          </div>
-          <div className="text-xs text-muted">{subtitle}</div>
-          <Gauge score={score} hex={hex} />
-          <div className="w-full max-w-[260px]">
-            <BandLegend band={band} />
-          </div>
-          <p className="mt-2 max-w-[300px] text-[10px] leading-snug text-faint">
-            Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
-            Skilled legit players score high too.
-          </p>
         </div>
 
         {/* factors — two columns to use the width and stay compact */}
