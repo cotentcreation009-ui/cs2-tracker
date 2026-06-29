@@ -83,7 +83,7 @@ func testWorker(store Store, resolve Resolver, parse ParseFunc) *Worker {
 
 // okResolve returns a path without marking it downloaded, so no real file is
 // touched for cleanup.
-func okResolve(context.Context, queue.Job, string) (demosource.Resolved, error) {
+func okResolve(context.Context, queue.Job, string, int64) (demosource.Resolved, error) {
 	return demosource.Resolved{Path: "match.dem", Downloaded: false}, nil
 }
 
@@ -125,7 +125,7 @@ func TestProcessParseFailure(t *testing.T) {
 func TestProcessResolveFailure(t *testing.T) {
 	fs := &fakeStore{}
 	w := testWorker(fs,
-		func(context.Context, queue.Job, string) (demosource.Resolved, error) {
+		func(context.Context, queue.Job, string, int64) (demosource.Resolved, error) {
 			return demosource.Resolved{}, errors.New("no such file")
 		},
 		func(string) (*models.ParsedMatch, error) {

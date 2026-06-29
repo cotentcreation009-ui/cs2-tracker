@@ -44,7 +44,7 @@ type Store interface {
 type ReplayParseFunc func(r io.Reader) (*parser.ReplayMatch, error)
 
 // Resolver turns a job into a local demo path on disk.
-type Resolver func(ctx context.Context, job queue.Job, workDir string) (demosource.Resolved, error)
+type Resolver func(ctx context.Context, job queue.Job, workDir string, maxBytes int64) (demosource.Resolved, error)
 
 // ParseFunc parses a demo file into structured results.
 type ParseFunc func(path string) (*models.ParsedMatch, error)
@@ -173,7 +173,7 @@ func (w *Worker) runReplay(job *queue.Job, log *slog.Logger) error {
 			}
 		}()
 	} else {
-		res, err := w.Resolve(jobCtx, *job, w.WorkDir)
+		res, err := w.Resolve(jobCtx, *job, w.WorkDir, w.MaxDemoBytes)
 		if err != nil {
 			return fmt.Errorf("resolve demo: %w", err)
 		}
@@ -233,7 +233,7 @@ func (w *Worker) runParse(job *queue.Job, log *slog.Logger) (int64, error) {
 	jobCtx, cancel := context.WithTimeout(context.Background(), w.JobTimeout)
 	defer cancel()
 
-	res, err := w.Resolve(jobCtx, *job, w.WorkDir)
+	res, err := w.Resolve(jobCtx, *job, w.WorkDir, w.MaxDemoBytes)
 	if err != nil {
 		return 0, fmt.Errorf("resolve demo: %w", err)
 	}
