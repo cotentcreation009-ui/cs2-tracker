@@ -79,7 +79,7 @@ function Gauge({ score, hex }: { score: number; hex: string }) {
   const [nx, ny] = pol(score, r - 16);
   const ticks = [0, 25, 50, 75, 100];
   return (
-    <svg viewBox="0 0 260 165" className="mt-1 w-full max-w-[400px]">
+    <svg viewBox="0 0 260 165" className="mt-1 w-full max-w-[300px]">
       <defs>
         <linearGradient id="cm-arc" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#46d369" />
@@ -150,7 +150,7 @@ function BandLegend({ band }: { band: Band }) {
         return (
           <div
             key={x.b}
-            className="rounded-md border px-1.5 py-1.5 text-center"
+            className="rounded-md border px-1 py-1 text-center"
             style={
               on
                 ? { borderColor: BAND_HEX[band], background: `${BAND_HEX[band]}1f` }
@@ -158,12 +158,12 @@ function BandLegend({ band }: { band: Band }) {
             }
           >
             <div
-              className="text-[10px] font-bold uppercase leading-tight"
+              className="text-[9px] font-bold uppercase leading-tight"
               style={{ color: on ? BAND_HEX[band] : "var(--color-faint)" }}
             >
               {BAND_LABEL[x.b]}
             </div>
-            <div className="text-[10px] text-faint">{x.r}</div>
+            <div className="text-[9px] text-faint">{x.r}</div>
           </div>
         );
       })}
@@ -502,17 +502,17 @@ export function CheatMeter({
 
         {/* center: the meter */}
         <div className="flex flex-col items-center text-center">
-          <div className="stat-label text-xs">Cheating likelihood</div>
-          <div className={`text-7xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
+          <div className="stat-label">Cheating likelihood</div>
+          <div className={`text-6xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
           </div>
-          <div className={`mt-1 text-lg font-bold uppercase ${BAND_TEXT[band]}`}>{RISK_LABEL[band]}</div>
-          <div className="text-sm text-muted">{subtitle}</div>
+          <div className={`mt-0.5 text-base font-bold uppercase ${BAND_TEXT[band]}`}>{RISK_LABEL[band]}</div>
+          <div className="text-xs text-muted">{subtitle}</div>
           <Gauge score={score} hex={hex} />
-          <div className="w-full max-w-[420px]">
+          <div className="w-full max-w-[300px]">
             <BandLegend band={band} />
           </div>
-          <p className="mt-3 max-w-[420px] text-[11px] leading-snug text-faint">
+          <p className="mt-2 max-w-[320px] text-[10px] leading-snug text-faint">
             Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
             Skilled legit players score high too.
           </p>
