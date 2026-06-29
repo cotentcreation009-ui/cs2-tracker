@@ -112,8 +112,10 @@ func (f *fakeStore) GetDemoJob(context.Context, string) (db.DemoJobStatus, error
 func (f *fakeStore) GetDemoData(context.Context, string) ([]byte, string, error) {
 	return nil, "", db.ErrNotFound
 }
-func (f *fakeStore) CountDemoJobsSince(context.Context, time.Time) (int, error)             { return 0, nil }
-func (f *fakeStore) CountDemoJobsByIPSince(context.Context, string, time.Time) (int, error) { return 0, nil }
+func (f *fakeStore) CountDemoJobsSince(context.Context, time.Time) (int, error) { return 0, nil }
+func (f *fakeStore) CountDemoJobsByIPSince(context.Context, string, time.Time) (int, error) {
+	return 0, nil
+}
 
 func routerWith(store Store) http.Handler {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}

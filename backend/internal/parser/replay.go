@@ -55,35 +55,35 @@ type ReplayPlayer struct {
 }
 
 type ReplayRound struct {
-	Number    int     `json:"n"`
-	Winner    string  `json:"winner"`
-	Reason    string  `json:"reason"`
-	FreezeEnd float64 `json:"freezeEnd,omitempty"` // seconds since round start when buy time ends
-	CT        []int   `json:"ct"`                  // player indices on CT this round
-	T         []int   `json:"t"`                   // player indices on T this round
-	Frames []ReplayFrame      `json:"frames"`
-	Kills  []ReplayKill       `json:"kills"`
-	Nades  []ReplayNade       `json:"nades"`
-	Bomb   []ReplayBomb       `json:"bomb"`
-	Stats  []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
+	Number    int                `json:"n"`
+	Winner    string             `json:"winner"`
+	Reason    string             `json:"reason"`
+	FreezeEnd float64            `json:"freezeEnd,omitempty"` // seconds since round start when buy time ends
+	CT        []int              `json:"ct"`                  // player indices on CT this round
+	T         []int              `json:"t"`                   // player indices on T this round
+	Frames    []ReplayFrame      `json:"frames"`
+	Kills     []ReplayKill       `json:"kills"`
+	Nades     []ReplayNade       `json:"nades"`
+	Bomb      []ReplayBomb       `json:"bomb"`
+	Stats     []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
 }
 
 // ReplayPlayerStat carries the per-player, per-round aggregates that need event
 // data beyond positions/kills: economy (buy), damage (ADR/util) and flashes.
 // Aggregated (not raw events) to keep the stored JSON compact.
 type ReplayPlayerStat struct {
-	I        int      `json:"i"`               // player index
-	Equip    int      `json:"equip,omitempty"` // equipment value at freeze-time end
-	Buy      string   `json:"buy,omitempty"`   // pistol | eco | semi | force | full
-	StartMoney int    `json:"startMoney,omitempty"` // cash at round start (before buying)
-	Money    int      `json:"money,omitempty"`     // cash left after buying (freeze-time end)
-	Bought   []string `json:"bought,omitempty"`    // loadout at round start (weapons/armor/kit)
-	PickedUp []string `json:"pickedUp,omitempty"`  // guns grabbed off the ground (a dropped weapon), not bought
-	Dmg      int         `json:"dmg,omitempty"`      // health damage dealt to enemies
-	DmgTo    map[int]int `json:"dmgTo,omitempty"`    // damage dealt, by victim player index (even if not killed)
-	UtilDmg  int         `json:"utilDmg,omitempty"`  // of Dmg, from grenades/molotov
-	Flashed  int         `json:"flashed,omitempty"`  // enemies flashed
-	FlashDur float64     `json:"flashDur,omitempty"` // total enemy blind seconds dealt
+	I          int         `json:"i"`                    // player index
+	Equip      int         `json:"equip,omitempty"`      // equipment value at freeze-time end
+	Buy        string      `json:"buy,omitempty"`        // pistol | eco | semi | force | full
+	StartMoney int         `json:"startMoney,omitempty"` // cash at round start (before buying)
+	Money      int         `json:"money,omitempty"`      // cash left after buying (freeze-time end)
+	Bought     []string    `json:"bought,omitempty"`     // loadout at round start (weapons/armor/kit)
+	PickedUp   []string    `json:"pickedUp,omitempty"`   // guns grabbed off the ground (a dropped weapon), not bought
+	Dmg        int         `json:"dmg,omitempty"`        // health damage dealt to enemies
+	DmgTo      map[int]int `json:"dmgTo,omitempty"`      // damage dealt, by victim player index (even if not killed)
+	UtilDmg    int         `json:"utilDmg,omitempty"`    // of Dmg, from grenades/molotov
+	Flashed    int         `json:"flashed,omitempty"`    // enemies flashed
+	FlashDur   float64     `json:"flashDur,omitempty"`   // total enemy blind seconds dealt
 	// Aim tells (per-tick): for kills where the victim became visible to this
 	// player shortly before dying. AimN = sample count; sum fields are averaged
 	// on the frontend. RctMs = ms from victim-spotted to the kill (lower = faster
@@ -131,12 +131,12 @@ type ReplayKill struct {
 }
 
 type ReplayNade struct {
-	T    float64 `json:"t"`
-	Kind string  `json:"k"` // smoke | molotov | flash | he | decoy
-	X    int32   `json:"x"`  // landing / detonation X
-	Y    int32   `json:"y"`  // landing / detonation Y
-	Ox   int32   `json:"ox"` // throw-origin X (where the thrower released it)
-	Oy   int32   `json:"oy"` // throw-origin Y
+	T    float64     `json:"t"`
+	Kind string      `json:"k"`  // smoke | molotov | flash | he | decoy
+	X    int32       `json:"x"`  // landing / detonation X
+	Y    int32       `json:"y"`  // landing / detonation Y
+	Ox   int32       `json:"ox"` // throw-origin X (where the thrower released it)
+	Oy   int32       `json:"oy"` // throw-origin Y
 	Dur  float64     `json:"dur"`
 	By   int         `json:"by"`            // thrower player index, -1 if unknown
 	Dmg  map[int]int `json:"dmg,omitempty"` // damage this grenade dealt, by victim index (HE/molotov)
@@ -606,13 +606,22 @@ func (rc *replayCollector) onBombPlantBegin(e events.BombPlantBegin) {
 		rc.addBomb("plant_start", i32(p.X), i32(p.Y))
 	}
 }
-func (rc *replayCollector) onBombPlanted(events.BombPlanted)  { x, y := rc.bombXY(); rc.addBomb("plant", x, y) }
+func (rc *replayCollector) onBombPlanted(events.BombPlanted) {
+	x, y := rc.bombXY()
+	rc.addBomb("plant", x, y)
+}
 func (rc *replayCollector) onBombDefuseStart(events.BombDefuseStart) {
 	x, y := rc.bombXY()
 	rc.addBomb("defuse_start", x, y)
 }
-func (rc *replayCollector) onBombDefused(events.BombDefused) { x, y := rc.bombXY(); rc.addBomb("defuse", x, y) }
-func (rc *replayCollector) onBombExplode(events.BombExplode) { x, y := rc.bombXY(); rc.addBomb("explode", x, y) }
+func (rc *replayCollector) onBombDefused(events.BombDefused) {
+	x, y := rc.bombXY()
+	rc.addBomb("defuse", x, y)
+}
+func (rc *replayCollector) onBombExplode(events.BombExplode) {
+	x, y := rc.bombXY()
+	rc.addBomb("explode", x, y)
+}
 
 // onProjectileThrow records where each grenade was released, so the detonation
 // handlers can attach a real throw origin instead of the landing spot.
@@ -745,10 +754,18 @@ func kindOfEq(t common.EquipmentType) string {
 	}
 }
 
-func (rc *replayCollector) onSmoke(e events.SmokeStart) { rc.addNade("smoke", e.Position, 18, e.Thrower, e.GrenadeEntityID) }
-func (rc *replayCollector) onFlash(e events.FlashExplode) { rc.addNade("flash", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
-func (rc *replayCollector) onHE(e events.HeExplode)       { rc.addNade("he", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
-func (rc *replayCollector) onDecoy(e events.DecoyStart)   { rc.addNade("decoy", e.Position, 0, e.Thrower, e.GrenadeEntityID) }
+func (rc *replayCollector) onSmoke(e events.SmokeStart) {
+	rc.addNade("smoke", e.Position, 18, e.Thrower, e.GrenadeEntityID)
+}
+func (rc *replayCollector) onFlash(e events.FlashExplode) {
+	rc.addNade("flash", e.Position, 0, e.Thrower, e.GrenadeEntityID)
+}
+func (rc *replayCollector) onHE(e events.HeExplode) {
+	rc.addNade("he", e.Position, 0, e.Thrower, e.GrenadeEntityID)
+}
+func (rc *replayCollector) onDecoy(e events.DecoyStart) {
+	rc.addNade("decoy", e.Position, 0, e.Thrower, e.GrenadeEntityID)
+}
 
 // onInferno uses InfernoStart (the actual fire) rather than FireGrenadeStart,
 // which in Source 2 has a nil thrower and may not fire. The inferno entity id
@@ -984,5 +1001,5 @@ func buyType(equip, roundNum int) string {
 	}
 }
 
-func i32(v float64) int32     { return int32(math.Round(v)) }
+func i32(v float64) int32      { return int32(math.Round(v)) }
 func round2(v float64) float64 { return math.Round(v*100) / 100 }

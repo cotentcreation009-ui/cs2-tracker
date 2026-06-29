@@ -99,8 +99,8 @@ type collector struct {
 
 	serverMapName string
 	matchStarted  bool
-	rt           *RoundTracker
-	roundNum     int // completed rounds so far
+	rt            *RoundTracker
+	roundNum      int // completed rounds so far
 
 	players  map[uint64]*models.MatchPlayer
 	rosterOf map[uint64]int // steamID -> starting team (roster identity)
