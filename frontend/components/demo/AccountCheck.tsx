@@ -84,8 +84,20 @@ export function AccountCheck({
     if (!data || aiState === "loading") return;
     setAiState("loading");
     setAiErr("");
+    // The display name is attacker-controlled; strip control chars + angle
+    // brackets (so it can't forge the <player_data> delimiter) and cap length
+    // before it enters the AI prompt.
+    const safeName =
+      [...String(name)]
+        .filter((ch) => {
+          const c = ch.codePointAt(0) ?? 0;
+          return c >= 0x20 && c !== 0x7f && ch !== "<" && ch !== ">";
+        })
+        .join("")
+        .trim()
+        .slice(0, 64) || "Unknown";
     const summary = [
-      `Player: ${name}`,
+      `Player: ${safeName}`,
       matchStats ? `This-match stats: ${matchStats}` : "",
       `This-match CheatMeter: ${matchScore.toFixed(0)}%${cheatFactors ? ` (aim tells: ${cheatFactors})` : ""}`,
       ...(tendencyLines.length ? ["Playstyle tendencies (from positioning/routes):", ...tendencyLines.map((l) => `- ${l}`)] : []),
