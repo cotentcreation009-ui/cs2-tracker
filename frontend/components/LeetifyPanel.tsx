@@ -53,6 +53,19 @@ const impactColor = (n: number) =>
 const lowerColor = (v: number, good: number, mid: number) =>
   v <= good ? "text-good" : v <= mid ? "text-mid" : "text-bad";
 
+// Leetify redacts detailed mechanics for friends-only profiles, so they arrive
+// as 0. For these percent/ms/degree/damage metrics a 0 means "no data" (a real
+// player is never exactly 0), so render a dash instead of a misleading "0.0%".
+function stat(
+  v: number,
+  fmt: (n: number) => string,
+  cls: (n: number) => string,
+): { value: string; valueClass: string } {
+  return v > 0
+    ? { value: fmt(v), valueClass: cls(v) }
+    : { value: "—", valueClass: "text-faint" };
+}
+
 function Group({
   title,
   children,
@@ -83,6 +96,14 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
     ? new Date(p.first_match_date).getFullYear()
     : null;
   const banCount = p.bans?.length ?? 0;
+  // A friends-only Leetify profile: ratings show, but the detailed aim/util/
+  // trading micro-stats are redacted to 0 (and the CheatMeter, which needs the
+  // hidden aim/reaction data, can't be scored).
+  const statsHidden =
+    p.total_matches > 0 &&
+    s.accuracy_head === 0 &&
+    s.preaim === 0 &&
+    s.reaction_time_ms === 0;
 
   return (
     <section className="card-2 px-5 py-5">
@@ -146,6 +167,20 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         )}
       </div>
 
+      {statsHidden && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-mid/25 bg-mid/[0.06] px-3 py-2.5 text-xs leading-relaxed text-muted">
+          <span className="mt-px shrink-0 font-bold text-mid">ⓘ</span>
+          <span>
+            <span className="font-semibold text-mid">Detailed stats are hidden.</span>{" "}
+            This player&apos;s Leetify profile is friends-only, so Leetify withholds
+            their aim/mechanics, utility and trading detail (shown as &ldquo;—&rdquo;).
+            Skill ratings, ranks and results are still available. The CheatMeter also
+            needs that hidden aim/reaction data, so it can&apos;t be scored for this
+            account.
+          </span>
+        </div>
+      )}
+
       {/* skill profile radar + the precise 0-100 bars */}
       <div className="mt-5 grid items-center gap-4 sm:grid-cols-[240px_1fr]">
         <RatingRadar rating={p.rating} />
@@ -166,29 +201,29 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
 
       {/* aim & mechanics */}
       <Group title="Aim & mechanics">
-        <Mini label="HS accuracy" value={`${s.accuracy_head.toFixed(1)}%`} valueClass={tierColor(s.accuracy_head, 25, 18)} />
-        <Mini label="Spotted accuracy" value={`${s.accuracy_enemy_spotted.toFixed(0)}%`} valueClass={tierColor(s.accuracy_enemy_spotted, 45, 35)} />
-        <Mini label="Counter-strafe" value={`${s.counter_strafing_good_shots_ratio.toFixed(0)}%`} valueClass={tierColor(s.counter_strafing_good_shots_ratio, 80, 60)} />
-        <Mini label="Spray" value={`${s.spray_accuracy.toFixed(0)}%`} valueClass={tierColor(s.spray_accuracy, 45, 30)} />
-        <Mini label="Preaim" value={`${s.preaim.toFixed(1)}°`} valueClass={lowerColor(s.preaim, 8, 11)} />
-        <Mini label="Reaction" value={`${s.reaction_time_ms.toFixed(0)} ms`} valueClass={lowerColor(s.reaction_time_ms, 550, 650)} />
+        <Mini label="HS accuracy" {...stat(s.accuracy_head, (v) => `${v.toFixed(1)}%`, (v) => tierColor(v, 25, 18))} />
+        <Mini label="Spotted accuracy" {...stat(s.accuracy_enemy_spotted, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 45, 35))} />
+        <Mini label="Counter-strafe" {...stat(s.counter_strafing_good_shots_ratio, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 80, 60))} />
+        <Mini label="Spray" {...stat(s.spray_accuracy, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 45, 30))} />
+        <Mini label="Preaim" {...stat(s.preaim, (v) => `${v.toFixed(1)}°`, (v) => lowerColor(v, 8, 11))} />
+        <Mini label="Reaction" {...stat(s.reaction_time_ms, (v) => `${v.toFixed(0)} ms`, (v) => lowerColor(v, 550, 650))} />
       </Group>
 
       {/* utility */}
       <Group title="Utility">
-        <Mini label="HE dmg / match" value={s.he_foes_damage_avg.toFixed(1)} valueClass={tierColor(s.he_foes_damage_avg, 6, 3)} />
-        <Mini label="Blinded / flash" value={s.flashbang_hit_foe_per_flashbang.toFixed(2)} valueClass={tierColor(s.flashbang_hit_foe_per_flashbang, 0.7, 0.4)} />
-        <Mini label="Flashes → kill" value={`${s.flashbang_leading_to_kill.toFixed(0)}%`} valueClass={tierColor(s.flashbang_leading_to_kill, 12, 7)} />
-        <Mini label="Util lost / death" value={`$${s.utility_on_death_avg.toFixed(0)}`} valueClass={lowerColor(s.utility_on_death_avg, 250, 400)} />
+        <Mini label="HE dmg / match" {...stat(s.he_foes_damage_avg, (v) => v.toFixed(1), (v) => tierColor(v, 6, 3))} />
+        <Mini label="Blinded / flash" {...stat(s.flashbang_hit_foe_per_flashbang, (v) => v.toFixed(2), (v) => tierColor(v, 0.7, 0.4))} />
+        <Mini label="Flashes → kill" {...stat(s.flashbang_leading_to_kill, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 12, 7))} />
+        <Mini label="Util lost / death" {...stat(s.utility_on_death_avg, (v) => `$${v.toFixed(0)}`, (v) => lowerColor(v, 250, 400))} />
       </Group>
 
       {/* opening & trading */}
       <Group title="Opening & trading">
-        <Mini label="Opening CT" value={`${s.ct_opening_duel_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.ct_opening_duel_success_percentage, 55, 45)} />
-        <Mini label="Opening T" value={`${s.t_opening_duel_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.t_opening_duel_success_percentage, 55, 45)} />
-        <Mini label="Trade success" value={`${s.trade_kills_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.trade_kills_success_percentage, 50, 40)} />
-        <Mini label="Traded on death" value={`${s.traded_deaths_success_percentage.toFixed(0)}%`} valueClass={tierColor(s.traded_deaths_success_percentage, 50, 40)} />
-        <Mini label="Trade chances / rd" value={s.trade_kill_opportunities_per_round.toFixed(2)} valueClass={tierColor(s.trade_kill_opportunities_per_round, 0.4, 0.25)} />
+        <Mini label="Opening CT" {...stat(s.ct_opening_duel_success_percentage, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 55, 45))} />
+        <Mini label="Opening T" {...stat(s.t_opening_duel_success_percentage, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 55, 45))} />
+        <Mini label="Trade success" {...stat(s.trade_kills_success_percentage, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 50, 40))} />
+        <Mini label="Traded on death" {...stat(s.traded_deaths_success_percentage, (v) => `${v.toFixed(0)}%`, (v) => tierColor(v, 50, 40))} />
+        <Mini label="Trade chances / rd" {...stat(s.trade_kill_opportunities_per_round, (v) => v.toFixed(2), (v) => tierColor(v, 0.4, 0.25))} />
       </Group>
 
       {/* recent matches (Leetify) — click a row to inspect per-match stats */}
