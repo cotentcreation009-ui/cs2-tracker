@@ -114,12 +114,21 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
     insufficient: {
       wrap: "border-line bg-panel/40",
       accent: "text-muted",
-      tag: "Compare yourself",
-      title:
-        cols.length >= 2
-          ? "Not enough matches on both platforms for an automatic verdict yet"
-          : "Only one platform in the recent window — no second side to compare against yet",
-      body: "The per-platform numbers are below — eyeball them to spot anything lopsided.",
+      tag: !split.faceit
+        ? "No FACEIT games"
+        : !split.official
+          ? "No Valve games"
+          : "Compare yourself",
+      title: !split.faceit
+        ? "No FACEIT matches in the recent window — nothing to compare against"
+        : !split.official
+          ? "No Valve (MM / Premier) matches in the recent window — nothing to compare against"
+          : "Not enough matches on both platforms for a reliable verdict yet",
+      body: !split.faceit
+        ? "All of this player's recent games are on Valve MM/Premier. This view compares Valve vs FACEIT (different anti-cheats), so there's no second side to compare here — the per-platform numbers are below."
+        : !split.official
+          ? "All of this player's recent games are on FACEIT — there are no Valve games to compare against."
+          : "The per-platform numbers are below — eyeball them to spot anything lopsided.",
     },
   }[split.verdict];
 
