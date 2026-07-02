@@ -68,7 +68,7 @@ func TestGetProfileLegacyFallback(t *testing.T) {
 		case "/api/profile/id/76561197995150836":
 			w.Write([]byte(`{
 				"meta":{"name":"Malone Lam","platformBans":[]},
-				"recentGameRatings":{"aim":89.1,"positioning":68.8,"utility":58.9,"clutch":0.19,"opening":0.026,"ctLeetify":0.036,"tLeetify":0.011},
+				"recentGameRatings":{"aim":89.1,"positioning":68.8,"utility":58.9,"clutch":0.19,"opening":0.026,"ctLeetify":0.036,"tLeetify":0.011,"leetify":0.024},
 				"games":[
 					{"gameId":"g1","gameFinishedAt":"2026-07-01T00:00:00.000Z","dataSource":"matchmaking","matchResult":"win","mapName":"de_mirage","scores":[16,13],"rankType":11,"skillLevel":30799,"elo":null,"ownTeamTotalLeetifyRatings":{"76561197995150836":0.0066},"preaim":0,"reactionTime":0,"accuracyHead":0},
 					{"gameId":"g2","gameFinishedAt":"2026-06-30T00:00:00.000Z","dataSource":"faceit","matchResult":"loss","mapName":"de_inferno","scores":[10,13],"rankType":1,"skillLevel":0,"elo":2542,"ownTeamTotalLeetifyRatings":{"76561197995150836":-0.05},"preaim":7.5,"reactionTime":520,"accuracyHead":30}
@@ -109,7 +109,7 @@ func TestGetProfileLegacyFallback(t *testing.T) {
 	if p.RecentMatches[1].Rank != 2542 { // from elo (skillLevel was 0)
 		t.Errorf("faceit match rank should fall back to elo: %+v", p.RecentMatches[1])
 	}
-	if string(p.Ranks) != `{"premier":30799}` {
-		t.Errorf("ranks = %s, want premier 30799", p.Ranks)
+	if string(p.Ranks) != `{"leetify":2.4,"premier":30799}` {
+		t.Errorf("ranks = %s, want leetify 2.4 + premier 30799", p.Ranks)
 	}
 }

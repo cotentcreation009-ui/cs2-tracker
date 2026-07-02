@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -229,6 +230,7 @@ type legacyProfile struct {
 		Opening     float64 `json:"opening"`
 		CTLeetify   float64 `json:"ctLeetify"`
 		TLeetify    float64 `json:"tLeetify"`
+		Leetify     float64 `json:"leetify"` // overall rating (raw decimal)
 	} `json:"recentGameRatings"`
 	Games []legacyGame `json:"games"`
 }
@@ -324,8 +326,19 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 		p.Stats.AccuracyHead = hsSum / float64(hsN)
 	}
 	p.RecentMatches = rm
+	ranks := map[string]any{}
+	if lp.RecentGameRatings.Leetify != 0 {
+		// Leetify's overall rating is a small decimal; v3 exposes it ×100 in
+		// ranks.leetify (e.g. 2.36), so match that scale for a consistent display.
+		ranks["leetify"] = math.Round(lp.RecentGameRatings.Leetify*10000) / 100
+	}
 	if premierRank > 0 {
-		p.Ranks = json.RawMessage(fmt.Sprintf(`{"premier":%d}`, premierRank))
+		ranks["premier"] = premierRank
+	}
+	if len(ranks) > 0 {
+		if b, err := json.Marshal(ranks); err == nil {
+			p.Ranks = b
+		}
 	}
 	return p
 }
