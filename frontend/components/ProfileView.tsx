@@ -139,7 +139,10 @@ export function ProfileView({
       {/* Premier/MM vs FACEIT split — spot a player who's lopsided across
           platforms (the cross-platform gap the CheatMeter scores, broken out). */}
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <PlatformSplit matches={leetify.recent_matches} />
+        <PlatformSplit
+          matches={leetify.recent_matches}
+          faceitMatches={leetify.faceit_matches}
+        />
       )}
 
       {/* Fallback hero for accounts without enough data for the CheatMeter */}

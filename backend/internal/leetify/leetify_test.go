@@ -121,4 +121,7 @@ func TestGetProfileLegacyFallback(t *testing.T) {
 	if p.PeakPremier != 30799 {
 		t.Errorf("peak premier = %v, want 30799", p.PeakPremier)
 	}
+	if len(p.FaceitMatches) != 1 || p.FaceitMatches[0].DataSource != "faceit" {
+		t.Errorf("faceit matches = %+v, want the one faceit game", p.FaceitMatches)
+	}
 }

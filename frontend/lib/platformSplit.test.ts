@@ -97,12 +97,24 @@ describe("computePlatformSplit (Premier vs FACEIT)", () => {
       ...many(50, () => premier({ leetify_rating: 0.0 })), // older
       ...many(20, () => faceit({ leetify_rating: 1.0 })),
     ];
-    const p10 = computePlatformSplit(matches, 10);
+    const p10 = computePlatformSplit(matches, undefined, 10);
     expect(p10.premier?.n).toBe(10); // last 10 Premier only
     expect(p10.faceit?.n).toBe(10);
     expect(p10.premierTotal).toBe(53); // totals are the full pool
     const pAll = computePlatformSplit(matches);
     expect(pAll.premier?.n).toBe(53);
+  });
+
+  it("uses the dedicated FACEIT list so games outside the recent window still count", () => {
+    // recent window (matches) has only Premier; the FACEIT games arrive via the
+    // separate full list — exactly the 'old FACEIT games' case.
+    const premierOnly = many(80, () => premier({ leetify_rating: 1.0 }));
+    const faceitList = many(6, () => faceit({ leetify_rating: 0.5 }));
+    const p = computePlatformSplit(premierOnly, faceitList);
+    expect(p.faceitTotal).toBe(6);
+    expect(p.faceit?.n).toBe(6);
+    expect(p.comparable).toBe(true);
+    expect(p.verdict).toBe("stronger-premier");
   });
 
   it("no FACEIT at all → faceit null, premier still present", () => {

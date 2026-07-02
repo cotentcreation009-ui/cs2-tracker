@@ -194,6 +194,7 @@ export interface LeetifyProfile {
     wingman?: number;
   };
   recent_matches?: LeetifyRecentMatch[];
+  faceit_matches?: LeetifyRecentMatch[]; // ALL FACEIT matches (not just the recent window)
 }
 
 export interface FaceitProfile {
