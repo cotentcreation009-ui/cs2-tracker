@@ -143,6 +143,11 @@ type Profile struct {
 // maxFaceitMatches caps the dedicated FACEIT list (plenty for the split).
 const maxFaceitMatches = 200
 
+// minFaceitForSplit: when a v3 profile's recent window has fewer FACEIT games
+// than this, we pull the full history from the legacy endpoint (v3 only returns
+// ~100 matches, so a Premier-heavy player's FACEIT can be cut off).
+const minFaceitForSplit = 3
+
 // faceitOnly returns the FACEIT matches (data_source "faceit") from a list.
 func faceitOnly(ms []RecentMatch) []RecentMatch {
 	out := make([]RecentMatch, 0, 16)
@@ -239,6 +244,26 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
 		p.PeakPremier = peakPremier(p.RecentMatches)
+		// v3 only returns ~100 recent matches, so a Premier-heavy player's FACEIT
+		// history can be cut off. When the recent window is FACEIT-sparse, pull the
+		// full history from the legacy endpoint to complete the FACEIT list (and
+		// the legacy-only K/D + party + all-time peak, a free bonus for v3 players).
+		if len(p.FaceitMatches) < minFaceitForSplit {
+			if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
+				if len(lp.FaceitMatches) > len(p.FaceitMatches) {
+					p.FaceitMatches = lp.FaceitMatches
+				}
+				if lp.KD > 0 {
+					p.KD = lp.KD
+				}
+				if lp.AvgPartySize > 0 {
+					p.AvgPartySize = lp.AvgPartySize
+				}
+				if lp.PeakPremier > p.PeakPremier {
+					p.PeakPremier = lp.PeakPremier
+				}
+			}
+		}
 		return &p, nil
 	case http.StatusNotFound:
 		// The newer /v3 API doesn't index every account Leetify actually has
@@ -329,11 +354,11 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 			preaimN++
 		}
 		if g.ReactionTime > 0 {
-			reactSum += g.ReactionTime
+			reactSum += g.ReactionTime * 1000 // legacy reactionTime is in seconds
 			reactN++
 		}
 		if g.AccuracyHead > 0 {
-			hsSum += g.AccuracyHead
+			hsSum += g.AccuracyHead * 100 // legacy accuracyHead is a 0-1 fraction
 			hsN++
 		}
 		if g.Kills > 0 || g.Deaths > 0 {
@@ -365,8 +390,8 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 			Rank:           rank,
 			RankType:       g.RankType,
 			Preaim:         g.Preaim,
-			ReactionTimeMs: g.ReactionTime,
-			AccuracyHead:   g.AccuracyHead,
+			ReactionTimeMs: g.ReactionTime * 1000, // seconds → ms (matches v3)
+			AccuracyHead:   g.AccuracyHead * 100,  // fraction → % (matches v3)
 		}
 		if len(rm) < maxRecentMatches {
 			rm = append(rm, match)
