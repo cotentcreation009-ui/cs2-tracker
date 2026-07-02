@@ -3,6 +3,7 @@ import {
   computePlatformSplit,
   type PlatformStat,
   GAP_THRESHOLD,
+  MIN_N,
 } from "@/lib/platformSplit";
 
 const fmtRating = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
@@ -81,7 +82,7 @@ const COL_ORDER = ["premier", "matchmaking", "faceit"];
  */
 export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
   const split = computePlatformSplit(matches);
-  if (!split.comparable) return null; // only meaningful with Valve + FACEIT samples
+  if (split.stats.length === 0) return null; // no recognizable platform data at all
 
   const cols = [...split.stats].sort(
     (a, b) => COL_ORDER.indexOf(a.key) - COL_ORDER.indexOf(b.key),
@@ -110,7 +111,16 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
       title: `Stronger on FACEIT than Valve — rating ${fmtRating(-gap)} higher on FACEIT`,
       body: "Usually just a more serious player on FACEIT (tougher lobbies, historically 128-tick) — not itself a red flag.",
     },
-    insufficient: null,
+    insufficient: {
+      wrap: "border-line bg-panel/40",
+      accent: "text-muted",
+      tag: "Compare yourself",
+      title:
+        cols.length >= 2
+          ? "Not enough matches on both platforms for an automatic verdict yet"
+          : "Only one platform in the recent window — no second side to compare against yet",
+      body: "The per-platform numbers are below — eyeball them to spot anything lopsided.",
+    },
   }[split.verdict];
 
   const gridCols = `minmax(6.5rem,1.1fr) ${cols.map(() => "minmax(0,1fr)").join(" ")}`;
@@ -152,7 +162,10 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
           {cols.map((c) => (
             <div key={c.key} className="text-right">
               <div className="text-sm font-bold text-ink">{c.label}</div>
-              <div className="text-[10px] text-faint">{c.n} matches</div>
+              <div className="text-[10px] text-faint">
+                {c.n} match{c.n === 1 ? "" : "es"}
+                {c.n < MIN_N ? " · small sample" : ""}
+              </div>
             </div>
           ))}
         </div>
@@ -171,7 +184,10 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
             const minG = Math.min(...goods);
             const raw = cells.filter((x) => x.valid).map((x) => x.v);
             const spread = Math.max(...raw) - Math.min(...raw);
-            const diverges = cells.filter((x) => x.valid).length >= 2 && spread > m.diverge;
+            // only flag divergence when we have enough matches on both sides to
+            // trust it — otherwise a 1-match average would fire false alarms.
+            const diverges =
+              split.comparable && cells.filter((x) => x.valid).length >= 2 && spread > m.diverge;
 
             return (
               <li

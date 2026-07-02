@@ -82,7 +82,7 @@ describe("computePlatformSplit", () => {
     expect(s.verdict).toBe("stronger-valve");
   });
 
-  it("is insufficient when one side lacks the minimum sample", () => {
+  it("withholds the auto-verdict when one side lacks the minimum sample, but still shows both", () => {
     const recent = [
       ...many(10, { data_source: "premier", leetify_rating: 1.3 }),
       ...many(2, { data_source: "faceit", leetify_rating: 0.3 }), // < MIN_N
@@ -90,7 +90,9 @@ describe("computePlatformSplit", () => {
     const s = computePlatformSplit(recent);
     expect(s.comparable).toBe(false);
     expect(s.verdict).toBe("insufficient");
-    expect(s.stats.some((p) => p.key === "faceit")).toBe(false); // too few to show
+    // still shown (with any n>=1) so the user can compare the raw numbers
+    expect(s.stats.find((p) => p.key === "faceit")?.n).toBe(2);
+    expect(s.stats.find((p) => p.key === "premier")?.n).toBe(10);
   });
 
   it("ignores 0-sentinel aim values when averaging", () => {

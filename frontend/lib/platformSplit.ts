@@ -82,8 +82,10 @@ export function computePlatformSplit(recent: LeetifyRecentMatch[]): PlatformSpli
     ),
   );
 
+  // Show every platform that has any recent matches, so users can always eyeball
+  // the raw numbers themselves; MIN_N only gates the automatic verdict below.
   const stats = [premier, faceit, mm].filter(
-    (s): s is PlatformStat => s != null && s.n >= MIN_N,
+    (s): s is PlatformStat => s != null && s.n >= 1,
   );
 
   let ratingGap: number | null = null;
