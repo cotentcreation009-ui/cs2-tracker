@@ -195,6 +195,9 @@ export function ProfileView({
                 {steamExtras?.visibility === 1 && (
                   <span className="pill bg-mid/15 text-mid">Private profile</span>
                 )}
+                {steamExtras?.visibility === 2 && (
+                  <span className="pill bg-mid/15 text-mid">Friends only</span>
+                )}
                 {player.countryCode && (
                   <span className="pill bg-panel text-muted">
                     {flag(player.countryCode)} {player.countryCode}

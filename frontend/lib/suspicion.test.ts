@@ -155,6 +155,33 @@ describe("CheatMeter calibration probes", () => {
     expect(sus!.score).toBeGreaterThanOrEqual(80);
   });
 
+  it("redacted friends-only profile still runs the meter (aim + Leetify K/D), capped + low-confidence", () => {
+    // Leetify redacts reaction/preaim/HS (→ 0) on friends-only profiles; only the
+    // aim rating + K/D survive. The meter should RUN (2 signals) but never assert
+    // High without the mechanical tells to back it.
+    const sus = computeSuspicion(
+      { ...mkLeetify({ reaction: 0, preaim: 0, aim: 89, head: 0 }), kd: 1.33 },
+      null,
+      null,
+    );
+    expect(sus).not.toBeNull();
+    expect(sus!.hasEnough).toBe(true); // now shows on a private profile
+    expect(sus!.lowConfidence).toBe(true);
+    expect(sus!.score).toBeLessThanOrEqual(50);
+    expect(sus!.band === "high" || sus!.band === "veryhigh").toBe(false);
+  });
+
+  it("redacted profile with very high aim is still capped at Moderate (no mechanical tells)", () => {
+    const sus = computeSuspicion(
+      { ...mkLeetify({ reaction: 0, preaim: 0, aim: 99, head: 0 }), kd: 1.6 },
+      null,
+      null,
+    );
+    expect(sus!.hasEnough).toBe(true);
+    expect(sus!.score).toBeLessThanOrEqual(50); // can't false-flag High without reaction/preaim
+    expect(sus!.band === "high" || sus!.band === "veryhigh").toBe(false);
+  });
+
   it("old game ban floors only to Moderate, not Very High", () => {
     const extras: SteamExtras = {
       steamId64: "1",

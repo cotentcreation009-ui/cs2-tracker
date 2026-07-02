@@ -165,9 +165,10 @@ export function computeSuspicion(
     gapEff = gap * conf;
   }
 
-  // K/D from FACEIT career only — Steam's lifetime all-mode K/D is too noisy to
-  // score (and would otherwise be the lone signal on a Steam-only account).
-  const kd = faceit?.kdRatio ?? 0;
+  // K/D: prefer FACEIT's; else Leetify's (from real CS2 matches — cleaner than
+  // Steam's lifetime all-mode number, and the one mechanical-ish signal a
+  // friends-only Leetify profile still exposes when it redacts aim detail).
+  const kd = faceit?.kdRatio ?? leetify?.kd ?? 0;
 
   // Bans — prefer Steam's typed + dated GetPlayerBans over Leetify's opaque
   // (length-only) array. The floor scales with type + freshness so an old game
@@ -286,6 +287,14 @@ export function computeSuspicion(
   // No mechanical (Leetify) tells → only skill-linked stats; cap below High so a
   // FACEIT/Steam-only K/D + HS% read can't publicly assert High/Very High.
   if (core.length === 0) score = Math.min(score, 39);
+  // Friends-only Leetify profiles redact the direct aimbot tells (reaction +
+  // crosshair placement). With those hidden and no cross-platform gap to cross-
+  // check, aim + K/D are skill-linked and can't confidently assert High — cap at
+  // Moderate. (A gap survives redaction, so if present it's allowed to drive the
+  // score higher.)
+  const noMechTells = sReaction == null && sPreaim == null;
+  const redactedThin = noMechTells && sGap == null;
+  if (redactedThin) score = Math.min(score, 50);
   // Floor scales with ban type + freshness (fresh VAC 85 → old game ban 52);
   // opaque Leetify-only bans floor at 70.
   if (banFloor > 0) score = Math.max(score, banFloor);
@@ -387,7 +396,7 @@ export function computeSuspicion(
   // --- confidence: how much real data backs the read ---
   // Leetify is the strongest source, so a Steam/FACEIT-only read starts lower
   // and stays honestly less confident.
-  const confidence = clamp(
+  let confidence = clamp(
     (leetify ? 45 : 30) +
       Math.min(recent.length, 30) +
       (faceit ? 8 : 0) +
@@ -396,6 +405,10 @@ export function computeSuspicion(
     30,
     97,
   );
+  // A redacted (friends-only) profile is missing the tells that matter, so the
+  // match count mustn't inflate confidence — keep it honestly low (caps the band
+  // at Moderate and shows the "limited data" caveat).
+  if (redactedThin) confidence = Math.min(confidence, 39);
 
   // Confidence gates the PUBLIC band: thin data (no Leetify / few matches) can't
   // assert a high-risk label. The raw score still drives the gauge needle, but
