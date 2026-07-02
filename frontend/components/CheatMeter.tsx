@@ -336,6 +336,41 @@ export function CheatMeter({
   const hex = BAND_HEX[band];
   const pct = (v: number) => (summary.total ? (v / summary.total) * 100 : 0);
 
+  // A friends-only Leetify profile redacts the aim micro-stats (reaction/preaim/
+  // HS → 0), so most of the CheatMeter's scale cards are missing. Surface the
+  // performance stats we DO have (ratings, ranks, K/D, win rate…) right by the
+  // meter so a private profile still reads as a full page.
+  const ls = leetify?.stats;
+  const statsHidden =
+    !!leetify &&
+    leetify.total_matches > 0 &&
+    (ls?.accuracy_head ?? 0) === 0 &&
+    (ls?.preaim ?? 0) === 0 &&
+    (ls?.reaction_time_ms ?? 0) === 0;
+  const sgn1 = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
+  const perfStats: { label: string; value: string }[] =
+    leetify && statsHidden
+      ? [
+          leetify.ranks?.leetify != null
+            ? { label: "Rating", value: sgn1(leetify.ranks.leetify) }
+            : null,
+          { label: "Aim", value: leetify.rating.aim.toFixed(0) },
+          { label: "Position", value: leetify.rating.positioning.toFixed(0) },
+          { label: "Utility", value: leetify.rating.utility.toFixed(0) },
+          { label: "Clutch", value: sgn1(leetify.rating.clutch * 100) },
+          { label: "Opening", value: sgn1(leetify.rating.opening * 100) },
+          leetify.kd ? { label: "K/D", value: leetify.kd.toFixed(2) } : null,
+          { label: "Win rate", value: `${(leetify.winrate * 100).toFixed(0)}%` },
+          { label: "Matches", value: leetify.total_matches.toLocaleString("en-US") },
+          leetify.peak_premier
+            ? { label: "Peak Premier", value: leetify.peak_premier.toLocaleString("en-US") }
+            : null,
+          leetify.avg_party_size
+            ? { label: "Avg party", value: leetify.avg_party_size.toFixed(1) }
+            : null,
+        ].filter((x): x is { label: string; value: string } => x != null)
+      : [];
+
   return (
     <section className="card-2 px-5 py-4">
       {/* top row: title (left) · player name over the meter (center) · actions (right) */}
@@ -527,6 +562,29 @@ export function CheatMeter({
           {metrics.map((m) => (
             <ScaleCard key={m.key} m={m} />
           ))}
+        </div>
+      )}
+
+      {/* Leetify performance — for friends-only profiles whose aim detail is
+          redacted, show the stats we DO have next to the meter. */}
+      {perfStats.length > 0 && (
+        <div className="mt-3 rounded-xl border border-line bg-panel/30 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="stat-label">Leetify performance</span>
+            <span className="text-[10px] text-faint">
+              detailed aim stats are hidden on this friends-only profile — here&apos;s what&apos;s available
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+            {perfStats.map((st) => (
+              <div key={st.label} className="rounded-lg border border-line bg-panel px-2.5 py-1.5">
+                <div className="stat-label">{st.label}</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-ink">
+                  {st.value}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
