@@ -2,8 +2,10 @@ package leetify
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +49,49 @@ func TestGetProfile(t *testing.T) {
 	}
 	if len(p.Ranks) == 0 {
 		t.Error("ranks passthrough empty")
+	}
+}
+
+// When v3 returns a FULL 100-match window with no FACEIT, the older FACEIT games
+// are completed from the legacy endpoint.
+func TestGetProfileCompletesFaceitFromLegacy(t *testing.T) {
+	rows := make([]string, v3MatchWindow) // a full v3 window, all Premier, no FACEIT
+	for i := range rows {
+		rows[i] = `{"data_source":"matchmaking","rank_type":11,"outcome":"win","leetify_rating":0.1,"score":[13,7],"map_name":"de_dust2"}`
+	}
+	v3 := fmt.Sprintf(
+		`{"name":"P","steam64_id":"1","total_matches":900,"winrate":0.5,"rating":{"aim":80},"recent_matches":[%s]}`,
+		strings.Join(rows, ","),
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/profile":
+			w.Write([]byte(v3))
+		case "/api/profile/id/1":
+			w.Write([]byte(`{"meta":{"name":"P"},"recentGameRatings":{"aim":80,"leetify":0.02},"games":[
+				{"gameId":"f1","dataSource":"faceit","matchResult":"win","rankType":0,"skillLevel":0,"elo":2100,"scores":[13,5],"ownTeamTotalLeetifyRatings":{"1":0.3},"preaim":6,"reactionTime":0.5,"accuracyHead":0.3},
+				{"gameId":"f2","dataSource":"faceit","matchResult":"loss","rankType":0,"skillLevel":0,"elo":2100,"scores":[8,13],"ownTeamTotalLeetifyRatings":{"1":-0.1},"preaim":7,"reactionTime":0.55,"accuracyHead":0.25}
+			]}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+	p, err := c.GetProfile(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.FaceitMatches) != 2 {
+		t.Fatalf("faceit matches = %d, want 2 (completed from legacy)", len(p.FaceitMatches))
+	}
+	if p.FaceitMatches[0].DataSource != "faceit" || p.FaceitMatches[0].Rank != 2100 {
+		t.Errorf("faceit match not mapped from legacy: %+v", p.FaceitMatches[0])
+	}
+	// v3 stays the base (aim 80 kept)
+	if p.Rating.Aim != 80 {
+		t.Errorf("v3 base lost: aim = %v", p.Rating.Aim)
 	}
 }
 
