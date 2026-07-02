@@ -22,6 +22,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
 import { PremierRank, type PremierPoint } from "@/components/PremierRank";
 import { FaceitRank } from "@/components/FaceitRank";
+import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
 
@@ -269,44 +270,6 @@ function Donut({
       <text x={cx} y={cy + 15} textAnchor="middle" className="fill-faint" style={{ fontSize: 9, letterSpacing: 1 }}>
         MATCHES
       </text>
-    </svg>
-  );
-}
-
-// --- consistency multi-line (each series normalised to its own range) -------
-function MultiLine({
-  series,
-}: {
-  series: { label: string; color: string; values: number[] }[];
-}) {
-  const w = 320;
-  const h = 96;
-  const pad = 5;
-  const line = (values: number[]) => {
-    if (values.length < 2) return "";
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
-    return values
-      .map((v, i) => {
-        const x = pad + (i / (values.length - 1)) * (w - 2 * pad);
-        const y = h - pad - ((v - min) / range) * (h - 2 * pad);
-        return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-  };
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-24 w-full">
-      {series.map((s) => (
-        <path
-          key={s.label}
-          d={line(s.values)}
-          fill="none"
-          stroke={s.color}
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
-      ))}
     </svg>
   );
 }
@@ -574,30 +537,11 @@ export function CheatMeter({
       >
         {summary.total > 0 && (
           <>
-        <div className="card px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="stat-label">
-              Performance consistency
-              <span className="text-faint"> · last {summary.total}</span>
-            </div>
-            <div className="flex items-center gap-3 text-[10px]">
-              <span className="flex items-center gap-1 text-brand2">
-                <span className="h-0.5 w-3 rounded bg-brand2" />
-                Rating
-              </span>
-              <span className="flex items-center gap-1 text-mid">
-                <span className="h-0.5 w-3 rounded bg-mid" />
-                {trend.secondaryLabel}
-              </span>
-            </div>
-          </div>
-          <MultiLine
-            series={[
-              { label: "Rating", color: "var(--color-brand2)", values: trend.rating },
-              { label: trend.secondaryLabel, color: "var(--color-mid)", values: trend.secondary },
-            ]}
-          />
-        </div>
+        <RatingConsistencyChart
+          ratings={trend.rating}
+          outcomes={trend.outcomes}
+          total={summary.total}
+        />
 
         <div className="card flex items-center gap-3 px-4 py-3">
           <Donut

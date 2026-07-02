@@ -93,7 +93,7 @@ export interface Suspicion {
   metrics: MetricCard[];
   queues: QueueStat[];
   gap: number | null;
-  trend: { rating: number[]; secondary: number[]; secondaryLabel: string };
+  trend: { rating: number[]; outcomes: string[] };
   summary: { wins: number; losses: number; draws: number; total: number };
   scope: { matches: number; hours: number | null };
   hasEnough: boolean;
@@ -381,8 +381,7 @@ export function computeSuspicion(
   const chrono = [...last].reverse();
   const trend = {
     rating: chrono.map((m) => m.leetify_rating),
-    secondary: chrono.map((m) => m.accuracy_head),
-    secondaryLabel: "HS acc",
+    outcomes: chrono.map((m) => m.outcome),
   };
 
   // --- confidence: how much real data backs the read ---
