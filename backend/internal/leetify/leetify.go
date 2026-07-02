@@ -30,9 +30,10 @@ const maxRecentMatches = 100
 
 // Client talks to the Leetify public API.
 type Client struct {
-	baseURL string
-	apiKey  string // optional; reserved for higher rate limits
-	http    *http.Client
+	baseURL   string
+	legacyURL string // legacy fallback host (api.leetify.com)
+	apiKey    string // optional; reserved for higher rate limits
+	http      *http.Client
 }
 
 // Option customises a Client.
@@ -41,12 +42,18 @@ type Option func(*Client)
 // WithHTTPClient injects a custom HTTP client (used in tests).
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
+// WithLegacyURL overrides the legacy fallback host (used in tests).
+func WithLegacyURL(u string) Option {
+	return func(c *Client) { c.legacyURL = strings.TrimRight(u, "/") }
+}
+
 // New builds a Client. baseURL defaults are set by the caller from config.
 func New(baseURL, apiKey string, opts ...Option) *Client {
 	c := &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		legacyURL: "https://api.leetify.com",
+		apiKey:    apiKey,
+		http:      &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, o := range opts {
 		o(c)
@@ -191,8 +198,166 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		}
 		return &p, nil
 	case http.StatusNotFound:
+		// The newer /v3 API doesn't index every account Leetify actually has
+		// (e.g. some friends-only profiles 404 here). Fall back to the legacy
+		// profile endpoint, which still serves them, before giving up.
+		if p, err := c.getProfileLegacy(ctx, steam64); err == nil {
+			return p, nil
+		}
 		return nil, ErrNotFound
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
+	}
+}
+
+// --- legacy fallback (api.leetify.com/api/profile/id/{steam64}) -------------
+// The older public endpoint returns accounts /v3 404s on. Its JSON shape is
+// different, so it is mapped into the same Profile. It has no aggregate stats
+// block, so aim micro-stats are averaged from the per-match games — left at 0
+// ("no data", which the CheatMeter skips) when the games don't carry them.
+
+type legacyProfile struct {
+	Meta struct {
+		Name         string            `json:"name"`
+		PlatformBans []json.RawMessage `json:"platformBans"`
+	} `json:"meta"`
+	RecentGameRatings struct {
+		Aim         float64 `json:"aim"`
+		Positioning float64 `json:"positioning"`
+		Utility     float64 `json:"utility"`
+		Clutch      float64 `json:"clutch"`
+		Opening     float64 `json:"opening"`
+		CTLeetify   float64 `json:"ctLeetify"`
+		TLeetify    float64 `json:"tLeetify"`
+	} `json:"recentGameRatings"`
+	Games []legacyGame `json:"games"`
+}
+
+type legacyGame struct {
+	GameID                     string             `json:"gameId"`
+	GameFinishedAt             string             `json:"gameFinishedAt"`
+	DataSource                 string             `json:"dataSource"`
+	MatchResult                string             `json:"matchResult"`
+	MapName                    string             `json:"mapName"`
+	Scores                     []int              `json:"scores"`
+	RankType                   int                `json:"rankType"`
+	SkillLevel                 int                `json:"skillLevel"`
+	Elo                        *float64           `json:"elo"`
+	OwnTeamTotalLeetifyRatings map[string]float64 `json:"ownTeamTotalLeetifyRatings"`
+	Preaim                     float64            `json:"preaim"`
+	ReactionTime               float64            `json:"reactionTime"`
+	AccuracyHead               float64            `json:"accuracyHead"`
+}
+
+func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
+	sid := strconv.FormatUint(steam64, 10)
+	p := &Profile{
+		Name:         lp.Meta.Name,
+		Steam64ID:    sid,
+		TotalMatches: len(lp.Games),
+		Bans:         lp.Meta.PlatformBans,
+		Rating: Rating{
+			Aim:         lp.RecentGameRatings.Aim,
+			Positioning: lp.RecentGameRatings.Positioning,
+			Utility:     lp.RecentGameRatings.Utility,
+			Clutch:      lp.RecentGameRatings.Clutch,
+			Opening:     lp.RecentGameRatings.Opening,
+			CTLeetify:   lp.RecentGameRatings.CTLeetify,
+			TLeetify:    lp.RecentGameRatings.TLeetify,
+		},
+	}
+
+	wins := 0
+	var preaimSum, reactSum, hsSum float64
+	var preaimN, reactN, hsN, premierRank int
+	rm := make([]RecentMatch, 0, len(lp.Games))
+	for _, g := range lp.Games {
+		if g.MatchResult == "win" {
+			wins++
+		}
+		if g.Preaim > 0 {
+			preaimSum += g.Preaim
+			preaimN++
+		}
+		if g.ReactionTime > 0 {
+			reactSum += g.ReactionTime
+			reactN++
+		}
+		if g.AccuracyHead > 0 {
+			hsSum += g.AccuracyHead
+			hsN++
+		}
+		rank := g.SkillLevel
+		if rank == 0 && g.Elo != nil {
+			rank = int(*g.Elo)
+		}
+		if premierRank == 0 && g.RankType == 11 && rank > 0 {
+			premierRank = rank // most recent Premier rating
+		}
+		if len(rm) < maxRecentMatches {
+			rm = append(rm, RecentMatch{
+				ID:             g.GameID,
+				FinishedAt:     g.GameFinishedAt,
+				DataSource:     g.DataSource,
+				Outcome:        g.MatchResult,
+				MapName:        g.MapName,
+				LeetifyRating:  g.OwnTeamTotalLeetifyRatings[sid],
+				Score:          g.Scores,
+				Rank:           rank,
+				RankType:       g.RankType,
+				Preaim:         g.Preaim,
+				ReactionTimeMs: g.ReactionTime,
+				AccuracyHead:   g.AccuracyHead,
+			})
+		}
+	}
+	if n := len(lp.Games); n > 0 {
+		p.Winrate = float64(wins) / float64(n)
+	}
+	if preaimN > 0 {
+		p.Stats.Preaim = preaimSum / float64(preaimN)
+	}
+	if reactN > 0 {
+		p.Stats.ReactionTimeMs = reactSum / float64(reactN)
+	}
+	if hsN > 0 {
+		p.Stats.AccuracyHead = hsSum / float64(hsN)
+	}
+	p.RecentMatches = rm
+	if premierRank > 0 {
+		p.Ranks = json.RawMessage(fmt.Sprintf(`{"premier":%d}`, premierRank))
+	}
+	return p
+}
+
+func (c *Client) getProfileLegacy(ctx context.Context, steam64 uint64) (*Profile, error) {
+	u := c.legacyURL + "/api/profile/id/" + strconv.FormatUint(steam64, 10)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetify legacy: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var lp legacyProfile
+		if err := json.NewDecoder(resp.Body).Decode(&lp); err != nil {
+			return nil, fmt.Errorf("leetify legacy: decode: %w", err)
+		}
+		// An empty/placeholder body is not a real profile.
+		if len(lp.Games) == 0 && lp.RecentGameRatings.Aim == 0 {
+			return nil, ErrNotFound
+		}
+		return lp.toProfile(steam64), nil
+	case http.StatusNotFound:
+		return nil, ErrNotFound
+	default:
+		return nil, fmt.Errorf("leetify legacy: unexpected status %d", resp.StatusCode)
 	}
 }
