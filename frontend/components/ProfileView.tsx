@@ -29,6 +29,7 @@ import { RecordRecent } from "@/components/RecordRecent";
 import { SteamStatsPanel } from "@/components/SteamStatsPanel";
 import { CrossSource } from "@/components/CrossSource";
 import { CheatMeter } from "@/components/CheatMeter";
+import { PlatformSplit } from "@/components/PlatformSplit";
 import { computeSuspicion } from "@/lib/suspicion";
 import Link from "next/link";
 import {
@@ -133,6 +134,12 @@ export function ProfileView({
             day: "numeric",
           })}
         />
+      )}
+
+      {/* Premier/MM vs FACEIT split — spot a player who's lopsided across
+          platforms (the cross-platform gap the CheatMeter scores, broken out). */}
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <PlatformSplit matches={leetify.recent_matches} />
       )}
 
       {/* Fallback hero for accounts without enough data for the CheatMeter */}
