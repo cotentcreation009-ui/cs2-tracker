@@ -77,10 +77,14 @@ function statFor(
 
 export function computePlatformSplit(
   matches: LeetifyRecentMatch[],
+  faceitMatches?: LeetifyRecentMatch[],
   limit = Infinity,
 ): PlatformSplit {
   const premierAll = matches.filter(isPremier);
-  const faceitAll = matches.filter(isFaceit);
+  // FACEIT comes from its dedicated full list when available (so games from
+  // months back still count), falling back to whatever's in the recent window.
+  const faceitAll =
+    faceitMatches && faceitMatches.length ? faceitMatches : matches.filter(isFaceit);
   const premier = statFor("premier", "Premier", premierAll.slice(0, limit));
   const faceit = statFor("faceit", "FACEIT", faceitAll.slice(0, limit));
 

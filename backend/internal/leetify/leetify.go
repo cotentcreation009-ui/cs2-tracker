@@ -133,6 +133,28 @@ type Profile struct {
 	PeakPremier  int     `json:"peak_premier,omitempty"`
 	// RecentMatches is capped on read to keep the payload small.
 	RecentMatches []RecentMatch `json:"recent_matches"`
+	// FaceitMatches is EVERY FACEIT match (not just the recent window), so the
+	// Premier-vs-FACEIT split can still find a player's FACEIT games when they
+	// last queued FACEIT far back in a Premier-heavy history. FACEIT is rare, so
+	// carrying the full set is cheap.
+	FaceitMatches []RecentMatch `json:"faceit_matches,omitempty"`
+}
+
+// maxFaceitMatches caps the dedicated FACEIT list (plenty for the split).
+const maxFaceitMatches = 200
+
+// faceitOnly returns the FACEIT matches (data_source "faceit") from a list.
+func faceitOnly(ms []RecentMatch) []RecentMatch {
+	out := make([]RecentMatch, 0, 16)
+	for _, m := range ms {
+		if m.DataSource == "faceit" {
+			out = append(out, m)
+			if len(out) >= maxFaceitMatches {
+				break
+			}
+		}
+	}
+	return out
 }
 
 // peakPremier returns the highest Premier rating (rank_type 11) in a match list.
@@ -211,6 +233,8 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 			return nil, fmt.Errorf("leetify: decode: %w", err)
 		}
+		// FACEIT list before capping recent_matches, so v3 surfaces all it has.
+		p.FaceitMatches = faceitOnly(p.RecentMatches)
 		if len(p.RecentMatches) > maxRecentMatches {
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
@@ -295,6 +319,7 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	var preaimN, reactN, hsN, premierRank int
 	var killSum, deathSum, partySum, partyN, peakPrem int
 	rm := make([]RecentMatch, 0, len(lp.Games))
+	faceitRm := make([]RecentMatch, 0, 16)
 	for _, g := range lp.Games {
 		if g.MatchResult == "win" {
 			wins++
@@ -329,21 +354,26 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 		if g.RankType == 11 && rank > peakPrem {
 			peakPrem = rank // highest Premier rating ever
 		}
+		match := RecentMatch{
+			ID:             g.GameID,
+			FinishedAt:     g.GameFinishedAt,
+			DataSource:     g.DataSource,
+			Outcome:        g.MatchResult,
+			MapName:        g.MapName,
+			LeetifyRating:  g.OwnTeamTotalLeetifyRatings[sid],
+			Score:          g.Scores,
+			Rank:           rank,
+			RankType:       g.RankType,
+			Preaim:         g.Preaim,
+			ReactionTimeMs: g.ReactionTime,
+			AccuracyHead:   g.AccuracyHead,
+		}
 		if len(rm) < maxRecentMatches {
-			rm = append(rm, RecentMatch{
-				ID:             g.GameID,
-				FinishedAt:     g.GameFinishedAt,
-				DataSource:     g.DataSource,
-				Outcome:        g.MatchResult,
-				MapName:        g.MapName,
-				LeetifyRating:  g.OwnTeamTotalLeetifyRatings[sid],
-				Score:          g.Scores,
-				Rank:           rank,
-				RankType:       g.RankType,
-				Preaim:         g.Preaim,
-				ReactionTimeMs: g.ReactionTime,
-				AccuracyHead:   g.AccuracyHead,
-			})
+			rm = append(rm, match)
+		}
+		// Keep EVERY FACEIT match (across all games), even past the recent cap.
+		if g.DataSource == "faceit" && len(faceitRm) < maxFaceitMatches {
+			faceitRm = append(faceitRm, match)
 		}
 	}
 	if n := len(lp.Games); n > 0 {
@@ -366,6 +396,7 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	}
 	p.PeakPremier = peakPrem
 	p.RecentMatches = rm
+	p.FaceitMatches = faceitRm
 	ranks := map[string]any{}
 	if lp.RecentGameRatings.Leetify != 0 {
 		// Leetify's overall rating is a small decimal; v3 exposes it ×100 in

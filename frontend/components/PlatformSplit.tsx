@@ -74,9 +74,19 @@ const METRICS: Metric[] = [
  * (10/20/50/100) sets how many recent games per platform are aggregated; FACEIT
  * is always surfaced when present, even if it's older than the Premier games.
  */
-export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
+export function PlatformSplit({
+  matches,
+  faceitMatches,
+}: {
+  matches: LeetifyRecentMatch[];
+  faceitMatches?: LeetifyRecentMatch[];
+}) {
   const premierTotal = matches.filter((m) => m.rank_type === 11).length;
-  const faceitTotal = matches.filter((m) => m.data_source === "faceit").length;
+  const faceitPool =
+    faceitMatches && faceitMatches.length
+      ? faceitMatches
+      : matches.filter((m) => m.data_source === "faceit");
+  const faceitTotal = faceitPool.length;
   const maxAvail = Math.max(premierTotal, faceitTotal);
 
   const maxBucket = Math.min(maxAvail, 100);
@@ -87,7 +97,7 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
 
   if (premierTotal === 0 && faceitTotal === 0) return null; // no Premier or FACEIT games
 
-  const split = computePlatformSplit(matches, limit);
+  const split = computePlatformSplit(matches, faceitMatches, limit);
   const cols = [split.premier, split.faceit].filter(
     (c): c is PlatformStat => c != null,
   );
