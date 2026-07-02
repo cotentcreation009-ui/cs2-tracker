@@ -143,10 +143,11 @@ type Profile struct {
 // maxFaceitMatches caps the dedicated FACEIT list (plenty for the split).
 const maxFaceitMatches = 200
 
-// minFaceitForSplit: when a v3 profile's recent window has fewer FACEIT games
-// than this, we pull the full history from the legacy endpoint (v3 only returns
-// ~100 matches, so a Premier-heavy player's FACEIT can be cut off).
-const minFaceitForSplit = 3
+// v3MatchWindow is the fixed size of the /v3/profile recent-match window (the
+// public API caps it here — limit/offset/paging are all ignored). When v3
+// returns a FULL window there is older history it can't reach, so we complete
+// the FACEIT list from the legacy endpoint (which returns every game).
+const v3MatchWindow = 100
 
 // faceitOnly returns the FACEIT matches (data_source "faceit") from a list.
 func faceitOnly(ms []RecentMatch) []RecentMatch {
@@ -244,11 +245,12 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
 		p.PeakPremier = peakPremier(p.RecentMatches)
-		// v3 only returns ~100 recent matches, so a Premier-heavy player's FACEIT
-		// history can be cut off. When the recent window is FACEIT-sparse, pull the
-		// full history from the legacy endpoint to complete the FACEIT list (and
-		// the legacy-only K/D + party + all-time peak, a free bonus for v3 players).
-		if len(p.FaceitMatches) < minFaceitForSplit {
+		// v3 caps its window at 100 matches, so a player's FACEIT games from months
+		// back get cut off. When v3 returned a FULL window (more history exists) and
+		// we don't already have a full FACEIT set, pull the whole history from the
+		// legacy endpoint to complete the FACEIT list (up to the 100-game filter) —
+		// plus the legacy-only K/D + party + all-time peak, a free bonus.
+		if len(p.RecentMatches) >= v3MatchWindow && len(p.FaceitMatches) < v3MatchWindow {
 			if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
 				if len(lp.FaceitMatches) > len(p.FaceitMatches) {
 					p.FaceitMatches = lp.FaceitMatches
