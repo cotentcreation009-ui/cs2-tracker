@@ -1,13 +1,17 @@
 import type { LeetifyRecentMatch } from "@/lib/types";
 
-// Splits a player's recent matches by platform (Premier / FACEIT / MM) and
-// aggregates the per-match performance + aim stats for each, so a lopsided
-// player — sharp on one platform, ordinary on another — is obvious at a glance.
-// The rating gap uses the SAME definition as the CheatMeter's cross-platform
-// factor (Valve official avg rating − FACEIT avg rating) so the two agree.
+// Premier-vs-FACEIT split. Compares a player's Premier matches (rank_type 11 —
+// Leetify tags these data_source "matchmaking" but the rating type is what makes
+// them Premier) against their FACEIT matches (data_source "faceit"). MM
+// Competitive, Wingman and everything else are deliberately excluded — this is
+// specifically Premier vs FACEIT (Valve's VAC vs FACEIT's kernel anti-cheat).
+//
+// Each side is bucketed across the WHOLE match pool, so FACEIT still shows even
+// if the player hasn't queued it recently; `limit` then caps how many of each
+// platform's most-recent games are aggregated (the 10/20/50/100 filter).
 
 export interface PlatformStat {
-  key: string; // data_source key
+  key: string;
   label: string;
   n: number;
   winPct: number;
@@ -20,23 +24,28 @@ export interface PlatformStat {
 
 export type Verdict =
   | "consistent"
-  | "stronger-valve"
+  | "stronger-premier"
   | "stronger-faceit"
   | "insufficient";
 
 export interface PlatformSplit {
-  stats: PlatformStat[]; // platforms with >= MIN_N matches, Premier → FACEIT → MM
-  faceit: PlatformStat | null;
-  official: PlatformStat | null; // Premier + MM combined (Valve official)
-  ratingGap: number | null; // official.avgRating − faceit.avgRating (both >= MIN_N)
+  premier: PlatformStat | null; // last `limit` Premier games
+  faceit: PlatformStat | null; // last `limit` FACEIT games
+  premierTotal: number; // total Premier games in the pool (for filter sizing)
+  faceitTotal: number; // total FACEIT games in the pool
+  ratingGap: number | null; // premier.avgRating − faceit.avgRating (both >= MIN_N)
   verdict: Verdict;
-  comparable: boolean; // both sides have >= MIN_N matches
+  comparable: boolean; // both sides have >= MIN_N games in the window
 }
 
-// Minimum matches on a platform for its averages to mean anything.
+// Minimum games on a platform for its averages (and the gap verdict) to mean
+// anything.
 export const MIN_N = 3;
 // A Leetify-rating gap beyond this reads as a real cross-platform discrepancy.
 export const GAP_THRESHOLD = 0.25;
+
+const isPremier = (m: LeetifyRecentMatch) => m.rank_type === 11;
+const isFaceit = (m: LeetifyRecentMatch) => m.data_source === "faceit";
 
 function statFor(
   key: string,
@@ -66,41 +75,36 @@ function statFor(
   };
 }
 
-export function computePlatformSplit(recent: LeetifyRecentMatch[]): PlatformSplit {
-  const by = (k: string) => recent.filter((m) => m.data_source === k);
-  const premier = statFor("premier", "Premier", by("premier"));
-  const faceit = statFor("faceit", "FACEIT", by("faceit"));
-  const mm = statFor("matchmaking", "MM", by("matchmaking"));
-
-  // Valve official = Premier + MM (what a cheat with weak VAC would inflate,
-  // vs FACEIT's kernel anti-cheat).
-  const official = statFor(
-    "official",
-    "Valve",
-    recent.filter(
-      (m) => m.data_source === "premier" || m.data_source === "matchmaking",
-    ),
-  );
-
-  // Show every platform that has any recent matches, so users can always eyeball
-  // the raw numbers themselves; MIN_N only gates the automatic verdict below.
-  const stats = [premier, faceit, mm].filter(
-    (s): s is PlatformStat => s != null && s.n >= 1,
-  );
+export function computePlatformSplit(
+  matches: LeetifyRecentMatch[],
+  limit = Infinity,
+): PlatformSplit {
+  const premierAll = matches.filter(isPremier);
+  const faceitAll = matches.filter(isFaceit);
+  const premier = statFor("premier", "Premier", premierAll.slice(0, limit));
+  const faceit = statFor("faceit", "FACEIT", faceitAll.slice(0, limit));
 
   let ratingGap: number | null = null;
   let verdict: Verdict = "insufficient";
   let comparable = false;
-  if (official && faceit && official.n >= MIN_N && faceit.n >= MIN_N) {
+  if (premier && faceit && premier.n >= MIN_N && faceit.n >= MIN_N) {
     comparable = true;
-    ratingGap = official.avgRating - faceit.avgRating;
+    ratingGap = premier.avgRating - faceit.avgRating;
     verdict =
       Math.abs(ratingGap) < GAP_THRESHOLD
         ? "consistent"
         : ratingGap > 0
-          ? "stronger-valve"
+          ? "stronger-premier"
           : "stronger-faceit";
   }
 
-  return { stats, faceit, official, ratingGap, verdict, comparable };
+  return {
+    premier,
+    faceit,
+    premierTotal: premierAll.length,
+    faceitTotal: faceitAll.length,
+    ratingGap,
+    verdict,
+    comparable,
+  };
 }

@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import {
   computePlatformSplit,
@@ -27,13 +30,7 @@ const METRICS: Metric[] = [
     dir: "high",
     diverge: GAP_THRESHOLD,
   },
-  {
-    label: "Win rate",
-    get: (s) => s.winPct,
-    fmt: (v) => `${v.toFixed(0)}%`,
-    dir: "high",
-    diverge: 15,
-  },
+  { label: "Win rate", get: (s) => s.winPct, fmt: (v) => `${v.toFixed(0)}%`, dir: "high", diverge: 15 },
   {
     label: "Crosshair placement",
     hint: "lower = tighter pre-aim",
@@ -70,23 +67,32 @@ const METRICS: Metric[] = [
   },
 ];
 
-const COL_ORDER = ["premier", "matchmaking", "faceit"];
-
 /**
- * PlatformSplit shows a player's recent-match performance broken out by
- * platform — Premier / MM (Valve) beside FACEIT — so a lopsided player (sharp
- * on one, ordinary on the other) is obvious at a glance. The headline verdict
- * reuses the CheatMeter's cross-platform rating gap (Valve − FACEIT): a big
- * Valve-over-FACEIT edge is a classic "look closer" tell, since cheats/boosts
- * rarely survive FACEIT's kernel anti-cheat.
+ * PlatformSplit compares a player's Premier matches against their FACEIT matches
+ * side by side — same player, VAC vs FACEIT anti-cheat — so a lopsided player
+ * (sharp on one, ordinary on the other) is obvious. A game-count filter
+ * (10/20/50/100) sets how many recent games per platform are aggregated; FACEIT
+ * is always surfaced when present, even if it's older than the Premier games.
  */
 export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
-  const split = computePlatformSplit(matches);
-  if (split.stats.length === 0) return null; // no recognizable platform data at all
+  const premierTotal = matches.filter((m) => m.rank_type === 11).length;
+  const faceitTotal = matches.filter((m) => m.data_source === "faceit").length;
+  const maxAvail = Math.max(premierTotal, faceitTotal);
 
-  const cols = [...split.stats].sort(
-    (a, b) => COL_ORDER.indexOf(a.key) - COL_ORDER.indexOf(b.key),
+  const maxBucket = Math.min(maxAvail, 100);
+  const buckets = Array.from(
+    new Set([...[10, 20, 50].filter((b) => b < maxBucket), maxBucket]),
+  ).sort((a, b) => a - b);
+  const [limit, setLimit] = useState(maxBucket);
+
+  if (premierTotal === 0 && faceitTotal === 0) return null; // no Premier or FACEIT games
+
+  const split = computePlatformSplit(matches, limit);
+  const cols = [split.premier, split.faceit].filter(
+    (c): c is PlatformStat => c != null,
   );
+  if (cols.length === 0) return null;
+
   const gap = split.ratingGap ?? 0;
 
   const banner = {
@@ -94,41 +100,44 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
       wrap: "border-good/25 bg-good/[0.06]",
       accent: "text-good",
       tag: "✓ Consistent",
-      title: "Performance lines up across platforms",
-      body: "Their Valve and FACEIT numbers are in the same range — no cross-platform red flag.",
+      title: "Performance lines up across Premier and FACEIT",
+      body: "Their Premier and FACEIT numbers are in the same range — no cross-platform red flag.",
     },
-    "stronger-valve": {
+    "stronger-premier": {
       wrap: "border-bad/30 bg-bad/[0.07]",
       accent: "text-bad",
       tag: "⚠ Look closer",
-      title: `Much sharper on Valve than FACEIT — rating ${fmtRating(gap)} higher`,
-      body: "Cheats and boosts often don't survive FACEIT's kernel anti-cheat, so a big Valve-over-FACEIT gap is a classic tell worth a closer look (not proof — tick-rate and effort differ too).",
+      title: `Much sharper on Premier than FACEIT — rating ${fmtRating(gap)} higher`,
+      body: "Cheats and boosts often don't survive FACEIT's kernel anti-cheat, so a big Premier-over-FACEIT gap is a classic tell worth a closer look (not proof — tick-rate and effort differ too).",
     },
     "stronger-faceit": {
       wrap: "border-mid/30 bg-mid/[0.07]",
       accent: "text-mid",
       tag: "Note",
-      title: `Stronger on FACEIT than Valve — rating ${fmtRating(-gap)} higher on FACEIT`,
+      title: `Stronger on FACEIT than Premier — rating ${fmtRating(-gap)} higher on FACEIT`,
       body: "Usually just a more serious player on FACEIT (tougher lobbies, historically 128-tick) — not itself a red flag.",
     },
     insufficient: {
       wrap: "border-line bg-panel/40",
       accent: "text-muted",
-      tag: !split.faceit
-        ? "No FACEIT games"
-        : !split.official
-          ? "No Valve games"
-          : "Compare yourself",
-      title: !split.faceit
-        ? "No FACEIT matches in the recent window — nothing to compare against"
-        : !split.official
-          ? "No Valve (MM / Premier) matches in the recent window — nothing to compare against"
-          : "Not enough matches on both platforms for a reliable verdict yet",
-      body: !split.faceit
-        ? "All of this player's recent games are on Valve MM/Premier. This view compares Valve vs FACEIT (different anti-cheats), so there's no second side to compare here — the per-platform numbers are below."
-        : !split.official
-          ? "All of this player's recent games are on FACEIT — there are no Valve games to compare against."
-          : "The per-platform numbers are below — eyeball them to spot anything lopsided.",
+      tag:
+        faceitTotal === 0
+          ? "No FACEIT games"
+          : premierTotal === 0
+            ? "No Premier games"
+            : "Compare yourself",
+      title:
+        faceitTotal === 0
+          ? "No FACEIT matches on record — nothing to compare against"
+          : premierTotal === 0
+            ? "No Premier matches on record — nothing to compare against"
+            : "Not enough games on both platforms for a reliable verdict yet",
+      body:
+        faceitTotal === 0
+          ? "All of this player's tracked games are Premier. This view compares Premier vs FACEIT (different anti-cheats), so there's no second side to compare here."
+          : premierTotal === 0
+            ? "All of this player's tracked games are FACEIT — there are no Premier games to compare against."
+            : "The per-platform numbers are below — eyeball them to spot anything lopsided.",
     },
   }[split.verdict];
 
@@ -147,8 +156,27 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
         </span>
         <h2 className="text-lg font-extrabold tracking-tight">Platform split</h2>
         <span className="text-xs text-faint">
-          Premier / MM vs FACEIT — same player, different anti-cheat
+          Premier vs FACEIT — same player, different anti-cheat
         </span>
+        {buckets.length > 1 && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-faint">Games</span>
+            <div className="flex rounded-lg border border-line bg-panel p-0.5">
+              {buckets.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setLimit(b)}
+                  className={`rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
+                    limit === b ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {banner && (
@@ -187,14 +215,15 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
               const valid = m.zeroMissing ? v > 0 : true;
               return { key: c.key, v, valid };
             });
-            const goods = cells.filter((x) => x.valid).map((x) => (m.dir === "high" ? x.v : -x.v));
+            const goods = cells
+              .filter((x) => x.valid)
+              .map((x) => (m.dir === "high" ? x.v : -x.v));
             if (goods.length === 0) return null;
             const maxG = Math.max(...goods);
             const minG = Math.min(...goods);
             const raw = cells.filter((x) => x.valid).map((x) => x.v);
             const spread = Math.max(...raw) - Math.min(...raw);
-            // only flag divergence when we have enough matches on both sides to
-            // trust it — otherwise a 1-match average would fire false alarms.
+            // only flag divergence when both sides have enough games to trust it
             const diverges =
               split.comparable && cells.filter((x) => x.valid).length >= 2 && spread > m.diverge;
 
@@ -207,7 +236,9 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-1 text-xs font-medium text-muted">
                     {m.label}
-                    {diverges && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-mid" title="platforms diverge here" />}
+                    {diverges && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-mid" title="platforms diverge here" />
+                    )}
                   </div>
                   {m.hint && <div className="text-[10px] leading-tight text-faint">{m.hint}</div>}
                 </div>
@@ -248,10 +279,10 @@ export function PlatformSplit({ matches }: { matches: LeetifyRecentMatch[] }) {
       </div>
 
       <p className="mt-2 text-[11px] leading-snug text-faint">
-        Averages over each platform&apos;s recent matches (from Leetify). A large
-        Valve-over-FACEIT gap is a &quot;look closer&quot; signal, not proof —
-        lobby strength, tick-rate and how seriously someone plays each platform
-        differ too.
+        Premier (rank_type) vs FACEIT, averaged over each platform&apos;s recent
+        matches from Leetify. A large Premier-over-FACEIT gap is a &quot;look
+        closer&quot; signal, not proof — lobby strength, tick-rate and how
+        seriously someone plays each platform differ too.
       </p>
     </section>
   );
