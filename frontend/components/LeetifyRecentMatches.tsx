@@ -17,6 +17,10 @@ function signed(n: number): string {
 const impactColor = (n: number) =>
   n > 0.03 ? "text-good" : n < -0.03 ? "text-bad" : "text-mid";
 
+// Friends-only Leetify profiles redact per-match aim detail (it comes back as
+// 0). A 0 here means "hidden", so show a dash rather than "0.0%".
+const dash = (v: number, fmt: (n: number) => string) => (v > 0 ? fmt(v) : "—");
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-line bg-panel px-2.5 py-1.5">
@@ -100,16 +104,16 @@ export function LeetifyRecentMatches({
                 <div className="border-t border-line bg-bg/40 px-3 py-3">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     <Stat label="Leetify rating" value={signed(m.leetify_rating)} />
-                    <Stat label="HS accuracy" value={`${m.accuracy_head.toFixed(1)}%`} />
+                    <Stat label="HS accuracy" value={dash(m.accuracy_head, (v) => `${v.toFixed(1)}%`)} />
                     <Stat
                       label="Spotted accuracy"
-                      value={`${m.accuracy_enemy_spotted.toFixed(0)}%`}
+                      value={dash(m.accuracy_enemy_spotted, (v) => `${v.toFixed(0)}%`)}
                     />
-                    <Stat label="Spray" value={`${m.spray_accuracy.toFixed(0)}%`} />
-                    <Stat label="Preaim" value={`${m.preaim.toFixed(1)}°`} />
+                    <Stat label="Spray" value={dash(m.spray_accuracy, (v) => `${v.toFixed(0)}%`)} />
+                    <Stat label="Preaim" value={dash(m.preaim, (v) => `${v.toFixed(1)}°`)} />
                     <Stat
                       label="Reaction"
-                      value={`${m.reaction_time_ms.toFixed(0)} ms`}
+                      value={dash(m.reaction_time_ms, (v) => `${v.toFixed(0)} ms`)}
                     />
                   </div>
                   {m.id && (
