@@ -154,6 +154,9 @@ export interface LeetifyProfile {
   steam64_id: string;
   total_matches: number;
   winrate: number; // 0..1
+  kd?: number; // legacy endpoint only (v3 doesn't expose it)
+  avg_party_size?: number; // legacy endpoint only
+  peak_premier?: number; // highest Premier rating across the match list
   privacy_mode: string;
   first_match_date?: string;
   bans?: unknown[];

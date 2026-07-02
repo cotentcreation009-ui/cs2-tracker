@@ -95,6 +95,16 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
   const firstYear = p.first_match_date
     ? new Date(p.first_match_date).getFullYear()
     : null;
+  // recent-form win rate (the second win-rate number, e.g. "63% / 77%")
+  const recentPool = (p.recent_matches || []).slice(0, 30);
+  const recentWr =
+    recentPool.length >= 5
+      ? Math.round(
+          (recentPool.filter((m) => m.outcome === "win").length / recentPool.length) * 100,
+        )
+      : null;
+  const kdTone = (v: number) =>
+    v >= 1.1 ? "text-good" : v < 0.9 ? "text-bad" : "";
   const banCount = p.bans?.length ?? 0;
   // A friends-only Leetify profile: ratings show, but the detailed aim/util/
   // trading micro-stats are redacted to 0 (and the CheatMeter, which needs the
@@ -136,14 +146,20 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
       </div>
 
       {/* headline */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {r.leetify != null && (
           <Mini label="Leetify rating" value={r.leetify.toFixed(2)} />
+        )}
+        {p.kd != null && p.kd > 0 && (
+          <Mini label="K/D" value={p.kd.toFixed(2)} valueClass={kdTone(p.kd)} />
         )}
         <Mini label="Matches" value={p.total_matches.toLocaleString("en-US")} />
         <Mini label="Win rate" value={`${(p.winrate * 100).toFixed(1)}%`} />
         {r.premier != null && r.premier > 0 && (
           <Mini label="Premier" value={r.premier.toLocaleString("en-US")} />
+        )}
+        {p.peak_premier != null && p.peak_premier > (r.premier ?? 0) && (
+          <Mini label="Peak Premier" value={p.peak_premier.toLocaleString("en-US")} />
         )}
       </div>
 
@@ -163,6 +179,18 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         {firstYear && (
           <span>
             Tracked since <span className="font-medium text-ink">{firstYear}</span>
+          </span>
+        )}
+        {p.avg_party_size != null && p.avg_party_size > 0 && (
+          <span>
+            Avg party{" "}
+            <span className="font-medium text-ink">{p.avg_party_size.toFixed(1)}</span>
+          </span>
+        )}
+        {recentWr != null && (
+          <span>
+            Recent form <span className="font-medium text-ink">{recentWr}% W</span>{" "}
+            <span className="text-faint">(last {recentPool.length})</span>
           </span>
         )}
       </div>

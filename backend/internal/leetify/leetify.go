@@ -125,8 +125,25 @@ type Profile struct {
 	Rating         Rating            `json:"rating"`
 	Stats          Stats             `json:"stats"`
 	Ranks          json.RawMessage   `json:"ranks"`
+	// Derived extras. KD + AvgPartySize come from the legacy endpoint's per-match
+	// data (v3 doesn't expose them, so they're 0/omitted there); PeakPremier is
+	// the highest Premier rating seen across the match list (both sources).
+	KD           float64 `json:"kd,omitempty"`
+	AvgPartySize float64 `json:"avg_party_size,omitempty"`
+	PeakPremier  int     `json:"peak_premier,omitempty"`
 	// RecentMatches is capped on read to keep the payload small.
 	RecentMatches []RecentMatch `json:"recent_matches"`
+}
+
+// peakPremier returns the highest Premier rating (rank_type 11) in a match list.
+func peakPremier(ms []RecentMatch) int {
+	peak := 0
+	for _, m := range ms {
+		if m.RankType == 11 && m.Rank > peak {
+			peak = m.Rank
+		}
+	}
+	return peak
 }
 
 func transientStatus(code int) bool {
@@ -197,6 +214,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		if len(p.RecentMatches) > maxRecentMatches {
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
+		p.PeakPremier = peakPremier(p.RecentMatches)
 		return &p, nil
 	case http.StatusNotFound:
 		// The newer /v3 API doesn't index every account Leetify actually has
@@ -249,6 +267,9 @@ type legacyGame struct {
 	Preaim                     float64            `json:"preaim"`
 	ReactionTime               float64            `json:"reactionTime"`
 	AccuracyHead               float64            `json:"accuracyHead"`
+	Kills                      int                `json:"kills"`
+	Deaths                     int                `json:"deaths"`
+	PartySize                  int                `json:"partySize"`
 }
 
 func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
@@ -272,6 +293,7 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	wins := 0
 	var preaimSum, reactSum, hsSum float64
 	var preaimN, reactN, hsN, premierRank int
+	var killSum, deathSum, partySum, partyN, peakPrem int
 	rm := make([]RecentMatch, 0, len(lp.Games))
 	for _, g := range lp.Games {
 		if g.MatchResult == "win" {
@@ -289,12 +311,23 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 			hsSum += g.AccuracyHead
 			hsN++
 		}
+		if g.Kills > 0 || g.Deaths > 0 {
+			killSum += g.Kills
+			deathSum += g.Deaths
+		}
+		if g.PartySize > 0 {
+			partySum += g.PartySize
+			partyN++
+		}
 		rank := g.SkillLevel
 		if rank == 0 && g.Elo != nil {
 			rank = int(*g.Elo)
 		}
 		if premierRank == 0 && g.RankType == 11 && rank > 0 {
 			premierRank = rank // most recent Premier rating
+		}
+		if g.RankType == 11 && rank > peakPrem {
+			peakPrem = rank // highest Premier rating ever
 		}
 		if len(rm) < maxRecentMatches {
 			rm = append(rm, RecentMatch{
@@ -325,6 +358,13 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	if hsN > 0 {
 		p.Stats.AccuracyHead = hsSum / float64(hsN)
 	}
+	if deathSum > 0 {
+		p.KD = float64(killSum) / float64(deathSum)
+	}
+	if partyN > 0 {
+		p.AvgPartySize = float64(partySum) / float64(partyN)
+	}
+	p.PeakPremier = peakPrem
 	p.RecentMatches = rm
 	ranks := map[string]any{}
 	if lp.RecentGameRatings.Leetify != 0 {
