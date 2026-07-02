@@ -9,6 +9,12 @@ import (
 
 func TestGetProfile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The FACEIT-completion step hits the legacy endpoint when the v3 window is
+		// FACEIT-sparse; 404 it so the merge is a no-op (and no real API is called).
+		if r.URL.Path == "/api/profile/id/76561198077030352" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if r.URL.Path != "/v3/profile" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
@@ -25,7 +31,7 @@ func TestGetProfile(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
 	p, err := c.GetProfile(context.Background(), 76561198077030352)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +77,7 @@ func TestGetProfileLegacyFallback(t *testing.T) {
 				"recentGameRatings":{"aim":89.1,"positioning":68.8,"utility":58.9,"clutch":0.19,"opening":0.026,"ctLeetify":0.036,"tLeetify":0.011,"leetify":0.024},
 				"games":[
 					{"gameId":"g1","gameFinishedAt":"2026-07-01T00:00:00.000Z","dataSource":"matchmaking","matchResult":"win","mapName":"de_mirage","scores":[16,13],"rankType":11,"skillLevel":30799,"elo":null,"ownTeamTotalLeetifyRatings":{"76561197995150836":0.0066},"preaim":0,"reactionTime":0,"accuracyHead":0,"kills":20,"deaths":15,"partySize":5},
-					{"gameId":"g2","gameFinishedAt":"2026-06-30T00:00:00.000Z","dataSource":"faceit","matchResult":"loss","mapName":"de_inferno","scores":[10,13],"rankType":1,"skillLevel":0,"elo":2542,"ownTeamTotalLeetifyRatings":{"76561197995150836":-0.05},"preaim":7.5,"reactionTime":520,"accuracyHead":30,"kills":18,"deaths":20,"partySize":1}
+					{"gameId":"g2","gameFinishedAt":"2026-06-30T00:00:00.000Z","dataSource":"faceit","matchResult":"loss","mapName":"de_inferno","scores":[10,13],"rankType":1,"skillLevel":0,"elo":2542,"ownTeamTotalLeetifyRatings":{"76561197995150836":-0.05},"preaim":7.5,"reactionTime":0.52,"accuracyHead":0.30,"kills":18,"deaths":20,"partySize":1}
 				]
 			}`))
 		default:
