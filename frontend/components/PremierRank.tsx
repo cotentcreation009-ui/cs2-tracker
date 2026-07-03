@@ -32,47 +32,53 @@ export interface PremierPoint {
 // Premier rating history (per Premier match, from Leetify). CS2 doesn't expose
 // past-season end ranks via any public API, so this is the match-by-match
 // rating timeline — the honest, real equivalent.
-export function PremierRank({ premier, history }: { premier: number; history: PremierPoint[] }) {
-  const [open, setOpen] = useState(false);
-  const color = premierColor(premier);
-  const pts = [...history].filter((p) => p.rating > 0).sort((a, b) => a.date.localeCompare(b.date));
-  const hasHist = pts.length >= 2;
+// PremierBadge — the Premier emblem button. Open/close is controlled by the
+// parent (RankRow) so the history panel renders BELOW the whole rank row,
+// keeping the other badges (FACEIT) visible. `history` is pre-filtered/sorted.
+// When the account has no CURRENT Premier rating it still shows their last
+// recorded rating and stays clickable for the history.
+export function PremierBadge({
+  premier,
+  history,
+  open,
+  onToggle,
+}: {
+  premier: number;
+  history: PremierPoint[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const hasHist = history.length >= 2;
+  const displayRating = premier > 0 ? premier : (history[history.length - 1]?.rating ?? 0);
+  const color = premierColor(displayRating);
 
   return (
-    <>
-      <button
-        type="button"
-        disabled={!hasHist}
-        onClick={() => setOpen((o) => !o)}
-        title={hasHist ? "Show Premier rating history" : `Premier · ${premierTier(premier)} tier`}
-        className="flex items-center gap-2.5 overflow-hidden rounded-xl border px-3 py-2 text-left transition enabled:hover:brightness-110 disabled:cursor-default"
-        style={{ borderColor: `${color}59`, background: `linear-gradient(100deg, ${color}2e, ${color}0a 72%)` }}
-      >
-        <span className="flex h-9 items-center gap-[3px]" aria-hidden>
-          <span className="h-9 w-1 -skew-x-12 rounded-[2px]" style={{ background: color }} />
-          <span className="h-9 w-[7px] -skew-x-12 rounded-[2px]" style={{ background: color }} />
-          <span className="h-9 w-[3px] -skew-x-12 rounded-[2px]" style={{ background: color, opacity: 0.5 }} />
-        </span>
-        <div className="min-w-0">
-          <div className="stat-label flex items-center gap-1">
-            Premier {hasHist && <span className="text-faint">{open ? "▲" : "▾"}</span>}
-          </div>
-          <div className="text-base font-bold tabular-nums" style={{ color }}>
-            {premier.toLocaleString("en-US")}
-          </div>
+    <button
+      type="button"
+      disabled={!hasHist}
+      onClick={onToggle}
+      title={hasHist ? "Show Premier rating history" : `Premier · ${premierTier(displayRating)} tier`}
+      className="flex items-center gap-2.5 overflow-hidden rounded-xl border px-3 py-2 text-left transition enabled:hover:brightness-110 disabled:cursor-default"
+      style={{ borderColor: `${color}59`, background: `linear-gradient(100deg, ${color}2e, ${color}0a 72%)` }}
+    >
+      <span className="flex h-9 items-center gap-[3px]" aria-hidden>
+        <span className="h-9 w-1 -skew-x-12 rounded-[2px]" style={{ background: color }} />
+        <span className="h-9 w-[7px] -skew-x-12 rounded-[2px]" style={{ background: color }} />
+        <span className="h-9 w-[3px] -skew-x-12 rounded-[2px]" style={{ background: color, opacity: 0.5 }} />
+      </span>
+      <div className="min-w-0">
+        <div className="stat-label flex items-center gap-1">
+          Premier {hasHist && <span className="text-faint">{open ? "▲" : "▾"}</span>}
         </div>
-      </button>
-
-      {open && hasHist && (
-        <div className="w-full">
-          <PremierHistory pts={pts} current={premier} />
+        <div className="text-base font-bold tabular-nums" style={{ color }}>
+          {displayRating > 0 ? displayRating.toLocaleString("en-US") : "Unranked"}
         </div>
-      )}
-    </>
+      </div>
+    </button>
   );
 }
 
-function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number }) {
+export function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number | null>(null);
   const shown = hover ?? pinned;
@@ -89,7 +95,8 @@ function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number
     return [x, y] as const;
   });
   const path = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const cur = premierColor(current);
+  const latest = pts[pts.length - 1]?.rating ?? peak; // most-recent rating (pts sorted ascending)
+  const cur = premierColor(current > 0 ? current : latest); // fall back to last rating when unranked
   const recent = [...pts].reverse().slice(0, 10); // most-recent first
   const fmtDate = (iso: string) => {
     const d = new Date(iso);
@@ -105,7 +112,12 @@ function PremierHistory({ pts, current }: { pts: PremierPoint[]; current: number
         <span className="text-[11px] text-faint">{pts.length} Premier matches · click a point</span>
         <span className="ml-auto flex items-center gap-3 text-xs">
           <span className="text-muted">Peak <b className="tabular-nums" style={{ color: premierColor(peak) }}>{peak.toLocaleString("en-US")}</b></span>
-          <span className="text-muted">Now <b className="tabular-nums" style={{ color: cur }}>{current.toLocaleString("en-US")}</b></span>
+          <span className="text-muted">
+            {current > 0 ? "Now" : "Last"}{" "}
+            <b className="tabular-nums" style={{ color: cur }}>
+              {(current > 0 ? current : latest).toLocaleString("en-US")}
+            </b>
+          </span>
         </span>
       </div>
 

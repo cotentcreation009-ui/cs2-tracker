@@ -20,8 +20,8 @@ import { flag, fmt } from "@/lib/format";
 import Link from "next/link";
 import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
-import { PremierRank, type PremierPoint } from "@/components/PremierRank";
-import { FaceitRank } from "@/components/FaceitRank";
+import { type PremierPoint } from "@/components/PremierRank";
+import { RankRow } from "@/components/RankRow";
 import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
@@ -318,8 +318,6 @@ export function CheatMeter({
   const premierHistory: PremierPoint[] = (leetify?.recent_matches ?? [])
     .filter((m) => m.rank_type === 11 && (m.rank ?? 0) > 0)
     .map((m) => ({ rating: m.rank as number, date: m.finished_at }));
-  const faceitLevel = faceit?.skillLevel || leetify?.ranks?.faceit || 0;
-  const wingman = leetify?.ranks?.wingman ?? 0;
   const {
     score,
     band,
@@ -421,25 +419,13 @@ export function CheatMeter({
       <div className="grid gap-5 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
         {/* left: ranks + steam profile + analysis scope */}
         <div className="space-y-3">
-          {(premier > 0 || faceitLevel > 0 || wingman > 0) && (
-            <div className="flex flex-wrap items-center gap-2">
-              {premier > 0 && <PremierRank premier={premier} history={premierHistory} />}
-              <FaceitRank
-                faceit={faceit}
-                levelFallback={leetify?.ranks?.faceit ?? 0}
-                eloFallback={leetify?.ranks?.faceit_elo ?? 0}
-              />
-              {wingman > 0 && (
-                <div className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2" title="Wingman rank">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel2 text-sm font-black text-muted">W</span>
-                  <div>
-                    <div className="stat-label">Wingman</div>
-                    <div className="text-base font-bold tabular-nums text-ink">#{wingman}</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <RankRow
+            premier={premier}
+            premierHistory={premierHistory}
+            faceit={faceit}
+            faceitLevelFallback={leetify?.ranks?.faceit ?? 0}
+            faceitEloFallback={leetify?.ranks?.faceit_elo ?? 0}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="stat-label">Steam profile</div>

@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import type { FaceitProfile } from "@/lib/types";
 
 // Official FACEIT skill-level colours (1 grey · 2–4 green · 5–7 yellow · 8–9
 // orange · 10 red).
-function faceitColor(lvl: number): string {
+export function faceitColor(lvl: number): string {
   if (lvl >= 10) return "#e8332e";
   if (lvl >= 8) return "#ff7a18";
   if (lvl >= 5) return "#ffc220";
@@ -13,61 +12,54 @@ function faceitColor(lvl: number): string {
   return "#dfe5ec";
 }
 
-// FaceitRank — the FACEIT emblem badge; click to expand the player's FACEIT
-// detail (ELO, level, matches, win%, K/D, HS%, streaks, recent results). FACEIT
-// doesn't expose a per-match ELO timeline, so this is the career snapshot + form.
-export function FaceitRank({
+// FaceitBadge — the FACEIT emblem button. Open/close is controlled by the parent
+// (RankRow) so the detail panel renders BELOW the whole rank row, keeping the
+// other badges visible. Returns null when the account has no FACEIT level.
+export function FaceitBadge({
   faceit,
-  levelFallback = 0,
-  eloFallback = 0,
+  level,
+  elo,
+  open,
+  onToggle,
 }: {
   faceit?: FaceitProfile | null;
-  levelFallback?: number;
-  eloFallback?: number;
+  level: number;
+  elo: number;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const level = faceit?.skillLevel || levelFallback;
-  const elo = faceit?.elo || eloFallback;
   if (level <= 0) return null;
   const color = faceitColor(level);
   const canOpen = !!faceit;
 
   return (
-    <>
-      <button
-        type="button"
-        disabled={!canOpen}
-        onClick={() => setOpen((o) => !o)}
-        title={canOpen ? "Show FACEIT detail" : `FACEIT level ${level}`}
-        className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2 text-left transition enabled:hover:brightness-110 disabled:cursor-default"
+    <button
+      type="button"
+      disabled={!canOpen}
+      onClick={onToggle}
+      title={canOpen ? "Show FACEIT detail" : `FACEIT level ${level}`}
+      className="flex items-center gap-2.5 rounded-xl border border-line bg-panel px-3.5 py-2 text-left transition enabled:hover:brightness-110 disabled:cursor-default"
+    >
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black"
+        style={{ background: "#0a0f1c", border: `2px solid ${color}`, color, boxShadow: `0 0 8px -2px ${color}80` }}
       >
-        <span
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-black"
-          style={{ background: "#0a0f1c", border: `2px solid ${color}`, color, boxShadow: `0 0 8px -2px ${color}80` }}
-        >
-          {level}
-        </span>
-        <div>
-          <div className="stat-label flex items-center gap-1">
-            FACEIT {canOpen && <span className="text-faint">{open ? "▲" : "▾"}</span>}
-          </div>
-          <div className="text-base font-bold tabular-nums" style={{ color }}>
-            {elo > 0 ? elo.toLocaleString("en-US") : `Lvl ${level}`}
-            {elo > 0 && <span className="ml-1 text-[10px] font-normal text-faint">ELO</span>}
-          </div>
+        {level}
+      </span>
+      <div>
+        <div className="stat-label flex items-center gap-1">
+          FACEIT {canOpen && <span className="text-faint">{open ? "▲" : "▾"}</span>}
         </div>
-      </button>
-
-      {open && faceit && (
-        <div className="w-full">
-          <FaceitDetail faceit={faceit} color={color} elo={elo} level={level} />
+        <div className="text-base font-bold tabular-nums" style={{ color }}>
+          {elo > 0 ? elo.toLocaleString("en-US") : `Lvl ${level}`}
+          {elo > 0 && <span className="ml-1 text-[10px] font-normal text-faint">ELO</span>}
         </div>
-      )}
-    </>
+      </div>
+    </button>
   );
 }
 
-function FaceitDetail({ faceit, color, elo, level }: { faceit: FaceitProfile; color: string; elo: number; level: number }) {
+export function FaceitDetail({ faceit, color, elo, level }: { faceit: FaceitProfile; color: string; elo: number; level: number }) {
   const results = faceit.recentResults ?? [];
   const stat = (label: string, value: string) => (
     <div className="rounded-lg bg-panel/60 px-2.5 py-2">
