@@ -22,6 +22,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
 import { type PremierPoint } from "@/components/PremierRank";
 import { RankRow } from "@/components/RankRow";
+import { SectionJump } from "@/components/SectionJump";
 import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
@@ -388,21 +389,29 @@ export function CheatMeter({
             </span>
           )}
         </div>
-        {/* center: player name + avatar, on the top row, over the meter below */}
-        <div className="flex min-w-0 items-center justify-center gap-2.5">
-          <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
-            {player.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
-            ) : (
-              <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
-                {(player.personaName || "?").slice(0, 1).toUpperCase()}
-              </div>
-            )}
+        {/* center: player name + avatar on the top row (over the meter below),
+            with the three section-jump buttons directly beneath the name. */}
+        <div className="flex min-w-0 flex-col items-center gap-2.5">
+          <div className="flex min-w-0 items-center justify-center gap-2.5">
+            <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
+              {player.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
+              ) : (
+                <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
+                  {(player.personaName || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+            </div>
+            <span className="truncate text-2xl font-extrabold leading-tight">
+              {player.personaName || player.steamId64}
+            </span>
           </div>
-          <span className="truncate text-2xl font-extrabold leading-tight">
-            {player.personaName || player.steamId64}
-          </span>
+          <SectionJump
+            split={!!(leetify?.recent_matches && leetify.recent_matches.length > 0)}
+            leetify={!!leetify}
+            counter={!!leetify}
+          />
         </div>
         <div className="flex items-center gap-2 lg:justify-end">
           <ShareButton label="Share" />
