@@ -219,27 +219,35 @@ export function computeSuspicion(
     }
   }
 
-  // Calibration reference (recompute if you touch the anchors/weights below):
+  // Calibration reference (recompute if you touch the anchors/weights below).
+  // Top-percentile anchors: 430ms reaction · aim 95 · K/D 1.8 · Leetify 3.0.
   //   typical legit (650ms/12°/aim70)            → ~2   very low
-  //   strong pro, no gap (480ms/6.5°/aim92)      → ~40  low (must NOT reach High)
-  //   near-max aim + fast reaction (99/436ms), normal K/D/HS → ~61 High
-  //   blatant aimbot, no gap (380ms/2°/aim99)    → ~89  very high
-  //   same aimbot but cross-platform-consistent  → ~89  very high (not exonerated)
+  //   strong pro, no gap (480ms/6.5°/aim92)      → ~55  moderate (must NOT reach High)
+  //   near-max aim + fast reaction (99/436ms), normal K/D/HS → ~70 High
+  //   blatant aimbot, no gap (380ms/2°/aim99)    → ~86  very high
+  //   same aimbot but cross-platform-consistent  → ~86  very high (not exonerated)
   //   no mechanical data (K/D + HS% only)        → capped at 39 (Moderate)
 
   // --- sub-scores (0 = normal, 100 = extreme) ---
-  // up()/down() are LINEAR ramps: 0 at the benign anchor, 100 at the superhuman
-  // anchor (clamped). Anchors sit in genuinely superhuman territory so fast-pro
-  // values stay modest (≈480ms reaction → ~44, 6.5° preaim → ~42), reserving the
-  // top of the range for inhuman triggerbot/aimbot values.
+  // up()/down() are LINEAR ramps: 0 at the benign anchor, 100 at the "top" anchor
+  // (clamped). Top-percentile anchors — the value at/above which the sub-score
+  // maxes to 100: 430ms reaction, aim rating 95, K/D 1.8, Leetify rating 3.0.
+  // These sit at elite-but-attainable levels, so the meter is intentionally
+  // sensitive: a genuinely top-tier legit player WILL register high here (that's
+  // what the confidence gating + "signal, not proof" framing exist to caveat).
   const sGap = gap != null ? up(gapEff, 0.2, 1.0) : null;
-  const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 560, 380) : null;
+  const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 560, 430) : null;
   const sPreaim = s && s.preaim > 0 ? down(s.preaim, 9, 3) : null;
-  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 85, 100) : null;
+  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 85, 95) : null;
   // Steam lifetime accuracy is all-mode (DM/casual inflate it) — shown as a
   // context card but NOT fed into the score.
   const sAccuracy = accuracyPct > 0 ? up(accuracyPct, 24, 40) : null;
-  const sKd = kd > 0 ? up(kd, 1.0, 2.0) : null;
+  const sKd = kd > 0 ? up(kd, 1.0, 1.8) : null;
+  // Overall Leetify rating (composite; ranks.leetify is on the ×100 scale, so a
+  // strong player sits ~1.5–3). 3.0+ = top percentile. Lighter, skill-linked
+  // support like K/D — NOT a direct aim tell, so it stays out of `core`.
+  const leetifyRating = leetify?.ranks?.leetify ?? 0;
+  const sLeetifyRating = leetifyRating > 0 ? up(leetifyRating, 1.5, 3) : null;
 
   // Mechanical-anomaly composite — reaction, crosshair placement and aim are the
   // most direct aimbot/triggerbot tells; HS% and K/D are lighter, skill-linked
@@ -252,6 +260,7 @@ export function computeSuspicion(
       [sAim, 0.18],
       [sHs, 0.1],
       [sKd, 0.12],
+      [sLeetifyRating, 0.1],
     ] as [number | null, number][]
   ).filter((p): p is [number, number] => p[0] != null);
   const mw = mechParts.reduce((a, p) => a + p[1], 0);
@@ -320,6 +329,7 @@ export function computeSuspicion(
   add("accuracy", "target", "Shot accuracy", accuracyPct > 0 ? `${accuracyPct.toFixed(0)}%` : "—", "shots hit vs fired", sAccuracy);
   add("hs", "target", hsLabel, hsDisplay, hsDetail, sHs);
   add("aim", "cross", "Aim rating", leetify ? leetify.rating.aim.toFixed(1) : "—", "aim quality (Leetify)", sAim);
+  add("leetify", "chart", "Leetify rating", leetifyRating > 0 ? leetifyRating.toFixed(2) : "—", "overall performance (Leetify)", sLeetifyRating);
   add("kd", "target", "K/D ratio", kd > 0 ? kd.toFixed(2) : "—", "kills per death", sKd);
   if (leetify || steamExtras) {
     const banDisplay =
@@ -370,15 +380,17 @@ export function computeSuspicion(
     });
 
   if (s && s.reaction_time_ms > 0)
-    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 560, 380), "560ms", "Human", "380ms", "Inhuman");
+    card("reaction", "bolt", "Reaction time", `${s.reaction_time_ms.toFixed(0)}ms`, down(s.reaction_time_ms, 560, 430), "560ms", "Human", "430ms", "Top");
   if (s && s.preaim > 0)
     card("preaim", "cross", "Crosshair placement", `${s.preaim.toFixed(1)}°`, down(s.preaim, 9, 3), "9°", "Typical", "3°", "Inhuman");
   if (leetify && leetify.rating.aim > 0)
-    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 85, 100), "85", "High", "100", "Extreme");
+    card("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), up(leetify.rating.aim, 85, 95), "85", "High", "95", "Top");
+  if (sLeetifyRating != null)
+    card("leetify", "chart", "Leetify rating", leetifyRating.toFixed(2), up(leetifyRating, 1.5, 3), "1.5", "Strong", "3.0", "Top");
   if (sAccuracy != null)
     card("accuracy", "target", "Shot accuracy", `${accuracyPct.toFixed(0)}%`, up(accuracyPct, 24, 40), "24%", "Typical", "40%", "Inhuman");
   if (sKd != null)
-    card("kd", "target", "K/D ratio", kd.toFixed(2), up(kd, 1.0, 2.0), "1.0", "Avg", "2.0", "Extreme");
+    card("kd", "target", "K/D ratio", kd.toFixed(2), up(kd, 1.0, 1.8), "1.0", "Avg", "1.8", "Top");
   if (sHs != null)
     card("hs", "target", hsLabel, hsDisplay, sHs, hsLo[0], hsLo[1], hsHi[0], hsHi[1]);
 
