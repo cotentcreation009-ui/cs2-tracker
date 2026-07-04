@@ -196,3 +196,37 @@ describe("CheatMeter calibration probes", () => {
     expect(sus!.score).toBeLessThan(60); // High floor, not Very High
   });
 });
+
+// Top-percentile anchors the meter is tuned to (per-signal sub-scores hit 100 at
+// or above these values): aim 95, reaction 430ms, K/D 1.8, Leetify rating 3.0.
+// These pin the ramp endpoints so a later edit can't silently loosen them.
+describe("top-percentile anchor calibration", () => {
+  const sub = (s: ReturnType<typeof computeSuspicion>, key: string): number =>
+    s?.factors.find((f) => f.key === key)?.score ?? -1;
+
+  it("aim rating 95 tops out (100); 90 sits mid", () => {
+    expect(sub(computeSuspicion(mkLeetify({ aim: 95 }), null, null), "aim")).toBe(100);
+    expect(sub(computeSuspicion(mkLeetify({ aim: 90 }), null, null), "aim")).toBeCloseTo(50, 0);
+    expect(sub(computeSuspicion(mkLeetify({ aim: 96 }), null, null), "aim")).toBe(100);
+  });
+
+  it("430ms reaction tops out (100); a slow 560ms is 0", () => {
+    expect(sub(computeSuspicion(mkLeetify({ reaction: 430 }), null, null), "reaction")).toBe(100);
+    expect(sub(computeSuspicion(mkLeetify({ reaction: 560 }), null, null), "reaction")).toBe(0);
+  });
+
+  it("K/D 1.5 lands in High (60–80); 1.8 tops out", () => {
+    const at15 = sub(computeSuspicion(null, mkFaceit({ kd: 1.5 }), null), "kd");
+    expect(at15).toBeGreaterThanOrEqual(60);
+    expect(at15).toBeLessThan(80);
+    expect(sub(computeSuspicion(null, mkFaceit({ kd: 1.8 }), null), "kd")).toBe(100);
+  });
+
+  it("Leetify overall rating 3.0 tops out; 1.5 is 0", () => {
+    const base = mkLeetify({ aim: 80 });
+    const at3 = computeSuspicion({ ...base, ranks: { ...base.ranks, leetify: 3 } }, null, null);
+    const at15 = computeSuspicion({ ...base, ranks: { ...base.ranks, leetify: 1.5 } }, null, null);
+    expect(sub(at3, "leetify")).toBe(100);
+    expect(sub(at15, "leetify")).toBe(0);
+  });
+});
