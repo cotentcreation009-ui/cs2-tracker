@@ -30,6 +30,7 @@ import { SteamStatsPanel } from "@/components/SteamStatsPanel";
 import { CrossSource } from "@/components/CrossSource";
 import { CheatMeter } from "@/components/CheatMeter";
 import { PlatformSplit } from "@/components/PlatformSplit";
+import { SectionJump } from "@/components/SectionJump";
 import { computeSuspicion } from "@/lib/suspicion";
 import Link from "next/link";
 import {
@@ -139,10 +140,12 @@ export function ProfileView({
       {/* Premier/MM vs FACEIT split — spot a player who's lopsided across
           platforms (the cross-platform gap the CheatMeter scores, broken out). */}
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <PlatformSplit
-          matches={leetify.recent_matches}
-          faceitMatches={leetify.faceit_matches}
-        />
+        <div id="platform-split" className="scroll-mt-24">
+          <PlatformSplit
+            matches={leetify.recent_matches}
+            faceitMatches={leetify.faceit_matches}
+          />
+        </div>
       )}
 
       {/* Fallback hero for accounts without enough data for the CheatMeter */}
@@ -187,6 +190,12 @@ export function ProfileView({
               <h1 className="truncate text-2xl font-extrabold leading-tight sm:text-3xl">
                 {player.personaName || player.steamId64}
               </h1>
+              <SectionJump
+                split={!!(leetify?.recent_matches && leetify.recent_matches.length > 0)}
+                leetify={!!leetify}
+                counter={!!leetify}
+                className="mt-2 justify-start"
+              />
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {steamExtras?.personaState != null &&
                   steamExtras.personaState > 0 && (
@@ -302,7 +311,11 @@ export function ProfileView({
       )}
 
       {/* Skill breakdown */}
-      {leetify && <LeetifyPanel profile={leetify} />}
+      {leetify && (
+        <div id="leetify-stats" className="scroll-mt-24">
+          <LeetifyPanel profile={leetify} />
+        </div>
+      )}
 
       {/* Other platforms */}
       {faceit && <FaceitPanel profile={faceit} />}
@@ -457,12 +470,14 @@ export function ProfileView({
 
       {/* Counter report — the payoff, at the bottom */}
       {leetify && (
-        <CounterReport
-          leetify={leetify}
-          faceit={faceit}
-          steamStats={steamStats}
-          name={player.personaName || "this player"}
-        />
+        <div id="counter-report" className="scroll-mt-24">
+          <CounterReport
+            leetify={leetify}
+            faceit={faceit}
+            steamStats={steamStats}
+            name={player.personaName || "this player"}
+          />
+        </div>
       )}
     </div>
   );
