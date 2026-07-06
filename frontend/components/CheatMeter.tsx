@@ -2,6 +2,7 @@ import type {
   FaceitProfile,
   LeetifyProfile,
   Player,
+  PlayerCareer,
   SteamExtras,
   SteamGameStats,
 } from "@/lib/types";
@@ -12,18 +13,19 @@ import {
   RISK_LABEL,
   computeSuspicion,
   type Band,
-  type MetricCard,
   type SusFactor,
   type Suspicion,
 } from "@/lib/suspicion";
-import { flag, fmt } from "@/lib/format";
+import { flag, fmt, tierColor } from "@/lib/format";
 import Link from "next/link";
 import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
 import { type PremierPoint } from "@/components/PremierRank";
 import { RankRow } from "@/components/RankRow";
-import { SectionJump } from "@/components/SectionJump";
+import { StatsPeek } from "@/components/StatsPeek";
 import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
+import { MapWinChart } from "@/components/MapStrength";
+import type { ReactNode } from "react";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
 
@@ -81,7 +83,7 @@ function Gauge({ score, hex }: { score: number; hex: string }) {
   const [nx, ny] = pol(score, r - 16);
   const ticks = [0, 25, 50, 75, 100];
   return (
-    <svg viewBox="0 0 260 165" className="mt-1 w-full max-w-[300px]">
+    <svg viewBox="0 0 260 165" className="mt-1 w-full max-w-[250px]">
       <defs>
         <linearGradient id="cm-arc" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#46d369" />
@@ -173,49 +175,12 @@ function BandLegend({ band }: { band: Band }) {
   );
 }
 
-// --- metric scale card ------------------------------------------------------
-function ScaleCard({ m }: { m: MetricCard }) {
-  const hex = BAND_HEX[m.band];
+// --- compact career stat ----------------------------------------------------
+function CStat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="card px-3 py-2.5">
-      <div className="flex items-center gap-1.5 stat-label">
-        <Icon name={m.icon} className="h-3.5 w-3.5" />
-        {m.label}
-      </div>
-      <div className="mt-1 flex items-center gap-2">
-        <span className="text-xl font-bold tabular-nums" style={{ color: hex }}>
-          {m.value}
-        </span>
-        <span
-          className="rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase"
-          style={{ background: `${hex}26`, color: hex }}
-        >
-          {BAND_LABEL[m.band]}
-        </span>
-      </div>
-      <div className="mt-2">
-        <div
-          className="relative h-1.5 rounded-full"
-          style={{
-            background:
-              "linear-gradient(90deg, rgba(70,211,105,.55), rgba(245,185,66,.55), rgba(245,105,74,.6))",
-          }}
-        >
-          <span
-            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
-            style={{ left: `${m.marker}%`, background: hex, borderColor: "var(--color-bg)" }}
-          />
-        </div>
-        <div className="mt-1 flex justify-between text-[10px] text-faint">
-          <span>
-            {m.loVal} {m.loLabel}
-          </span>
-          <span>
-            {m.hiVal} {m.hiLabel}
-          </span>
-        </div>
-      </div>
-      <div className="mt-1.5 text-[11px] text-muted">{m.note}</div>
+    <div className="rounded-lg border border-line bg-panel px-2.5 py-1.5">
+      <div className="stat-label">{label}</div>
+      <div className={`mt-0.5 text-sm font-bold tabular-nums ${color ?? "text-ink"}`}>{value}</div>
     </div>
   );
 }
@@ -226,11 +191,13 @@ function Donut({
   losses,
   draws,
   total,
+  sizeClass = "h-32 w-32",
 }: {
   wins: number;
   losses: number;
   draws: number;
   total: number;
+  sizeClass?: string;
 }) {
   const R = 54;
   const C = 2 * Math.PI * R;
@@ -243,7 +210,7 @@ function Donut({
   ];
   let acc = 0;
   return (
-    <svg viewBox="0 0 140 140" className="h-32 w-32 shrink-0">
+    <svg viewBox="0 0 140 140" className={`${sizeClass} shrink-0`}>
       <circle cx={cx} cy={cy} r={R} fill="none" stroke="var(--color-line)" strokeWidth="13" />
       {segs.map((s, i) => {
         const frac = total ? s.v / total : 0;
@@ -296,7 +263,9 @@ export function CheatMeter({
   steamStats,
   steamExtras,
   rating,
+  career,
   generatedOn,
+  panels,
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -304,7 +273,11 @@ export function CheatMeter({
   steamStats?: SteamGameStats | null;
   steamExtras?: SteamExtras | null;
   rating?: number | null;
+  career?: PlayerCareer | null;
   generatedOn?: string;
+  // Pre-rendered section nodes shown in the StatsPeek modal (built in ProfileView
+  // so the server components render server-side); a missing slot hides its button.
+  panels?: { split?: ReactNode; leetify?: ReactNode; counter?: ReactNode; matchstats?: ReactNode };
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras);
   if (!sus || !sus.hasEnough) return null;
@@ -327,13 +300,27 @@ export function CheatMeter({
     confidence,
     lowConfidence,
     factors,
-    metrics,
     summary,
     scope,
     trend,
   } = sus;
   const hex = BAND_HEX[band];
   const pct = (v: number) => (summary.total ? (v / summary.total) * 100 : 0);
+
+  // Career stats + map win rates now fill the row where the scale cards used to
+  // sit — those duplicated the factors column, whereas these are new signal.
+  const recentMatches = leetify?.recent_matches ?? [];
+  const distinctMaps = new Set(
+    recentMatches.filter((m) => m.map_name).map((m) => m.map_name),
+  ).size;
+  const showMapChart = distinctMaps >= 3;
+  const showCareer = !!career && career.matches > 0;
+  const openTotal = career ? career.openingKills + career.openingDeaths : 0;
+  const openPct = openTotal > 0 ? (career!.openingKills / openTotal) * 100 : 0;
+  const clutchTotal = career ? career.clutchesWon + career.clutchesLost : 0;
+  const clutchPct = clutchTotal > 0 ? (career!.clutchesWon / clutchTotal) * 100 : 0;
+  const udPerRound =
+    career && career.roundsPlayed > 0 ? career.utilityDamage / career.roundsPlayed : 0;
 
   // A friends-only Leetify profile redacts the aim micro-stats (reaction/preaim/
   // HS → 0), so most of the CheatMeter's scale cards are missing. Surface the
@@ -372,13 +359,14 @@ export function CheatMeter({
 
   return (
     <section className="card-2 px-5 py-4">
-      {/* top row: title (left) · player name over the meter (center) · actions (right) */}
-      <div className="mb-4 grid grid-cols-1 items-center gap-2 border-b border-line/60 pb-4 lg:grid-cols-[1fr_auto_1fr]">
+      {/* top row: title (left) · player identity + section buttons (center) · actions (right) —
+          one slim line so the meter grid gets the vertical room. */}
+      <div className="mb-3 grid grid-cols-1 items-center gap-2 border-b border-line/60 pb-3 lg:grid-cols-[1fr_auto_1fr]">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-bad/15 text-bad">
-            <Icon name="shield" className="h-4 w-4" />
+          <span className="grid h-6 w-6 place-items-center rounded-lg bg-bad/15 text-bad">
+            <Icon name="shield" className="h-3.5 w-3.5" />
           </span>
-          <h2 className="text-lg font-extrabold tracking-tight">CheatMeter</h2>
+          <h2 className="text-base font-extrabold tracking-tight">CheatMeter</h2>
           <span className="pill bg-brand/15 text-brand">BETA</span>
           {lowConfidence && (
             <span
@@ -389,45 +377,45 @@ export function CheatMeter({
             </span>
           )}
         </div>
-        {/* center: player name + avatar on the top row (over the meter below),
-            with the three section-jump buttons directly beneath the name. */}
-        <div className="flex min-w-0 flex-col items-center gap-2.5">
-          <div className="flex min-w-0 items-center justify-center gap-2.5">
-            <div className="shrink-0 rounded-xl bg-linear-to-br from-brand to-brand2 p-[2px]">
+        {/* center: avatar + name with the three section buttons on the same line */}
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="shrink-0 rounded-lg bg-linear-to-br from-brand to-brand2 p-[2px]">
               {player.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={player.avatarUrl} alt={player.personaName} className="h-10 w-10 rounded-[10px] object-cover" />
+                <img src={player.avatarUrl} alt={player.personaName} className="h-8 w-8 rounded-md object-cover" />
               ) : (
-                <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-panel text-base font-bold text-faint">
+                <div className="grid h-8 w-8 place-items-center rounded-md bg-panel text-sm font-bold text-faint">
                   {(player.personaName || "?").slice(0, 1).toUpperCase()}
                 </div>
               )}
             </div>
-            <span className="truncate text-2xl font-extrabold leading-tight">
+            <span className="truncate text-xl font-extrabold leading-tight">
               {player.personaName || player.steamId64}
             </span>
           </div>
-          <SectionJump
-            split={!!(leetify?.recent_matches && leetify.recent_matches.length > 0)}
-            leetify={!!leetify}
-            counter={!!leetify}
+          <StatsPeek
+            split={panels?.split}
+            leetify={panels?.leetify}
+            counter={panels?.counter}
+            matchstats={panels?.matchstats}
           />
         </div>
         <div className="flex items-center gap-2 lg:justify-end">
           <ShareButton label="Share" />
           <Link
             href={`/compare?a=${player.steamId64}`}
-            className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm font-medium text-ink transition hover:border-brand/60"
+            className="inline-flex shrink-0 items-center rounded-lg border border-line bg-panel2 px-2.5 py-1 text-[13px] font-medium text-ink transition hover:border-brand/60"
           >
             Compare
           </Link>
         </div>
       </div>
 
-      {/* ranks + steam profile (left) · name + meter (centered) · factors (right) */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)_minmax(0,300px)] lg:items-start">
-        {/* left: ranks + steam profile + analysis scope */}
-        <div className="space-y-3">
+      {/* ranks + steam profile (left) · meter (centered) · factors (right) */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,330px)_minmax(0,1fr)_minmax(0,330px)] lg:items-start">
+        {/* left: ranks + steam profile + rating/scope */}
+        <div className="space-y-2.5">
           <RankRow
             premier={premier}
             premierHistory={premierHistory}
@@ -435,7 +423,6 @@ export function CheatMeter({
             faceitLevelFallback={leetify?.ranks?.faceit ?? 0}
             faceitEloFallback={leetify?.ranks?.faceit_elo ?? 0}
           />
-          <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="stat-label">Steam profile</div>
             <div className="flex flex-wrap gap-1.5">
@@ -472,74 +459,67 @@ export function CheatMeter({
             </div>
             <div className="font-mono text-[11px] text-faint">{player.steamId64}</div>
           </div>
-          {/* scope + generated — beside the steam profile */}
-          <div className="space-y-2">
-            {rating != null && <RatingRing rating={rating} />}
-            <div className="rounded-xl border border-line bg-panel/40 p-3">
+          {/* rating ring beside the analysis scope — one compact row */}
+          <div className="flex items-center gap-3 pt-1">
+            {rating != null && <RatingRing rating={rating} size={100} />}
+            <div className="min-w-0 flex-1 rounded-xl border border-line bg-panel/40 p-2.5">
               <div className="stat-label">Analysis scope</div>
-              <div className="mt-1 text-sm text-ink">
+              <div className="mt-1 text-sm leading-snug text-ink">
                 {scope.hours != null && (
-                  <span className="font-semibold tabular-nums">{fmt(Math.round(scope.hours))}h</span>
+                  <>
+                    <span className="font-semibold tabular-nums">{fmt(Math.round(scope.hours))}h</span>
+                    <span className="text-faint"> playtime</span>
+                    <br />
+                  </>
                 )}
-                {scope.hours != null && <span className="text-faint"> playtime · </span>}
                 <span className="font-semibold tabular-nums">{fmt(scope.matches)}</span>
                 <span className="text-faint"> matches</span>
               </div>
             </div>
-            {generatedOn && (
-              <div className="rounded-xl border border-line bg-panel/40 p-3 text-[11px] text-faint">
-                Generated {generatedOn}
-              </div>
-            )}
           </div>
-        </div>
         </div>
 
         {/* center: the meter */}
         <div className="flex flex-col items-center text-center">
           <div className="stat-label">Cheating likelihood</div>
-          <div className={`text-6xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
+          <div className={`text-5xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
           </div>
-          <div className={`mt-0.5 text-base font-bold uppercase ${BAND_TEXT[band]}`}>{RISK_LABEL[band]}</div>
+          <div className={`mt-0.5 text-sm font-bold uppercase ${BAND_TEXT[band]}`}>{RISK_LABEL[band]}</div>
           <div className="text-xs text-muted">{subtitle}</div>
           <Gauge score={score} hex={hex} />
-          <div className="w-full max-w-[300px]">
+          <div className="w-full max-w-[290px]">
             <BandLegend band={band} />
           </div>
-          <p className="mt-2 max-w-[320px] text-[10px] leading-snug text-faint">
-            Statistical anomaly from public stats — a &quot;look closer&quot; signal, not proof.
-            Skilled legit players score high too.
-          </p>
         </div>
 
         {/* factors — single stacked column on the right */}
         <div>
-          <div className="stat-label mb-1.5">Factors analyzed <span className="font-normal normal-case text-faint">· biggest drivers first</span></div>
-          <ul className="space-y-1.5">
+          <div className="stat-label mb-1">Factors analyzed <span className="font-normal normal-case text-faint">· biggest drivers first</span></div>
+          <ul className="space-y-1">
             {[...factors]
               .sort((a, b) => b.score - a.score || Number(!!b.primary) - Number(!!a.primary))
               .map((f) => (
               <li
                 key={f.key}
-                className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${
+                className={`flex items-center gap-2 rounded-lg px-2 py-0.5 ${
                   f.primary ? "border border-brand/30 bg-brand/5" : "bg-panel/40"
                 }`}
               >
                 <span
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-panel2"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-panel2"
                   style={{ color: BAND_HEX[f.band] }}
                 >
-                  <Icon name={f.icon} className="h-3.5 w-3.5" />
+                  <Icon name={f.icon} className="h-3 w-3" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium leading-tight">{f.label}</div>
-                  <div className="truncate text-[11px] text-faint">{f.detail}</div>
+                  <div className="text-[13px] font-medium leading-tight">{f.label}</div>
+                  <div className="truncate text-[10px] leading-tight text-faint">{f.detail}</div>
                 </div>
                 <div className="shrink-0 text-right">
-                  <div className="text-sm font-bold tabular-nums">{f.display}</div>
+                  <div className="text-[13px] font-bold leading-tight tabular-nums">{f.display}</div>
                   <div
-                    className="text-[10px] font-bold uppercase"
+                    className="text-[9px] font-bold uppercase leading-tight"
                     style={{ color: BAND_HEX[f.band] }}
                   >
                     {factorTag(f)}
@@ -551,15 +531,8 @@ export function CheatMeter({
         </div>
       </div>
 
-      {/* metric scale cards */}
-      {metrics.length > 0 && (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {metrics.map((m) => (
-            <ScaleCard key={m.key} m={m} />
-          ))}
-        </div>
-      )}
-
+      {/* Career stats (left) + map win rates (right) — the real detail that
+          replaces the old scale-card row (which just duplicated the factors). */}
       {/* Leetify performance — for friends-only profiles whose aim detail is
           redacted, show the stats we DO have next to the meter. */}
       {perfStats.length > 0 && (
@@ -583,98 +556,155 @@ export function CheatMeter({
         </div>
       )}
 
-      {/* consistency · history · verdict */}
+      {/* bottom row: career stats · map win rates · consistency + history/verdict —
+          one compact strip so the whole box fits a desktop viewport. */}
       <div
         className={`mt-3 grid gap-3 ${
-          summary.total > 0 ? "lg:grid-cols-[1.25fr_1fr_1fr]" : ""
+          showCareer && showMapChart
+            ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(0,280px)_minmax(0,1.35fr)]"
+            : showCareer || showMapChart
+              ? "lg:grid-cols-2"
+              : ""
         }`}
       >
-        {summary.total > 0 && (
-          <>
-        <RatingConsistencyChart
-          ratings={trend.rating}
-          outcomes={trend.outcomes}
-          total={summary.total}
-        />
-
-        <div className="card flex items-center gap-3 px-4 py-3">
-          <Donut
-            wins={summary.wins}
-            losses={summary.losses}
-            draws={summary.draws}
-            total={summary.total}
-          />
-          <div className="min-w-0 space-y-1.5 text-sm">
-            <div className="stat-label">Match history</div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5 text-good">
-                <span className="h-2 w-2 rounded-full bg-good" />
-                Wins
-              </span>
-              <span className="tabular-nums">
-                {summary.wins} ({pct(summary.wins).toFixed(0)}%)
+        {showCareer && (
+          <div className="card flex flex-col px-3.5 py-3">
+            <div className="stat-label mb-2">
+              Career stats{" "}
+              <span className="font-normal normal-case text-faint">
+                · {fmt(career!.matches)} parsed matches
               </span>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5 text-bad">
-                <span className="h-2 w-2 rounded-full bg-bad" />
-                Losses
-              </span>
-              <span className="tabular-nums">
-                {summary.losses} ({pct(summary.losses).toFixed(0)}%)
-              </span>
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+              <CStat label="ADR" value={career!.adr.toFixed(0)} color={tierColor(career!.adr, 80, 65)} />
+              <CStat label="KAST" value={`${career!.kastPct.toFixed(0)}%`} color={tierColor(career!.kastPct, 72, 65)} />
+              <CStat label="Rounds" value={fmt(career!.roundsPlayed)} />
+              <CStat label="Opening" value={`${openPct.toFixed(0)}%`} color={tierColor(openPct, 55, 45)} />
+              <CStat label="Clutch" value={`${clutchPct.toFixed(0)}%`} color={tierColor(clutchPct, 50, 30)} />
+              <CStat label="Assists" value={fmt(career!.assists)} />
+              <CStat label="Util/rd" value={udPerRound.toFixed(1)} color={tierColor(udPerRound, 8, 5)} />
+              <CStat label="MVPs" value={fmt(career!.mvps)} />
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-1.5 text-mid">
-                <span className="h-2 w-2 rounded-full bg-mid" />
-                Draws
-              </span>
-              <span className="tabular-nums">
-                {summary.draws} ({pct(summary.draws).toFixed(0)}%)
-              </span>
-            </div>
+            {/* multi-kill rounds — slim inline strip */}
+            {(() => {
+              const buckets = [
+                { label: "1K", n: career!.k1, tone: "bg-line2" },
+                { label: "2K", n: career!.k2, tone: "bg-brand/50" },
+                { label: "3K", n: career!.k3, tone: "bg-brand" },
+                { label: "4K", n: career!.k4, tone: "bg-brand2" },
+                { label: "5K", n: career!.k5, tone: "bg-mid" },
+              ];
+              const mkTotal = buckets.reduce((s, b) => s + b.n, 0);
+              if (mkTotal === 0) return null;
+              return (
+                <div className="mt-auto pt-2.5">
+                  <div className="stat-label mb-1.5">Multi-kill rounds</div>
+                  <div className="flex h-2 overflow-hidden rounded-full bg-panel">
+                    {buckets.map((b) =>
+                      b.n > 0 ? (
+                        <span
+                          key={b.label}
+                          className={b.tone}
+                          style={{ width: `${(b.n / mkTotal) * 100}%` }}
+                          title={`${b.label}: ${fmt(b.n)} rounds`}
+                        />
+                      ) : null,
+                    )}
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-5 gap-1 text-center">
+                    {buckets.map((b) => (
+                      <div key={b.label}>
+                        <div className="flex items-center justify-center gap-1 text-[10px] text-muted">
+                          <span className={`h-1.5 w-1.5 rounded-full ${b.tone}`} />
+                          {b.label}
+                        </div>
+                        <div className="text-xs font-semibold tabular-nums">{fmt(b.n)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
-        </div>
-          </>
         )}
 
-        <div className="card px-4 py-3">
-          <div className="stat-label mb-1">Overall verdict</div>
-          <div className="flex items-start gap-2">
-            <span style={{ color: hex }} className="mt-0.5 text-xl leading-none">
-              ⚠
-            </span>
-            <div>
-              <div className="text-base font-extrabold" style={{ color: hex }}>
-                {VERDICT_TITLE[band]}
+        {showMapChart && <MapWinChart matches={recentMatches} embedded />}
+
+        <div className="flex min-w-0 flex-col gap-2.5">
+          {summary.total > 0 && (
+            <RatingConsistencyChart
+              ratings={trend.rating}
+              outcomes={trend.outcomes}
+              total={summary.total}
+            />
+          )}
+          <div className={`grid flex-1 gap-3 ${summary.total > 0 ? "sm:grid-cols-[auto_1fr]" : ""}`}>
+            {summary.total > 0 && (
+              <div className="card flex items-center gap-2.5 px-3 py-2.5">
+                <Donut
+                  wins={summary.wins}
+                  losses={summary.losses}
+                  draws={summary.draws}
+                  total={summary.total}
+                  sizeClass="h-[74px] w-[74px]"
+                />
+                <div className="min-w-0 space-y-0.5 text-xs">
+                  <div className="stat-label">Last {summary.total}</div>
+                  <div className="flex items-center gap-1.5 whitespace-nowrap text-good">
+                    <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                    {summary.wins}W
+                    <span className="text-faint">({pct(summary.wins).toFixed(0)}%)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 whitespace-nowrap text-bad">
+                    <span className="h-1.5 w-1.5 rounded-full bg-bad" />
+                    {summary.losses}L
+                    <span className="text-faint">({pct(summary.losses).toFixed(0)}%)</span>
+                  </div>
+                  {summary.draws > 0 && (
+                    <div className="flex items-center gap-1.5 whitespace-nowrap text-mid">
+                      <span className="h-1.5 w-1.5 rounded-full bg-mid" />
+                      {summary.draws}D
+                      <span className="text-faint">({pct(summary.draws).toFixed(0)}%)</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted">{verdict}</p>
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="stat-label">Confidence</span>
-              <span className="font-bold tabular-nums">{confidence.toFixed(0)}%</span>
-            </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-panel">
-              <div
-                className="h-full rounded-full bg-linear-to-r from-brand to-brand2"
-                style={{ width: `${confidence}%` }}
-              />
+            )}
+            <div className="card min-w-0 px-3.5 py-2.5">
+              <div className="stat-label mb-1">Overall verdict</div>
+              <div className="flex items-start gap-2">
+                <span style={{ color: hex }} className="mt-0.5 text-lg leading-none">
+                  ⚠
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[15px] font-extrabold leading-tight" style={{ color: hex }}>
+                    {VERDICT_TITLE[band]}
+                  </div>
+                  <p className="mt-0.5 text-[11px] leading-snug text-muted">{verdict}</p>
+                </div>
+              </div>
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="stat-label">Confidence</span>
+                  <span className="font-bold tabular-nums">{confidence.toFixed(0)}%</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-panel">
+                  <div
+                    className="h-full rounded-full bg-linear-to-r from-brand to-brand2"
+                    style={{ width: `${confidence}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-col gap-1 border-t border-line pt-3 text-[11px] leading-relaxed text-faint sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-3 flex flex-col gap-1 border-t border-line pt-2 text-[10px] leading-snug text-faint sm:flex-row sm:items-center sm:justify-between">
         <span>
-          CheatMeter compares public stats against typical player patterns to
-          estimate anomaly.{" "}
-          <span className="text-muted">
-            Not a ban and not definitive proof
-          </span>{" "}
-          — playstyle, role and sample size all matter. Elite legit players score
-          high too.
+          Statistical anomaly from public stats —{" "}
+          <span className="text-muted">not a ban and not definitive proof</span>. Playstyle,
+          role and sample size all matter; elite legit players score high too.
         </span>
         {generatedOn && (
           <span className="shrink-0">Generated {generatedOn}</span>

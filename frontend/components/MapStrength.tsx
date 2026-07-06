@@ -270,6 +270,7 @@ function MapWinRadar({
   useMetric,
   hasRounds,
   valOf,
+  embedded = false,
 }: {
   rows: MapRow[];
   metric: "rounds" | "matches";
@@ -277,6 +278,7 @@ function MapWinRadar({
   useMetric: "rounds" | "matches";
   hasRounds: boolean;
   valOf: (r: MapRow) => number;
+  embedded?: boolean;
 }) {
   void metric;
   const reliable = rows.filter((r) => r.n >= 3);
@@ -317,14 +319,19 @@ function MapWinRadar({
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
 
   return (
-    <div className="card-2 mb-3 px-4 py-4">
+    <div className={embedded ? "card flex flex-col px-3.5 py-3" : "card-2 mb-3 px-4 py-4"}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold">Map Win Rates</h3>
+        {embedded ? (
+          <span className="stat-label">Map win rates</span>
+        ) : (
+          <h3 className="text-sm font-bold">Map Win Rates</h3>
+        )}
         <div className="flex rounded-lg border border-line bg-panel p-0.5">
           {(["rounds", "matches"] as const).map((m) => (
             <button
               key={m}
               type="button"
+              aria-pressed={useMetric === m}
               onClick={() => setMetric(m)}
               disabled={m === "rounds" && !hasRounds}
               className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize transition ${
@@ -337,7 +344,11 @@ function MapWinRadar({
         </div>
       </div>
 
-      <div className="relative mx-auto aspect-square w-full max-w-xs">
+      <div
+        className={`relative mx-auto aspect-square w-full ${
+          embedded ? "max-w-[200px]" : "max-w-xs"
+        }`}
+      >
         <svg
           viewBox={`0 0 ${RADAR} ${RADAR}`}
           className="absolute inset-0 h-full w-full overflow-visible"
@@ -383,28 +394,74 @@ function MapWinRadar({
         })}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div className="rounded-lg border border-line bg-panel/60 px-3 py-2">
+      <div className={`grid grid-cols-2 gap-2 ${embedded ? "mt-auto pt-2" : "mt-3"}`}>
+        <div className={`rounded-lg border border-line bg-panel/60 ${embedded ? "px-2 py-1" : "px-3 py-2"}`}>
           <div className="stat-label">Best</div>
           <div className="flex items-center justify-between gap-1">
-            <span className="truncate text-sm font-semibold capitalize">{mapLabel(best.r.map)}</span>
-            <span className="text-sm font-bold tabular-nums text-good">{best.v.toFixed(0)}%</span>
+            <span className={`truncate font-semibold capitalize ${embedded ? "text-xs" : "text-sm"}`}>{mapLabel(best.r.map)}</span>
+            <span className={`font-bold tabular-nums text-good ${embedded ? "text-xs" : "text-sm"}`}>{best.v.toFixed(0)}%</span>
           </div>
         </div>
         {worst && (
-          <div className="rounded-lg border border-line bg-panel/60 px-3 py-2">
+          <div className={`rounded-lg border border-line bg-panel/60 ${embedded ? "px-2 py-1" : "px-3 py-2"}`}>
             <div className="stat-label">Worst</div>
             <div className="flex items-center justify-between gap-1">
-              <span className="truncate text-sm font-semibold capitalize">{mapLabel(worst.r.map)}</span>
-              <span className="text-sm font-bold tabular-nums text-bad">{worst.v.toFixed(0)}%</span>
+              <span className={`truncate font-semibold capitalize ${embedded ? "text-xs" : "text-sm"}`}>{mapLabel(worst.r.map)}</span>
+              <span className={`font-bold tabular-nums text-bad ${embedded ? "text-xs" : "text-sm"}`}>{worst.v.toFixed(0)}%</span>
             </div>
           </div>
         )}
       </div>
-      <div className="mt-1.5 text-center text-[10px] text-faint">
-        win rate by {useMetric} · {data.length} maps · 50% = dashed ring
-      </div>
+      {!embedded && (
+        <div className="mt-1.5 text-center text-[10px] text-faint">
+          win rate by {useMetric} · {data.length} maps · 50% = dashed ring
+        </div>
+      )}
     </div>
+  );
+}
+
+// MapWinChart — just the Map Win Rates radar, self-contained (computes its own
+// rows from all matches, defaults to match win rate). For embedding in a compact
+// spot like the CheatMeter box. Renders nothing if there are fewer than 3 maps.
+export function MapWinChart({
+  matches,
+  embedded = false,
+}: {
+  matches: LeetifyRecentMatch[];
+  embedded?: boolean;
+}) {
+  const [metric, setMetric] = useState<"rounds" | "matches">("matches");
+  const rows = useMemo<MapRow[]>(() => {
+    const byMap = new Map<string, LeetifyRecentMatch[]>();
+    for (const m of matches.slice(0, 100)) {
+      const key = m.map_name || "unknown";
+      const arr = byMap.get(key);
+      if (arr) arr.push(m);
+      else byMap.set(key, [m]);
+    }
+    return [...byMap.entries()].map(([map, ms]) => {
+      const w = ms.filter((m) => m.outcome === "win").length;
+      return { map, ms, n: ms.length, w, l: ms.length - w, winPct: (w / ms.length) * 100 };
+    });
+  }, [matches]);
+  const hasRounds = useMemo(() => rows.some((r) => Number.isFinite(roundWinPct(r.ms))), [rows]);
+  const useMetric: "rounds" | "matches" = metric === "rounds" && !hasRounds ? "matches" : metric;
+  const valOf = (r: MapRow) => {
+    if (useMetric === "matches") return r.winPct;
+    const rp = roundWinPct(r.ms);
+    return Number.isFinite(rp) ? rp : r.winPct;
+  };
+  return (
+    <MapWinRadar
+      rows={rows}
+      metric={metric}
+      setMetric={setMetric}
+      useMetric={useMetric}
+      hasRounds={hasRounds}
+      valOf={valOf}
+      embedded={embedded}
+    />
   );
 }
 
@@ -505,6 +562,7 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
                 <button
                   key={s.key}
                   type="button"
+                  aria-pressed={source === s.key}
                   onClick={() => setSource(s.key)}
                   className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${
                     source === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
@@ -520,6 +578,7 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
               <button
                 key={b}
                 type="button"
+                aria-pressed={bucket === b}
                 onClick={() => setBucket(b)}
                 className={`rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
                   bucket === b ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
