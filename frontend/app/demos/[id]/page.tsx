@@ -827,13 +827,15 @@ export default function ReplayPage() {
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
-        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] lg:items-stretch lg:gap-3">
-          {/* player unit: the radar with its transport bar attached below,
-              exactly like a video player. At lg+ it's a size container — the
-              square radar takes min(width, height − transport) so the whole
-              unit always fits the pane. */}
-          <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2.5 lg:@container-size">
-        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-122px))] lg:max-w-none">
+        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(280px,330px)_minmax(300px,360px)]">
+          {/* player unit. At lg+ it's a size container: the radar square takes
+              min(width, height) — the FULL pane height — and the transport bar
+              overlays its bottom edge like real video-player controls. */}
+          <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:@container-size">
+        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,100cqh)] lg:max-w-none">
+        {/* canvas + its overlays get their own box so overlays anchor to the
+            map, not to the wrapper (which sub-lg also contains the transport) */}
+        <div className="relative">
           <canvas
             ref={canvasRef}
             width={SIZE}
@@ -907,16 +909,18 @@ export default function ReplayPage() {
             </div>
           )}
           {!hasCalibration(meta.map) && (
-            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">
+            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid lg:bottom-24">
               {meta.map} radar uncalibrated — positions auto-scaled
             </div>
           )}
         </div>
 
-        {/* transport bar — the radar's video controls (width matches the radar) */}
-        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:mx-0 lg:mt-0 lg:w-[min(100cqw,calc(100cqh-122px))] lg:max-w-none lg:shrink-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            <div className="flex items-center gap-1">
+        {/* transport bar — the radar's video controls. At lg+ it overlays the
+            radar's bottom edge (translucent, like a video player) so the map
+            gets the full pane height; sub-lg it's a card below the canvas. */}
+        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:absolute lg:inset-x-0 lg:bottom-0 lg:z-10 lg:mx-0 lg:mt-0 lg:w-auto lg:max-w-none lg:rounded-t-none lg:rounded-b-xl lg:border-x-0 lg:border-b-0 lg:border-t-line/60 lg:bg-bg/80 lg:px-3 lg:py-2 lg:shadow-none lg:backdrop-blur">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 lg:min-w-0 lg:flex-nowrap">
+            <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 onClick={() => goRound(roundIdx - 1)}
@@ -962,7 +966,7 @@ export default function ReplayPage() {
               </button>
             </div>
 
-            <span className="text-xs font-semibold tabular-nums">
+            <span className="text-xs font-semibold tabular-nums lg:min-w-0 lg:truncate">
               Round {round.n}
               {round.winner && (
                 <span className="ml-1.5 pill" style={{ background: `${winHex}22`, color: winHex }}>
@@ -972,7 +976,7 @@ export default function ReplayPage() {
               <span className="ml-1.5 text-faint">{roundIdx + 1}/{rounds.length}</span>
             </span>
 
-            <div className="flex rounded-lg border border-line bg-panel p-0.5">
+            <div className="flex shrink-0 rounded-lg border border-line bg-panel p-0.5">
               {SPEEDS.map((s) => (
                 <button
                   key={s}
@@ -994,12 +998,12 @@ export default function ReplayPage() {
                 type="button"
                 onClick={() => setScopeRound(null)}
                 title="Unlink this round from the toolbar"
-                className="pill bg-brand/15 text-brand"
+                className="pill shrink-0 whitespace-nowrap bg-brand/15 text-brand"
               >
                 R{round.n} scoped ✕
               </button>
             )}
-            <span className="ml-auto text-xs tabular-nums text-muted">
+            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted">
               {mmss(time)} / {mmss(duration)}
             </span>
           </div>
@@ -1014,7 +1018,7 @@ export default function ReplayPage() {
               setPlaying(false);
               seek(parseFloat(e.target.value));
             }}
-            className="mt-2.5 w-full accent-brand"
+            className="mt-2.5 w-full accent-brand lg:mt-1.5"
           />
           {duration > 0 && (
             <div className="relative mt-1 h-2">
@@ -1047,14 +1051,20 @@ export default function ReplayPage() {
             </div>
           )}
         </div>
+        </div>
           </div>
 
           {/* right rail: live feed → player detail → teams. At lg+ it fills the
               pane; the feed flexes and its kill log scrolls, the cards keep
-              their height and the rail scrolls if a player card overflows. */}
-          <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto">
-          <EventFeed round={round} time={time} meta={meta} zones={zones} />
+              their height and the rail scrolls if a player card overflows.
+              At 2xl the rail dissolves (contents) into TWO grid columns —
+              live feed | detail stack — so wide screens show everything. */}
+          <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
+          <div className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col 2xl:h-full 2xl:min-h-0">
+            <EventFeed round={round} time={time} meta={meta} zones={zones} />
+          </div>
 
+          <div className="space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">
           {focusPlayer != null ? (
             <div className="lg:shrink-0">
               <PlayerRoundCard
@@ -1117,6 +1127,7 @@ export default function ReplayPage() {
             <div className="mt-3 border-t border-line pt-2 text-xs text-faint">
               {(round.kills ?? []).length} kills · {(round.nades ?? []).length} nades
             </div>
+          </div>
           </div>
           </div>
         </div>

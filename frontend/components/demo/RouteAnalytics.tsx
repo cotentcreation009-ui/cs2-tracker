@@ -185,12 +185,33 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const dim = (related: boolean) => (active && !related ? 0.18 : 1);
 
   // at lg+ the pane is viewport-locked: the map column is a size container and
-  // the square takes min(width, height − space reserved for the rows below it
-  // — legend only when a round is scoped, legend + stat strip otherwise).
+  // the square takes the FULL pane height — the legend becomes a translucent
+  // strip on the map's bottom edge and the stat tiles (non-scoped) move into
+  // the routes card, so nothing below the square steals map size.
   const focused = typeof playerFilter === "number";
-  const squareW = scopedRound
-    ? "lg:w-[min(100cqw,calc(100cqh-28px))]"
-    : "lg:w-[min(100cqw,calc(100cqh-88px))]";
+  const squareW = "lg:w-[min(100cqw,100cqh)]";
+
+  // shared between the sub-lg below-the-map rows and their lg homes
+  const legendItems = (
+    <>
+      <Legend swatch="#46d369" label="kill" shape="x" />
+      <Legend swatch="#f5694a" label="death" shape="o" />
+      <Legend swatch={KIND_COLOR.smoke} label="smoke" />
+      <Legend swatch={KIND_COLOR.flash} label="flash" />
+      <Legend swatch={KIND_COLOR.he} label="HE" />
+      <Legend swatch={KIND_COLOR.molotov} label="molly" />
+      {scopedRound && <span className="ml-auto">dashed = util throw → land · scroll to zoom</span>}
+    </>
+  );
+  const statTiles = (
+    <>
+      <Stat label="Paths" value={String(summary.paths)} />
+      <Stat label="Win rate" value={`${Math.round(summary.winRate * 100)}%`} color={winColor(summary.winRate)} />
+      <Stat label="Kills" value={String(summary.kills)} />
+      <Stat label="Deaths" value={String(summary.deaths)} />
+      <Stat label="Avg life" value={`${summary.avgLife.toFixed(1)}s`} />
+    </>
+  );
 
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0">
@@ -208,8 +229,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
       <div
         className={`grid gap-4 lg:min-h-0 lg:flex-1 lg:items-stretch lg:gap-3 ${
           scopedRound && focused
-            ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)_minmax(320px,380px)]"
-            : "lg:grid-cols-[1.6fr_1fr]"
+            ? "lg:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.8fr)_minmax(320px,0.9fr)]"
+            : "lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,1fr)]"
         }`}
       >
         {/* map unit: size container — square map + legend (+ stats) share one
@@ -395,27 +416,24 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 </div>
               ) : null;
             })()}
-            {!calibrated && <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">{meta.map} uncalibrated — auto-scaled</div>}
+            {!calibrated && <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid lg:bottom-auto lg:top-3">{meta.map} uncalibrated — auto-scaled</div>}
+
+            {/* legend — at lg+ a translucent strip on the map's bottom edge,
+                so the square keeps the full pane height */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 hidden flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/50 bg-bg/75 px-3 py-1.5 text-[10px] text-faint backdrop-blur lg:flex">
+              {legendItems}
+            </div>
           </div>
 
-          {/* legend */}
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-faint lg:shrink-0 ${squareW}`}>
-            <Legend swatch="#46d369" label="kill" shape="x" />
-            <Legend swatch="#f5694a" label="death" shape="o" />
-            <Legend swatch={KIND_COLOR.smoke} label="smoke" />
-            <Legend swatch={KIND_COLOR.flash} label="flash" />
-            <Legend swatch={KIND_COLOR.he} label="HE" />
-            <Legend swatch={KIND_COLOR.molotov} label="molly" />
-            {scopedRound && <span className="ml-auto">dashed = util throw → land · scroll to zoom</span>}
+          {/* legend + stats (sub-lg, below the map — at lg they live in the
+              map overlay / the routes card instead) */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-faint lg:hidden">
+            {legendItems}
           </div>
 
           {!scopedRound && (
-            <div className={`grid grid-cols-3 gap-2 sm:grid-cols-5 lg:shrink-0 ${squareW}`}>
-              <Stat label="Paths" value={String(summary.paths)} />
-              <Stat label="Win rate" value={`${Math.round(summary.winRate * 100)}%`} color={winColor(summary.winRate)} />
-              <Stat label="Kills" value={String(summary.kills)} />
-              <Stat label="Deaths" value={String(summary.deaths)} />
-              <Stat label="Avg life" value={`${summary.avgLife.toFixed(1)}s`} />
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:hidden">
+              {statTiles}
             </div>
           )}
         </div>
@@ -455,6 +473,11 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
           </div>
         ) : (
           <div className="card flex max-h-240 flex-col px-4 py-3 lg:h-full lg:max-h-none lg:min-h-0">
+            {/* lg: the match-summary tiles move here from under the map
+                (3-up until xl so the labels don't wrap in a narrow column) */}
+            <div className="mb-2.5 hidden gap-2 lg:grid lg:shrink-0 lg:grid-cols-3 xl:grid-cols-5">
+              {statTiles}
+            </div>
             <div className="mb-2 flex items-center justify-between lg:shrink-0">
               <span className="stat-label">{mode === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
               {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
