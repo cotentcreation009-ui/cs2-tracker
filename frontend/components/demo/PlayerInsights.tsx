@@ -437,6 +437,68 @@ function PlayerCard({
   );
 }
 
+// Compact scoreboard row — click to make this THE focused player (the tab
+// shows one player's breakdown at a time).
+function RosterRow({
+  p,
+  rank,
+  focused,
+  comparing,
+  onFocus,
+  onCompare,
+}: {
+  p: PlayerInsight;
+  rank: number;
+  focused: boolean;
+  comparing: boolean;
+  onFocus: () => void;
+  onCompare: () => void;
+}) {
+  const hex = sideHex(p.team);
+  const rating = impactRating(p);
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 transition ${
+        focused ? "border-brand/50 bg-brand/10" : "border-transparent hover:bg-panel/60"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onFocus}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        title={`Show ${p.name}'s full breakdown`}
+      >
+        <span className="w-4 shrink-0 text-right text-[10px] font-bold tabular-nums text-faint">{rank}</span>
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hex }} />
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{p.name}</span>
+        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted">
+          {p.kills}-{p.deaths}
+        </span>
+        <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-faint">{p.adr.toFixed(0)}</span>
+        <span
+          className="w-10 shrink-0 text-right text-[11px] font-bold tabular-nums"
+          style={{ color: ratingHex(rating) }}
+          title="Impact rating (≈1.0 = solid)"
+        >
+          {rating.toFixed(2)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onCompare}
+        title="Add to comparison (pick two)"
+        className={`shrink-0 rounded border px-1 py-0.5 text-[9px] transition ${
+          comparing
+            ? "border-brand/50 bg-brand/15 text-brand"
+            : "border-line text-faint hover:bg-panel/50 hover:text-ink"
+        }`}
+      >
+        {comparing ? "✓" : "vs"}
+      </button>
+    </div>
+  );
+}
+
 // One individual throw — click to play its lineup solo on the map.
 function ThrowRow({
   tw,
@@ -800,9 +862,11 @@ export default function PlayerInsights({
   const cmpA = compare[0] != null ? data.players.find((p) => p.i === compare[0]) ?? null : null;
   const cmpB = compare[1] != null ? data.players.find((p) => p.i === compare[1]) ?? null : null;
   // kind is player-scoped (see pickedKind), so changing player resets it
-  // implicitly; only the throw selection needs an explicit reset here.
+  // implicitly; the throw selection AND any lingering hover preview (the row
+  // may unmount without firing onMouseLeave) need an explicit reset here.
   useEffect(() => {
     setThrowIdx(null);
+    setHoverIdx(null);
   }, [focusI]);
   // bring the card into view ONLY on an explicit pick (award chip / toolbar / card)
   // — not the auto-fallback, which would scroll on every tab open.
@@ -868,10 +932,12 @@ export default function PlayerInsights({
     view.setFocusPlayer(player.i);
     setKindSel({ i: player.i, kind: k });
     setThrowIdx(null);
+    setHoverIdx(null);
   };
   const pickKind = (k: string) => {
     if (focusI != null) setKindSel({ i: focusI, kind: k });
     setThrowIdx(null);
+    setHoverIdx(null);
   };
 
   return (
@@ -896,11 +962,236 @@ export default function PlayerInsights({
         </div>
       )}
 
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[1fr_minmax(0,420px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3 2xl:grid-cols-[1fr_minmax(0,520px)]">
-      {/* left: compare/timeline pinned on top, then the player-card list — at
-          lg+ the list is the internal scroller so the pane itself never grows */}
-      <div className="space-y-3 lg:flex lg:min-h-0 lg:flex-col">
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(400px,500px)]">
+      {/* left: the utility explorer IS this tab's centerpiece — a full-height
+          map with the step controls overlaying its bottom edge (video-player
+          style, like the replay radar). ◀ ▶ arrow keys step through throws. */}
+      <div
+        className="card-2 p-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:items-center lg:justify-center lg:@container-size"
+        tabIndex={selThrows.length ? 0 : -1}
+        onKeyDown={(e) => {
+          if (!selThrows.length) return;
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            stepThrow(-1);
+          } else if (e.key === "ArrowRight") {
+            e.preventDefault();
+            stepThrow(1);
+          } else if (e.key === "Escape") {
+            setThrowIdx(null);
+            setHoverIdx(null);
+          }
+        }}
+      >
+        {/* header (two fixed rows, both aligned to the map width): whose
+            utility on top, the kind switcher below — every item can shrink or
+            truncate, so short viewports can never break the alignment */}
+        <div className="mb-1.5 flex w-full items-center gap-x-2 lg:w-[min(100cqw,calc(100cqh-72px))]">
+          <span className="stat-label shrink-0">Utility breakdown</span>
+          {selPlayer && (
+            <span className="pill min-w-0 truncate bg-panel text-ink" title={selPlayer.name}>
+              {selPlayer.name}
+            </span>
+          )}
+          {selPlayer && (selPlayer.enemiesFlashed > 0 || selPlayer.utilDamage > 0) && (
+            <span className="ml-auto hidden min-w-0 truncate text-[10px] tabular-nums text-faint xl:inline">
+              {selPlayer.enemiesFlashed > 0 &&
+                `${selPlayer.enemiesFlashed} flashed · ${selPlayer.flashDuration.toFixed(0)}s blind`}
+              {selPlayer.enemiesFlashed > 0 && selPlayer.utilDamage > 0 && " · "}
+              {selPlayer.utilDamage > 0 && `${selPlayer.utilDamage} util dmg`}
+            </span>
+          )}
+        </div>
+        {selPlayer && selKinds.length > 0 && (
+          <div className="mb-2 flex w-full flex-wrap gap-1 lg:w-[min(100cqw,calc(100cqh-72px))] lg:flex-nowrap lg:overflow-x-auto">
+            {selKinds.map((k) => {
+              const n = selPlayer.utilNades.filter((x) => x.kind === k).length;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => pickKind(k)}
+                  className={`pill shrink-0 whitespace-nowrap transition ${
+                    k === activeKind
+                      ? "bg-brand/15 text-brand"
+                      : "bg-panel text-muted hover:text-ink"
+                  }`}
+                >
+                  <span
+                    className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
+                    style={{ background: KIND_COLOR[k] }}
+                  />
+                  {KIND_LABEL[k]} {n}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {selPlayer && activeKind && selThrows.length > 0 ? (
+          <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-72px))] lg:max-w-none">
+            <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} zones={zones} className="w-full" />
+
+            {/* step controls — translucent overlay on the map's bottom edge */}
+            <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
+              <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">◀</button>
+              <div className="min-w-0 flex-1 text-center text-[11px]">
+                {soloThrow ? (
+                  <span title="dashed line = thrown from → landed">
+                    <span className="font-semibold text-ink">Throw {(shownIdx ?? 0) + 1}/{selThrows.length}</span>
+                    <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
+                    {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
+                    <span className="text-brand"> · {timingOf(soloThrow.t)}</span>
+                  </span>
+                ) : (
+                  <span className="text-muted">
+                    {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — hover a row or ◀ ▶ to step
+                  </span>
+                )}
+              </div>
+              {soloThrow && (
+                <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">all</button>
+              )}
+              <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">▶</button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid aspect-square w-full place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted lg:aspect-auto lg:min-h-0 lg:w-full lg:flex-1">
+            {selPlayer
+              ? `${selPlayer.name} threw no trackable utility${
+                  view.scopeRound != null ? ` in ${scopeLabel}` : ""
+                }.`
+              : "Pick a player to break down their utility."}
+          </div>
+        )}
+      </div>
+
+      {/* right: one player at a time — a compact scoreboard picks the player,
+          then just THAT player's detail shows. The column scrolls internally;
+          the map never gives up space. */}
+      <div className="space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
+        {/* scoreboard */}
+        <div className="card-2 px-3 py-2.5 lg:shrink-0">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
+            <span className="stat-label">Players</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] uppercase tracking-wider text-faint">Sort</span>
+              <div className="flex flex-wrap rounded-lg border border-line bg-panel p-0.5">
+                {SORTS.map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setSortKey(s.key)}
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium transition ${
+                      sortKey === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[9px] uppercase tracking-wider text-faint">
+            <span className="w-4" />
+            <span className="w-2" />
+            <span className="min-w-0 flex-1">Player</span>
+            <span className="w-12 text-right">K-D</span>
+            <span className="w-8 text-right">ADR</span>
+            <span className="w-10 text-right">Impact</span>
+            <span className="w-6" />
+          </div>
+          <div className="space-y-0.5">
+            {sortedPlayers.map((p, idx) => (
+              <div
+                key={p.i}
+                ref={(el) => {
+                  if (el) cardRefs.current.set(p.i, el);
+                  else cardRefs.current.delete(p.i);
+                }}
+              >
+                <RosterRow
+                  p={p}
+                  rank={idx + 1}
+                  focused={focusI === p.i}
+                  comparing={compare.includes(p.i)}
+                  onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
+                  onCompare={() => toggleCompare(p.i)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
         {cmpA && cmpB && <CompareTable a={cmpA} b={cmpB} onClose={() => setCompare([])} />}
+
+        {/* every throw of the active kind — hover previews it, click pins it */}
+        {selPlayer && activeKind && selThrows.length > 0 && (
+          <div className="card-2 px-3 py-2.5 lg:shrink-0">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="stat-label">
+                {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()}
+              </span>
+              <span className="text-[10px] text-faint">hover = preview · click = pin · dashed = throw → land</span>
+            </div>
+            <div className="max-h-56 space-y-1 overflow-y-auto pr-1 lg:max-h-64">
+              {selThrows.map((tw, i) => (
+                <ThrowRow
+                  key={`${tw.round}-${tw.t}-${i}`}
+                  tw={tw}
+                  zone={zoneOf(tw.x, tw.y)}
+                  timing={timingOf(tw.t)}
+                  active={shownIdx === i}
+                  onClick={() => setThrowIdx(throwIdx === i ? null : i)}
+                  onEnter={() => setHoverIdx(i)}
+                  onLeave={() => setHoverIdx(null)}
+                />
+              ))}
+            </div>
+            {spots.length > 1 && (
+              <div className="mt-2 border-t border-line pt-2">
+                <div className="stat-label mb-1">Common spots</div>
+                <div className="flex flex-wrap gap-1">
+                  {spots.slice(0, 6).map((sp, i) => {
+                    const z = zoneOf(sp.cx, sp.cy);
+                    const first = selThrows.indexOf(sp.throws[0]);
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => first >= 0 && setThrowIdx(first)}
+                        onMouseEnter={() => first >= 0 && setHoverIdx(first)}
+                        onMouseLeave={() => setHoverIdx(null)}
+                        title={`${sp.count}× · usually ${timingOf(sp.avgT)} · avg ${mmss(sp.avgT)}`}
+                        className="pill bg-panel text-muted hover:text-ink"
+                      >
+                        {z ?? "spot"} ×{sp.count}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* the ONE player card — the focused player's full breakdown */}
+        {selPlayer && (
+          <div className="insight-card-in lg:shrink-0">
+            <PlayerCard
+              p={selPlayer}
+              rank={sortedPlayers.findIndex((x) => x.i === selPlayer.i) + 1}
+              focused
+              activeKind={activeKind}
+              lean={siteLean.get(selPlayer.i)}
+              tend={tendMap.get(selPlayer.steamId)}
+              onFocus={() => view.setFocusPlayer(selPlayer.i)}
+              onUtil={pickUtil}
+              onCompare={() => toggleCompare(selPlayer.i)}
+              comparing={compare.includes(selPlayer.i)}
+            />
+          </div>
+        )}
 
         {focusI != null && (
           <RoundTimeline
@@ -912,223 +1203,18 @@ export default function PlayerInsights({
           />
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2 lg:shrink-0">
-          <p className="max-w-md text-[11px] text-faint">
-            Click a player to focus them, then a utility chip to break it down on the map.
-          </p>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-faint">Sort</span>
-            <div className="flex flex-wrap rounded-lg border border-line bg-panel p-0.5">
-              {SORTS.map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => setSortKey(s.key)}
-                  className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
-                    sortKey === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-          <div className="grid gap-3 sm:grid-cols-2 min-[1800px]:grid-cols-3">
-            {sortedPlayers.map((p, idx) => (
-              <div
-                key={p.i}
-                ref={(el) => {
-                  if (el) cardRefs.current.set(p.i, el);
-                  else cardRefs.current.delete(p.i);
-                }}
-                className="insight-card-in scroll-mt-4"
-                style={{ animationDelay: `${Math.min(idx, 9) * 45}ms` }}
-              >
-                <PlayerCard
-                  p={p}
-                  rank={idx + 1}
-                  focused={focusI === p.i}
-                  activeKind={focusI === p.i ? activeKind : null}
-                  lean={siteLean.get(p.i)}
-                  tend={tendMap.get(p.steamId)}
-                  onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
-                  onUtil={pickUtil}
-                  onCompare={() => toggleCompare(p.i)}
-                  comparing={compare.includes(p.i)}
-                />
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] leading-relaxed text-faint">
-            <span className="font-semibold text-muted">Data notes:</span>{" "}
-            {PLAYER_INSIGHTS_LIMITATIONS}
-          </p>
-        </div>
-      </div>
-
-      {/* right: utility explorer — at lg+ a size container: the square map is
-          sized by the height left over after the fixed rows, and the throw
-          list becomes the column's internal scroller */}
-      <div className="space-y-3 self-start lg:flex lg:min-h-0 lg:flex-col lg:self-stretch">
-        <div
-          className="card-2 p-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden lg:@container-size"
-          tabIndex={selThrows.length ? 0 : -1}
-          onKeyDown={(e) => {
-            if (!selThrows.length) return;
-            if (e.key === "ArrowLeft") {
-              e.preventDefault();
-              stepThrow(-1);
-            } else if (e.key === "ArrowRight") {
-              e.preventDefault();
-              stepThrow(1);
-            } else if (e.key === "Escape") {
-              setThrowIdx(null);
-              setHoverIdx(null);
-            }
-          }}
-        >
-          <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
-            <span className="stat-label">Utility breakdown</span>
-            {selPlayer && (
-              <span className="pill max-w-[55%] truncate bg-panel text-ink">
-                {selPlayer.name}
-              </span>
-            )}
-          </div>
-
-          {selPlayer && activeKind && selThrows.length > 0 ? (
-            <>
-              {/* kind tabs */}
-              <div className="mb-2 flex flex-wrap gap-1 lg:shrink-0">
-                {selKinds.map((k) => {
-                  const n = selPlayer.utilNades.filter((x) => x.kind === k).length;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => pickKind(k)}
-                      className={`pill transition ${
-                        k === activeKind
-                          ? "bg-brand/15 text-brand"
-                          : "bg-panel text-muted hover:text-ink"
-                      }`}
-                    >
-                      <span
-                        className="mr-1 inline-block h-2 w-2 rounded-full align-middle"
-                        style={{ background: KIND_COLOR[k] }}
-                      />
-                      {KIND_LABEL[k]} {n}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <UtilThrowMap
-                map={meta.map}
-                proj={proj}
-                throws={mapThrows}
-                zones={zones}
-                className="lg:mx-auto lg:w-[min(100cqw,calc(100cqh-280px))] lg:max-w-none lg:shrink-0"
-              />
-
-              {/* step through each throw */}
-              <div className="mt-2 flex items-center gap-2 lg:shrink-0">
-                <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost px-2 py-1 text-xs">◀</button>
-                <div className="min-w-0 flex-1 text-center text-[11px]">
-                  {soloThrow ? (
-                    <span>
-                      <span className="font-semibold text-ink">Throw {(shownIdx ?? 0) + 1}/{selThrows.length}</span>
-                      <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
-                      {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
-                    </span>
-                  ) : (
-                    <span className="text-muted">
-                      {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — hover a row or ◀ ▶ to step
-                    </span>
-                  )}
-                </div>
-                {soloThrow && (
-                  <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost px-2 py-1 text-[10px]">all</button>
-                )}
-                <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost px-2 py-1 text-xs">▶</button>
-              </div>
-              {soloThrow && (
-                <p className="mt-1 text-center text-[10px] text-brand lg:shrink-0">
-                  dashed line = thrown from → landed · {timingOf(soloThrow.t)}
-                </p>
-              )}
-
-              {/* every throw of this kind — the lg scroller of this column */}
-              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1 lg:min-h-0 lg:max-h-none lg:flex-1">
-                {selThrows.map((tw, i) => (
-                  <ThrowRow
-                    key={`${tw.round}-${tw.t}-${i}`}
-                    tw={tw}
-                    zone={zoneOf(tw.x, tw.y)}
-                    timing={timingOf(tw.t)}
-                    active={shownIdx === i}
-                    onClick={() => setThrowIdx(throwIdx === i ? null : i)}
-                    onEnter={() => setHoverIdx(i)}
-                    onLeave={() => setHoverIdx(null)}
-                  />
-                ))}
-              </div>
-
-              {/* common spots — tendency summary */}
-              {spots.length > 1 && (
-                <div className="mt-2 border-t border-line pt-2 lg:shrink-0">
-                  <div className="stat-label mb-1">Common spots</div>
-                  <div className="flex flex-wrap gap-1">
-                    {spots.slice(0, 6).map((sp, i) => {
-                      const z = zoneOf(sp.cx, sp.cy);
-                      const first = selThrows.indexOf(sp.throws[0]);
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => first >= 0 && setThrowIdx(first)}
-                          onMouseEnter={() => first >= 0 && setHoverIdx(first)}
-                          onMouseLeave={() => setHoverIdx(null)}
-                          title={`${sp.count}× · usually ${timingOf(sp.avgT)} · avg ${mmss(sp.avgT)}`}
-                          className="pill bg-panel text-muted hover:text-ink"
-                        >
-                          {z ?? "spot"} ×{sp.count}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted lg:min-h-0 lg:flex-1 lg:aspect-auto">
-              {selPlayer
-                ? `${selPlayer.name} threw no trackable utility${
-                    view.scopeRound != null ? ` in ${scopeLabel}` : ""
-                  }.`
-                : "Pick a player to break down their utility."}
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] text-faint lg:shrink-0">
+          <span className="font-semibold text-muted">Match utility ({scopeLabel}):</span>
+          <span className="tabular-nums">
+            {u.smoke} smoke · {u.flash} flash · {u.molotov} molly · {u.he} HE · {u.decoy} decoy
+          </span>
+          <span className="ml-auto tabular-nums">{u.perRound.toFixed(1)}/round</span>
         </div>
 
-        <div className="card-2 px-4 py-3 lg:shrink-0">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="stat-label">Utility used</span>
-            <span className="pill bg-panel text-faint">{scopeLabel} total</span>
-            <span className="ml-auto text-xs text-muted tabular-nums">
-              {u.perRound.toFixed(1)} / round
-            </span>
-          </div>
-          <div className="grid grid-cols-5 gap-2">
-            <Stat label="Smoke" value={`${u.smoke}`} />
-            <Stat label="Molly" value={`${u.molotov}`} />
-            <Stat label="Flash" value={`${u.flash}`} />
-            <Stat label="HE" value={`${u.he}`} />
-            <Stat label="Decoy" value={`${u.decoy}`} />
-          </div>
-        </div>
+        <p className="px-1 text-[10px] leading-relaxed text-faint lg:shrink-0">
+          <span className="font-semibold text-muted">Data notes:</span>{" "}
+          {PLAYER_INSIGHTS_LIMITATIONS}
+        </p>
 
         <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-faint lg:shrink-0">
           <span>
