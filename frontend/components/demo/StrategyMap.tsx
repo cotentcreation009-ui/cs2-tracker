@@ -381,9 +381,12 @@ export function StrategyMap({
   const heatOn = active.has("positions") || active.has("kills") || active.has("deaths");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr] 2xl:grid-cols-[1.9fr_1fr]">
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
+    <div className="grid gap-4 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(300px,370px)] lg:items-stretch lg:gap-3">
+      {/* map unit: header + square canvas. At lg+ the column is a size
+          container — the canvas takes min(width, height − header) so it always
+          fits the pane (same pattern as the replay tab player unit). */}
+      <div className="space-y-2 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:items-center lg:justify-center lg:@container-size">
+        <div className="flex items-center justify-between lg:w-[min(100cqw,calc(100cqh-36px))] lg:shrink-0">
           <h3 className="text-sm font-bold">
             Heat map <span className="font-normal text-faint">· {[...active].join(" · ") || "—"}</span>
           </h3>
@@ -393,12 +396,12 @@ export function StrategyMap({
           ref={canvasRef}
           width={SIZE}
           height={SIZE}
-          className="aspect-square w-full rounded-xl border border-line bg-panel2"
+          className="aspect-square w-full rounded-xl border border-line bg-panel2 lg:w-[min(100cqw,calc(100cqh-36px))] lg:max-w-none lg:shrink-0"
         />
       </div>
 
-      <div className="space-y-3">
-        <div className="card px-4 py-3">
+      <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col">
+        <div className="card px-4 py-3 lg:shrink-0">
           <div className="stat-label mb-2">Overlays</div>
           <div className="flex flex-wrap gap-1.5">
             {LAYERS.map((l) => (
@@ -474,12 +477,14 @@ export function StrategyMap({
           </button>
         </div>
 
+        {/* the one genuinely long region: shrinks when the pane is short and
+            scrolls its list internally (min-h-0 chain: column → card → list) */}
         {zoneStats.length > 0 && (
-          <div className="card px-4 py-3">
-            <div className="stat-label mb-2">
+          <div className="card px-4 py-3 lg:flex lg:min-h-0 lg:flex-col">
+            <div className="stat-label mb-2 lg:shrink-0">
               Zone breakdown <span className="font-normal lowercase text-faint">· hold · K/D in zone</span>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 lg:min-h-0 lg:overflow-y-auto">
               {zoneStats.slice(0, 9).map((z) => (
                 <div key={z.name} className="flex items-center gap-2 text-xs">
                   <span className="w-24 shrink-0 truncate text-muted" title={z.name}>{z.name}</span>
@@ -497,13 +502,13 @@ export function StrategyMap({
                 </div>
               ))}
             </div>
-            <div className="mt-2 text-[10px] text-faint">
+            <div className="mt-2 text-[10px] text-faint lg:shrink-0">
               bar = time held · <span className="text-good">kills</span> / <span className="text-bad">deaths</span> in that call-out
             </div>
           </div>
         )}
 
-        <div className="card px-4 py-3 text-xs text-muted">
+        <div className="card px-4 py-3 text-xs text-muted lg:shrink-0">
           {scopeRound != null && rounds[scopeRound] ? (
             <>
               Showing <span className="font-semibold text-ink">round {rounds[scopeRound].n}</span>.

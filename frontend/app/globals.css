@@ -214,3 +214,25 @@ body {
   width: 100vw;
   margin-inline: calc(50% - 50vw);
 }
+
+/* Viewport-locked workspace (demo analyzer). At lg+ the document itself never
+   scrolls: body becomes a fixed viewport-high column, <main> takes the space
+   under the sticky header, and each panel scrolls internally. The demo replay
+   page toggles this class on <body>; below lg normal page flow/scroll applies. */
+@media (min-width: 1024px) {
+  body.workspace-lock {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  body.workspace-lock main {
+    flex: 1;
+    min-height: 0;
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+  body.workspace-lock footer {
+    display: none;
+  }
+}

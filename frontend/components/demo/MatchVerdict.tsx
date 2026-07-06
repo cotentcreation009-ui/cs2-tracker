@@ -24,7 +24,9 @@ function VerdictCard({ p, cheat, tend }: { p: PlayerInsight; cheat: DemoCheat; t
   }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`;
 
   return (
-    <div className="card-2 px-3.5 py-3">
+    // At lg+ the grid row bounds the card's height; anything past it (expanded
+    // account check, long AI write-ups) scrolls inside the card, never the pane.
+    <div className="card-2 px-3.5 py-3 lg:min-h-0 lg:overflow-y-auto lg:px-3 lg:py-2.5">
       <div className="flex items-center gap-2">
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: col }} />
         <span className="truncate text-sm font-bold">{p.name}</span>
@@ -123,15 +125,22 @@ export default function MatchVerdict({
   }
 
   return (
-    <div>
-      <div className="mb-3 rounded-lg border border-line bg-panel/40 px-4 py-2.5 text-xs text-muted">
+    // Viewport-locked at lg+: fill the pane exactly — intro strip on top, then
+    // the card grid takes the rest. Rows split the remaining height evenly
+    // (auto-rows-fr) so every card is bounded and scrolls internally instead of
+    // growing the pane.
+    <div className="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+      <div className="mb-3 rounded-lg border border-line bg-panel/40 px-4 py-2.5 text-xs text-muted lg:mb-2 lg:shrink-0 lg:px-3 lg:py-1.5">
         Per-player read: the <span className="text-ink">in-match CheatMeter</span> scores only
         aim-quality anomalies (snap kills, accuracy, reaction) — never fragging volume — alongside{" "}
         <span className="text-ink">tactical tendencies</span> from positioning and{" "}
         <span className="text-ink">account signals</span>. Open <span className="text-ink">Account check</span>{" "}
         then <span className="text-ink">✨ AI read</span> for a written analysis. Signals from public data — not proof.
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Wide pane → go horizontal: 4–5 columns at lg+ so 10 players land in
+          2 rows at ~1080p. min-h-0 + flex-1 keeps the grid bounded so the
+          per-card scrollers actually get a height. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:min-h-0 lg:flex-1 lg:auto-rows-fr lg:grid-cols-4 lg:gap-2.5 xl:grid-cols-5">
         {players.map(({ p, cheat }) => (
           <VerdictCard key={p.steamId} p={p} cheat={cheat} tend={tend.get(p.steamId)} />
         ))}

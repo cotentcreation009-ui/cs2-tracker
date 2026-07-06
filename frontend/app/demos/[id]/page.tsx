@@ -115,7 +115,9 @@ function EventFeed({
   const tAlive = (round.t ?? []).filter((i) => !dead.has(i)).length;
 
   return (
-    <div className="card px-4 py-3">
+    // At lg+ the feed flexes to fill the rail and the kill log scrolls inside
+    // it (min-h keeps it readable when a player card takes the rail's space).
+    <div className="card px-4 py-3 lg:flex lg:min-h-56 lg:flex-1 lg:flex-col lg:overflow-hidden">
       <div className="mb-2 flex items-center justify-between">
         <span className="stat-label">Live feed</span>
         <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
@@ -157,12 +159,12 @@ function EventFeed({
         )}
       </div>
 
-      <div>
+      <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Kills ({kills.length})</div>
         {kills.length === 0 ? (
           <div className="text-xs text-faint">No kills yet.</div>
         ) : (
-          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1">
+          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
             {kills.map((k, i) => {
               const recent = time - k.t < 4;
               return (
@@ -265,6 +267,14 @@ export default function ReplayPage() {
       alive = false;
     };
   }, [id]);
+
+  // Lock the document to the viewport on desktop (see body.workspace-lock in
+  // globals.css): the workspace — not the page — owns scrolling, so every lens
+  // fits on one screen and long lists scroll inside their own panel.
+  useEffect(() => {
+    document.body.classList.add("workspace-lock");
+    return () => document.body.classList.remove("workspace-lock");
+  }, []);
 
   const round = rounds[roundIdx];
   // Play to the round's TRUE end. Frame capture stops the instant RoundEnd fires
@@ -721,10 +731,10 @@ export default function ReplayPage() {
   const tWins = rounds.filter((r) => r.winner === "T").length;
 
   return (
-    <div className="full-bleed space-y-3 px-4 lg:px-6">
+    <div className="full-bleed flex flex-col gap-3 px-4 lg:h-full lg:min-h-0 lg:gap-2.5 lg:px-6">
       {/* unified header: identity + scoreline, with the lens tabs built in */}
-      <section className="card-2 overflow-hidden">
-        <div className="flex flex-col gap-3 px-4 pb-3 pt-3.5 sm:flex-row sm:items-center sm:px-5">
+      <section className="card-2 shrink-0 overflow-hidden">
+        <div className="flex flex-col gap-3 px-4 pb-3 pt-3.5 sm:flex-row sm:items-center sm:px-5 lg:py-2">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <Link
               href="/demos"
@@ -738,10 +748,10 @@ export default function ReplayPage() {
               <img
                 src={radarImage(meta.map)}
                 alt={mapLabel(meta.map)}
-                className="h-12 w-12 shrink-0 rounded-lg border border-line object-cover"
+                className="h-12 w-12 shrink-0 rounded-lg border border-line object-cover lg:h-10 lg:w-10"
               />
             ) : (
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-xl text-faint">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-xl text-faint lg:h-10 lg:w-10">
                 ◎
               </div>
             )}
@@ -760,7 +770,7 @@ export default function ReplayPage() {
           </div>
 
           {/* scoreline */}
-          <div className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5">
+          <div className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5 lg:py-1">
             <div className="text-center">
               <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: CT }}>
                 {ctWins}
@@ -788,7 +798,7 @@ export default function ReplayPage() {
               key={tb.k}
               type="button"
               onClick={() => setTab(tb.k)}
-              className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition ${
+              className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition lg:py-1.5 ${
                 tab === tb.k
                   ? "border-brand text-ink"
                   : "border-transparent text-muted hover:border-line hover:text-ink"
@@ -807,6 +817,9 @@ export default function ReplayPage() {
         showSide={tab !== "replay"}
       />
 
+      {/* lens pane: at lg+ this is the rest of the viewport — lenses fill it
+          and scroll internally; the pane (never the page) absorbs overflow */}
+      <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
@@ -814,11 +827,13 @@ export default function ReplayPage() {
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] xl:items-start">
+        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] lg:items-stretch lg:gap-3">
           {/* player unit: the radar with its transport bar attached below,
-              exactly like a video player */}
-          <div className="min-w-0">
-        <div className="relative mx-auto w-full max-w-180">
+              exactly like a video player. At lg+ it's a size container — the
+              square radar takes min(width, height − transport) so the whole
+              unit always fits the pane. */}
+          <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2.5 lg:@container-size">
+        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-122px))] lg:max-w-none">
           <canvas
             ref={canvasRef}
             width={SIZE}
@@ -898,8 +913,8 @@ export default function ReplayPage() {
           )}
         </div>
 
-        {/* transport bar — the radar's video controls */}
-        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5">
+        {/* transport bar — the radar's video controls (width matches the radar) */}
+        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:mx-0 lg:mt-0 lg:w-[min(100cqw,calc(100cqh-122px))] lg:max-w-none lg:shrink-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <div className="flex items-center gap-1">
               <button
@@ -1034,26 +1049,30 @@ export default function ReplayPage() {
         </div>
           </div>
 
-          {/* right rail: live feed → player detail → teams */}
-          <div className="space-y-3">
+          {/* right rail: live feed → player detail → teams. At lg+ it fills the
+              pane; the feed flexes and its kill log scrolls, the cards keep
+              their height and the rail scrolls if a player card overflows. */}
+          <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto">
           <EventFeed round={round} time={time} meta={meta} zones={zones} />
 
           {focusPlayer != null ? (
-            <PlayerRoundCard
-              round={round}
-              meta={meta}
-              i={focusPlayer}
-              rounds={rounds}
-              zoneOf={(x, y) => classifyPosition(meta.map, x, y, zones)?.name ?? null}
-              onClose={() => setFocusPlayer(null)}
-            />
+            <div className="lg:shrink-0">
+              <PlayerRoundCard
+                round={round}
+                meta={meta}
+                i={focusPlayer}
+                rounds={rounds}
+                zoneOf={(x, y) => classifyPosition(meta.map, x, y, zones)?.name ?? null}
+                onClose={() => setFocusPlayer(null)}
+              />
+            </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-line px-3 py-2 text-[11px] text-faint">
+            <div className="rounded-lg border border-dashed border-line px-3 py-2 text-[11px] text-faint lg:shrink-0">
               Tip: scroll to zoom · drag to pan · click a player dot for their round detail.
             </div>
           )}
 
-          <div className="card px-4 py-3 text-sm">
+          <div className="card px-4 py-3 text-sm lg:shrink-0">
             <div className="mb-2.5 flex items-center justify-between">
               <span className="stat-label">Round {round.n}</span>
               {round.winner && (
@@ -1102,6 +1121,7 @@ export default function ReplayPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
