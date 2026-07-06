@@ -161,6 +161,7 @@ func (s *Server) Router() http.Handler {
 			}
 			r.Get("/health", s.handleHealth)
 			r.Get("/resolve", s.handleResolve)
+			r.Get("/faceit/resolve", s.handleFaceitResolve)
 			r.Get("/leaderboard", s.handleLeaderboard)
 			r.Get("/search", s.handleSearch)
 
@@ -545,6 +546,31 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 	}
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
+}
+
+// handleFaceitResolve maps a FACEIT nickname to its SteamID64 — the browser
+// extension uses it to turn a match-room player into a StatRun profile lookup.
+func (s *Server) handleFaceitResolve(w http.ResponseWriter, r *http.Request) {
+	nick := strings.TrimSpace(r.URL.Query().Get("nickname"))
+	if nick == "" {
+		writeError(w, http.StatusBadRequest, "missing 'nickname'")
+		return
+	}
+	if s.faceit == nil || !s.faceit.HasKey() {
+		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
+		return
+	}
+	id, err := s.faceit.ResolveNickname(r.Context(), nick)
+	if errors.Is(err, faceit.ErrNotFound) || errors.Is(err, faceit.ErrNoAPIKey) {
+		writeError(w, http.StatusNotFound, "no CS2 SteamID for that FACEIT nickname")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "faceit resolve", err)
+		return
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
+	writeJSON(w, http.StatusOK, map[string]string{"steamId64": strconv.FormatUint(id, 10)})
 }
 
 func (s *Server) handleMaps(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "StatRun — CS2 CheatMeter for FACEIT & Steam",
+  "version": "1.0.0",
+  "description": "See each player's CheatMeter risk score, Premier/FACEIT ranks and cross-platform gap right inside FACEIT match rooms and Steam profiles.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "src/options.html",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://steamcommunity.run/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.faceit.com/*"],
+      "js": ["src/badge.js", "src/faceit.js"],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://steamcommunity.com/profiles/*",
+        "https://steamcommunity.com/id/*"
+      ],
+      "js": ["src/badge.js", "src/steam.js"],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

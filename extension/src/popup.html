@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        font: 400 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0e1826;
+        color: #c7d4e3;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px;
+        border-bottom: 1px solid #223243;
+      }
+      .logo { font-weight: 800; font-size: 16px; color: #e6eef8; }
+      .logo b { color: #5b9dff; }
+      .tag {
+        font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+        color: #5b9dff; background: rgba(91, 157, 255, 0.14); padding: 2px 6px; border-radius: 6px;
+      }
+      .body { padding: 14px; }
+      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .muted { color: #8b98a9; font-size: 12px; }
+      .switch { position: relative; width: 40px; height: 22px; }
+      .switch input { display: none; }
+      .slider {
+        position: absolute; inset: 0; background: #2a3a4d; border-radius: 22px; cursor: pointer; transition: 0.2s;
+      }
+      .slider::before {
+        content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+        background: #fff; border-radius: 50%; transition: 0.2s;
+      }
+      input:checked + .slider { background: #5b9dff; }
+      input:checked + .slider::before { transform: translateX(18px); }
+      a.cta {
+        display: block; text-align: center; padding: 9px; margin-top: 6px;
+        background: #5b9dff; color: #06101d; font-weight: 700; border-radius: 8px; text-decoration: none;
+      }
+      .hint { font-size: 11px; color: #6b7a8d; margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <span class="logo">Stat<b>Run</b></span>
+      <span class="tag">CheatMeter</span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <span>Show badges</span>
+        <label class="switch">
+          <input type="checkbox" id="enabled" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="muted">Adds a CheatMeter risk score to players on FACEIT match rooms and Steam profiles.</div>
+      <a class="cta" id="site" href="https://steamcommunity.run" target="_blank" rel="noreferrer">Open StatRun ↗</a>
+      <div class="hint">Signal, not proof — elite legit players score high too.</div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

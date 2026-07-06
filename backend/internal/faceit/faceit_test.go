@@ -171,3 +171,31 @@ func TestMatchDemoResourceNoDemo(t *testing.T) {
 		t.Errorf("err = %v, want ErrNoDemo", err)
 	}
 }
+
+// Nickname -> SteamID64 via game_player_id (used by the browser extension).
+func TestResolveNickname(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("nickname") != "-Keewee" {
+			t.Errorf("nickname = %q", r.URL.Query().Get("nickname"))
+		}
+		w.Write([]byte(`{"player_id":"x","nickname":"-Keewee","games":{"cs2":{"skill_level":10,"faceit_elo":2542,"game_player_id":"76561198294661712"}}}`))
+	}))
+	defer srv.Close()
+	id, err := New(srv.URL, "k").ResolveNickname(context.Background(), "-Keewee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 76561198294661712 {
+		t.Errorf("steam64 = %d", id)
+	}
+}
+
+func TestResolveNicknameNoCS2(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"player_id":"x","nickname":"n","games":{}}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "k").ResolveNickname(context.Background(), "n"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
