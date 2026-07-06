@@ -138,6 +138,10 @@ type Profile struct {
 	// last queued FACEIT far back in a Premier-heavy history. FACEIT is rare, so
 	// carrying the full set is cheap.
 	FaceitMatches []RecentMatch `json:"faceit_matches,omitempty"`
+	// PremierMatches is the mirror for Premier (rank_type 11) — a FACEIT-heavy
+	// player's Premier games fall out of the v3 window just the same, so the
+	// split needs the dedicated list for BOTH sides.
+	PremierMatches []RecentMatch `json:"premier_matches,omitempty"`
 }
 
 // maxFaceitMatches caps the dedicated FACEIT list (plenty for the split).
@@ -154,6 +158,20 @@ func faceitOnly(ms []RecentMatch) []RecentMatch {
 	out := make([]RecentMatch, 0, 16)
 	for _, m := range ms {
 		if m.DataSource == "faceit" {
+			out = append(out, m)
+			if len(out) >= maxFaceitMatches {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// premierOnly returns the Premier matches (rank_type 11) from a list.
+func premierOnly(ms []RecentMatch) []RecentMatch {
+	out := make([]RecentMatch, 0, 16)
+	for _, m := range ms {
+		if m.RankType == 11 {
 			out = append(out, m)
 			if len(out) >= maxFaceitMatches {
 				break
@@ -239,21 +257,27 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 			return nil, fmt.Errorf("leetify: decode: %w", err)
 		}
-		// FACEIT list before capping recent_matches, so v3 surfaces all it has.
+		// Platform lists before capping recent_matches, so v3 surfaces all it has.
 		p.FaceitMatches = faceitOnly(p.RecentMatches)
+		p.PremierMatches = premierOnly(p.RecentMatches)
 		if len(p.RecentMatches) > maxRecentMatches {
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
 		p.PeakPremier = peakPremier(p.RecentMatches)
-		// v3 caps its window at 100 matches, so a player's FACEIT games from months
-		// back get cut off. When v3 returned a FULL window (more history exists) and
-		// we don't already have a full FACEIT set, pull the whole history from the
-		// legacy endpoint to complete the FACEIT list (up to the 100-game filter) —
-		// plus the legacy-only K/D + party + all-time peak, a free bonus.
-		if len(p.RecentMatches) >= v3MatchWindow && len(p.FaceitMatches) < v3MatchWindow {
+		// v3 caps its window at 100 matches, so whichever platform a player queues
+		// LESS gets cut off (a FACEIT-heavy player loses their Premier games and
+		// vice versa). When v3 returned a FULL window (more history exists) and
+		// either platform list is short, pull the whole history from the legacy
+		// endpoint to complete BOTH lists (up to the 100-game filter) — plus the
+		// legacy-only K/D + party + all-time peak, a free bonus.
+		if len(p.RecentMatches) >= v3MatchWindow &&
+			(len(p.FaceitMatches) < v3MatchWindow || len(p.PremierMatches) < v3MatchWindow) {
 			if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
 				if len(lp.FaceitMatches) > len(p.FaceitMatches) {
 					p.FaceitMatches = lp.FaceitMatches
+				}
+				if len(lp.PremierMatches) > len(p.PremierMatches) {
+					p.PremierMatches = lp.PremierMatches
 				}
 				if lp.KD > 0 {
 					p.KD = lp.KD
@@ -347,6 +371,7 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	var killSum, deathSum, partySum, partyN, peakPrem int
 	rm := make([]RecentMatch, 0, len(lp.Games))
 	faceitRm := make([]RecentMatch, 0, 16)
+	premierRm := make([]RecentMatch, 0, 16)
 	for _, g := range lp.Games {
 		if g.MatchResult == "win" {
 			wins++
@@ -398,9 +423,12 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 		if len(rm) < maxRecentMatches {
 			rm = append(rm, match)
 		}
-		// Keep EVERY FACEIT match (across all games), even past the recent cap.
+		// Keep EVERY FACEIT + Premier match (across all games), past the recent cap.
 		if g.DataSource == "faceit" && len(faceitRm) < maxFaceitMatches {
 			faceitRm = append(faceitRm, match)
+		}
+		if g.RankType == 11 && len(premierRm) < maxFaceitMatches {
+			premierRm = append(premierRm, match)
 		}
 	}
 	if n := len(lp.Games); n > 0 {
@@ -424,6 +452,7 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	p.PeakPremier = peakPrem
 	p.RecentMatches = rm
 	p.FaceitMatches = faceitRm
+	p.PremierMatches = premierRm
 	ranks := map[string]any{}
 	if lp.RecentGameRatings.Leetify != 0 {
 		// Leetify's overall rating is a small decimal; v3 exposes it ×100 in

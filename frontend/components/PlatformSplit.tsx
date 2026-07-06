@@ -77,11 +77,17 @@ const METRICS: Metric[] = [
 export function PlatformSplit({
   matches,
   faceitMatches,
+  premierMatches,
 }: {
   matches: LeetifyRecentMatch[];
   faceitMatches?: LeetifyRecentMatch[];
+  premierMatches?: LeetifyRecentMatch[];
 }) {
-  const premierTotal = matches.filter((m) => m.rank_type === 11).length;
+  const premierPool =
+    premierMatches && premierMatches.length
+      ? premierMatches
+      : matches.filter((m) => m.rank_type === 11);
+  const premierTotal = premierPool.length;
   const faceitPool =
     faceitMatches && faceitMatches.length
       ? faceitMatches
@@ -97,7 +103,7 @@ export function PlatformSplit({
 
   if (premierTotal === 0 && faceitTotal === 0) return null; // no Premier or FACEIT games
 
-  const split = computePlatformSplit(matches, faceitMatches, limit);
+  const split = computePlatformSplit(matches, faceitMatches, limit, premierMatches);
   const cols = [split.premier, split.faceit].filter(
     (c): c is PlatformStat => c != null,
   );

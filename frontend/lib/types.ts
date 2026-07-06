@@ -195,6 +195,7 @@ export interface LeetifyProfile {
   };
   recent_matches?: LeetifyRecentMatch[];
   faceit_matches?: LeetifyRecentMatch[]; // ALL FACEIT matches (not just the recent window)
+  premier_matches?: LeetifyRecentMatch[]; // ALL Premier matches (rank_type 11) — same idea
 }
 
 export interface FaceitProfile {
