@@ -827,12 +827,13 @@ export default function ReplayPage() {
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
-        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(280px,330px)_minmax(300px,360px)]">
+        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.6fr)_minmax(320px,0.65fr)]">
           {/* player unit. At lg+ it's a size container: the radar square takes
-              min(width, height) — the FULL pane height — and the transport bar
-              overlays its bottom edge like real video-player controls. */}
-          <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:@container-size">
-        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,100cqh)] lg:max-w-none">
+              min(width, height − slim transport) so the WHOLE map stays
+              visible — nothing overlays map pixels. Side columns are fr-based
+              so they absorb the leftover width beside the square. */}
+          <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:@container-size">
+        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-104px))] lg:max-w-none">
         {/* canvas + its overlays get their own box so overlays anchor to the
             map, not to the wrapper (which sub-lg also contains the transport) */}
         <div className="relative">
@@ -909,16 +910,18 @@ export default function ReplayPage() {
             </div>
           )}
           {!hasCalibration(meta.map) && (
-            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid lg:bottom-24">
+            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">
               {meta.map} radar uncalibrated — positions auto-scaled
             </div>
           )}
         </div>
+        </div>
 
-        {/* transport bar — the radar's video controls. At lg+ it overlays the
-            radar's bottom edge (translucent, like a video player) so the map
-            gets the full pane height; sub-lg it's a card below the canvas. */}
-        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:absolute lg:inset-x-0 lg:bottom-0 lg:z-10 lg:mx-0 lg:mt-0 lg:w-auto lg:max-w-none lg:rounded-t-none lg:rounded-b-xl lg:border-x-0 lg:border-b-0 lg:border-t-line/60 lg:bg-bg/80 lg:px-3 lg:py-2 lg:shadow-none lg:backdrop-blur">
+        {/* transport bar — a slim strip BELOW the map spanning the full
+            column (theater-mode style): never covers map pixels, and its
+            controls row always has room no matter how small the height-bound
+            radar gets. The radar math reserves its ~104px. */}
+        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:mt-0 lg:w-full lg:max-w-none lg:px-3 lg:py-1.5">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 lg:min-w-0 lg:flex-nowrap">
             <div className="flex shrink-0 items-center gap-1">
               <button
@@ -926,7 +929,7 @@ export default function ReplayPage() {
                 onClick={() => goRound(roundIdx - 1)}
                 disabled={atFirst}
                 title="Previous round"
-                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40"
+                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40 lg:h-7 lg:w-7"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
                   <path d="M6 5h2v14H6zM20 5v14l-10-7z" />
@@ -941,7 +944,7 @@ export default function ReplayPage() {
                   setPlaying(np);
                 }}
                 title={playing ? "Pause" : "Play"}
-                className="grid h-9 w-9 place-items-center rounded-lg bg-brand text-[#06101d] transition hover:brightness-110"
+                className="grid h-9 w-9 place-items-center rounded-lg bg-brand text-[#06101d] transition hover:brightness-110 lg:h-8 lg:w-8"
               >
                 {playing ? (
                   <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
@@ -958,7 +961,7 @@ export default function ReplayPage() {
                 onClick={() => goRound(roundIdx + 1)}
                 disabled={atLast}
                 title="Next round"
-                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40"
+                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40 lg:h-7 lg:w-7"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
                   <path d="M16 5h2v14h-2zM4 5v14l10-7z" />
@@ -1018,7 +1021,7 @@ export default function ReplayPage() {
               setPlaying(false);
               seek(parseFloat(e.target.value));
             }}
-            className="mt-2.5 w-full accent-brand lg:mt-1.5"
+            className="mt-2.5 w-full accent-brand lg:mt-1"
           />
           {duration > 0 && (
             <div className="relative mt-1 h-2">
@@ -1050,7 +1053,6 @@ export default function ReplayPage() {
               ))}
             </div>
           )}
-        </div>
         </div>
           </div>
 
