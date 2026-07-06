@@ -15,7 +15,6 @@ import { RecentMatches } from "@/components/RecentMatches";
 import { RecentForm } from "@/components/RecentForm";
 import { ParsedTrendChart } from "@/components/ParsedTrendChart";
 import { LiveTrendChart } from "@/components/LiveTrendChart";
-import { MultiKillBar } from "@/components/MultiKillBar";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
@@ -30,7 +29,6 @@ import { SteamStatsPanel } from "@/components/SteamStatsPanel";
 import { CrossSource } from "@/components/CrossSource";
 import { CheatMeter } from "@/components/CheatMeter";
 import { PlatformSplit } from "@/components/PlatformSplit";
-import { SectionJump } from "@/components/SectionJump";
 import { computeSuspicion } from "@/lib/suspicion";
 import Link from "next/link";
 import {
@@ -93,6 +91,16 @@ export function ProfileView({
   // self-hides otherwise, in which case we fall back to the plain hero below.
   const showMeter = !!computeSuspicion(leetify, faceit, steamStats, steamExtras)?.hasEnough;
 
+  // The content behind the three name buttons — rendered here (server-side) and
+  // handed to StatsPeek, which shows it in a modal over the CheatMeter. When the
+  // CheatMeter is the whole page (showMeter), these popups carry ALL the detail
+  // that used to sit below it, so a slot bundles its related sections:
+  //   • FACEIT      → platform split + FACEIT career
+  //   • Leetify     → full skill breakdown
+  //   • Counter     → map ban plan (map win rates now live in the CheatMeter box)
+  //   • Match stats → parsed career/weapons/maps/recent matches + Steam + cross-source
+  // A slot is null when its data is absent, which also hides that button.
+  const splitMatches = leetify?.recent_matches ?? [];
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career.clutchesWon + career.clutchesLost;
@@ -106,6 +114,104 @@ export function ProfileView({
   const udPerRound = rounds > 0 ? career.utilityDamage / rounds : 0;
   const flashesPerRound = rounds > 0 ? career.enemiesFlashed / rounds : 0;
   const mvpsPerMatch = career.matches > 0 ? career.mvps / career.matches : 0;
+
+  // Full parsed-match detail + Steam lifetime stats + cross-source — everything
+  // that doesn't fit the compact CheatMeter box. Rendered inline on the fallback
+  // page, and behind the "Match stats" button when the box is the whole page, so
+  // no data is ever dropped. Each sub-section self-hides when its data is absent.
+  const matchStatsPanel =
+    hasData || steamStats || leetify || faceit ? (
+      <div className="space-y-5">
+        {hasData && (
+          <>
+            <section>
+              <SectionTitle>Career stats</SectionTitle>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                <StatCard
+                  label="Matches"
+                  value={fmt(career.matches)}
+                  sub={<span><span className="text-good">{career.wins}W</span> <span className="text-bad">{career.losses}L</span></span>}
+                />
+                <StatCard label="Win rate" value={`${career.winRate.toFixed(0)}%`} valueClass={tierColor(career.winRate, 55, 45)} />
+                <StatCard label="K / D" value={career.kd.toFixed(2)} valueClass={kdColor(career.kd)} sub={`${fmt(career.kills)} / ${fmt(career.deaths)}`} />
+                <StatCard label="ADR" value={career.adr.toFixed(0)} valueClass={tierColor(career.adr, 80, 65)} />
+                <StatCard label="KAST" value={`${career.kastPct.toFixed(0)}%`} valueClass={tierColor(career.kastPct, 72, 65)} />
+                <StatCard label="Headshot %" value={`${career.hsPct.toFixed(0)}%`} valueClass={tierColor(career.hsPct, 50, 40)} />
+              </div>
+            </section>
+
+            {matches.length > 0 && <RecentForm matches={matches} />}
+            {matches.length > 1 && <ParsedTrendChart matches={matches} />}
+
+            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
+              <StatCard label="Opening duels" value={`${openWinPct.toFixed(0)}%`} valueClass={tierColor(openWinPct, 55, 45)} sub={`${fmt(career.openingKills)}–${fmt(career.openingDeaths)}`} />
+              <StatCard label="Clutch win" value={`${clutchWinPct.toFixed(0)}%`} valueClass={tierColor(clutchWinPct, 50, 30)} sub={`${fmt(career.clutchesWon)}/${fmt(clutchTotal)}`} />
+              <StatCard label="Assists" value={fmt(career.assists)} />
+              <StatCard label="Career rating" value={career.rating.toFixed(2)} valueClass={ratingColor(career.rating)} />
+            </section>
+
+            <section>
+              <SectionTitle>Utility &amp; impact</SectionTitle>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <StatCard label="Kills / round" value={kpr.toFixed(2)} valueClass={tierColor(kpr, 0.75, 0.6)} />
+                <StatCard label="Deaths / round" value={dpr.toFixed(2)} />
+                <StatCard label="Utility dmg / round" value={udPerRound.toFixed(1)} valueClass={tierColor(udPerRound, 8, 5)} sub={`${fmt(career.utilityDamage)} total`} />
+                <StatCard label="Flashes / round" value={flashesPerRound.toFixed(2)} valueClass={tierColor(flashesPerRound, 1, 0.6)} sub={`${fmt(career.enemiesFlashed)} enemies`} />
+                <StatCard label="MVPs" value={fmt(career.mvps)} sub={`${mvpsPerMatch.toFixed(1)} / match`} />
+              </div>
+            </section>
+
+            <section className="grid gap-5 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <SectionTitle>Recent matches</SectionTitle>
+                <RecentMatches matches={matches} />
+              </div>
+              <div className="space-y-5">
+                {maps.length > 0 && (
+                  <div>
+                    <SectionTitle>Maps</SectionTitle>
+                    <MapStats maps={maps} />
+                  </div>
+                )}
+                {weapons.length > 0 && (
+                  <div>
+                    <SectionTitle>Top weapons</SectionTitle>
+                    <WeaponStats weapons={weapons} />
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {steamStats && <SteamStatsPanel data={steamStats} />}
+
+        <CrossSource career={career} leetify={leetify} faceit={faceit} steamStats={steamStats} />
+      </div>
+    ) : null;
+
+  const panels = {
+    split:
+      splitMatches.length > 0 || faceit ? (
+        <div className="space-y-4">
+          {splitMatches.length > 0 && (
+            <PlatformSplit matches={splitMatches} faceitMatches={leetify?.faceit_matches} />
+          )}
+          {faceit && <FaceitPanel profile={faceit} />}
+        </div>
+      ) : null,
+    leetify: leetify ? <LeetifyPanel profile={leetify} /> : null,
+    counter: leetify ? (
+      <CounterReport
+        leetify={leetify}
+        faceit={faceit}
+        steamStats={steamStats}
+        name={player.personaName || "this player"}
+      />
+    ) : null,
+    matchstats: matchStatsPanel,
+  };
 
   return (
     // Full-bleed: the whole stats page uses the viewport width, matching the
@@ -129,23 +235,14 @@ export function ProfileView({
           steamStats={steamStats}
           steamExtras={steamExtras}
           rating={hasData ? career.rating : null}
+          career={career}
+          panels={panels}
           generatedOn={new Date().toLocaleDateString("en-US", {
             year: "numeric",
             month: "long",
             day: "numeric",
           })}
         />
-      )}
-
-      {/* Premier/MM vs FACEIT split — spot a player who's lopsided across
-          platforms (the cross-platform gap the CheatMeter scores, broken out). */}
-      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <div id="platform-split" className="scroll-mt-24">
-          <PlatformSplit
-            matches={leetify.recent_matches}
-            faceitMatches={leetify.faceit_matches}
-          />
-        </div>
       )}
 
       {/* Fallback hero for accounts without enough data for the CheatMeter */}
@@ -190,12 +287,6 @@ export function ProfileView({
               <h1 className="truncate text-2xl font-extrabold leading-tight sm:text-3xl">
                 {player.personaName || player.steamId64}
               </h1>
-              <SectionJump
-                split={!!(leetify?.recent_matches && leetify.recent_matches.length > 0)}
-                leetify={!!leetify}
-                counter={!!leetify}
-                className="mt-2 justify-start"
-              />
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {steamExtras?.personaState != null &&
                   steamExtras.personaState > 0 && (
@@ -271,7 +362,13 @@ export function ProfileView({
       </section>
 
       <RankStrip leetify={leetify} faceit={faceit} />
-        </>
+
+      {/* Everything below is the traditional full page, shown ONLY when there's
+          no CheatMeter. When the CheatMeter IS shown it's the whole screen — all
+          of this detail lives in its three popup buttons instead. */}
+
+      {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
+        <PlatformSplit matches={leetify.recent_matches} faceitMatches={leetify.faceit_matches} />
       )}
 
       {/* Recent form & trends — collapsed by default (the CheatMeter hero
@@ -310,24 +407,10 @@ export function ProfileView({
         </details>
       )}
 
-      {/* Skill breakdown */}
-      {leetify && (
-        <div id="leetify-stats" className="scroll-mt-24">
-          <LeetifyPanel profile={leetify} />
-        </div>
-      )}
+      {leetify && <LeetifyPanel profile={leetify} />}
 
       {/* Other platforms */}
       {faceit && <FaceitPanel profile={faceit} />}
-
-      {steamStats && <SteamStatsPanel data={steamStats} />}
-
-      <CrossSource
-        career={career}
-        leetify={leetify}
-        faceit={faceit}
-        steamStats={steamStats}
-      />
 
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
         <MapStrength matches={leetify.recent_matches} />
@@ -340,145 +423,19 @@ export function ProfileView({
         </div>
       )}
 
-      {hasData && (
-        <>
-          {/* Career stats */}
-          <section>
-            <SectionTitle>Career stats</SectionTitle>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <StatCard
-              label="Matches"
-              value={fmt(career.matches)}
-              sub={
-                <span>
-                  <span className="text-good">{career.wins}W</span>{" "}
-                  <span className="text-bad">{career.losses}L</span>
-                </span>
-              }
-            />
-            <StatCard
-              label="Win rate"
-              value={`${career.winRate.toFixed(0)}%`}
-              valueClass={tierColor(career.winRate, 55, 45)}
-            />
-            <StatCard
-              label="K / D"
-              value={career.kd.toFixed(2)}
-              valueClass={kdColor(career.kd)}
-              sub={`${fmt(career.kills)} / ${fmt(career.deaths)}`}
-            />
-            <StatCard
-              label="ADR"
-              value={career.adr.toFixed(0)}
-              valueClass={tierColor(career.adr, 80, 65)}
-            />
-            <StatCard
-              label="KAST"
-              value={`${career.kastPct.toFixed(0)}%`}
-              valueClass={tierColor(career.kastPct, 72, 65)}
-            />
-            <StatCard
-              label="Headshot %"
-              value={`${career.hsPct.toFixed(0)}%`}
-              valueClass={tierColor(career.hsPct, 50, 40)}
-            />
-            </div>
-          </section>
+      {matchStatsPanel}
 
-          {matches.length > 0 && <RecentForm matches={matches} />}
-
-          {matches.length > 1 && <ParsedTrendChart matches={matches} />}
-
-          {/* Secondary stats */}
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <StatCard label="Rounds" value={fmt(career.roundsPlayed)} />
-            <StatCard
-              label="Opening duels"
-              value={`${openWinPct.toFixed(0)}%`}
-              valueClass={tierColor(openWinPct, 55, 45)}
-              sub={`${fmt(career.openingKills)}–${fmt(career.openingDeaths)}`}
-            />
-            <StatCard
-              label="Clutch win"
-              value={`${clutchWinPct.toFixed(0)}%`}
-              valueClass={tierColor(clutchWinPct, 50, 30)}
-              sub={`${fmt(career.clutchesWon)}/${fmt(clutchTotal)}`}
-            />
-            <StatCard label="Assists" value={fmt(career.assists)} />
-            <StatCard
-              label="Career rating"
-              value={career.rating.toFixed(2)}
-              valueClass={ratingColor(career.rating)}
-            />
-          </section>
-
-          <MultiKillBar career={career} />
-
-          {/* Utility & impact */}
-          <section>
-            <SectionTitle>Utility &amp; impact</SectionTitle>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <StatCard
-                label="Kills / round"
-                value={kpr.toFixed(2)}
-                valueClass={tierColor(kpr, 0.75, 0.6)}
-              />
-              <StatCard label="Deaths / round" value={dpr.toFixed(2)} />
-              <StatCard
-                label="Utility dmg / round"
-                value={udPerRound.toFixed(1)}
-                valueClass={tierColor(udPerRound, 8, 5)}
-                sub={`${fmt(career.utilityDamage)} total`}
-              />
-              <StatCard
-                label="Flashes / round"
-                value={flashesPerRound.toFixed(2)}
-                valueClass={tierColor(flashesPerRound, 1, 0.6)}
-                sub={`${fmt(career.enemiesFlashed)} enemies`}
-              />
-              <StatCard
-                label="MVPs"
-                value={fmt(career.mvps)}
-                sub={`${mvpsPerMatch.toFixed(1)} / match`}
-              />
-            </div>
-          </section>
-
-          {/* Recent matches + weapons */}
-          <section className="grid gap-5 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <SectionTitle>Recent matches</SectionTitle>
-              <RecentMatches matches={matches} />
-            </div>
-            <div className="space-y-5">
-              {maps.length > 0 && (
-                <div>
-                  <SectionTitle>Maps</SectionTitle>
-                  <MapStats maps={maps} />
-                </div>
-              )}
-              {weapons.length > 0 && (
-                <div>
-                  <SectionTitle>Top weapons</SectionTitle>
-                  <WeaponStats weapons={weapons} />
-                </div>
-              )}
-            </div>
-          </section>
+      {leetify && (
+        <CounterReport
+          leetify={leetify}
+          faceit={faceit}
+          steamStats={steamStats}
+          name={player.personaName || "this player"}
+        />
+      )}
         </>
       )}
 
-      {/* Counter report — the payoff, at the bottom */}
-      {leetify && (
-        <div id="counter-report" className="scroll-mt-24">
-          <CounterReport
-            leetify={leetify}
-            faceit={faceit}
-            steamStats={steamStats}
-            name={player.personaName || "this player"}
-          />
-        </div>
-      )}
     </div>
   );
 }

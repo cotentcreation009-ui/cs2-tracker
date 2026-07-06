@@ -174,29 +174,36 @@ body {
   animation: barGrow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Brief ring pulse on a section after a jump-button scrolls to it, so it's
-   obvious where you landed. */
-@keyframes jumpFlash {
-  0% {
-    box-shadow: 0 0 0 0 rgba(91, 157, 255, 0);
+/* Stats-peek modal: backdrop fade + dialog pop-in. */
+@keyframes modalBackdropIn {
+  from {
+    opacity: 0;
   }
-  18% {
-    box-shadow:
-      0 0 0 2px rgba(91, 157, 255, 0.75),
-      0 0 24px -4px rgba(91, 157, 255, 0.6);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(91, 157, 255, 0);
+  to {
+    opacity: 1;
   }
 }
-.jump-flash {
-  animation: jumpFlash 1.4s ease-out;
-  border-radius: 1rem;
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.modal-backdrop-in {
+  animation: modalBackdropIn 0.18s ease-out;
+}
+.modal-pop {
+  animation: modalPop 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @media (prefers-reduced-motion: reduce) {
   .insight-card-in,
   .bar-grow,
-  .jump-flash {
+  .modal-backdrop-in,
+  .modal-pop {
     animation: none;
   }
 }

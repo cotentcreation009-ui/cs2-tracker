@@ -176,6 +176,7 @@ export function PlatformSplit({
                 <button
                   key={b}
                   type="button"
+                  aria-pressed={limit === b}
                   onClick={() => setLimit(b)}
                   className={`rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
                     limit === b ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
