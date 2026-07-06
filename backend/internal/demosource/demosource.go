@@ -30,10 +30,28 @@ type Resolved struct {
 	Downloaded bool   // true if we fetched it (and may delete it afterwards)
 }
 
+// ShareCodeResolver turns a match share code (CSGO-xxxxx-…) into a downloadable
+// replay URL — satisfied by (*gcbot.Client).Resolve when the sidecar is deployed.
+type ShareCodeResolver func(ctx context.Context, shareCode string) (string, error)
+
 // Resolve turns a job into a local .dem path. For DemoURL jobs the file is
-// downloaded into workDir (and transparently bz2-decompressed). For DemoPath
-// jobs the user's file is used in place and never deleted.
+// downloaded into workDir (and transparently decompressed). For DemoPath jobs
+// the user's file is used in place and never deleted. ShareCode jobs need a
+// Game Coordinator resolver — use NewResolver to supply one.
 func Resolve(ctx context.Context, job queue.Job, workDir string, maxBytes int64) (Resolved, error) {
+	return resolve(ctx, job, workDir, maxBytes, nil)
+}
+
+// NewResolver returns a Resolve-shaped function with share-code support wired
+// to sc (the gc-bot sidecar). The share code resolves to a replay URL, then the
+// normal download path takes over.
+func NewResolver(sc ShareCodeResolver) func(ctx context.Context, job queue.Job, workDir string, maxBytes int64) (Resolved, error) {
+	return func(ctx context.Context, job queue.Job, workDir string, maxBytes int64) (Resolved, error) {
+		return resolve(ctx, job, workDir, maxBytes, sc)
+	}
+}
+
+func resolve(ctx context.Context, job queue.Job, workDir string, maxBytes int64, sc ShareCodeResolver) (Resolved, error) {
 	switch {
 	case job.DemoPath != "":
 		if _, err := os.Stat(job.DemoPath); err != nil {
@@ -49,10 +67,18 @@ func Resolve(ctx context.Context, job queue.Job, workDir string, maxBytes int64)
 		return Resolved{Path: path, Downloaded: true}, nil
 
 	case job.ShareCode != "":
-		// Decoding the share code is implemented (internal/sharecode); turning it
-		// into a demo URL requires authenticating to the CS2 Game Coordinator and
-		// requesting match details. That GC client is the next pipeline milestone.
-		return Resolved{}, fmt.Errorf("demosource: share-code ingest requires the Game Coordinator client (roadmap); provide DemoPath or DemoURL for now")
+		if sc == nil {
+			return Resolved{}, fmt.Errorf("demosource: share-code ingest needs the Game Coordinator bot (GC_BOT_URL not configured)")
+		}
+		demoURL, err := sc(ctx, job.ShareCode)
+		if err != nil {
+			return Resolved{}, fmt.Errorf("demosource: resolve share code: %w", err)
+		}
+		path, err := download(ctx, demoURL, workDir, maxBytes)
+		if err != nil {
+			return Resolved{}, err
+		}
+		return Resolved{Path: path, Downloaded: true}, nil
 
 	default:
 		return Resolved{}, fmt.Errorf("demosource: job has neither demoPath, demoUrl nor shareCode")

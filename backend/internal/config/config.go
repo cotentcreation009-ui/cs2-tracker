@@ -56,6 +56,7 @@ type Config struct {
 	DeleteRawDemo     bool          // delete the raw .dem after a successful parse (parse-once policy)
 	JobTimeout        time.Duration // max time a single parse job may run
 	WorkerConcurrency int           // number of jobs a single worker parses in parallel
+	GCBotURL          string        // gc-bot sidecar base URL (e.g. http://gc-bot:7300); empty disables share-code ingest
 
 	// Demo direct-upload object storage (GCS). When DemoGCSBucket is set, the API
 	// signs direct-to-bucket upload URLs so the browser PUTs a .dem straight to
@@ -110,6 +111,7 @@ func Load() (*Config, error) {
 		DeleteRawDemo:     getBool("DELETE_RAW_DEMO", true),
 		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
+		GCBotURL:          getEnv("GC_BOT_URL", ""),
 
 		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),

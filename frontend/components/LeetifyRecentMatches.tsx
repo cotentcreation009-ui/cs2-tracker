@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, timeAgo } from "@/lib/format";
+import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
 
 const sourceLabel: Record<string, string> = {
   matchmaking: "MM",
@@ -117,14 +118,22 @@ export function LeetifyRecentMatches({
                     />
                   </div>
                   {m.id && (
-                    <a
-                      href={`https://leetify.com/app/match-details/${m.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 inline-block text-xs text-brand hover:underline"
-                    >
-                      View full match on Leetify ↗
-                    </a>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                      <AnalyzeDemoButton
+                        gameId={m.id}
+                        dataSource={m.data_source}
+                        finishedAt={m.finished_at}
+                        mapName={m.map_name}
+                      />
+                      <a
+                        href={`https://leetify.com/app/match-details/${m.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-brand hover:underline"
+                      >
+                        View full match on Leetify ↗
+                      </a>
+                    </div>
                   )}
                 </div>
               )}
