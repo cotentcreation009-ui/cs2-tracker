@@ -495,14 +495,14 @@ function RoundTimeline({
 }) {
   if (rounds.length < 2) return null;
   return (
-    <div className="card-2 px-3 py-2.5">
+    <div className="card-2 px-3 py-2.5 lg:shrink-0">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="stat-label">
           Round-by-round · <span className="text-ink">{meta.players[i]?.name ?? "?"}</span>
         </span>
         <span className="text-[10px] text-faint">click a round to scope every tab to it</span>
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-1">
         {rounds.map((r, ri) => {
           const side = r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
           const won = !!side && r.winner === side;
@@ -521,7 +521,7 @@ function RoundTimeline({
                   ? `Round ${r.n} · did not play`
                   : `Round ${r.n} · ${won ? "won" : "lost"} · ${kills}K · ${dmg} dmg · ${died ? "died" : "survived"}${util ? ` · ${util} util` : ""}`
               }
-              className={`grid h-9 w-7 place-items-center rounded border leading-none transition ${active ? "ring-2 ring-brand" : ""} ${
+              className={`grid h-9 w-7 place-items-center rounded border leading-none transition lg:shrink-0 ${active ? "ring-2 ring-brand" : ""} ${
                 side == null
                   ? "border-line bg-panel/40 opacity-40"
                   : won
@@ -619,7 +619,7 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
   const Row = (r: (typeof rows)[number]) => {
     const w = winner(r.av, r.bv, r.lower);
     return (
-      <div key={r.label} className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
+      <div key={r.label} className="grid break-inside-avoid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
         <span className={`text-right tabular-nums ${w === -1 ? "font-bold text-good" : "text-muted"}`}>
           {r.av == null ? "—" : r.fmt(r.av)}
         </span>
@@ -631,7 +631,7 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
     );
   };
   return (
-    <div className="card-2 px-4 py-3">
+    <div className="card-2 px-4 py-3 lg:max-h-80 lg:shrink-0 lg:overflow-y-auto">
       <div className="mb-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <span className="truncate text-right text-sm font-bold" style={{ color: sideHex(a.team) }}>{a.name}</span>
         <span className="text-[10px] uppercase tracking-wider text-faint">vs</span>
@@ -640,11 +640,11 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
           <button type="button" onClick={onClose} className="ml-auto shrink-0 text-sm text-faint hover:text-ink" title="Clear comparison">✕</button>
         </div>
       </div>
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 lg:columns-2 lg:gap-x-10">
         <div className="mb-1 text-center text-[10px] uppercase tracking-wider text-faint">This match</div>
         {rows.filter((r) => r.show !== false).map(Row)}
 
-        <div className="mt-2 mb-1 border-t border-line pt-2 text-center text-[10px] uppercase tracking-wider text-faint">
+        <div className="mt-2 mb-1 break-inside-avoid border-t border-line pt-2 text-center text-[10px] uppercase tracking-wider text-faint">
           Career
         </div>
         {careerState === "loading" && (
@@ -875,9 +875,9 @@ export default function PlayerInsights({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
       {awards.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 lg:shrink-0">
           {awards.map((a) => (
             <button
               key={a.label}
@@ -896,22 +896,23 @@ export default function PlayerInsights({
         </div>
       )}
 
-      {cmpA && cmpB && <CompareTable a={cmpA} b={cmpB} onClose={() => setCompare([])} />}
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[1fr_minmax(0,420px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3 2xl:grid-cols-[1fr_minmax(0,520px)]">
+      {/* left: compare/timeline pinned on top, then the player-card list — at
+          lg+ the list is the internal scroller so the pane itself never grows */}
+      <div className="space-y-3 lg:flex lg:min-h-0 lg:flex-col">
+        {cmpA && cmpB && <CompareTable a={cmpA} b={cmpB} onClose={() => setCompare([])} />}
 
-      {focusI != null && (
-        <RoundTimeline
-          rounds={rounds}
-          meta={meta}
-          i={focusI}
-          scope={view.scopeRound}
-          onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
-        />
-      )}
+        {focusI != null && (
+          <RoundTimeline
+            rounds={rounds}
+            meta={meta}
+            i={focusI}
+            scope={view.scopeRound}
+            onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
+          />
+        )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,420px)] 2xl:grid-cols-[1fr_minmax(0,520px)]">
-      {/* left: player cards */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 lg:shrink-0">
           <p className="max-w-md text-[11px] text-faint">
             Click a player to focus them, then a utility chip to break it down on the map.
           </p>
@@ -933,42 +934,46 @@ export default function PlayerInsights({
             </div>
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 min-[1800px]:grid-cols-3">
-          {sortedPlayers.map((p, idx) => (
-            <div
-              key={p.i}
-              ref={(el) => {
-                if (el) cardRefs.current.set(p.i, el);
-                else cardRefs.current.delete(p.i);
-              }}
-              className="insight-card-in scroll-mt-4"
-              style={{ animationDelay: `${Math.min(idx, 9) * 45}ms` }}
-            >
-              <PlayerCard
-                p={p}
-                rank={idx + 1}
-                focused={focusI === p.i}
-                activeKind={focusI === p.i ? activeKind : null}
-                lean={siteLean.get(p.i)}
-                tend={tendMap.get(p.steamId)}
-                onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
-                onUtil={pickUtil}
-                onCompare={() => toggleCompare(p.i)}
-                comparing={compare.includes(p.i)}
-              />
-            </div>
-          ))}
+        <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="grid gap-3 sm:grid-cols-2 min-[1800px]:grid-cols-3">
+            {sortedPlayers.map((p, idx) => (
+              <div
+                key={p.i}
+                ref={(el) => {
+                  if (el) cardRefs.current.set(p.i, el);
+                  else cardRefs.current.delete(p.i);
+                }}
+                className="insight-card-in scroll-mt-4"
+                style={{ animationDelay: `${Math.min(idx, 9) * 45}ms` }}
+              >
+                <PlayerCard
+                  p={p}
+                  rank={idx + 1}
+                  focused={focusI === p.i}
+                  activeKind={focusI === p.i ? activeKind : null}
+                  lean={siteLean.get(p.i)}
+                  tend={tendMap.get(p.steamId)}
+                  onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
+                  onUtil={pickUtil}
+                  onCompare={() => toggleCompare(p.i)}
+                  comparing={compare.includes(p.i)}
+                />
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] leading-relaxed text-faint">
+            <span className="font-semibold text-muted">Data notes:</span>{" "}
+            {PLAYER_INSIGHTS_LIMITATIONS}
+          </p>
         </div>
-        <p className="text-[11px] leading-relaxed text-faint">
-          <span className="font-semibold text-muted">Data notes:</span>{" "}
-          {PLAYER_INSIGHTS_LIMITATIONS}
-        </p>
       </div>
 
-      {/* right: utility explorer */}
-      <div className="space-y-3 self-start lg:sticky lg:top-4">
+      {/* right: utility explorer — at lg+ a size container: the square map is
+          sized by the height left over after the fixed rows, and the throw
+          list becomes the column's internal scroller */}
+      <div className="space-y-3 self-start lg:flex lg:min-h-0 lg:flex-col lg:self-stretch">
         <div
-          className="card-2 p-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/40"
+          className="card-2 p-3 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden lg:@container-size"
           tabIndex={selThrows.length ? 0 : -1}
           onKeyDown={(e) => {
             if (!selThrows.length) return;
@@ -984,7 +989,7 @@ export default function PlayerInsights({
             }
           }}
         >
-          <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
             <span className="stat-label">Utility breakdown</span>
             {selPlayer && (
               <span className="pill max-w-[55%] truncate bg-panel text-ink">
@@ -996,7 +1001,7 @@ export default function PlayerInsights({
           {selPlayer && activeKind && selThrows.length > 0 ? (
             <>
               {/* kind tabs */}
-              <div className="mb-2 flex flex-wrap gap-1">
+              <div className="mb-2 flex flex-wrap gap-1 lg:shrink-0">
                 {selKinds.map((k) => {
                   const n = selPlayer.utilNades.filter((x) => x.kind === k).length;
                   return (
@@ -1020,10 +1025,16 @@ export default function PlayerInsights({
                 })}
               </div>
 
-              <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} zones={zones} />
+              <UtilThrowMap
+                map={meta.map}
+                proj={proj}
+                throws={mapThrows}
+                zones={zones}
+                className="lg:mx-auto lg:w-[min(100cqw,calc(100cqh-280px))] lg:max-w-none lg:shrink-0"
+              />
 
               {/* step through each throw */}
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2 lg:shrink-0">
                 <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost px-2 py-1 text-xs">◀</button>
                 <div className="min-w-0 flex-1 text-center text-[11px]">
                   {soloThrow ? (
@@ -1044,13 +1055,13 @@ export default function PlayerInsights({
                 <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost px-2 py-1 text-xs">▶</button>
               </div>
               {soloThrow && (
-                <p className="mt-1 text-center text-[10px] text-brand">
+                <p className="mt-1 text-center text-[10px] text-brand lg:shrink-0">
                   dashed line = thrown from → landed · {timingOf(soloThrow.t)}
                 </p>
               )}
 
-              {/* every throw of this kind */}
-              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1">
+              {/* every throw of this kind — the lg scroller of this column */}
+              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1 lg:min-h-0 lg:max-h-none lg:flex-1">
                 {selThrows.map((tw, i) => (
                   <ThrowRow
                     key={`${tw.round}-${tw.t}-${i}`}
@@ -1067,7 +1078,7 @@ export default function PlayerInsights({
 
               {/* common spots — tendency summary */}
               {spots.length > 1 && (
-                <div className="mt-2 border-t border-line pt-2">
+                <div className="mt-2 border-t border-line pt-2 lg:shrink-0">
                   <div className="stat-label mb-1">Common spots</div>
                   <div className="flex flex-wrap gap-1">
                     {spots.slice(0, 6).map((sp, i) => {
@@ -1092,7 +1103,7 @@ export default function PlayerInsights({
               )}
             </>
           ) : (
-            <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted">
+            <div className="grid aspect-square place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted lg:min-h-0 lg:flex-1 lg:aspect-auto">
               {selPlayer
                 ? `${selPlayer.name} threw no trackable utility${
                     view.scopeRound != null ? ` in ${scopeLabel}` : ""
@@ -1102,7 +1113,7 @@ export default function PlayerInsights({
           )}
         </div>
 
-        <div className="card-2 px-4 py-3">
+        <div className="card-2 px-4 py-3 lg:shrink-0">
           <div className="mb-2 flex items-center gap-2">
             <span className="stat-label">Utility used</span>
             <span className="pill bg-panel text-faint">{scopeLabel} total</span>
@@ -1119,7 +1130,7 @@ export default function PlayerInsights({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-faint">
+        <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-faint lg:shrink-0">
           <span>
             {zones.length
               ? `${zones.length} call-out${zones.length === 1 ? "" : "s"} on ${meta.map.replace("de_", "")}`

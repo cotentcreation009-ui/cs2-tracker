@@ -62,7 +62,7 @@ function StatPill({
   tone?: "offense" | "threat";
 }) {
   return (
-    <div className="card px-4 py-3">
+    <div className="card px-4 py-3 lg:px-3 lg:py-2">
       <div className="flex items-center gap-1.5">
         {tone && (
           <span
@@ -72,7 +72,7 @@ function StatPill({
         )}
         <div className="stat-label">{label}</div>
       </div>
-      <div className="mt-1 truncate text-2xl font-extrabold tabular-nums" style={hex ? { color: hex } : undefined}>
+      <div className="mt-1 truncate text-2xl font-extrabold tabular-nums lg:text-xl" style={hex ? { color: hex } : undefined}>
         {value}
       </div>
       {hint && <div className="mt-0.5 truncate text-[11px] text-faint">{hint}</div>}
@@ -155,21 +155,21 @@ function WeaponPanel({
 }) {
   const max = data.weapons[0]?.kills ?? 1;
   return (
-    <div className="card-2 px-5 py-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
+      <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
         <h3 className="stat-label">{title}</h3>
         <span className="text-[10px] text-faint">{subtitle}</span>
       </div>
       {data.weapons.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted">{empty}</div>
+        <div className="py-6 text-center text-xs text-muted lg:my-auto">{empty}</div>
       ) : (
         <>
-          <div className="space-y-3">
+          <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {data.weapons.slice(0, 8).map((w) => (
               <WeaponRow key={w.key} w={w} max={max} unit={unit} />
             ))}
           </div>
-          <div className="mt-4 border-t border-line pt-3">
+          <div className="mt-4 border-t border-line pt-3 lg:mt-3 lg:shrink-0">
             <div className="stat-label mb-2">Class mix</div>
             <ClassMix data={data} />
           </div>
@@ -209,16 +209,16 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
   const upsetPct = m.total ? (m.upset / m.total) * 100 : 0;
 
   return (
-    <div className="card-2 px-5 py-4">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+    <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 lg:shrink-0">
         <h3 className="stat-label">Economy ladder · killer buy vs victim buy</h3>
         <span className="text-[10px] text-faint">cell = kills · green ring = punching up</span>
       </div>
-      <p className="mb-3 text-xs text-muted">
+      <p className="mb-3 text-xs text-muted lg:mb-2 lg:shrink-0">
         <span className="font-bold text-good">{m.upset}</span> upset frags ({upsetPct.toFixed(0)}%) — killing an
         equal-or-richer enemy while on the weaker buy.
       </p>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto lg:min-h-0 lg:overflow-y-auto">
         <div
           className="inline-grid gap-1 text-[11px]"
           style={{ gridTemplateColumns: `auto repeat(${BUY_KEYS.length}, 2.4rem)` }}
@@ -234,7 +234,7 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
           ))}
         </div>
       </div>
-      <div className="mt-2 text-[10px] text-faint">
+      <div className="mt-2 text-[10px] text-faint lg:shrink-0">
         Rows = killer&apos;s buy, columns = victim&apos;s buy. Cells above the diagonal = the killer was on a
         cheaper buy than who they killed.
       </div>
@@ -264,7 +264,7 @@ function BuyRow({
           <div
             key={vk}
             title={`${TIER[kk].label} buy → killed ${TIER[vk].label} buy: ${n}`}
-            className={`grid h-9 place-items-center rounded tabular-nums ${upset && n > 0 ? "ring-1 ring-good/70" : ""}`}
+            className={`grid h-9 place-items-center rounded tabular-nums lg:h-7 ${upset && n > 0 ? "ring-1 ring-good/70" : ""}`}
             style={{
               background: n
                 ? `color-mix(in srgb, var(--color-brand) ${Math.round(12 + intensity * 60)}%, var(--color-panel))`
@@ -322,8 +322,10 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
 
   return (
-    <div className="card-2 p-3">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+    // at lg+ the card is a size container: the square radar below takes
+    // min(width, height − controls/footnote) so the whole card fits the pane
+    <div className="card-2 p-3 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:@container-size">
+      <div className="mb-2 flex flex-wrap items-center gap-2 lg:shrink-0">
         <span className="stat-label">{mode === "kills" ? "Kill positions" : "Death positions"}</span>
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
           {(["kills", "deaths"] as const).map((mm) => (
@@ -353,7 +355,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
         </span>
       </div>
 
-      <div className="mb-2 flex flex-wrap gap-1">
+      <div className="mb-2 flex flex-wrap gap-1 lg:shrink-0">
         {CLASS_CHIPS.map((c) => (
           <button
             key={c.key}
@@ -369,7 +371,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
         ))}
       </div>
 
-      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2">
+      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:my-auto lg:w-[min(100cqw,calc(100cqh-150px))] lg:max-w-none lg:shrink-0">
         {calibrated ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={radarImage(meta.map)} alt={`${meta.map} radar`} className="absolute inset-0 h-full w-full object-cover opacity-90" draggable={false} />
@@ -401,7 +403,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
           </div>
         )}
       </div>
-      <div className="mt-2 text-[10px] text-faint">
+      <div className="mt-2 text-[10px] text-faint lg:shrink-0">
         ✕ at the victim&apos;s spot, coloured by weapon. {mode === "deaths" ? "Where the scoped player/side dies" : "Where the scoped player/side gets kills"} — toggle the angle line for the shot direction.
       </div>
     </div>
@@ -481,15 +483,15 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
   // focused player → their duel list vs every opponent
   if (focus != null) {
     return (
-      <div className="card-2 px-5 py-4">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
+        <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
           <h3 className="stat-label">Head-to-head · {focusName}</h3>
           <span className="text-[10px] text-faint">your kills vs theirs · click to switch player</span>
         </div>
         {duels.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted">No duels in this scope.</div>
+          <div className="py-6 text-center text-xs text-muted lg:my-auto">No duels in this scope.</div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {duels.map((d) => {
               const tot = d.for + d.against || 1;
               const col = teamColor(d.opp.team);
@@ -523,7 +525,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
             })}
           </div>
         )}
-        <div className="mt-2 text-[10px] text-faint">
+        <div className="mt-2 text-[10px] text-faint lg:shrink-0">
           <span className="text-good">green</span> = your kills, <span className="text-bad">red</span> = your deaths to them. Spans the whole match (duels cross sides).
         </div>
       </div>
@@ -534,12 +536,12 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
   if (!matrix || matrix.players.length === 0) return null;
   const { players, net, maxAbs } = matrix;
   return (
-    <div className="card-2 px-5 py-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
+      <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
         <h3 className="stat-label">Head-to-head · net frags</h3>
         <span className="text-[10px] text-faint">row vs column · green = row leads · click a name</span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <div
           className="inline-grid gap-0.5 text-[11px]"
           style={{ gridTemplateColumns: `minmax(7rem,auto) repeat(${players.length}, 1.9rem)` }}
@@ -586,7 +588,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
           ))}
         </div>
       </div>
-      <div className="mt-2 text-[10px] text-faint">
+      <div className="mt-2 text-[10px] text-faint lg:shrink-0">
         Numbers index the rows. Each cell = that row player&apos;s net kills against the column player (whole match).
       </div>
     </div>
@@ -633,9 +635,9 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   ].filter(Boolean);
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-3 lg:space-y-0">
       {/* header */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand/15 text-brand">
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <circle cx="12" cy="12" r="8" />
@@ -651,7 +653,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       </div>
 
       {/* dual headline strip: offense + threat */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:shrink-0 lg:grid-cols-4">
         <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills` : undefined} hex={offense.topWeapon?.color} />
         <StatPill tone="offense" label="Headshot rate" value={`${offense.overallHsPct.toFixed(0)}%`} hint={`${offense.totalHeadshots}/${offense.totalKills} kills`} hex={hsColor(offense.overallHsPct)} />
         <StatPill
@@ -680,8 +682,11 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
         )}
       </div>
 
-      {/* dual-lens: kills (offense) vs deaths (threat) */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* main analysis row — five lg columns across the very wide pane
+          (offense | threat | duels+economy | map | roster); plain vertical
+          stack below lg exactly as before */}
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1.2fr)_minmax(0,1.05fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3">
+        {/* dual-lens: kills (offense) vs deaths (threat) */}
         <WeaponPanel
           title={focusName ? `${focusName} · kills by weapon` : view.side !== "all" ? `${view.side} kills by weapon` : "Kills by weapon"}
           subtitle="bar = kills · pill = HS%"
@@ -696,40 +701,40 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           unit="D"
           empty="No deaths in this scope."
         />
+
+        {/* head-to-head duels (grows, scrolls) + economy ladder (natural height) */}
+        <div className="grid gap-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:gap-3">
+          <HeadToHead meta={meta} rounds={rounds} view={view} />
+          <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
+        </div>
+
+        {/* kill / death map */}
+        <DuelMap meta={meta} rounds={rounds} view={view} />
+
+        {/* per-player breakdown (offense, whole roster) */}
+        <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
+          <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
+            <h3 className="stat-label">Per-player weapons</h3>
+            <span className="text-[10px] text-faint">click to expand · sets the scoped player</span>
+          </div>
+          <div className="grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
+            {roster.players.map((p) => (
+              <PlayerCard
+                key={p.i}
+                p={p}
+                open={openPlayer === p.i}
+                onToggle={() => {
+                  const next = openPlayer === p.i ? null : p.i;
+                  setOpenPlayer(next);
+                  view.setFocusPlayer(next);
+                }}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* head-to-head duels */}
-      <HeadToHead meta={meta} rounds={rounds} view={view} />
-
-      {/* economy ladder */}
-      <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
-
-      {/* kill / death map */}
-      <DuelMap meta={meta} rounds={rounds} view={view} />
-
-      {/* per-player breakdown (offense, whole roster) */}
-      <div className="card-2 px-5 py-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="stat-label">Per-player weapons</h3>
-          <span className="text-[10px] text-faint">click to expand · sets the scoped player</span>
-        </div>
-        <div className="grid gap-2 lg:grid-cols-2">
-          {roster.players.map((p) => (
-            <PlayerCard
-              key={p.i}
-              p={p}
-              open={openPlayer === p.i}
-              onToggle={() => {
-                const next = openPlayer === p.i ? null : p.i;
-                setOpenPlayer(next);
-                view.setFocusPlayer(next);
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
-      <p className="text-[10px] leading-relaxed text-faint">
+      <p className="text-[10px] leading-relaxed text-faint lg:shrink-0">
         Derived from kill events (killer · weapon · headshot · positions) plus per-round buy values. A kill
         records only the killer&apos;s weapon, so &quot;deaths by weapon&quot; means what killed you, never your own
         gun. The economy ladder needs per-round buy data (re-parse older demos). For aim quality, ADR, KAST and

@@ -184,9 +184,17 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   // dim helper: when something is active, fade the unrelated
   const dim = (related: boolean) => (active && !related ? 0.18 : 1);
 
+  // at lg+ the pane is viewport-locked: the map column is a size container and
+  // the square takes min(width, height − space reserved for the rows below it
+  // — legend only when a round is scoped, legend + stat strip otherwise).
+  const focused = typeof playerFilter === "number";
+  const squareW = scopedRound
+    ? "lg:w-[min(100cqw,calc(100cqh-28px))]"
+    : "lg:w-[min(100cqw,calc(100cqh-88px))]";
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0">
+      <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
         <Seg value={mode} onChange={(v) => { setMode(v); setSelected(null); }}
           options={[{ key: "common", label: "Common routes" }, { key: "individual", label: "All paths" }]} />
         <span className="text-[11px] text-faint">
@@ -194,15 +202,26 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
         </span>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <div className="space-y-3">
+      {/* main grid: map unit | detail column(s). When a round AND a player are
+          both scoped the two right-hand cards get a column each — the pane is
+          wide, so going horizontal beats stacking them into one tall rail. */}
+      <div
+        className={`grid gap-4 lg:min-h-0 lg:flex-1 lg:items-stretch lg:gap-3 ${
+          scopedRound && focused
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)_minmax(320px,380px)]"
+            : "lg:grid-cols-[1.6fr_1fr]"
+        }`}
+      >
+        {/* map unit: size container — square map + legend (+ stats) share one
+            width so they stay aligned while the square is height-driven */}
+        <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:space-y-0 lg:@container-size">
           <div
             ref={wrapRef}
             onMouseDown={onDown}
             onMouseMove={onMove}
             onMouseUp={onUp}
             onMouseLeave={() => { onUp(); }}
-            className={`relative aspect-square w-full max-w-240 overflow-hidden rounded-xl border border-line bg-panel2 ${
+            className={`relative aspect-square w-full max-w-240 overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-none lg:shrink-0 ${squareW} ${
               zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""
             }`}
           >
@@ -380,7 +399,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
           </div>
 
           {/* legend */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-faint">
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-faint lg:shrink-0 ${squareW}`}>
             <Legend swatch="#46d369" label="kill" shape="x" />
             <Legend swatch="#f5694a" label="death" shape="o" />
             <Legend swatch={KIND_COLOR.smoke} label="smoke" />
@@ -391,7 +410,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
           </div>
 
           {!scopedRound && (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            <div className={`grid grid-cols-3 gap-2 sm:grid-cols-5 lg:shrink-0 ${squareW}`}>
               <Stat label="Paths" value={String(summary.paths)} />
               <Stat label="Win rate" value={`${Math.round(summary.winRate * 100)}%`} color={winColor(summary.winRate)} />
               <Stat label="Kills" value={String(summary.kills)} />
@@ -401,21 +420,25 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
           )}
         </div>
 
-        {/* right panel */}
+        {/* right panel — lg:contents promotes the player card and the round
+            detail to their own grid columns at lg; below lg they stack as
+            before */}
         {scopedRound ? (
-          <div className="space-y-3">
+          <div className="space-y-3 lg:contents lg:space-y-0">
             {typeof playerFilter === "number" && (
-              <PlayerRoundCard
-                round={scopedRound}
-                meta={meta}
-                i={playerFilter}
-                rounds={rounds}
-                onClose={() => view.setFocusPlayer(null)}
-                onUtilHover={(id) => onHover(id == null ? null : { kind: "util", id })}
-                onUtilPin={(id) => onPin({ kind: "util", id })}
-                activeUtilId={active?.kind === "util" ? active.id : null}
-                zoneOf={zoneOf}
-              />
+              <div className="lg:h-full lg:min-h-0 lg:overflow-y-auto">
+                <PlayerRoundCard
+                  round={scopedRound}
+                  meta={meta}
+                  i={playerFilter}
+                  rounds={rounds}
+                  onClose={() => view.setFocusPlayer(null)}
+                  onUtilHover={(id) => onHover(id == null ? null : { kind: "util", id })}
+                  onUtilPin={(id) => onPin({ kind: "util", id })}
+                  activeUtilId={active?.kind === "util" ? active.id : null}
+                  zoneOf={zoneOf}
+                />
+              </div>
             )}
             <RoundDetail
               meta={meta}
@@ -431,8 +454,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
             />
           </div>
         ) : (
-          <div className="card flex max-h-240 flex-col px-4 py-3">
-            <div className="mb-2 flex items-center justify-between">
+          <div className="card flex max-h-240 flex-col px-4 py-3 lg:h-full lg:max-h-none lg:min-h-0">
+            <div className="mb-2 flex items-center justify-between lg:shrink-0">
               <span className="stat-label">{mode === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
               {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
             </div>
@@ -512,9 +535,9 @@ function RoundDetail({
   });
 
   return (
-    <div className="card flex max-h-240 flex-col overflow-hidden p-0">
+    <div className="card flex max-h-240 flex-col overflow-hidden p-0 lg:h-full lg:max-h-none lg:min-h-0">
       <div
-        className="flex items-center justify-between gap-2 px-4 py-3"
+        className="flex items-center justify-between gap-2 px-4 py-3 lg:shrink-0"
         style={{ background: `linear-gradient(90deg, ${winHex}26, transparent)` }}
       >
         <div>
