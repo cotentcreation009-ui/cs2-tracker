@@ -16,7 +16,7 @@ import {
   type SusFactor,
   type Suspicion,
 } from "@/lib/suspicion";
-import { flag, fmt, tierColor } from "@/lib/format";
+import { flag, fmt, kdColor, tierColor } from "@/lib/format";
 import Link from "next/link";
 import { ShareButton } from "@/components/ShareButton";
 import { RatingRing } from "@/components/RatingRing";
@@ -322,6 +322,61 @@ export function CheatMeter({
   const udPerRound =
     career && career.roundsPlayed > 0 ? career.utilityDamage / career.roundsPlayed : 0;
 
+  // Most profiles have NO parsed-demo career yet — the parsed numbers only exist
+  // once we've ingested their demos. So when they're absent, fill the same card
+  // from Leetify / FACEIT / Steam instead, so every profile gets its career
+  // panel (clearly labelled by source). Cells self-hide when a value is missing.
+  const ls0 = leetify?.stats;
+  const fallbackCells: { label: string; value: string; color?: string }[] = [];
+  if (!showCareer) {
+    const st = steamStats?.stats;
+    const cMatches =
+      leetify?.total_matches || faceit?.matches || st?.["total_matches_played"] || 0;
+    if (cMatches > 0)
+      fallbackCells.push({ label: "Matches", value: fmt(cMatches) });
+    const cWin =
+      leetify && leetify.winrate > 0
+        ? leetify.winrate * 100
+        : faceit && faceit.winRatePct > 0
+          ? faceit.winRatePct
+          : st?.["total_wins"] && st?.["total_matches_played"]
+            ? (st["total_wins"] / st["total_matches_played"]) * 100
+            : 0;
+    if (cWin > 0)
+      fallbackCells.push({ label: "Win rate", value: `${cWin.toFixed(0)}%`, color: tierColor(cWin, 55, 45) });
+    const cKd =
+      leetify?.kd ||
+      faceit?.kdRatio ||
+      (st?.["total_kills"] && st?.["total_deaths"] ? st["total_kills"] / st["total_deaths"] : 0);
+    if (cKd > 0)
+      fallbackCells.push({ label: "K/D", value: cKd.toFixed(2), color: kdColor(cKd) });
+    const cHs =
+      faceit?.hsPct ||
+      (st?.["total_kills_headshot"] && st?.["total_kills"]
+        ? (st["total_kills_headshot"] / st["total_kills"]) * 100
+        : 0);
+    if (cHs > 0)
+      fallbackCells.push({ label: "HS %", value: `${cHs.toFixed(0)}%`, color: tierColor(cHs, 50, 40) });
+    const openCt = ls0?.ct_opening_duel_success_percentage ?? 0;
+    const openT = ls0?.t_opening_duel_success_percentage ?? 0;
+    const cOpen = openCt > 0 && openT > 0 ? (openCt + openT) / 2 : openCt || openT;
+    if (cOpen > 0)
+      fallbackCells.push({ label: "Opening", value: `${cOpen.toFixed(0)}%`, color: tierColor(cOpen, 55, 45) });
+    if (ls0 && ls0.trade_kills_success_percentage > 0)
+      fallbackCells.push({ label: "Trades won", value: `${ls0.trade_kills_success_percentage.toFixed(0)}%` });
+    if (ls0 && ls0.spray_accuracy > 0)
+      fallbackCells.push({ label: "Spray acc", value: `${ls0.spray_accuracy.toFixed(0)}%` });
+    if (ls0 && ls0.counter_strafing_good_shots_ratio > 0)
+      fallbackCells.push({
+        label: "C-strafe",
+        value: `${(ls0.counter_strafing_good_shots_ratio * 100).toFixed(0)}%`,
+      });
+    if (st?.["total_mvps"] && fallbackCells.length < 8)
+      fallbackCells.push({ label: "MVPs", value: fmt(st["total_mvps"]) });
+  }
+  // The career card renders for parsed data OR a reasonably-filled fallback.
+  const showCareerCard = showCareer || fallbackCells.length >= 3;
+
   // A friends-only Leetify profile redacts the aim micro-stats (reaction/preaim/
   // HS → 0), so most of the CheatMeter's scale cards are missing. Surface the
   // performance stats we DO have (ratings, ranks, K/D, win rate…) right by the
@@ -560,33 +615,41 @@ export function CheatMeter({
           one compact strip so the whole box fits a desktop viewport. */}
       <div
         className={`mt-3 grid gap-3 ${
-          showCareer && showMapChart
+          showCareerCard && showMapChart
             ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(0,280px)_minmax(0,1.35fr)]"
-            : showCareer || showMapChart
+            : showCareerCard || showMapChart
               ? "lg:grid-cols-2"
               : ""
         }`}
       >
-        {showCareer && (
+        {showCareerCard && (
           <div className="card flex flex-col px-3.5 py-3">
             <div className="stat-label mb-2">
               Career stats{" "}
               <span className="font-normal normal-case text-faint">
-                · {fmt(career!.matches)} parsed matches
+                · {showCareer ? `${fmt(career!.matches)} parsed matches` : "Leetify / FACEIT / Steam"}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              <CStat label="ADR" value={career!.adr.toFixed(0)} color={tierColor(career!.adr, 80, 65)} />
-              <CStat label="KAST" value={`${career!.kastPct.toFixed(0)}%`} color={tierColor(career!.kastPct, 72, 65)} />
-              <CStat label="Rounds" value={fmt(career!.roundsPlayed)} />
-              <CStat label="Opening" value={`${openPct.toFixed(0)}%`} color={tierColor(openPct, 55, 45)} />
-              <CStat label="Clutch" value={`${clutchPct.toFixed(0)}%`} color={tierColor(clutchPct, 50, 30)} />
-              <CStat label="Assists" value={fmt(career!.assists)} />
-              <CStat label="Util/rd" value={udPerRound.toFixed(1)} color={tierColor(udPerRound, 8, 5)} />
-              <CStat label="MVPs" value={fmt(career!.mvps)} />
-            </div>
-            {/* multi-kill rounds — slim inline strip */}
-            {(() => {
+            {showCareer ? (
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <CStat label="ADR" value={career!.adr.toFixed(0)} color={tierColor(career!.adr, 80, 65)} />
+                <CStat label="KAST" value={`${career!.kastPct.toFixed(0)}%`} color={tierColor(career!.kastPct, 72, 65)} />
+                <CStat label="Rounds" value={fmt(career!.roundsPlayed)} />
+                <CStat label="Opening" value={`${openPct.toFixed(0)}%`} color={tierColor(openPct, 55, 45)} />
+                <CStat label="Clutch" value={`${clutchPct.toFixed(0)}%`} color={tierColor(clutchPct, 50, 30)} />
+                <CStat label="Assists" value={fmt(career!.assists)} />
+                <CStat label="Util/rd" value={udPerRound.toFixed(1)} color={tierColor(udPerRound, 8, 5)} />
+                <CStat label="MVPs" value={fmt(career!.mvps)} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {fallbackCells.slice(0, 8).map((c) => (
+                  <CStat key={c.label} label={c.label} value={c.value} color={c.color} />
+                ))}
+              </div>
+            )}
+            {/* multi-kill rounds — slim inline strip (parsed data only) */}
+            {showCareer && (() => {
               const buckets = [
                 { label: "1K", n: career!.k1, tone: "bg-line2" },
                 { label: "2K", n: career!.k2, tone: "bg-brand/50" },
