@@ -116,9 +116,10 @@ type playerResp struct {
 	FaceitURL string `json:"faceit_url"`
 	Games     struct {
 		CS2 struct {
-			SkillLevel int    `json:"skill_level"`
-			FaceitElo  int    `json:"faceit_elo"`
-			Region     string `json:"region"`
+			SkillLevel   int    `json:"skill_level"`
+			FaceitElo    int    `json:"faceit_elo"`
+			Region       string `json:"region"`
+			GamePlayerID string `json:"game_player_id"` // the player's SteamID64
 		} `json:"cs2"`
 	} `json:"games"`
 }
@@ -185,6 +186,26 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	p.LongestWinStreak = atoi(l.LongStreak)
 	p.RecentResults = l.Recent
 	return p, nil
+}
+
+// ResolveNickname maps a FACEIT nickname to the player's SteamID64 (their CS2
+// game_player_id). Used by the browser extension to turn a match-room player
+// into a StatRun lookup.
+func (c *Client) ResolveNickname(ctx context.Context, nickname string) (uint64, error) {
+	if c.apiKey == "" {
+		return 0, ErrNoAPIKey
+	}
+	q := url.Values{}
+	q.Set("nickname", nickname)
+	var pr playerResp
+	if err := c.get(ctx, "/players?"+q.Encode(), &pr); err != nil {
+		return 0, err
+	}
+	sid, err := strconv.ParseUint(pr.Games.CS2.GamePlayerID, 10, 64)
+	if err != nil || sid == 0 {
+		return 0, ErrNotFound
+	}
+	return sid, nil
 }
 
 // MatchDemoResource returns the demo resource URL for a FACEIT match-room id

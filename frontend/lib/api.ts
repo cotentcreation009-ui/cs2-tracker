@@ -193,3 +193,19 @@ export async function resolveSteamId(query: string): Promise<string> {
   );
   return data.steamId64;
 }
+
+// resolveFaceitNickname maps a FACEIT nickname to a SteamID64 (via FACEIT's
+// game_player_id). Used by the public/extension endpoint. Returns null on any
+// failure (unknown nickname, no key, unreachable).
+export async function resolveFaceitNickname(
+  nickname: string,
+): Promise<string | null> {
+  try {
+    const data = await getJSON<{ steamId64: string }>(
+      `/api/faceit/resolve?nickname=${encodeURIComponent(nickname)}`,
+    );
+    return data.steamId64 || null;
+  } catch {
+    return null;
+  }
+}
