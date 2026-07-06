@@ -7,11 +7,13 @@ package demosource
 
 import (
 	"compress/bzip2"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cs2tracker/server/internal/queue"
+	"github.com/klauspost/compress/zstd"
 )
 
 // Resolved is the outcome of resolving a job to a demo on disk.
@@ -105,6 +108,35 @@ var safeClient = &http.Client{
 	},
 }
 
+// decompressor wraps body with the decoder implied by the URL's PATH extension
+// (query strings — e.g. signed-URL tokens — are ignored). GOTV demos ship as
+// .dem.bz2, FACEIT demos as .dem.zst (older ones .dem.gz); plain .dem passes
+// through. The returned close func releases decoder resources (never the body).
+func decompressor(rawURL string, body io.Reader) (io.Reader, func(), error) {
+	path := rawURL
+	if u, err := url.Parse(rawURL); err == nil && u.Path != "" {
+		path = u.Path
+	}
+	switch {
+	case strings.HasSuffix(strings.ToLower(path), ".bz2"):
+		return bzip2.NewReader(body), func() {}, nil
+	case strings.HasSuffix(strings.ToLower(path), ".gz"):
+		gz, err := gzip.NewReader(body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("demosource: gzip: %w", err)
+		}
+		return gz, func() { _ = gz.Close() }, nil
+	case strings.HasSuffix(strings.ToLower(path), ".zst"):
+		zr, err := zstd.NewReader(body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("demosource: zstd: %w", err)
+		}
+		return zr, zr.Close, nil
+	default:
+		return body, func() {}, nil
+	}
+}
+
 func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -128,11 +160,13 @@ func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (stri
 	}
 	defer out.Close()
 
-	var src io.Reader = resp.Body
-	if strings.HasSuffix(strings.ToLower(rawURL), ".bz2") {
-		src = bzip2.NewReader(resp.Body) // GOTV demos are distributed bz2-compressed
+	src, closeDec, err := decompressor(rawURL, resp.Body)
+	if err != nil {
+		_ = os.Remove(out.Name())
+		return "", err
 	}
-	// Cap the DECOMPRESSED size so a small bz2 "bomb" can't expand to fill disk.
+	defer closeDec()
+	// Cap the DECOMPRESSED size so a small compressed "bomb" can't fill the disk.
 	if maxBytes > 0 {
 		src = io.LimitReader(src, maxBytes+1)
 	}

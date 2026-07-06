@@ -1,12 +1,17 @@
 package demosource
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestIsPublicIP(t *testing.T) {
@@ -33,6 +38,53 @@ func TestIsPublicIP(t *testing.T) {
 		if got := isPublicIP(ip); got != want {
 			t.Errorf("isPublicIP(%s) = %v, want %v", s, got, want)
 		}
+	}
+}
+
+// decompressor must pick the decoder from the URL PATH extension — including
+// signed URLs whose query strings carry tokens — and round-trip the payload.
+// FACEIT demos are .dem.zst, legacy FACEIT .dem.gz, GOTV .dem.bz2, Valve .dem.
+func TestDecompressor(t *testing.T) {
+	payload := []byte("HL2DEMO fake demo payload for round-trip")
+
+	gzBuf := &bytes.Buffer{}
+	gw := gzip.NewWriter(gzBuf)
+	_, _ = gw.Write(payload)
+	_ = gw.Close()
+
+	zstBuf := &bytes.Buffer{}
+	zw, err := zstd.NewWriter(zstBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = zw.Write(payload)
+	_ = zw.Close()
+
+	cases := []struct {
+		name string
+		url  string
+		body []byte
+	}{
+		{"plain dem", "https://replay1.valve.net/730/x.dem", payload},
+		{"gzip", "https://demos.faceit-cdn.net/old/x.dem.gz", gzBuf.Bytes()},
+		{"zstd", "https://demos-us-east.backblaze.faceit-cdn.net/cs2/x.dem.zst", zstBuf.Bytes()},
+		{"zstd signed url (query string)", "https://cdn.example.net/cs2/x.dem.zst?sig=abc123&expires=999", zstBuf.Bytes()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src, closeDec, err := decompressor(tc.url, bytes.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("decompressor: %v", err)
+			}
+			defer closeDec()
+			got, err := io.ReadAll(src)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if !bytes.Equal(got, payload) {
+				t.Errorf("round-trip mismatch: got %q", got)
+			}
+		})
 	}
 }
 

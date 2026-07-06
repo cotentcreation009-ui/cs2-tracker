@@ -97,11 +97,15 @@ export default function DemosPage() {
         onPhase: (p) => setPhase(p),
         signal: ac.signal,
       });
-      const name =
-        (u.split("?")[0].split("/").pop() || "demo").replace(
-          /\.dem(\.(bz2|gz))?$/i,
-          "",
-        ) || "Demo";
+      // Display name: FACEIT room links get "FACEIT <id>"; file URLs use the
+      // basename with the (possibly compressed) .dem extension stripped.
+      const roomMatch = u.match(/\/room\/([0-9]+-[0-9a-f-]{36})/i) ?? u.match(/^([0-9]+-[0-9a-f-]{36})$/i);
+      const name = roomMatch
+        ? `FACEIT ${roomMatch[1].slice(0, 10)}…`
+        : (u.split("?")[0].split("/").pop() || "demo").replace(
+            /\.dem(\.(bz2|gz|zst))?$/i,
+            "",
+          ) || "Demo";
       await saveMatch(meta, rounds, name);
       setUrl("");
       await refresh();
@@ -225,19 +229,21 @@ export default function DemosPage() {
         )}
       </div>
 
-      {/* parse from a link — server fetches the demo, no local file needed */}
+      {/* parse from a link — server fetches the demo, no local file needed.
+          Accepts a FACEIT match-room link (resolved to its demo via the FACEIT
+          API) or a direct .dem/.bz2/.gz/.zst URL. */}
       <div className="card-2 flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
         <div className="shrink-0 text-xs font-semibold uppercase tracking-wider text-muted">
           Or parse from a link
         </div>
         <input
-          type="url"
+          type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void handleUrl();
           }}
-          placeholder="https://…/match.dem  ·  FACEIT demo link or GOTV .dem/.bz2"
+          placeholder="FACEIT match link (faceit.com/…/room/…)  ·  or a direct .dem/.bz2/.zst URL"
           disabled={parsing}
           className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm text-ink placeholder:text-faint disabled:opacity-50"
         />
