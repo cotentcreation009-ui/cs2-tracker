@@ -717,57 +717,86 @@ export default function ReplayPage() {
     setPlaying(true);
   };
 
-  return (
-    <div className="full-bleed space-y-4 px-4 lg:px-6">
-      <Link href="/demos" className="text-xs text-muted hover:text-ink">
-        ← Demos
-      </Link>
+  const ctWins = rounds.filter((r) => r.winner === "CT").length;
+  const tWins = rounds.filter((r) => r.winner === "T").length;
 
-      {/* header */}
-      <section className="card-2 relative overflow-hidden">
-        <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center">
-          {hasCalibration(meta.map) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={radarImage(meta.map)}
-              alt={mapLabel(meta.map)}
-              className="h-16 w-16 shrink-0 rounded-lg border border-line object-cover"
-            />
-          ) : (
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-2xl text-faint">
-              ◎
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-xl font-extrabold tracking-tight">
-              {name}
-            </h1>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
-              <span className="pill bg-panel capitalize text-ink">
-                {mapLabel(meta.map)}
-              </span>
-              <span className="tabular-nums">{rounds.length} rounds</span>
-              <span className="tabular-nums">{meta.players.length} players</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="font-bold tabular-nums text-[#5b9dff]">
-                  {rounds.filter((r) => r.winner === "CT").length}
-                </span>
-                <span className="text-faint">CT</span>
+  return (
+    <div className="full-bleed space-y-3 px-4 lg:px-6">
+      {/* unified header: identity + scoreline, with the lens tabs built in */}
+      <section className="card-2 overflow-hidden">
+        <div className="flex flex-col gap-3 px-4 pb-3 pt-3.5 sm:flex-row sm:items-center sm:px-5">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Link
+              href="/demos"
+              title="Back to demo library"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-panel text-base text-muted transition hover:border-brand/60 hover:text-ink"
+            >
+              ←
+            </Link>
+            {hasCalibration(meta.map) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={radarImage(meta.map)}
+                alt={mapLabel(meta.map)}
+                className="h-12 w-12 shrink-0 rounded-lg border border-line object-cover"
+              />
+            ) : (
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-xl text-faint">
+                ◎
+              </div>
+            )}
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-extrabold leading-tight tracking-tight">
+                {name}
+              </h1>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+                <span className="font-semibold capitalize text-ink">{mapLabel(meta.map)}</span>
                 <span className="text-faint">·</span>
-                <span className="font-bold tabular-nums text-[#e7b53c]">
-                  {rounds.filter((r) => r.winner === "T").length}
-                </span>
-                <span className="text-faint">T</span>
-              </span>
+                <span className="tabular-nums">{rounds.length} rounds</span>
+                <span className="text-faint">·</span>
+                <span className="tabular-nums">{meta.players.length} players</span>
+              </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setTab("map")}
-            className="btn btn-ghost shrink-0 text-xs"
-          >
-            Heatmap →
-          </button>
+
+          {/* scoreline */}
+          <div className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5">
+            <div className="text-center">
+              <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: CT }}>
+                {ctWins}
+              </div>
+              <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: CT }}>
+                CT
+              </div>
+            </div>
+            <div className="text-lg font-bold text-faint">:</div>
+            <div className="text-center">
+              <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: T }}>
+                {tWins}
+              </div>
+              <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: T }}>
+                T
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* lens tabs — part of the header, not a floating strip */}
+        <div className="flex flex-wrap gap-1 border-t border-line/60 bg-panel/30 px-3">
+          {TABS.map((tb) => (
+            <button
+              key={tb.k}
+              type="button"
+              onClick={() => setTab(tb.k)}
+              className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition ${
+                tab === tb.k
+                  ? "border-brand text-ink"
+                  : "border-transparent text-muted hover:border-line hover:text-ink"
+              }`}
+            >
+              {tb.label}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -778,24 +807,6 @@ export default function ReplayPage() {
         showSide={tab !== "replay"}
       />
 
-      {/* analysis tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {TABS.map((tb) => (
-          <button
-            key={tb.k}
-            type="button"
-            onClick={() => setTab(tb.k)}
-            className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition ${
-              tab === tb.k
-                ? "border-brand text-ink"
-                : "border-transparent text-muted hover:border-line hover:text-ink"
-            }`}
-          >
-            {tb.label}
-          </button>
-        ))}
-      </div>
-
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
@@ -803,10 +814,11 @@ export default function ReplayPage() {
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
-        <>
-      <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
-        {/* radar */}
-        <div className="relative w-full max-w-160">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,340px)] xl:items-start">
+          {/* player unit: the radar with its transport bar attached below,
+              exactly like a video player */}
+          <div className="min-w-0">
+        <div className="relative mx-auto w-full max-w-180">
           <canvas
             ref={canvasRef}
             width={SIZE}
@@ -886,37 +898,21 @@ export default function ReplayPage() {
           )}
         </div>
 
-        {/* controls + round info */}
-        <div className="space-y-3">
-          <div className="card px-4 py-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
+        {/* transport bar — the radar's video controls */}
+        <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => goRound(roundIdx - 1)}
                 disabled={atFirst}
-                className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-40"
+                title="Previous round"
+                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40"
               >
-                ← Prev
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
+                  <path d="M6 5h2v14H6zM20 5v14l-10-7z" />
+                </svg>
               </button>
-              <span className="text-xs font-semibold tabular-nums">
-                Round {round.n}
-                {round.winner && (
-                  <span className="ml-1.5 pill" style={{ background: `${winHex}22`, color: winHex }}>
-                    {round.winner}
-                  </span>
-                )}
-                <span className="ml-1.5 text-faint">{roundIdx + 1}/{rounds.length}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => goRound(roundIdx + 1)}
-                disabled={atLast}
-                className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-40"
-              >
-                Next →
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -925,85 +921,122 @@ export default function ReplayPage() {
                   playRef.current = np;
                   setPlaying(np);
                 }}
-                className="btn btn-primary px-4"
+                title={playing ? "Pause" : "Play"}
+                className="grid h-9 w-9 place-items-center rounded-lg bg-brand text-[#06101d] transition hover:brightness-110"
               >
-                {playing ? "Pause" : "Play"}
+                {playing ? (
+                  <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
+                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="currentColor" aria-hidden>
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
               </button>
-              <div className="flex rounded-lg border border-line bg-panel p-0.5">
-                {SPEEDS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => {
-                      speedRef.current = s;
-                      setSpeed(s);
-                    }}
-                    className={`rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
-                      speed === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
-                    }`}
-                  >
-                    {s}×
-                  </button>
-                ))}
-              </div>
-              {scopeRound !== null && (
-                <button
-                  type="button"
-                  onClick={() => setScopeRound(null)}
-                  title="Unlink this round from the toolbar"
-                  className="pill bg-brand/15 text-brand"
-                >
-                  R{round.n} scoped ✕
-                </button>
-              )}
-              <span className="ml-auto text-xs tabular-nums text-muted">
-                {time.toFixed(1)}s / {duration.toFixed(0)}s
-              </span>
+              <button
+                type="button"
+                onClick={() => goRound(roundIdx + 1)}
+                disabled={atLast}
+                title="Next round"
+                className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-panel text-muted transition hover:text-ink disabled:opacity-40"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
+                  <path d="M16 5h2v14h-2zM4 5v14l10-7z" />
+                </svg>
+              </button>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={Math.max(duration, 0.1)}
-              step={0.1}
-              value={time}
-              onChange={(e) => {
-                playRef.current = false;
-                setPlaying(false);
-                seek(parseFloat(e.target.value));
-              }}
-              className="mt-3 w-full accent-brand"
-            />
-            {duration > 0 && (
-              <div className="relative mt-1 h-2">
-                {(round.nades ?? []).map((n, i) => (
-                  <span
-                    key={`n${i}`}
-                    title={`${n.k} · ${mmss(n.t)}`}
-                    className="absolute top-0.5 h-1 w-0.5 -translate-x-1/2 rounded-full"
-                    style={{ left: `${(n.t / duration) * 100}%`, background: KIND_COLOR[n.k] ?? "#8a7dff" }}
-                  />
-                ))}
-                {(round.kills ?? []).filter((k) => k.k >= 0).map((k, i) => (
-                  <button
-                    key={`k${i}`}
-                    type="button"
-                    title={`Kill · ${mmss(k.t)} — jump`}
-                    onClick={() => { playRef.current = false; setPlaying(false); seek(k.t); }}
-                    className="absolute top-0 h-2 w-1 -translate-x-1/2 rounded-full transition-transform hover:scale-150"
-                    style={{ left: `${(k.t / duration) * 100}%`, background: "#f5694a" }}
-                  />
-                ))}
-                {(round.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => (
-                  <span
-                    key={`b${i}`}
-                    title={`Bomb plant · ${mmss(b.t)}`}
-                    className="absolute -top-0.5 h-2.5 w-0.5 -translate-x-1/2"
-                    style={{ left: `${(b.t / duration) * 100}%`, background: "#fff" }}
-                  />
-                ))}
-              </div>
+
+            <span className="text-xs font-semibold tabular-nums">
+              Round {round.n}
+              {round.winner && (
+                <span className="ml-1.5 pill" style={{ background: `${winHex}22`, color: winHex }}>
+                  {round.winner}
+                </span>
+              )}
+              <span className="ml-1.5 text-faint">{roundIdx + 1}/{rounds.length}</span>
+            </span>
+
+            <div className="flex rounded-lg border border-line bg-panel p-0.5">
+              {SPEEDS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    speedRef.current = s;
+                    setSpeed(s);
+                  }}
+                  className={`rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
+                    speed === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                  }`}
+                >
+                  {s}×
+                </button>
+              ))}
+            </div>
+            {scopeRound !== null && (
+              <button
+                type="button"
+                onClick={() => setScopeRound(null)}
+                title="Unlink this round from the toolbar"
+                className="pill bg-brand/15 text-brand"
+              >
+                R{round.n} scoped ✕
+              </button>
             )}
+            <span className="ml-auto text-xs tabular-nums text-muted">
+              {mmss(time)} / {mmss(duration)}
+            </span>
           </div>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(duration, 0.1)}
+            step={0.1}
+            value={time}
+            onChange={(e) => {
+              playRef.current = false;
+              setPlaying(false);
+              seek(parseFloat(e.target.value));
+            }}
+            className="mt-2.5 w-full accent-brand"
+          />
+          {duration > 0 && (
+            <div className="relative mt-1 h-2">
+              {(round.nades ?? []).map((n, i) => (
+                <span
+                  key={`n${i}`}
+                  title={`${n.k} · ${mmss(n.t)}`}
+                  className="absolute top-0.5 h-1 w-0.5 -translate-x-1/2 rounded-full"
+                  style={{ left: `${(n.t / duration) * 100}%`, background: KIND_COLOR[n.k] ?? "#8a7dff" }}
+                />
+              ))}
+              {(round.kills ?? []).filter((k) => k.k >= 0).map((k, i) => (
+                <button
+                  key={`k${i}`}
+                  type="button"
+                  title={`Kill · ${mmss(k.t)} — jump`}
+                  onClick={() => { playRef.current = false; setPlaying(false); seek(k.t); }}
+                  className="absolute top-0 h-2 w-1 -translate-x-1/2 rounded-full transition-transform hover:scale-150"
+                  style={{ left: `${(k.t / duration) * 100}%`, background: "#f5694a" }}
+                />
+              ))}
+              {(round.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => (
+                <span
+                  key={`b${i}`}
+                  title={`Bomb plant · ${mmss(b.t)}`}
+                  className="absolute -top-0.5 h-2.5 w-0.5 -translate-x-1/2"
+                  style={{ left: `${(b.t / duration) * 100}%`, background: "#fff" }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+          </div>
+
+          {/* right rail: live feed → player detail → teams */}
+          <div className="space-y-3">
+          <EventFeed round={round} time={time} meta={meta} zones={zones} />
 
           {focusPlayer != null ? (
             <PlayerRoundCard
@@ -1019,8 +1052,6 @@ export default function ReplayPage() {
               Tip: scroll to zoom · drag to pan · click a player dot for their round detail.
             </div>
           )}
-
-          <EventFeed round={round} time={time} meta={meta} zones={zones} />
 
           <div className="card px-4 py-3 text-sm">
             <div className="mb-2.5 flex items-center justify-between">
@@ -1068,9 +1099,8 @@ export default function ReplayPage() {
               {(round.kills ?? []).length} kills · {(round.nades ?? []).length} nades
             </div>
           </div>
+          </div>
         </div>
-      </div>
-        </>
       )}
     </div>
   );
