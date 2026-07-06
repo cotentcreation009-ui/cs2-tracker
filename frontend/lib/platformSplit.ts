@@ -79,10 +79,13 @@ export function computePlatformSplit(
   matches: LeetifyRecentMatch[],
   faceitMatches?: LeetifyRecentMatch[],
   limit = Infinity,
+  premierMatches?: LeetifyRecentMatch[],
 ): PlatformSplit {
-  const premierAll = matches.filter(isPremier);
-  // FACEIT comes from its dedicated full list when available (so games from
-  // months back still count), falling back to whatever's in the recent window.
+  // Each platform comes from its dedicated full list when available (so games
+  // that fell out of the 100-match recent window still count — a FACEIT-heavy
+  // player's Premier games and vice versa), falling back to the recent window.
+  const premierAll =
+    premierMatches && premierMatches.length ? premierMatches : matches.filter(isPremier);
   const faceitAll =
     faceitMatches && faceitMatches.length ? faceitMatches : matches.filter(isFaceit);
   const premier = statFor("premier", "Premier", premierAll.slice(0, limit));

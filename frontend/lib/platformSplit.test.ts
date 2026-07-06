@@ -125,4 +125,18 @@ describe("computePlatformSplit (Premier vs FACEIT)", () => {
     expect(p.comparable).toBe(false);
     expect(p.verdict).toBe("insufficient");
   });
+
+  it("uses the dedicated PREMIER list so a FACEIT-heavy window still gets full Premier (Kiwi bug)", () => {
+    // recent window: 97 FACEIT + 3 Premier (v3's 100-cap cut the older Premier
+    // games off); the dedicated premier list carries the full 40.
+    const window = [
+      ...many(3, () => premier({ leetify_rating: 0.2 })),
+      ...many(97, () => faceit({ leetify_rating: 0.0 })),
+    ];
+    const premierList = many(40, () => premier({ leetify_rating: 0.2 }));
+    const p = computePlatformSplit(window, undefined, Infinity, premierList);
+    expect(p.premierTotal).toBe(40); // not 3
+    expect(p.premier?.n).toBe(40);
+    expect(p.comparable).toBe(true);
+  });
 });

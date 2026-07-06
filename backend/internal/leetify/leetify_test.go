@@ -89,9 +89,70 @@ func TestGetProfileCompletesFaceitFromLegacy(t *testing.T) {
 	if p.FaceitMatches[0].DataSource != "faceit" || p.FaceitMatches[0].Rank != 2100 {
 		t.Errorf("faceit match not mapped from legacy: %+v", p.FaceitMatches[0])
 	}
+	// The Premier list keeps the v3 window's Premier games (fuller than legacy's 0).
+	if len(p.PremierMatches) != v3MatchWindow {
+		t.Errorf("premier matches = %d, want %d (from v3 window)", len(p.PremierMatches), v3MatchWindow)
+	}
 	// v3 stays the base (aim 80 kept)
 	if p.Rating.Aim != 80 {
 		t.Errorf("v3 base lost: aim = %v", p.Rating.Aim)
+	}
+}
+
+// The mirror case (the Kiwi bug): a FACEIT-heavy v3 window (only a few Premier
+// games visible) must complete the PREMIER list from the legacy endpoint.
+func TestGetProfileCompletesPremierFromLegacy(t *testing.T) {
+	rows := make([]string, v3MatchWindow) // full window: 97 faceit + 3 premier
+	for i := range rows {
+		if i < 3 {
+			rows[i] = `{"data_source":"matchmaking","rank_type":11,"rank":30000,"outcome":"win","leetify_rating":0.1,"score":[13,7],"map_name":"de_mirage"}`
+		} else {
+			rows[i] = `{"data_source":"faceit","rank_type":0,"outcome":"loss","leetify_rating":-0.1,"score":[9,13],"map_name":"de_inferno"}`
+		}
+	}
+	v3 := fmt.Sprintf(
+		`{"name":"K","steam64_id":"2","total_matches":8229,"winrate":0.72,"rating":{"aim":99},"recent_matches":[%s]}`,
+		strings.Join(rows, ","),
+	)
+	// legacy history holds the older Premier games the v3 window cut off
+	legacyGames := make([]string, 40)
+	for i := range legacyGames {
+		legacyGames[i] = fmt.Sprintf(
+			`{"gameId":"p%d","dataSource":"matchmaking","matchResult":"win","rankType":11,"skillLevel":%d,"scores":[13,9],"ownTeamTotalLeetifyRatings":{"2":0.2},"kills":20,"deaths":15,"partySize":2}`,
+			i, 29000+i,
+		)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/profile":
+			w.Write([]byte(v3))
+		case "/api/profile/id/2":
+			fmt.Fprintf(w, `{"meta":{"name":"K"},"recentGameRatings":{"aim":99,"leetify":0.0145},"games":[%s]}`,
+				strings.Join(legacyGames, ","))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+	p, err := c.GetProfile(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.PremierMatches) != 40 {
+		t.Fatalf("premier matches = %d, want 40 (completed from legacy)", len(p.PremierMatches))
+	}
+	if p.PremierMatches[0].RankType != 11 || p.PremierMatches[0].Rank != 29000 {
+		t.Errorf("premier match not mapped from legacy: %+v", p.PremierMatches[0])
+	}
+	// FACEIT keeps the fuller v3 set (97 > legacy's 0).
+	if len(p.FaceitMatches) != 97 {
+		t.Errorf("faceit matches = %d, want 97 (v3 kept)", len(p.FaceitMatches))
+	}
+	// legacy peak beats the v3 window's 30000
+	if p.PeakPremier != 30000 {
+		t.Errorf("peak premier = %d, want 30000 (v3 window rank)", p.PeakPremier)
 	}
 }
 
@@ -174,5 +235,8 @@ func TestGetProfileLegacyFallback(t *testing.T) {
 	}
 	if len(p.FaceitMatches) != 1 || p.FaceitMatches[0].DataSource != "faceit" {
 		t.Errorf("faceit matches = %+v, want the one faceit game", p.FaceitMatches)
+	}
+	if len(p.PremierMatches) != 1 || p.PremierMatches[0].RankType != 11 {
+		t.Errorf("premier matches = %+v, want the one premier game", p.PremierMatches)
 	}
 }

@@ -362,17 +362,29 @@ export function CheatMeter({
     const cOpen = openCt > 0 && openT > 0 ? (openCt + openT) / 2 : openCt || openT;
     if (cOpen > 0)
       fallbackCells.push({ label: "Opening", value: `${cOpen.toFixed(0)}%`, color: tierColor(cOpen, 55, 45) });
+    // Leetify sends some of these as 0-1 ratios and some as 0-100 percentages
+    // (source-dependent) — normalise before display so a ratio can't render as
+    // "8607%".
+    const asPct = (v: number) => (v <= 1 ? v * 100 : v);
     if (ls0 && ls0.trade_kills_success_percentage > 0)
-      fallbackCells.push({ label: "Trades won", value: `${ls0.trade_kills_success_percentage.toFixed(0)}%` });
+      fallbackCells.push({ label: "Trades won", value: `${asPct(ls0.trade_kills_success_percentage).toFixed(0)}%` });
     if (ls0 && ls0.spray_accuracy > 0)
-      fallbackCells.push({ label: "Spray acc", value: `${ls0.spray_accuracy.toFixed(0)}%` });
+      fallbackCells.push({ label: "Spray acc", value: `${asPct(ls0.spray_accuracy).toFixed(0)}%` });
     if (ls0 && ls0.counter_strafing_good_shots_ratio > 0)
       fallbackCells.push({
         label: "C-strafe",
-        value: `${(ls0.counter_strafing_good_shots_ratio * 100).toFixed(0)}%`,
+        value: `${asPct(ls0.counter_strafing_good_shots_ratio).toFixed(0)}%`,
       });
-    if (st?.["total_mvps"] && fallbackCells.length < 8)
+    if (ls0 && ls0.accuracy_enemy_spotted > 0)
+      fallbackCells.push({ label: "Spotted acc", value: `${asPct(ls0.accuracy_enemy_spotted).toFixed(0)}%` });
+    if (ls0 && ls0.flashbang_hit_foe_per_flashbang > 0)
+      fallbackCells.push({ label: "Flash hits", value: ls0.flashbang_hit_foe_per_flashbang.toFixed(2) });
+    if (ls0 && ls0.he_foes_damage_avg > 0)
+      fallbackCells.push({ label: "HE dmg avg", value: ls0.he_foes_damage_avg.toFixed(1) });
+    if (st?.["total_mvps"])
       fallbackCells.push({ label: "MVPs", value: fmt(st["total_mvps"]) });
+    if (faceit && faceit.avgKills > 0)
+      fallbackCells.push({ label: "Avg kills", value: faceit.avgKills.toFixed(1) });
   }
   // The career card renders for parsed data OR a reasonably-filled fallback.
   const showCareerCard = showCareer || fallbackCells.length >= 3;
@@ -532,6 +544,32 @@ export function CheatMeter({
               </div>
             </div>
           </div>
+          {/* extra account context — compact pills, matching the Steam row above */}
+          {(() => {
+            const extras: { label: string; value: string }[] = [];
+            if (leetify?.peak_premier)
+              extras.push({ label: "Peak Premier", value: leetify.peak_premier.toLocaleString("en-US") });
+            if (leetify?.avg_party_size)
+              extras.push({ label: "Avg party", value: leetify.avg_party_size.toFixed(1) });
+            if (leetify?.first_match_date) {
+              const y = new Date(leetify.first_match_date).getFullYear();
+              if (Number.isFinite(y) && y > 2000)
+                extras.push({ label: "Since", value: String(y) });
+            }
+            if (faceit && faceit.longestWinStreak > 0)
+              extras.push({ label: "Best streak", value: `${faceit.longestWinStreak}W` });
+            if (!extras.length) return null;
+            return (
+              <div className="flex flex-wrap gap-1.5">
+                {extras.slice(0, 4).map((e) => (
+                  <span key={e.label} className="pill bg-panel text-muted">
+                    {e.label}{" "}
+                    <b className="tabular-nums text-ink">{e.value}</b>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* center: the meter */}
@@ -614,7 +652,7 @@ export function CheatMeter({
       {/* bottom row: career stats · map win rates · consistency + history/verdict —
           one compact strip so the whole box fits a desktop viewport. */}
       <div
-        className={`mt-3 grid gap-3 ${
+        className={`mt-2.5 grid gap-3 ${
           showCareerCard && showMapChart
             ? "lg:grid-cols-[minmax(0,1.1fr)_minmax(0,280px)_minmax(0,1.35fr)]"
             : showCareerCard || showMapChart
@@ -643,7 +681,7 @@ export function CheatMeter({
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                {fallbackCells.slice(0, 8).map((c) => (
+                {fallbackCells.slice(0, 12).map((c) => (
                   <CStat key={c.label} label={c.label} value={c.value} color={c.color} />
                 ))}
               </div>

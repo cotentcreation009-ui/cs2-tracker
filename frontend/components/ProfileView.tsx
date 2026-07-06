@@ -196,7 +196,11 @@ export function ProfileView({
       splitMatches.length > 0 || faceit ? (
         <div className="space-y-4">
           {splitMatches.length > 0 && (
-            <PlatformSplit matches={splitMatches} faceitMatches={leetify?.faceit_matches} />
+            <PlatformSplit
+              matches={splitMatches}
+              faceitMatches={leetify?.faceit_matches}
+              premierMatches={leetify?.premier_matches}
+            />
           )}
           {faceit && <FaceitPanel profile={faceit} />}
         </div>
@@ -368,7 +372,11 @@ export function ProfileView({
           of this detail lives in its three popup buttons instead. */}
 
       {leetify?.recent_matches && leetify.recent_matches.length > 0 && (
-        <PlatformSplit matches={leetify.recent_matches} faceitMatches={leetify.faceit_matches} />
+        <PlatformSplit
+          matches={leetify.recent_matches}
+          faceitMatches={leetify.faceit_matches}
+          premierMatches={leetify.premier_matches}
+        />
       )}
 
       {/* Recent form & trends — collapsed by default (the CheatMeter hero

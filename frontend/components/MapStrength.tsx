@@ -223,8 +223,9 @@ function roundRec(ms: LeetifyRecentMatch[]): { won: number; lost: number } {
 }
 
 // Map icon: real map logo, falling back to the radar thumbnail, then a short
-// label. Shows the map name on hover so each vertex is identifiable.
-function MapIcon({ map }: { map: string }) {
+// label. Shows the map name on hover so each vertex is identifiable (the radar
+// suppresses this via noLabel and shows its richer stats tooltip instead).
+function MapIcon({ map, noLabel = false }: { map: string; noLabel?: boolean }) {
   const logo = radarImage(map).replace(/radar\.png$/, "logo.png");
   const radar = radarImage(map);
   const [stage, setStage] = useState(0); // 0 = logo, 1 = radar, 2 = label
@@ -247,9 +248,11 @@ function MapIcon({ map }: { map: string }) {
           }`}
         />
       )}
-      <span className="pointer-events-none absolute -bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-bg/95 px-1.5 py-0.5 text-[9px] font-semibold text-ink opacity-0 shadow transition-opacity group-hover:opacity-100">
-        {mapLabel(map)}
-      </span>
+      {!noLabel && (
+        <span className="pointer-events-none absolute -bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-bg/95 px-1.5 py-0.5 text-[9px] font-semibold text-ink opacity-0 shadow transition-opacity group-hover:opacity-100">
+          {mapLabel(map)}
+        </span>
+      )}
     </span>
   );
 }
@@ -281,6 +284,7 @@ function MapWinRadar({
   embedded?: boolean;
 }) {
   void metric;
+  const [hov, setHov] = useState<string | null>(null); // hovered vertex (map key)
   const reliable = rows.filter((r) => r.n >= 3);
   const base = (reliable.length >= 3 ? reliable : rows.filter((r) => r.n >= 1)).slice(0, 9);
   // fixed angular order (by name) so vertices don't jump as values change
@@ -317,14 +321,25 @@ function MapWinRadar({
   const ranked = data.map((r) => ({ r, v: valOf(r) })).sort((a, b) => b.v - a.v);
   const best = ranked[0];
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
+  const totalGames = data.reduce((s, r) => s + r.n, 0);
 
   return (
     <div className={embedded ? "card flex flex-col px-3.5 py-3" : "card-2 mb-3 px-4 py-4"}>
       <div className="mb-2 flex items-center justify-between gap-2">
         {embedded ? (
-          <span className="stat-label">Map win rates</span>
+          <span className="stat-label">
+            Map win rates{" "}
+            <span className="font-normal normal-case text-faint">
+              · {totalGames} matches
+            </span>
+          </span>
         ) : (
-          <h3 className="text-sm font-bold">Map Win Rates</h3>
+          <h3 className="text-sm font-bold">
+            Map Win Rates{" "}
+            <span className="text-xs font-normal text-faint">
+              · {totalGames} matches · {data.length} maps
+            </span>
+          </h3>
         )}
         <div className="flex rounded-lg border border-line bg-panel p-0.5">
           {(["rounds", "matches"] as const).map((m) => (
@@ -381,14 +396,43 @@ function MapWinRadar({
 
         {data.map((r, i) => {
           const o = ptAt(i, 1.17);
+          const rec =
+            useMetric === "matches"
+              ? `${r.w}–${r.l}`
+              : (() => {
+                  const { won, lost } = roundRec(r.ms);
+                  return `${won}–${lost}`;
+                })();
+          const avgRating = r.ms.reduce((s, m) => s + m.leetify_rating, 0) / r.n;
+          const isHov = hov === r.map;
+          const wc = winColor(valOf(r));
           return (
             <div
               key={r.map}
-              title={`${mapLabel(r.map)} · ${valOf(r).toFixed(0)}% ${useMetric}`}
               className="absolute -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%` }}
+              style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%`, zIndex: isHov ? 30 : undefined }}
+              onMouseEnter={() => setHov(r.map)}
+              onMouseLeave={() => setHov(null)}
             >
-              <MapIcon map={r.map} />
+              <MapIcon map={r.map} noLabel />
+              {isHov && (
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line2 bg-bg/95 px-2.5 py-1.5 text-[11px] leading-snug shadow-xl">
+                  <div className="font-bold capitalize text-ink">{mapLabel(r.map)}</div>
+                  <div>
+                    <span className="font-bold tabular-nums" style={{ color: wc }}>
+                      {valOf(r).toFixed(0)}%
+                    </span>{" "}
+                    <span className="text-faint">win rate ({useMetric})</span>
+                  </div>
+                  <div className="tabular-nums text-muted">
+                    {rec} <span className="text-faint">{useMetric === "matches" ? "record" : "rounds"} · over {r.n} matches</span>
+                  </div>
+                  <div className="tabular-nums text-muted">
+                    {avgRating >= 0 ? "+" : ""}
+                    {avgRating.toFixed(2)} <span className="text-faint">avg rating</span>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
