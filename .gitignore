@@ -43,3 +43,4 @@ Thumbs.db
 
 # vendored copy of the previous demo-parser app (reference only)
 demo parser app/
+gc-bot/node_modules/

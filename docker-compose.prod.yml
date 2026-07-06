@@ -79,6 +79,9 @@ services:
       DEMO_GCS_CREDENTIALS: ${DEMO_GCS_CREDENTIALS:-}
       DEMO_MAX_MB: ${DEMO_MAX_MB:-600}
       DEMO_URL_TTL: ${DEMO_URL_TTL:-15m}
+      # Set when the gc-bot sidecar runs — the API uses it only to advertise
+      # whether Premier/MM share-code analysis is live.
+      GC_BOT_URL: ${GC_BOT_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,11 +121,39 @@ services:
       DEMO_GCS_BUCKET: ${DEMO_GCS_BUCKET:-}
       DEMO_GCS_CREDENTIALS: ${DEMO_GCS_CREDENTIALS:-}
       DEMO_MAX_MB: ${DEMO_MAX_MB:-600}
+      # Share-code resolution via the gc-bot sidecar (Premier/MM demos).
+      GC_BOT_URL: ${GC_BOT_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Steam Game Coordinator sidecar: resolves CS2 share codes to GOTV replay
+  # URLs for the worker. Internal-only (no published ports). Needs a dedicated
+  # bot Steam account; first start requires a one-time Steam Guard email code:
+  #   docker compose -f docker-compose.prod.yml exec gc-bot \
+  #     wget -qO- --post-data '{"code":"XXXXX"}' \
+  #     --header 'content-type: application/json' http://localhost:7300/guard-code
+  # The refresh token then persists in the gcbot_data volume (~200 days).
+  gc-bot:
+    build: ./gc-bot
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      STEAM_BOT_USER: ${STEAM_BOT_USER:-}
+      STEAM_BOT_PASS: ${STEAM_BOT_PASS:-}
+    volumes:
+      - gcbot_data:/data
+    healthcheck:
+      # Up = the HTTP server answers. (loggedOn/gcConnected are in the JSON body
+      # for humans; we don't fail the container on a transient GC disconnect.)
+      test: ["CMD", "wget", "-qO-", "http://localhost:7300/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # no ports: only the worker (same network) calls it at http://gc-bot:7300
 
   frontend:
     build: ./frontend
@@ -157,3 +188,4 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  gcbot_data:

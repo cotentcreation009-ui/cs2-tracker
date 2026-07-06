@@ -16,6 +16,7 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/demosource"
+	"github.com/cs2tracker/server/internal/gcbot"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/worker"
 )
@@ -69,6 +70,12 @@ func run(log *slog.Logger) error {
 	}
 
 	w := worker.New(database, c, workDir, cfg.DeleteRawDemo, cfg.JobTimeout, log)
+
+	// Wire the Game Coordinator bot so share-code jobs resolve to replay URLs.
+	if cfg.GCBotURL != "" {
+		w.Resolve = demosource.NewResolver(gcbot.New(cfg.GCBotURL).Resolve)
+		log.Info("share-code resolution enabled", "gcBot", cfg.GCBotURL)
+	}
 
 	// Attach object storage so the worker can pull browser-direct (GCS) uploads.
 	if gcs, err := blob.NewGCS(ctx, cfg.DemoGCSBucket, cfg.DemoGCSCredentials); err != nil {

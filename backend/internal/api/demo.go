@@ -18,6 +18,7 @@ import (
 
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/faceit"
+	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/go-chi/chi/v5"
 )
@@ -309,6 +310,124 @@ func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 		Type:    queue.JobParseReplay,
 		Source:  source,
 		DemoURL: raw,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
+		s.serverError(w, "enqueue", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
+// leetifyGameIDRe matches a Leetify game id (UUID) — the id our recent-match
+// rows carry.
+var leetifyGameIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// valveReplayMaxAge is how long Valve keeps GOTV replays around. Matches older
+// than this get a clear "expired" error instead of a doomed download attempt.
+const valveReplayMaxAge = 31 * 24 * time.Hour
+
+// handleDemoAnalyzeMatch enqueues a demo parse for a match listed on a profile,
+// identified by its Leetify game id. The server looks the match up on Leetify:
+// FACEIT matches resolve via the FACEIT Download API; Premier/MM matches carry a
+// Valve share code, resolved to a replay URL by the gc-bot at parse time.
+// Public + quota'd; one click, no file handling for the user.
+func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) {
+	if s.queue == nil {
+		writeError(w, http.StatusServiceUnavailable, "demo parsing is not available right now")
+		return
+	}
+	if s.leetify == nil {
+		writeError(w, http.StatusServiceUnavailable, "match lookup is not available right now")
+		return
+	}
+	if ok, status, msg := s.demoQuotaOK(r); !ok {
+		writeError(w, status, msg)
+		return
+	}
+	var req struct {
+		GameID string `json:"gameId"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	gameID := strings.TrimSpace(req.GameID)
+	if !leetifyGameIDRe.MatchString(gameID) {
+		writeError(w, http.StatusBadRequest, "invalid match id")
+		return
+	}
+
+	// Charge quota UP FRONT: create the job row before any external lookup, so
+	// requests that error out (unknown match, expired demo, no scope) still count
+	// against the per-IP/global daily caps. Otherwise error paths are free and an
+	// attacker can drive unbounded Leetify/FACEIT calls with random ids.
+	id := randID()
+	if err := s.db.CreateDemoJob(r.Context(), id, clientIP(r), "match.dem", 0); err != nil {
+		s.serverError(w, "record demo job", err)
+		return
+	}
+	fail := func(status int, msg string) {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", msg)
+		writeError(w, status, msg)
+	}
+
+	gd, err := s.leetify.GetGameDetails(r.Context(), gameID)
+	if err != nil {
+		if errors.Is(err, leetify.ErrNotFound) {
+			fail(http.StatusNotFound, "match not found")
+			return
+		}
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "match lookup failed")
+		s.serverError(w, "match lookup", err)
+		return
+	}
+
+	var (
+		demoURL   string
+		shareCode string
+		source    string
+	)
+	switch {
+	case gd.FaceitMatchID != "":
+		signed, ferr := s.resolveFaceitDemo(r.Context(), gd.FaceitMatchID)
+		switch {
+		case ferr == nil:
+			demoURL = signed
+			source = "faceit"
+		case errors.Is(ferr, faceit.ErrNoDemo), errors.Is(ferr, faceit.ErrNotFound):
+			fail(http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old)")
+			return
+		case errors.Is(ferr, faceit.ErrNoDownloadScope), errors.Is(ferr, faceit.ErrNoAPIKey):
+			fail(http.StatusServiceUnavailable, "FACEIT demo analysis isn't enabled yet — coming soon")
+			return
+		default:
+			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "resolve faceit demo failed")
+			s.serverError(w, "resolve faceit demo", ferr)
+			return
+		}
+	case gd.SteamShareCode != "":
+		if s.cfg.GCBotURL == "" {
+			fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
+			return
+		}
+		if t, terr := time.Parse(time.RFC3339, gd.FinishedAt); terr == nil && time.Since(t) > valveReplayMaxAge {
+			fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
+			return
+		}
+		shareCode = gd.SteamShareCode
+		source = "sharecode"
+	default:
+		fail(http.StatusBadRequest, "no demo reference is available for that match")
+		return
+	}
+
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:        id,
+		Type:      queue.JobParseReplay,
+		Source:    source,
+		DemoURL:   demoURL,
+		ShareCode: shareCode,
 	})
 	if err != nil {
 		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")

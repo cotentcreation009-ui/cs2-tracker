@@ -470,6 +470,48 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	return p
 }
 
+// GameDetails is the tiny slice of Leetify's per-match payload we need to turn
+// a listed match into an analyzable demo: the Valve share code (Premier/MM) or
+// the FACEIT match id, plus when it finished (Valve replays expire ~30 days).
+type GameDetails struct {
+	ID             string `json:"id"`
+	DataSource     string `json:"dataSource"`
+	FinishedAt     string `json:"finishedAt"`
+	MapName        string `json:"mapName"`
+	SteamShareCode string `json:"steamShareCode"`
+	FaceitMatchID  string `json:"faceitMatchId"`
+}
+
+// GetGameDetails fetches a single match's details from the legacy endpoint by
+// Leetify game id (the id our recent-match rows carry).
+func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetails, error) {
+	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetify games: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var gd GameDetails
+		if err := json.NewDecoder(resp.Body).Decode(&gd); err != nil {
+			return nil, fmt.Errorf("leetify games: decode: %w", err)
+		}
+		return &gd, nil
+	case http.StatusNotFound:
+		return nil, ErrNotFound
+	default:
+		return nil, fmt.Errorf("leetify games: unexpected status %d", resp.StatusCode)
+	}
+}
+
 func (c *Client) getProfileLegacy(ctx context.Context, steam64 uint64) (*Profile, error) {
 	u := c.legacyURL + "/api/profile/id/" + strconv.FormatUint(steam64, 10)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

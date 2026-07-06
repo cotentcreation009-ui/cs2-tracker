@@ -185,6 +185,26 @@ export async function parseDemoFromUrl(
   return pollAndFetch(id, handlers);
 }
 
+// Analyze a match listed on a profile by its Leetify game id — the server looks
+// the match up, resolves its demo (FACEIT Download API or the Valve GC bot) and
+// parses it. One click, no file handling for the user.
+export async function analyzeMatch(
+  gameId: string,
+  handlers: ParseHandlers = {},
+): Promise<ParseResult> {
+  const { signal } = handlers;
+  handlers.onPhase?.("finding demo…");
+  const res = await fetch("/api/demos/analyze-match", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ gameId }),
+    signal,
+  });
+  if (!res.ok) throw new Error(await errText(res, "could not start analysis"));
+  const { id } = (await res.json()) as { id: string };
+  return pollAndFetch(id, handlers);
+}
+
 // Poll a parse job to completion, then fetch + shape the result. Shared by the
 // upload and from-URL paths.
 async function pollAndFetch(

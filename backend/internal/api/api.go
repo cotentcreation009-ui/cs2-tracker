@@ -144,6 +144,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/demos/parse", s.handleDemoParse)
 			r.Post("/demos/upload", s.handleDemoUpload)
 			r.Post("/demos/from-url", s.handleDemoFromURL)
+			r.Post("/demos/analyze-match", s.handleDemoAnalyzeMatch)
 			r.Get("/demos/{id}", s.handleDemoJob)
 			r.Get("/demos/{id}/data", s.handleDemoData)
 			r.Post("/ai/analyze", s.handleAiAnalyze)
