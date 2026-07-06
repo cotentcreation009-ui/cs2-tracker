@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,10 +12,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/go-chi/chi/v5"
 )
@@ -182,9 +185,50 @@ func isPublicHost(host string) bool {
 	return true
 }
 
-// handleDemoFromURL enqueues a replay parse for a demo at a remote URL (e.g. a
-// FACEIT demo link or a Valve GOTV .dem/.bz2). The worker downloads it server-
-// side, so the user never needs the file locally. Public + quota'd + SSRF-guarded.
+// faceitRoomRe matches a FACEIT match-room id, e.g. "1-2e6c6720-5486-40be-9549-0b3657a8d4f7".
+var faceitRoomRe = regexp.MustCompile(`^[0-9]+-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// faceitRoomID extracts a FACEIT match id from user input: either a bare match
+// id, or a match-room link like https://www.faceit.com/en/cs2/room/1-…/scoreboard.
+// Returns "" when the input isn't a FACEIT room reference.
+func faceitRoomID(raw string, u *url.URL) string {
+	if faceitRoomRe.MatchString(raw) {
+		return raw
+	}
+	if u == nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "faceit.com" && !strings.HasSuffix(host, ".faceit.com") {
+		return ""
+	}
+	segs := strings.Split(u.Path, "/")
+	for i, seg := range segs {
+		if seg == "room" && i+1 < len(segs) && faceitRoomRe.MatchString(segs[i+1]) {
+			return segs[i+1]
+		}
+	}
+	return ""
+}
+
+// resolveFaceitDemo turns a FACEIT match id into a signed, downloadable demo URL
+// (Data API → demo resource → Download API signed URL).
+func (s *Server) resolveFaceitDemo(ctx context.Context, matchID string) (string, error) {
+	if s.faceit == nil || !s.faceit.HasKey() {
+		return "", faceit.ErrNoAPIKey
+	}
+	resource, err := s.faceit.MatchDemoResource(ctx, matchID)
+	if err != nil {
+		return "", err
+	}
+	return s.faceit.SignDemoURL(ctx, resource)
+}
+
+// handleDemoFromURL enqueues a replay parse for a demo the server fetches itself,
+// so the user never downloads/uploads the file. Accepts a FACEIT match-room link
+// (or bare match id) — resolved to a signed demo URL via the FACEIT API — or a
+// direct .dem/.bz2/.gz/.zst URL (e.g. a Valve GOTV replay link). Public +
+// quota'd + SSRF-guarded.
 func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 	if s.queue == nil {
 		writeError(w, http.StatusServiceUnavailable, "demo parsing is not available right now")
@@ -202,14 +246,48 @@ func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw := strings.TrimSpace(req.URL)
+	source := "url"
+
+	// A bare FACEIT match id isn't a URL — check before url.Parse.
+	roomID := faceitRoomID(raw, nil)
+	if roomID == "" {
+		if u, err := url.Parse(raw); err == nil {
+			roomID = faceitRoomID(raw, u)
+		}
+	}
+	if roomID != "" {
+		signed, err := s.resolveFaceitDemo(r.Context(), roomID)
+		switch {
+		case err == nil:
+			raw = signed
+			source = "faceit"
+		case errors.Is(err, faceit.ErrNoDemo):
+			writeError(w, http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old or not finished)")
+			return
+		case errors.Is(err, faceit.ErrNoDownloadScope):
+			writeError(w, http.StatusServiceUnavailable, "FACEIT demo downloads aren't enabled yet on our API key — paste a direct demo file URL for now")
+			return
+		case errors.Is(err, faceit.ErrNotFound):
+			writeError(w, http.StatusBadRequest, "FACEIT match not found — check the room link")
+			return
+		case errors.Is(err, faceit.ErrNoAPIKey):
+			writeError(w, http.StatusServiceUnavailable, "FACEIT integration isn't configured")
+			return
+		default:
+			s.serverError(w, "resolve faceit demo", err)
+			return
+		}
+	}
+
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		writeError(w, http.StatusBadRequest, "url must start with http:// or https://")
+		writeError(w, http.StatusBadRequest, "paste a FACEIT match-room link or a direct http(s) demo URL")
 		return
 	}
 	lower := strings.ToLower(u.Path)
-	if !strings.HasSuffix(lower, ".dem") && !strings.HasSuffix(lower, ".bz2") && !strings.HasSuffix(lower, ".gz") {
-		writeError(w, http.StatusBadRequest, "url must point to a .dem (optionally .bz2/.gz) file")
+	if !strings.HasSuffix(lower, ".dem") && !strings.HasSuffix(lower, ".bz2") &&
+		!strings.HasSuffix(lower, ".gz") && !strings.HasSuffix(lower, ".zst") {
+		writeError(w, http.StatusBadRequest, "url must point to a .dem (optionally .bz2/.gz/.zst) file")
 		return
 	}
 	if !isPublicHost(u.Hostname()) {
@@ -229,7 +307,7 @@ func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 	job, err := s.queue.Enqueue(r.Context(), queue.Job{
 		ID:      id,
 		Type:    queue.JobParseReplay,
-		Source:  "url",
+		Source:  source,
 		DemoURL: raw,
 	})
 	if err != nil {

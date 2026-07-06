@@ -11,6 +11,7 @@ package faceit
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,15 +27,29 @@ var (
 	ErrNoAPIKey = errors.New("faceit: no API key configured")
 	// ErrNotFound means the SteamID has no linked FACEIT CS2 player.
 	ErrNotFound = errors.New("faceit: player not found")
+	// ErrNoDemo means the match exists but exposes no demo file (too old, not
+	// finished, or FACEIT didn't record one).
+	ErrNoDemo = errors.New("faceit: match has no demo available")
+	// ErrNoDownloadScope means the API key was rejected by FACEIT's Download API —
+	// demo downloads need the separate "Download API" scope enabled for the key in
+	// the FACEIT developer portal (demo CDN URLs are not directly fetchable).
+	ErrNoDownloadScope = errors.New("faceit: api key lacks the Download API scope")
 )
 
-const defaultBaseURL = "https://open.faceit.com/data/v4"
+const (
+	defaultBaseURL = "https://open.faceit.com/data/v4"
+	// FACEIT's Download API: exchanges a demo resource URL for a short-lived
+	// signed download URL. The raw demo_url hosts have no public DNS, so this
+	// exchange is the only way to fetch a demo.
+	defaultDownloadURL = "https://open.faceit.com/download/v2/demos/download"
+)
 
 // Client talks to the FACEIT Data API.
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	baseURL     string
+	downloadURL string
+	apiKey      string
+	http        *http.Client
 }
 
 // Option customises a Client.
@@ -43,6 +58,11 @@ type Option func(*Client)
 // WithHTTPClient injects a custom HTTP client (used in tests).
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
+// WithDownloadURL overrides the Download API endpoint (used in tests).
+func WithDownloadURL(u string) Option {
+	return func(c *Client) { c.downloadURL = strings.TrimRight(u, "/") }
+}
+
 // New builds a Client. An empty baseURL falls back to the public API; apiKey may
 // be empty (calls then return ErrNoAPIKey).
 func New(baseURL, apiKey string, opts ...Option) *Client {
@@ -50,9 +70,10 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		baseURL = defaultBaseURL
 	}
 	c := &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		downloadURL: defaultDownloadURL,
+		apiKey:      apiKey,
+		http:        &http.Client{Timeout: 10 * time.Second},
 	}
 	for _, o := range opts {
 		o(c)
@@ -164,6 +185,79 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	p.LongestWinStreak = atoi(l.LongStreak)
 	p.RecentResults = l.Recent
 	return p, nil
+}
+
+// MatchDemoResource returns the demo resource URL for a FACEIT match-room id
+// (e.g. "1-2e6c6720-…"). The returned URL is NOT directly fetchable — pass it
+// to SignDemoURL to obtain a downloadable signed URL.
+func (c *Client) MatchDemoResource(ctx context.Context, matchID string) (string, error) {
+	if c.apiKey == "" {
+		return "", ErrNoAPIKey
+	}
+	var mr struct {
+		Status  string   `json:"status"`
+		DemoURL []string `json:"demo_url"`
+	}
+	if err := c.get(ctx, "/matches/"+url.PathEscape(matchID), &mr); err != nil {
+		return "", err
+	}
+	if len(mr.DemoURL) == 0 || mr.DemoURL[0] == "" {
+		return "", ErrNoDemo
+	}
+	return mr.DemoURL[0], nil
+}
+
+// SignDemoURL exchanges a demo resource URL for a fetchable signed URL via
+// FACEIT's Download API. Requires the key to carry the Download API scope.
+func (c *Client) SignDemoURL(ctx context.Context, resourceURL string) (string, error) {
+	if c.apiKey == "" {
+		return "", ErrNoAPIKey
+	}
+	body, err := json.Marshal(map[string]string{"resource_url": resourceURL})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.downloadURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return "", fmt.Errorf("faceit: download-url request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Shape is {"payload":{"download_url":…}}; tolerate a flat download_url too.
+		var out struct {
+			Payload struct {
+				DownloadURL string `json:"download_url"`
+			} `json:"payload"`
+			DownloadURL string `json:"download_url"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return "", fmt.Errorf("faceit: download-url decode: %w", err)
+		}
+		u := out.Payload.DownloadURL
+		if u == "" {
+			u = out.DownloadURL
+		}
+		if u == "" {
+			return "", errors.New("faceit: download-url response had no download_url")
+		}
+		return u, nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "", ErrNoDownloadScope
+	case http.StatusNotFound:
+		return "", ErrNoDemo
+	default:
+		return "", fmt.Errorf("faceit: download-url unexpected status %d", resp.StatusCode)
+	}
 }
 
 func (c *Client) get(ctx context.Context, path string, dst any) error {

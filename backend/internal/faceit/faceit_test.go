@@ -2,6 +2,8 @@ package faceit
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,5 +99,75 @@ func TestGetProfileNoStats(t *testing.T) {
 	}
 	if p.SkillLevel != 3 || p.Matches != 0 {
 		t.Errorf("unexpected identity-only profile: %+v", p)
+	}
+}
+
+// Match-room id → demo resource URL → signed download URL (the two-step FACEIT
+// demo flow; the raw resource host has no public DNS so signing is mandatory).
+func TestMatchDemoResourceAndSign(t *testing.T) {
+	const matchID = "1-2e6c6720-5486-40be-9549-0b3657a8d4f7"
+	const resource = "https://demos-us-east.backblaze.faceit-cdn.net/cs2/x.dem.zst"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/matches/" + matchID:
+			w.Write([]byte(`{"status":"FINISHED","demo_url":["` + resource + `"]}`))
+		case "/download":
+			if r.Method != http.MethodPost {
+				t.Errorf("download method = %s", r.Method)
+			}
+			var body struct {
+				ResourceURL string `json:"resource_url"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.ResourceURL != resource {
+				t.Errorf("resource_url = %q", body.ResourceURL)
+			}
+			w.Write([]byte(`{"payload":{"download_url":"` + resource + `?sig=abc"}}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "k", WithDownloadURL(srv.URL+"/download"))
+	res, err := c.MatchDemoResource(context.Background(), matchID)
+	if err != nil {
+		t.Fatalf("MatchDemoResource: %v", err)
+	}
+	if res != resource {
+		t.Errorf("resource = %q", res)
+	}
+	signed, err := c.SignDemoURL(context.Background(), res)
+	if err != nil {
+		t.Fatalf("SignDemoURL: %v", err)
+	}
+	if signed != resource+"?sig=abc" {
+		t.Errorf("signed = %q", signed)
+	}
+}
+
+// A 403 from the Download API means the key lacks the download scope — surfaced
+// as a distinct error so the API can tell users what's wrong.
+func TestSignDemoURLNoScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"errors":[{"code":"err_f0","message":"no valid scope provided"}]}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "k", WithDownloadURL(srv.URL))
+	if _, err := c.SignDemoURL(context.Background(), "https://x/y.dem.zst"); !errors.Is(err, ErrNoDownloadScope) {
+		t.Errorf("err = %v, want ErrNoDownloadScope", err)
+	}
+}
+
+// A match without a demo (expired/not finished) returns ErrNoDemo.
+func TestMatchDemoResourceNoDemo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"status":"FINISHED","demo_url":[]}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "k").MatchDemoResource(context.Background(), "1-x"); !errors.Is(err, ErrNoDemo) {
+		t.Errorf("err = %v, want ErrNoDemo", err)
 	}
 }
