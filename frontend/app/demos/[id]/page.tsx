@@ -862,10 +862,10 @@ export default function ReplayPage() {
       <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
-      {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
+      {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
       {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
       {tab === "zones" && <ZoneEditor map={meta.map} fit />}
-      {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
+      {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
 
       {tab === "replay" && (
         <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.6fr)_minmax(320px,0.65fr)]">
