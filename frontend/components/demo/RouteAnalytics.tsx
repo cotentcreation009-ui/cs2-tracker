@@ -5,7 +5,7 @@ import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { analyzeRoutes, type PlayerPath, type RouteCluster, type Side } from "@/lib/demo/routes";
 import { radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
-import { loadZones, classifyPosition, ZONE_COLOR, type Zone } from "@/lib/maps/zones";
+import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
@@ -260,12 +260,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 </g>
               )}
 
-              {/* call-out zones */}
-              {calibrated && zones.map((z) => {
-                if (z.points.length < 3) return null;
-                const d = z.points.map((p, i) => `${i ? "L" : "M"} ${p.x * 100} ${p.y * 100}`).join(" ") + " Z";
-                return <path key={z.id} d={d} fill={(ZONE_COLOR[z.kind] ?? "#8a7dff") + "14"} stroke={(ZONE_COLOR[z.kind] ?? "#8a7dff") + "55"} strokeWidth={s * 0.3} />;
-              })}
+              {/* call-out zones are drawn only in the Zones tab; here their
+                  names still label positions/throws via classifyPosition */}
 
               {/* routes */}
               {drawnPaths.map(({ path, winRate, emphasis }) => {
