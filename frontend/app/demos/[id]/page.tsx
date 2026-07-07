@@ -19,6 +19,7 @@ import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
+import { teamScore } from "@/lib/demo/score";
 
 const TABS = [
   { k: "replay", label: "Replay" },
@@ -35,6 +36,25 @@ const SIZE = 720; // canvas internal resolution
 const CT = "#5b9dff";
 const T = "#e7b53c";
 const SPEEDS = [1, 2, 4, 8];
+
+// One small glyph per lens for the tab nav. viewBox 24, currentColor.
+const TAB_ICON: Record<Tab, string> = {
+  replay: "M8 5v14l11-7z",
+  routes: "M4 18h5a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h5M17 3l3 3-3 3M4 15l-3 3 3 3", // rough path
+  weapons: "M12 2v4M12 18v4M2 12h4M18 12h4M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // crosshair
+  insights: "M4 20V10M10 20V4M16 20v-7M22 20H2", // bars
+  map: "M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6zM9 3v15M15 6v15", // folded map
+  zones: "M12 2l9 5v10l-9 5-9-5V7l9-5zM12 2v20M3 7l9 5 9-5", // hexagon
+  verdict: "M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4zM9 12l2 2 4-4", // shield-check
+};
+
+function TabIcon({ k, className }: { k: Tab; className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={TAB_ICON[k]} />
+    </svg>
+  );
+}
 
 // #rrggbb -> rgba() with alpha, for gradients/translucent fills.
 function colA(hex: string, a: number): string {
@@ -731,8 +751,9 @@ export default function ReplayPage() {
     setPlaying(true);
   };
 
-  const ctWins = rounds.filter((r) => r.winner === "CT").length;
-  const tWins = rounds.filter((r) => r.winner === "T").length;
+  // Match score by TEAM, not by side (sides swap at half, so a raw CT/T count
+  // isn't the score). teamA started CT (blue), teamB started T (amber).
+  const { a: teamAScore, b: teamBScore } = teamScore(rounds);
 
   return (
     <div className="full-bleed flex flex-col gap-3 px-4 lg:h-full lg:min-h-0 lg:gap-2.5 lg:px-6">
@@ -773,44 +794,56 @@ export default function ReplayPage() {
             </div>
           </div>
 
-          {/* scoreline */}
+          {/* scoreline — final score by team (winner emphasized). Teams are
+              identified by the side they started on; they swap at halftime. */}
           <div className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5 lg:py-1">
             <div className="text-center">
-              <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: CT }}>
-                {ctWins}
+              <div
+                className="text-2xl font-extrabold leading-none tabular-nums"
+                style={{ color: CT, opacity: teamAScore >= teamBScore ? 1 : 0.55 }}
+              >
+                {teamAScore}
               </div>
               <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: CT }}>
-                CT
+                CT start
               </div>
             </div>
             <div className="text-lg font-bold text-faint">:</div>
             <div className="text-center">
-              <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: T }}>
-                {tWins}
+              <div
+                className="text-2xl font-extrabold leading-none tabular-nums"
+                style={{ color: T, opacity: teamBScore >= teamAScore ? 1 : 0.55 }}
+              >
+                {teamBScore}
               </div>
               <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: T }}>
-                T
+                T start
               </div>
             </div>
           </div>
         </div>
 
-        {/* lens tabs — part of the header, not a floating strip */}
-        <div className="flex flex-wrap gap-1 border-t border-line/60 bg-panel/30 px-3">
-          {TABS.map((tb) => (
-            <button
-              key={tb.k}
-              type="button"
-              onClick={() => setTab(tb.k)}
-              className={`-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold transition lg:py-1.5 ${
-                tab === tb.k
-                  ? "border-brand text-ink"
-                  : "border-transparent text-muted hover:border-line hover:text-ink"
-              }`}
-            >
-              {tb.label}
-            </button>
-          ))}
+        {/* lens tabs — a segmented icon nav built into the header */}
+        <div className="flex gap-1 overflow-x-auto border-t border-line/60 bg-panel/25 px-2 py-1.5 lg:py-1">
+          {TABS.map((tb) => {
+            const on = tab === tb.k;
+            return (
+              <button
+                key={tb.k}
+                type="button"
+                onClick={() => setTab(tb.k)}
+                aria-current={on ? "page" : undefined}
+                className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition lg:py-1 ${
+                  on
+                    ? "bg-brand/15 text-brand shadow-[inset_0_0_0_1px] shadow-brand/30"
+                    : "text-muted hover:bg-panel/70 hover:text-ink"
+                }`}
+              >
+                <TabIcon k={tb.k} className={`h-3.5 w-3.5 ${on ? "opacity-100" : "opacity-70"}`} />
+                {tb.label}
+              </button>
+            );
+          })}
         </div>
       </section>
 
