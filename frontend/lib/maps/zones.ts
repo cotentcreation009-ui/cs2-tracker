@@ -7,6 +7,7 @@
 
 import { worldToRadar } from "./calibration";
 import { defaultCallouts } from "./callouts";
+import { defaultZonePolygons } from "./zonePolygons";
 
 export type ZoneKind = "A" | "B" | "Mid" | "other";
 
@@ -48,6 +49,22 @@ export function newZoneId(): string {
 const toKind = (s: string): ZoneKind => (s === "A" || s === "B" || s === "Mid" ? s : "other");
 
 export function defaultZoneSet(map: string): ZoneSet {
+  // Prefer hand-drawn polygon call-outs where we have them (precise areas — a
+  // position inside a shape takes that shape's name). Maps without a polygon
+  // set fall back to point anchors (nearest-anchor Voronoi).
+  const polys = defaultZonePolygons(map);
+  if (polys && polys.length) {
+    return {
+      id: DEFAULT_SET_ID,
+      name: "Default callouts",
+      zones: polys.map((p, i) => ({
+        id: `def_${i}`,
+        name: p.name,
+        kind: p.kind,
+        points: p.points.map((pt) => ({ ...pt })),
+      })),
+    };
+  }
   return {
     id: DEFAULT_SET_ID,
     name: "Default callouts",
@@ -160,6 +177,10 @@ export function classifyPosition(
   let bestArea = Infinity;
   let bestAnchor: Zone | null = null;
   let bestDist = Infinity;
+  // fallback for polygon-only sets: nearest polygon by centroid, so a position
+  // that lands in a gap between drawn shapes still resolves to a callout.
+  let nearestPoly: Zone | null = null;
+  let nearestPolyDist = Infinity;
   for (const z of zones) {
     if (z.points.length >= 3) {
       if (pointInPolygon(r, z.points)) {
@@ -168,6 +189,19 @@ export function classifyPosition(
           bestArea = a;
           bestPoly = z;
         }
+      }
+      let cx = 0;
+      let cy = 0;
+      for (const p of z.points) {
+        cx += p.x;
+        cy += p.y;
+      }
+      cx /= z.points.length;
+      cy /= z.points.length;
+      const d = (cx - r.x) * (cx - r.x) + (cy - r.y) * (cy - r.y);
+      if (d < nearestPolyDist) {
+        nearestPolyDist = d;
+        nearestPoly = z;
       }
     } else if (z.points.length === 1) {
       const p = z.points[0];
@@ -178,7 +212,7 @@ export function classifyPosition(
       }
     }
   }
-  return bestPoly ?? bestAnchor;
+  return bestPoly ?? bestAnchor ?? nearestPoly;
 }
 
 // ---- legacy shims (kept for the standalone editor / older callers) ---------
