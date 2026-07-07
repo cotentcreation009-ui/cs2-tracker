@@ -12,6 +12,7 @@ import {
   saveCustomSets,
   DEFAULT_SET_ID,
   ZONE_COLOR,
+  pointInPolygon,
   type Zone,
   type ZoneKind,
   type ZoneSet,
@@ -39,10 +40,17 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
   const [tool, setTool] = useState<Tool>("none");
   const [draft, setDraft] = useState<{ x: number; y: number }[]>([]);
   const [drag, setDrag] = useState<{ zoneId: string; idx: number } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imgOk = useRef(false);
   const setsRef = useRef<ZoneSet[]>([]);
+  // whole-zone move (drag a zone's interior); null unless a move is in progress
+  const moveRef = useRef<{ zoneId: string; sx: number; sy: number; orig: { x: number; y: number }[][] } | null>(null);
+  const movedRef = useRef(false); // distinguish a click (select) from a drag (move)
+  const nameInputs = useRef(new Map<string, HTMLInputElement>());
+  const focusNext = useRef(false); // true when a selection should grab the rename field
 
   useEffect(() => {
     setSets(loadCustomSets(map));
@@ -51,7 +59,23 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
     setTool("none");
     setDraft([]);
     setDrag(null);
+    setSelectedId(null);
+    setQuery("");
   }, [map]);
+
+  // when a zone is selected from the MAP (or an "edit" click), scroll its list
+  // row in and focus its name field. Hover-highlighting doesn't set focusNext,
+  // so it only highlights and never steals focus mid-type.
+  useEffect(() => {
+    if (!selectedId || !focusNext.current) return;
+    focusNext.current = false;
+    const el = nameInputs.current.get(selectedId);
+    if (el) {
+      el.scrollIntoView({ block: "nearest" });
+      el.focus();
+      el.select();
+    }
+  }, [selectedId]);
 
   useEffect(() => {
     setsRef.current = sets;
@@ -106,6 +130,52 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
   const renameSet = (id: string, name: string) =>
     persist(sets.map((s) => (s.id === id ? { ...s, name } : s)));
 
+  // One-click "edit this callout": jump straight into editing with a zone
+  // selected. If the active set is the read-only default, fork it first (so the
+  // user never has to think about "duplicate to edit"); then select the zone by
+  // name so its rename field is focused.
+  const editZoneByName = (zoneName: string) => {
+    focusNext.current = !!zoneName;
+    if (activeId !== DEFAULT_SET_ID) {
+      const set = sets.find((s) => s.id === activeId);
+      if (set) {
+        setEditingId(activeId);
+        setSelectedId(set.zones.find((z) => z.name === zoneName)?.id ?? null);
+        return;
+      }
+    }
+    // fork the default into an editable set
+    const id = newZoneId();
+    const zones = defaults.zones.map((z) => ({ ...z, id: newZoneId(), points: z.points.map((p) => ({ ...p })) }));
+    persist([...sets, { id, name: "My callouts", zones }]);
+    makeActive(id);
+    setEditingId(id);
+    setSelectedId(zones.find((z) => z.name === zoneName)?.id ?? null);
+  };
+
+  // smallest polygon (or nearest anchor within grab radius) under a point
+  const hitZone = (nx: number, ny: number): string | null => {
+    if (!editing) return null;
+    let best: string | null = null;
+    let bestArea = Infinity;
+    for (const z of editing.zones) {
+      if (z.points.length >= 3 && pointInPolygon({ x: nx, y: ny }, z.points)) {
+        let a = 0;
+        for (let i = 0, j = z.points.length - 1; i < z.points.length; j = i++) {
+          a += (z.points[j].x + z.points[i].x) * (z.points[j].y - z.points[i].y);
+        }
+        a = Math.abs(a) / 2;
+        if (a < bestArea) { bestArea = a; best = z.id; }
+      }
+    }
+    if (best) return best;
+    const R = 14 / SIZE;
+    for (const z of editing.zones) {
+      if (z.points.length === 1 && Math.abs(z.points[0].x - nx) < R && Math.abs(z.points[0].y - ny) < R) return z.id;
+    }
+    return null;
+  };
+
   // --- canvas ---
   const redraw = useCallback(() => {
     const cv = canvasRef.current;
@@ -129,6 +199,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
 
     for (const z of shown) {
       const col = ZONE_COLOR[z.kind] ?? "#8a7dff";
+      const sel = editingId != null && z.id === selectedId;
       if (z.points.length >= 3) {
         ctx.beginPath();
         z.points.forEach((p, i) => {
@@ -136,19 +207,19 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.closePath();
-        ctx.fillStyle = col + "26";
+        ctx.fillStyle = col + (sel ? "44" : "26");
         ctx.fill();
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = sel ? "#fff" : col;
+        ctx.lineWidth = sel ? 3.5 : 2;
         ctx.stroke();
       } else if (z.points.length === 1) {
         const p = z.points[0];
         ctx.beginPath();
-        ctx.arc(p.x * SIZE, p.y * SIZE, 5, 0, 7);
+        ctx.arc(p.x * SIZE, p.y * SIZE, sel ? 7 : 5, 0, 7);
         ctx.fillStyle = col;
         ctx.fill();
-        ctx.strokeStyle = "#04060e";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = sel ? "#fff" : "#04060e";
+        ctx.lineWidth = sel ? 2.5 : 1.5;
         ctx.stroke();
       }
       const cx = (z.points.reduce((s, p) => s + p.x, 0) / z.points.length) * SIZE;
@@ -192,7 +263,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
         ctx.fill();
       }
     }
-  }, [shown, draft, editingId]);
+  }, [shown, draft, editingId, selectedId]);
 
   useEffect(() => {
     imgOk.current = false;
@@ -247,15 +318,54 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
     return null;
   };
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!editing || tool !== "none") return; // only drag when no draw tool is active
+    if (!editing || tool !== "none") return; // only select/drag when no draw tool is active
     const { x, y } = posOf(e);
     const hit = hitPoint(x, y);
     if (hit) {
+      // grabbing a vertex reshapes; also select that zone
       setDrag(hit);
+      setSelectedId(hit.zoneId);
       e.preventDefault();
+      return;
+    }
+    const zoneId = hitZone(x, y);
+    if (zoneId) {
+      // click selects the zone (and focuses its rename field); dragging its
+      // interior moves the whole shape
+      const z = editing.zones.find((zz) => zz.id === zoneId);
+      movedRef.current = false;
+      moveRef.current = z ? { zoneId, sx: x, sy: y, orig: [z.points.map((p) => ({ ...p }))] } : null;
+      focusNext.current = true;
+      setSelectedId(zoneId);
+      e.preventDefault();
+    } else {
+      setSelectedId(null);
     }
   };
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // whole-zone move
+    if (moveRef.current && editingId) {
+      const mv = moveRef.current;
+      const { x, y } = posOf(e);
+      const dx = x - mv.sx;
+      const dy = y - mv.sy;
+      if (Math.abs(dx) > 2 / SIZE || Math.abs(dy) > 2 / SIZE) movedRef.current = true;
+      const next = setsRef.current.map((s) =>
+        s.id === editingId
+          ? {
+              ...s,
+              zones: s.zones.map((z) =>
+                z.id === mv.zoneId
+                  ? { ...z, points: mv.orig[0].map((p) => ({ x: clamp01(p.x + dx), y: clamp01(p.y + dy) })) }
+                  : z,
+              ),
+            }
+          : s,
+      );
+      setsRef.current = next;
+      setSets(next);
+      return;
+    }
     if (!drag || !editingId) return;
     const { x, y } = posOf(e);
     const cx = clamp01(x);
@@ -276,6 +386,11 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
     setSets(next); // re-render only; persist once on release
   };
   const endDrag = () => {
+    if (moveRef.current) {
+      if (movedRef.current) saveCustomSets(map, setsRef.current);
+      moveRef.current = null;
+      return;
+    }
     if (!drag) return;
     saveCustomSets(map, setsRef.current);
     setDrag(null);
@@ -360,23 +475,32 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
               </div>
             </div>
 
-            {/* the active zones, for reference (what the data will be labelled with) */}
+            {/* the active zones — click any one to rename / reshape it */}
             <div className={`card flex flex-col px-4 py-3 ${fit ? "lg:min-h-0 lg:flex-1" : "max-h-128"}`}>
-              <div className="stat-label mb-2 lg:shrink-0">
-                Call-outs in use ({shown.length})
+              <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
+                <span className="stat-label">Call-outs ({shown.length})</span>
+                <span className="text-[10px] text-faint">click one to rename</span>
               </div>
               <div className="flex-1 space-y-0.5 overflow-y-auto pr-1">
                 {shown.map((z) => (
-                  <div key={z.id} className="flex items-center gap-1.5 text-xs">
+                  <button
+                    key={z.id}
+                    type="button"
+                    onClick={() => editZoneByName(z.name)}
+                    title={`Rename or reshape ${z.name}`}
+                    className="group flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs transition hover:bg-panel/60"
+                  >
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: ZONE_COLOR[z.kind] }} />
                     <span className="min-w-0 flex-1 truncate text-ink">{z.name}</span>
-                    <span className="shrink-0 text-[10px] text-faint">{z.kind}</span>
-                  </div>
+                    <span className="shrink-0 text-[10px] text-faint transition group-hover:text-brand">edit →</span>
+                  </button>
                 ))}
               </div>
               <p className="mt-2 border-t border-line pt-2 text-[10px] text-faint lg:shrink-0">
-                Kills, positions and utility are labelled with these — a smoke landing in
-                a zone reads as &ldquo;smoked {shown[0]?.name ?? "…"}&rdquo;.
+                These label kills, positions &amp; utility — a smoke in a zone reads as
+                &ldquo;smoked {shown[0]?.name ?? "…"}&rdquo;. Click a call-out (or{" "}
+                <button type="button" onClick={() => editZoneByName("")} className="text-brand hover:underline">edit on the map</button>
+                ) to change it — your copy is saved for next time.
               </p>
             </div>
 
@@ -431,21 +555,44 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
                   ? "Click the map to drop a named point."
                   : tool === "polygon"
                     ? "Click points, then Finish."
-                    : "Drag any point on the map to reposition it, or pick a tool / edit zones below."}
+                    : "Click a zone on the map to select it (then rename below) · drag its inside to move it · drag a white dot to reshape."}
               </p>
             </div>
 
             <div className={`card flex flex-col px-4 py-3 ${fit ? "lg:min-h-0 lg:flex-1" : "max-h-128"}`}>
-              <div className="stat-label mb-2 lg:shrink-0">Zones ({editing.zones.length})</div>
+              <div className="mb-2 flex items-center gap-2 lg:shrink-0">
+                <span className="stat-label">Zones ({editing.zones.length})</span>
+                {editing.zones.length > 6 && (
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search…"
+                    className="ml-auto w-28 rounded border border-line bg-panel px-2 py-0.5 text-[11px]"
+                  />
+                )}
+              </div>
               {editing.zones.length === 0 ? (
                 <div className="text-xs text-muted">None yet — add an anchor or draw a polygon.</div>
               ) : (
                 <div className="flex-1 space-y-1 overflow-y-auto pr-1">
-                  {editing.zones.map((z) => (
-                    <div key={z.id} className="flex items-center gap-1.5">
+                  {editing.zones
+                    .filter((z) => !query || z.name.toLowerCase().includes(query.toLowerCase()))
+                    .map((z) => (
+                    <div
+                      key={z.id}
+                      onMouseEnter={() => setSelectedId(z.id)}
+                      className={`flex items-center gap-1.5 rounded px-1 py-0.5 transition ${
+                        z.id === selectedId ? "bg-brand/10 ring-1 ring-brand/40" : ""
+                      }`}
+                    >
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ZONE_COLOR[z.kind] }} />
                       <input
+                        ref={(el) => {
+                          if (el) nameInputs.current.set(z.id, el);
+                          else nameInputs.current.delete(z.id);
+                        }}
                         value={z.name}
+                        onFocus={() => setSelectedId(z.id)}
                         onChange={(e) => updateEditing(editing.zones.map((x) => (x.id === z.id ? { ...x, name: e.target.value } : x)))}
                         className="min-w-0 flex-1 rounded border border-line bg-panel px-2 py-0.5 text-xs"
                       />
@@ -453,11 +600,12 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
                         value={z.kind}
                         onChange={(e) => updateEditing(editing.zones.map((x) => (x.id === z.id ? { ...x, kind: e.target.value as ZoneKind } : x)))}
                         className="rounded border border-line bg-panel px-1 py-0.5 text-[11px]"
+                        title="Colour group"
                       >
                         {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
                       </select>
                       <span className="text-[10px] text-faint">{z.points.length === 1 ? "pt" : "poly"}</span>
-                      <button type="button" onClick={() => updateEditing(editing.zones.filter((x) => x.id !== z.id))} className="text-xs text-faint hover:text-bad">✕</button>
+                      <button type="button" onClick={() => { updateEditing(editing.zones.filter((x) => x.id !== z.id)); if (selectedId === z.id) setSelectedId(null); }} title="Delete call-out" className="text-xs text-faint hover:text-bad">✕</button>
                     </div>
                   ))}
                 </div>

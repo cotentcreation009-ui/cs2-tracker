@@ -5,7 +5,7 @@ import { radarImage } from "@/lib/maps/calibration";
 import type { Projection } from "@/lib/demo/projection";
 import type { UtilThrow } from "@/lib/demo/insights";
 import { KIND_COLOR } from "./RadarMap";
-import { ZONE_COLOR, type Zone } from "@/lib/maps/zones";
+import { type Zone } from "@/lib/maps/zones";
 
 const SIZE = 600;
 
@@ -205,32 +205,7 @@ export function UtilThrowMap({
         }
       }
 
-      // zone call-outs (only meaningful when calibrated — radar-normalized)
-      if (calibrated) {
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "center";
-        for (const z of zones) {
-          if (z.points.length < 3) continue;
-          ctx.beginPath();
-          z.points.forEach((p, i) => {
-            const x = p.x * SIZE, y = p.y * SIZE;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          });
-          ctx.closePath();
-          const zc = ZONE_COLOR[z.kind] ?? "#8a7dff";
-          ctx.fillStyle = hexA(zc, 0.08);
-          ctx.fill();
-          ctx.strokeStyle = hexA(zc, 0.35);
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          const cx = (z.points.reduce((s, p) => s + p.x, 0) / z.points.length) * SIZE;
-          const cy = (z.points.reduce((s, p) => s + p.y, 0) / z.points.length) * SIZE;
-          ctx.fillStyle = "rgba(230,238,248,0.45)";
-          ctx.fillText(z.name, cx, cy);
-        }
-        ctx.textAlign = "left";
-      }
+      // call-out zones are drawn only in the Zones tab — not overlaid here
 
       // solo: persistent dashed trajectory so the lineup reads at a glance
       // (only when both ends actually project onto the map)
