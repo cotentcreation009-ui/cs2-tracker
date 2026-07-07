@@ -103,6 +103,31 @@ function TimingBadge({ timing }: { timing: Timing }) {
   return <span className={`pill ${m.cls}`}>{m.label}</span>;
 }
 
+// award glyphs (viewBox 24, currentColor)
+type AwardKind = "frag" | "impact" | "entry" | "util";
+const AWARD_PATH: Record<AwardKind, { d: string; fill: boolean }> = {
+  frag: { d: "M12 3v3M12 18v3M3 12h3M18 12h3M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z", fill: false },
+  impact: { d: "M12 2l2.9 6.2 6.6.8-4.9 4.6 1.3 6.5-5.9-3.3-5.9 3.3 1.3-6.5L2.5 9l6.6-.8z", fill: true },
+  entry: { d: "M13 2L4 14h6l-1 8 9-12h-6l1-8z", fill: true },
+  util: { d: "M12 2c4 5 7 8.5 7 12a7 7 0 1 1-14 0c0-3.5 3-7 7-12z", fill: true },
+};
+function AwardIcon({ kind, className }: { kind: AwardKind; className?: string }) {
+  const g = AWARD_PATH[kind];
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={g.fill ? "currentColor" : "none"}
+      stroke={g.fill ? "none" : "currentColor"}
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <path d={g.d} />
+    </svg>
+  );
+}
+
 // Clickable utility chip on a player card — focuses the player + selects a kind.
 function UtilPill({
   kind,
@@ -182,6 +207,7 @@ function PlayerCard({
   onUtil,
   onCompare,
   comparing,
+  aiKey,
 }: {
   p: PlayerInsight;
   rank?: number;
@@ -193,6 +219,7 @@ function PlayerCard({
   onUtil: (player: PlayerInsight, kind: string) => void;
   onCompare?: () => void;
   comparing?: boolean;
+  aiKey?: string; // demo+scope-scoped cache key for the AI read
 }) {
   const hex = sideHex(p.team);
   const mk = p.multiKills;
@@ -432,9 +459,18 @@ function PlayerCard({
         }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`}
         cheatFactors={cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ")}
         tendencyLines={playstyleSummary(p, tend)}
+        aiKey={aiKey}
       />
     </div>
   );
+}
+
+// What the scoreboard's stat column shows for one player — follows the active
+// sort so what you sort by is what you SEE (value + a normalized data bar).
+export interface RosterStat {
+  display: string;
+  frac: number; // 0..1 of the field's best, drives the bar
+  color: string;
 }
 
 // Compact scoreboard row — click to make this THE focused player (the tab
@@ -444,6 +480,7 @@ function RosterRow({
   rank,
   focused,
   comparing,
+  stat,
   onFocus,
   onCompare,
 }: {
@@ -451,36 +488,47 @@ function RosterRow({
   rank: number;
   focused: boolean;
   comparing: boolean;
+  stat: RosterStat;
   onFocus: () => void;
   onCompare: () => void;
 }) {
   const hex = sideHex(p.team);
-  const rating = impactRating(p);
   return (
     <div
-      className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 transition ${
+      className={`relative flex items-center gap-1.5 overflow-hidden rounded-lg border px-2 py-1 transition ${
         focused ? "border-brand/50 bg-brand/10" : "border-transparent hover:bg-panel/60"
       }`}
     >
+      {/* team accent edge */}
+      <span
+        className="absolute inset-y-1 left-0 w-0.5 rounded-full"
+        style={{ background: hex, opacity: focused ? 1 : 0.45 }}
+      />
       <button
         type="button"
         onClick={onFocus}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        className="flex min-w-0 flex-1 items-center gap-1.5 pl-1 text-left"
         title={`Show ${p.name}'s full breakdown`}
       >
         <span className="w-4 shrink-0 text-right text-[10px] font-bold tabular-nums text-faint">{rank}</span>
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hex }} />
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{p.name}</span>
+        <span className={`min-w-0 flex-1 truncate text-xs font-semibold ${focused ? "text-brand" : "text-ink"}`}>
+          {p.name}
+        </span>
         <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted">
           {p.kills}-{p.deaths}
         </span>
-        <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-faint">{p.adr.toFixed(0)}</span>
-        <span
-          className="w-10 shrink-0 text-right text-[11px] font-bold tabular-nums"
-          style={{ color: ratingHex(rating) }}
-          title="Impact rating (≈1.0 = solid)"
-        >
-          {rating.toFixed(2)}
+        {/* the sorted stat: value + mini data bar */}
+        <span className="w-14 shrink-0 text-right">
+          <span className="block text-[11px] font-bold leading-tight tabular-nums" style={{ color: stat.color }}>
+            {stat.display}
+          </span>
+          <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-panel">
+            <span
+              className="block h-full rounded-full transition-all"
+              style={{ width: `${Math.round(stat.frac * 100)}%`, background: stat.color, opacity: 0.85 }}
+            />
+          </span>
         </span>
       </button>
       <button
@@ -732,10 +780,12 @@ export default function PlayerInsights({
   meta,
   rounds,
   view,
+  demoId,
 }: {
   meta: ReplayMeta;
   rounds: ReplayRound[];
   view: DemoView;
+  demoId: string;
 }) {
   const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
   const [throwIdx, setThrowIdx] = useState<number | null>(null);
@@ -771,20 +821,48 @@ export default function PlayerInsights({
     [players, sortKey],
   );
 
+  // scoreboard stat column follows the active sort: what you sort by is what
+  // you see, with a bar normalized to the field's best.
+  const statMax = useMemo(
+    () => Math.max(0.0001, ...players.map((p) => sortValue(p, sortKey))),
+    [players, sortKey],
+  );
+  const statFor = (p: PlayerInsight): RosterStat => {
+    const frac = Math.min(1, Math.max(0.04, sortValue(p, sortKey) / statMax));
+    switch (sortKey) {
+      case "kills":
+        return { display: `${p.kills}`, frac, color: "var(--color-brand)" };
+      case "adr":
+        return { display: p.adr.toFixed(0), frac, color: "var(--color-brand)" };
+      case "kd":
+        return { display: p.kd.toFixed(2), frac, color: ratingHex(p.kd) };
+      case "hs":
+        return { display: `${p.hsPct.toFixed(0)}%`, frac, color: "var(--color-brand)" };
+      case "cheat": {
+        const c = demoCheat(p);
+        return { display: `${c.score.toFixed(0)}%`, frac, color: BAND_HEX[c.band] };
+      }
+      default: {
+        const r = impactRating(p);
+        return { display: r.toFixed(2), frac, color: ratingHex(r) };
+      }
+    }
+  };
+
   // "best of the match" highlights — quick scan + click to focus.
   const awards = useMemo(() => {
     if (!players.length) return [];
     const top = (fn: (p: PlayerInsight) => number) =>
       players.reduce((b, p) => (fn(p) > fn(b) ? p : b), players[0]);
-    const out: { label: string; p: PlayerInsight; val: string }[] = [];
+    const out: { label: string; p: PlayerInsight; val: string; icon: AwardKind }[] = [];
     const frag = top((p) => p.kills);
-    out.push({ label: "Top fragger", p: frag, val: `${frag.kills} kills` });
+    out.push({ label: "Top fragger", p: frag, val: `${frag.kills} kills`, icon: "frag" });
     const imp = top((p) => impactRating(p));
-    out.push({ label: "Best impact", p: imp, val: impactRating(imp).toFixed(2) });
+    out.push({ label: "Best impact", p: imp, val: impactRating(imp).toFixed(2), icon: "impact" });
     const entry = top((p) => p.openingKills);
-    if (entry.openingKills > 0) out.push({ label: "Entry king", p: entry, val: `${entry.openingKills} opening K` });
+    if (entry.openingKills > 0) out.push({ label: "Entry king", p: entry, val: `${entry.openingKills} opening K`, icon: "entry" });
     const util = top((p) => p.utilNades.length);
-    if (util.utilNades.length > 0) out.push({ label: "Most utility", p: util, val: `${util.utilNades.length} nades` });
+    if (util.utilNades.length > 0) out.push({ label: "Most utility", p: util, val: `${util.utilNades.length} nades`, icon: "util" });
     return out;
   }, [players]);
 
@@ -957,21 +1035,39 @@ export default function PlayerInsights({
     <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
       {awards.length > 0 && (
         <div className="flex flex-wrap gap-2 lg:shrink-0">
-          {awards.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
-              title={`Focus ${a.p.name}`}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
-                focusI === a.p.i ? "border-brand/50 bg-brand/10" : "border-line bg-panel/50 hover:border-brand/40 hover:bg-panel"
-              }`}
-            >
-              <span className="text-[10px] uppercase tracking-wider text-faint">{a.label}</span>
-              <span className="text-sm font-bold" style={{ color: sideHex(a.p.team) }}>{a.p.name}</span>
-              <span className="text-[11px] tabular-nums text-muted">{a.val}</span>
-            </button>
-          ))}
+          {awards.map((a) => {
+            const hex = sideHex(a.p.team);
+            const on = focusI === a.p.i;
+            return (
+              <button
+                key={a.label}
+                type="button"
+                onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
+                title={`Focus ${a.p.name}`}
+                className={`flex items-center gap-2.5 rounded-xl border py-1.5 pl-1.5 pr-3 text-left transition ${
+                  on ? "border-brand/50 bg-brand/10" : "border-line bg-panel/50 hover:border-brand/40 hover:bg-panel"
+                }`}
+              >
+                <span
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg"
+                  style={{ background: `${hex}1f`, color: hex }}
+                >
+                  <AwardIcon kind={a.icon} className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[9px] font-bold uppercase leading-tight tracking-wider text-faint">
+                    {a.label}
+                  </span>
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="max-w-32 truncate text-sm font-bold leading-tight" style={{ color: hex }}>
+                      {a.p.name}
+                    </span>
+                    <span className="text-[11px] tabular-nums leading-tight text-muted">{a.val}</span>
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -1117,13 +1213,14 @@ export default function PlayerInsights({
               </div>
             </div>
           </div>
-          <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[9px] uppercase tracking-wider text-faint">
+          <div className="mb-0.5 flex items-center gap-1.5 px-2 pl-3 text-[9px] uppercase tracking-wider text-faint">
             <span className="w-4" />
             <span className="w-2" />
             <span className="min-w-0 flex-1">Player</span>
             <span className="w-12 text-right">K-D</span>
-            <span className="w-8 text-right">ADR</span>
-            <span className="w-10 text-right">Impact</span>
+            <span className="w-14 truncate whitespace-nowrap text-right text-brand/80">
+              {sortKey === "cheat" ? "Cheat" : SORTS.find((s) => s.key === sortKey)?.label ?? "Impact"}
+            </span>
             <span className="w-6" />
           </div>
           <div className="space-y-0.5">
@@ -1140,6 +1237,7 @@ export default function PlayerInsights({
                   rank={idx + 1}
                   focused={focusI === p.i}
                   comparing={compare.includes(p.i)}
+                  stat={statFor(p)}
                   onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
                   onCompare={() => toggleCompare(p.i)}
                 />
@@ -1215,6 +1313,7 @@ export default function PlayerInsights({
               onUtil={pickUtil}
               onCompare={() => toggleCompare(selPlayer.i)}
               comparing={compare.includes(selPlayer.i)}
+              aiKey={`player:${demoId}:${view.scopeRound ?? "all"}:${view.side}:${selPlayer.steamId}`}
             />
           </div>
         )}

@@ -54,12 +54,14 @@ function StatPill({
   hint,
   hex,
   tone,
+  weapon,
 }: {
   label: string;
   value: string;
   hint?: string;
   hex?: string;
   tone?: "offense" | "threat";
+  weapon?: WeaponStat | null; // when set, shows a weapon badge beside the value
 }) {
   return (
     <div className="card px-4 py-3 lg:px-3 lg:py-2">
@@ -72,8 +74,11 @@ function StatPill({
         )}
         <div className="stat-label">{label}</div>
       </div>
-      <div className="mt-1 truncate text-2xl font-extrabold tabular-nums lg:text-xl" style={hex ? { color: hex } : undefined}>
-        {value}
+      <div className="mt-1 flex items-center gap-2">
+        {weapon && <WeaponBadge w={weapon} size={26} />}
+        <div className="min-w-0 truncate text-2xl font-extrabold tabular-nums lg:text-xl" style={hex ? { color: hex } : undefined}>
+          {value}
+        </div>
       </div>
       {hint && <div className="mt-0.5 truncate text-[11px] text-faint">{hint}</div>}
     </div>
@@ -81,13 +86,39 @@ function StatPill({
 }
 
 // weapon bar: bar = count, pill = headshot %. `unit` is K (kills) or D (deaths).
-function WeaponRow({ w, max, unit = "K" }: { w: WeaponStat; max: number; unit?: string }) {
+// Clicking it plots exactly those kills/deaths on the map (selected = ring).
+function WeaponRow({
+  w,
+  max,
+  unit = "K",
+  selected = false,
+  onSelect,
+}: {
+  w: WeaponStat;
+  max: number;
+  unit?: string;
+  selected?: boolean;
+  onSelect?: () => void;
+}) {
   const pct = max ? (w.kills / max) * 100 : 0;
   return (
-    <div className="group">
+    <button
+      type="button"
+      onClick={onSelect}
+      title={onSelect ? `Show ${w.label} ${unit === "D" ? "deaths" : "kills"} on the map` : undefined}
+      className={`group block w-full rounded-lg px-1.5 py-1 text-left transition ${
+        selected ? "bg-panel/70" : "hover:bg-panel/40"
+      }`}
+      style={selected ? { boxShadow: `inset 0 0 0 1px ${w.color}` } : undefined}
+    >
       <div className="mb-1 flex items-center gap-2">
         <WeaponBadge w={w} />
         <span className="text-sm font-semibold text-ink">{w.label}</span>
+        {selected && (
+          <span className="rounded-full px-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ background: `${w.color}22`, color: w.color }}>
+            on map
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-2 text-xs tabular-nums">
           <span className="text-faint">{w.kills} {unit}</span>
           <span
@@ -108,7 +139,7 @@ function WeaponRow({ w, max, unit = "K" }: { w: WeaponStat; max: number; unit?: 
           style={{ width: `${(pct * w.hsPct) / 100}%`, background: "linear-gradient(90deg, transparent, rgba(255,255,255,.35))" }}
         />
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -146,12 +177,16 @@ function WeaponPanel({
   data,
   unit,
   empty,
+  selectedWeapon,
+  onSelectWeapon,
 }: {
   title: string;
   subtitle: string;
   data: WeaponInsightsData;
   unit: string;
   empty: string;
+  selectedWeapon?: string | null;
+  onSelectWeapon?: (key: string) => void;
 }) {
   const max = data.weapons[0]?.kills ?? 1;
   return (
@@ -164,9 +199,16 @@ function WeaponPanel({
         <div className="py-6 text-center text-xs text-muted lg:my-auto">{empty}</div>
       ) : (
         <>
-          <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {data.weapons.slice(0, 8).map((w) => (
-              <WeaponRow key={w.key} w={w} max={max} unit={unit} />
+              <WeaponRow
+                key={w.key}
+                w={w}
+                max={max}
+                unit={unit}
+                selected={selectedWeapon === w.key}
+                onSelect={onSelectWeapon ? () => onSelectWeapon(w.key) : undefined}
+              />
             ))}
           </div>
           <div className="mt-4 border-t border-line pt-3 lg:mt-3 lg:shrink-0">
@@ -291,12 +333,28 @@ const CLASS_CHIPS: { key: WeaponClass | "all"; label: string; color: string }[] 
   { key: "heavy", label: "Heavy", color: "#9bb0c8" },
 ];
 
-function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
+function DuelMap({
+  meta,
+  rounds,
+  view,
+  weaponSel,
+  onClearWeapon,
+}: {
+  meta: ReplayMeta;
+  rounds: ReplayRound[];
+  view: DemoView;
+  weaponSel: { key: string; label: string; color: string; mode: "kills" | "deaths" } | null;
+  onClearWeapon: () => void;
+}) {
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
   const calibrated = proj.calibrated;
   const [mode, setMode] = useState<"kills" | "deaths">("kills");
   const [cls, setCls] = useState<WeaponClass | "all">("all");
   const [angle, setAngle] = useState(false);
+
+  // a weapon picked from the kill/death panels drives the map (its own mode);
+  // otherwise the map uses its local mode + class-chip filter.
+  const activeMode = weaponSel ? weaponSel.mode : mode;
 
   const marks = useMemo(() => {
     const scoped = view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
@@ -304,12 +362,14 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
     for (const r of scoped) {
       for (const k of r.kills ?? []) {
         if (k.k < 0) continue;
-        const subj = mode === "kills" ? k.k : k.v;
+        const subj = activeMode === "kills" ? k.k : k.v;
         if (subj < 0) continue;
         if (view.focusPlayer != null && subj !== view.focusPlayer) continue;
         if (view.side !== "all" && sideOf(r, subj, meta) !== view.side) continue;
         const wm = weaponMeta(k.w);
-        if (cls !== "all" && wm.cls !== cls) continue;
+        if (weaponSel) {
+          if (wm.key !== weaponSel.key) continue;
+        } else if (cls !== "all" && wm.cls !== cls) continue;
         const v = proj.project(k.vx, k.vy);
         if (!v) continue;
         const kp = proj.project(k.kx, k.ky);
@@ -317,7 +377,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
       }
     }
     return out;
-  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer, mode, cls]);
+  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel]);
 
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
 
@@ -326,15 +386,18 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
     // min(width, height − controls/footnote) so the whole card fits the pane
     <div className="card-2 p-3 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:@container-size">
       <div className="mb-2 flex flex-wrap items-center gap-2 lg:shrink-0">
-        <span className="stat-label">{mode === "kills" ? "Kill positions" : "Death positions"}</span>
+        <span className="stat-label">{activeMode === "kills" ? "Kill positions" : "Death positions"}</span>
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
           {(["kills", "deaths"] as const).map((mm) => (
             <button
               key={mm}
               type="button"
-              onClick={() => setMode(mm)}
+              onClick={() => {
+                onClearWeapon(); // manual mode toggle leaves the weapon drilldown
+                setMode(mm);
+              }}
               className={`rounded-md px-2 py-0.5 font-medium capitalize transition ${
-                mode === mm ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                activeMode === mm ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
               }`}
             >
               {mm}
@@ -351,25 +414,44 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
           angle line
         </button>
         <span className="ml-auto text-[10px] text-faint">
-          {marks.length} {mode} · {focusName ? focusName : view.side !== "all" ? `${view.side} side` : "match"}
+          {marks.length} {activeMode} · {focusName ? focusName : view.side !== "all" ? `${view.side} side` : "match"}
         </span>
       </div>
 
-      <div className="mb-2 flex flex-wrap gap-1 lg:shrink-0">
-        {CLASS_CHIPS.map((c) => (
+      {/* weapon drilldown chip (from the kills/deaths panels) OR class chips */}
+      {weaponSel ? (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 lg:shrink-0">
+          <span className="text-[10px] text-faint">Showing</span>
           <button
-            key={c.key}
             type="button"
-            onClick={() => setCls(c.key)}
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
-              cls === c.key ? "border-current" : "border-line text-muted hover:text-ink"
-            }`}
-            style={cls === c.key ? { color: c.color } : undefined}
+            onClick={() => {
+              setMode(activeMode); // keep the map on this mode after clearing
+              onClearWeapon();
+            }}
+            title="Clear weapon filter"
+            className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold transition hover:brightness-110"
+            style={{ background: `${weaponSel.color}22`, color: weaponSel.color }}
           >
-            {c.label}
+            {weaponSel.label} {activeMode} <span className="opacity-70">✕</span>
           </button>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="mb-2 flex flex-wrap gap-1 lg:shrink-0">
+          {CLASS_CHIPS.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setCls(c.key)}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+                cls === c.key ? "border-current" : "border-line text-muted hover:text-ink"
+              }`}
+              style={cls === c.key ? { color: c.color } : undefined}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:my-auto lg:w-[min(100cqw,calc(100cqh-150px))] lg:max-w-none lg:shrink-0">
         {calibrated ? (
@@ -394,7 +476,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
         </svg>
         {marks.length === 0 && (
           <div className="absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted">
-            No {mode} for the current filter.
+            No {activeMode} for the current filter.
           </div>
         )}
         {!calibrated && (
@@ -404,7 +486,7 @@ function DuelMap({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound
         )}
       </div>
       <div className="mt-2 text-[10px] text-faint lg:shrink-0">
-        ✕ at the victim&apos;s spot, coloured by weapon. {mode === "deaths" ? "Where the scoped player/side dies" : "Where the scoped player/side gets kills"} — toggle the angle line for the shot direction.
+        ✕ at the victim&apos;s spot, coloured by weapon. {activeMode === "deaths" ? "Where the scoped player/side dies" : "Where the scoped player/side gets kills"} — toggle the angle line for the shot direction. Click a weapon in the kills/deaths lists to isolate it.
       </div>
     </div>
   );
@@ -605,6 +687,15 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
     if (focus != null) setOpenPlayer(focus);
   }, [focus]);
 
+  // a weapon picked from either kills/deaths panel drives the map; reset it
+  // whenever the scope/side/focus changes (the underlying kill set changed).
+  const [weaponSel, setWeaponSel] = useState<{ key: string; mode: "kills" | "deaths" } | null>(null);
+  useEffect(() => {
+    setWeaponSel(null);
+  }, [roundSel, view.side, focus]);
+  const pickWeapon = (key: string, mode: "kills" | "deaths") =>
+    setWeaponSel((s) => (s && s.key === key && s.mode === mode ? null : { key, mode }));
+
   const roundFilter = useMemo(
     () => (roundSel == null ? undefined : (_r: ReplayRound, idx: number) => idx === roundSel),
     [roundSel],
@@ -654,7 +745,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
 
       {/* dual headline strip: offense + threat */}
       <div className="grid gap-3 sm:grid-cols-2 lg:shrink-0 lg:grid-cols-4">
-        <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills` : undefined} hex={offense.topWeapon?.color} />
+        <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills · ${offense.topWeapon.hsPct.toFixed(0)}% HS` : undefined} hex={offense.topWeapon?.color} weapon={offense.topWeapon} />
         <StatPill tone="offense" label="Headshot rate" value={`${offense.overallHsPct.toFixed(0)}%`} hint={`${offense.totalHeadshots}/${offense.totalKills} kills`} hex={hsColor(offense.overallHsPct)} />
         <StatPill
           tone="threat"
@@ -662,6 +753,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           value={defense.topWeapon ? defense.topWeapon.label : "—"}
           hint={defense.topWeapon ? `${defense.topWeapon.kills} ${focusName ? "of your deaths" : "deaths"}` : undefined}
           hex={defense.topWeapon?.color}
+          weapon={defense.topWeapon}
         />
         {focusName ? (
           <StatPill
@@ -689,17 +781,21 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
         {/* dual-lens: kills (offense) vs deaths (threat) */}
         <WeaponPanel
           title={focusName ? `${focusName} · kills by weapon` : view.side !== "all" ? `${view.side} kills by weapon` : "Kills by weapon"}
-          subtitle="bar = kills · pill = HS%"
+          subtitle="click a weapon → map"
           data={offense}
           unit="K"
           empty="No kills in this scope."
+          selectedWeapon={weaponSel?.mode === "kills" ? weaponSel.key : null}
+          onSelectWeapon={(k) => pickWeapon(k, "kills")}
         />
         <WeaponPanel
           title={focusName ? `What kills ${focusName}` : view.side !== "all" ? `What kills ${view.side}` : "Deaths by weapon"}
-          subtitle="bar = deaths · pill = HS% taken"
+          subtitle="click a weapon → map"
           data={defense}
           unit="D"
           empty="No deaths in this scope."
+          selectedWeapon={weaponSel?.mode === "deaths" ? weaponSel.key : null}
+          onSelectWeapon={(k) => pickWeapon(k, "deaths")}
         />
 
         {/* head-to-head duels (grows, scrolls) + economy ladder (natural height) */}
@@ -708,8 +804,18 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
         </div>
 
-        {/* kill / death map */}
-        <DuelMap meta={meta} rounds={rounds} view={view} />
+        {/* kill / death map — driven by the shared weapon selection */}
+        <DuelMap
+          meta={meta}
+          rounds={rounds}
+          view={view}
+          weaponSel={
+            weaponSel
+              ? { key: weaponSel.key, mode: weaponSel.mode, label: weaponMeta(weaponSel.key).label, color: weaponMeta(weaponSel.key).color }
+              : null
+          }
+          onClearWeapon={() => setWeaponSel(null)}
+        />
 
         {/* per-player breakdown (offense, whole roster) */}
         <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">

@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  clientFaceit,
-  clientSteamExtras,
-  clientSteamStats,
-  clientLeetify,
-} from "@/lib/demo/accountClient";
-import { accountScores, verdict, BAND_HEX, BAND_LABEL, TONE_HEX, type AccountScores, type Band } from "@/lib/demo/account";
+  cachedAccountScores,
+  fetchAccountScores,
+  getAiRead,
+  setAiRead,
+} from "@/lib/demo/accountStore";
+import { verdict, BAND_HEX, BAND_LABEL, TONE_HEX, type AccountScores, type Band } from "@/lib/demo/account";
 import { band5 } from "@/lib/suspicion";
 
 // One score bar with the inputs/reasons that drove it listed beneath (the
@@ -55,7 +55,9 @@ function ScoreBar({
 }
 
 // On-demand account-level scores for one demo player (Steam/FACEIT/Leetify by
-// steamId). One lookup per click, so we never auto-fire 10 profile fetches.
+// steamId). One lookup per click — or driven by the tab's "Check all" via
+// autoRun (a stagger delay in ms). Results + AI reads are session-cached
+// (accountStore), so switching tabs doesn't lose or re-bill anything.
 export function AccountCheck({
   steamId,
   name,
@@ -63,6 +65,8 @@ export function AccountCheck({
   matchStats = "",
   cheatFactors = "",
   tendencyLines = [],
+  autoRun = null,
+  aiKey,
 }: {
   steamId: string;
   name: string;
@@ -70,18 +74,37 @@ export function AccountCheck({
   matchStats?: string;
   cheatFactors?: string; // top in-match aim tells, "label value" joined
   tendencyLines?: string[]; // tactical tendencies from positioning/routes
+  autoRun?: number | null; // ms delay before self-running the lookup (null = manual)
+  aiKey?: string; // cache key for the AI read — MUST include demo+scope identity
 }) {
-  const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [data, setData] = useState<AccountScores | null>(null);
+  // The AI write-up embeds THIS-match stats, so its cache key must be scoped to
+  // the demo (and round scope) — a bare steamId would leak demo A's analysis
+  // into demo B for recurring players. Account scores stay keyed by steamId
+  // (career-level data, demo-independent).
+  const aiCacheKey = aiKey ?? `player:${steamId}`;
+  const cached = steamId ? cachedAccountScores(steamId) : null;
+  const cachedAi = steamId ? getAiRead(aiCacheKey) : null;
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">(cached ? "done" : "idle");
+  const [data, setData] = useState<AccountScores | null>(cached);
   const [err, setErr] = useState("");
-  const [aiState, setAiState] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [aiText, setAiText] = useState("");
+  const [aiState, setAiState] = useState<"idle" | "loading" | "done" | "error">(cachedAi ? "done" : "idle");
+  const [aiText, setAiText] = useState(cachedAi ?? "");
   const [aiErr, setAiErr] = useState("");
 
-  if (!steamId) return null;
+  // scope changes swap the AI key while mounted — resync from the cache so the
+  // panel never shows another scope's write-up (initializers don't re-run).
+  const aiKeyRef = useRef(aiCacheKey);
+  useEffect(() => {
+    aiKeyRef.current = aiCacheKey;
+    const hit = getAiRead(aiCacheKey);
+    setAiText(hit ?? "");
+    setAiState(hit ? "done" : "idle");
+    setAiErr("");
+  }, [aiCacheKey]);
 
   const runAi = async () => {
     if (!data || aiState === "loading") return;
+    const key = aiCacheKey;
     setAiState("loading");
     setAiErr("");
     // The display name is attacker-controlled; strip control chars + angle
@@ -125,9 +148,14 @@ export function AccountCheck({
         throw new Error(b.error || `AI request failed (${res.status})`);
       }
       const { text } = (await res.json()) as { text: string };
+      setAiRead(key, text);
+      // cache write above is correct even if the scope changed mid-flight —
+      // just don't paint it over the new scope's panel
+      if (aiKeyRef.current !== key) return;
       setAiText(text);
       setAiState("done");
     } catch (e) {
+      if (aiKeyRef.current !== key) return;
       setAiErr(e instanceof Error ? e.message : "failed");
       setAiState("error");
     }
@@ -138,19 +166,26 @@ export function AccountCheck({
     setState("loading");
     setErr("");
     try {
-      const [faceit, extras, steamStats, leetify] = await Promise.all([
-        clientFaceit(steamId).catch(() => null),
-        clientSteamExtras(steamId).catch(() => null),
-        clientSteamStats(steamId).catch(() => null),
-        clientLeetify(steamId).catch(() => null),
-      ]);
-      setData(accountScores(faceit, extras, steamStats, leetify));
+      setData(await fetchAccountScores(steamId));
       setState("done");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "lookup failed");
       setState("error");
     }
   };
+
+  // "Check all" from the tab: self-run after a stagger delay so ten cards
+  // don't burst-fire forty lookups at once.
+  useEffect(() => {
+    if (autoRun == null || !steamId || state !== "idle") return;
+    const t = setTimeout(() => {
+      void run();
+    }, autoRun);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, state, steamId]);
+
+  if (!steamId) return null;
 
   if (state === "idle") {
     return (
