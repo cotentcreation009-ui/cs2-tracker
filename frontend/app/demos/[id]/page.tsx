@@ -221,6 +221,9 @@ export default function ReplayPage() {
   const [scopeRound, setScopeRound] = useState<number | null>(null);
   const [side, setSide] = useState<SideFilter>("all");
   const [zones, setZones] = useState<Zone[]>([]);
+  // a "watch this moment" request from another tab (Cheat/AI evidence): switch
+  // to the replay, scope the round, then seek to the kill once it's loaded.
+  const [jump, setJump] = useState<{ round: number; time: number } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focusRef = useRef<number | null>(null);
@@ -641,6 +644,23 @@ export default function ReplayPage() {
     setTime(tRef.current);
   };
 
+  // Jump-to-replay: called from the Cheat/AI evidence list. Focus the player,
+  // scope the round (the sync effect loads it), and record the target time; the
+  // effect below seeks once that round is loaded. pendingJumpRound tells the
+  // sync effect NOT to reset this round's time to 0 — so the seek isn't
+  // stomped even when both effects fire in the same commit (order-independent).
+  const pendingJumpRound = useRef<number | null>(null);
+  const jumpToReplay = useCallback(
+    (roundIndex: number, t: number, player: number | null) => {
+      if (player != null) setFocusPlayer(player);
+      pendingJumpRound.current = roundIndex;
+      setScopeRound(roundIndex);
+      setJump({ round: roundIndex, time: t });
+      setTab("replay");
+    },
+    [],
+  );
+
   // --- map pan + click-to-select ---
   const onCanvasDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const v = vpRef.current;
@@ -699,12 +719,29 @@ export default function ReplayPage() {
     if (scopeRound == null || scopeRound < 0 || scopeRound >= rounds.length) return;
     setRoundIdx(scopeRound);
     roundRef.current = scopeRound;
-    tRef.current = 0;
-    setTime(0);
+    // don't reset the playhead when a jump for this round is pending — the jump
+    // effect owns the time and would otherwise be stomped back to 0:00.
+    if (pendingJumpRound.current !== scopeRound) {
+      tRef.current = 0;
+      setTime(0);
+    }
     playRef.current = false;
     setPlaying(false);
     setViewport({ scale: 1, ox: 0, oy: 0 }); // each round starts unzoomed
   }, [scopeRound, rounds.length, setViewport]);
+
+  // Consume a pending jump once its round is loaded. Declared AFTER the sync
+  // effect above so it runs LAST — the seek always wins over the sync effect's
+  // playhead reset even when both fire in the same commit.
+  useEffect(() => {
+    if (!jump || roundIdx !== jump.round) return;
+    tRef.current = clamp(jump.time, 0, duration);
+    setTime(tRef.current);
+    playRef.current = false;
+    setPlaying(false);
+    pendingJumpRound.current = null;
+    setJump(null);
+  }, [jump, roundIdx, duration]);
 
   // wheel-zoom toward the cursor (non-passive so the page doesn't scroll)
   useEffect(() => {
@@ -865,7 +902,7 @@ export default function ReplayPage() {
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
       {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
       {tab === "zones" && <ZoneEditor map={meta.map} fit />}
-      {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
+      {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} demoId={String(id)} onWatch={jumpToReplay} />}
 
       {tab === "replay" && (
         <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.6fr)_minmax(320px,0.65fr)]">
