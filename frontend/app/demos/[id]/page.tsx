@@ -14,6 +14,7 @@ import PlayerInsights from "@/components/demo/PlayerInsights";
 import MatchVerdict from "@/components/demo/MatchVerdict";
 import { StrategyMap } from "@/components/demo/StrategyMap";
 import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
+import { ZoneEditor } from "@/components/demo/ZoneEditor";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
@@ -25,6 +26,7 @@ const TABS = [
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Insights" },
   { k: "map", label: "Heatmap" },
+  { k: "zones", label: "Zones" },
   { k: "verdict", label: "Cheat / AI" },
 ] as const;
 type Tab = (typeof TABS)[number]["k"];
@@ -332,10 +334,12 @@ export default function ReplayPage() {
     img.src = radarImage(meta.map);
   }, [meta]);
 
-  // load the map's call-out zones so the live feed can name util landings
+  // load the map's call-out zones so the live feed can name util landings.
+  // Re-read on tab change too: edits made in the Zones tab (same page, no
+  // remount) must show up when switching back to the replay.
   useEffect(() => {
     if (meta) setZones(loadZones(meta.map));
-  }, [meta]);
+  }, [meta, tab]);
 
   const posAt = useCallback((rd: ReplayRound, t: number): Blip[] => {
     const f = rd.frames;
@@ -810,12 +814,15 @@ export default function ReplayPage() {
         </div>
       </section>
 
-      <MatchToolbar
-        meta={meta}
-        rounds={rounds}
-        view={view}
-        showSide={tab !== "replay"}
-      />
+      {/* the zones tab is a map-wide editor — player/round filters don't apply */}
+      {tab !== "zones" && (
+        <MatchToolbar
+          meta={meta}
+          rounds={rounds}
+          view={view}
+          showSide={tab !== "replay"}
+        />
+      )}
 
       {/* lens pane: at lg+ this is the rest of the viewport — lenses fill it
           and scroll internally; the pane (never the page) absorbs overflow */}
@@ -824,6 +831,7 @@ export default function ReplayPage() {
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
+      {tab === "zones" && <ZoneEditor map={meta.map} fit />}
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} />}
 
       {tab === "replay" && (
