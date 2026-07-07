@@ -1030,7 +1030,7 @@ export default function PlayerInsights({
 
         {selPlayer && activeKind && selThrows.length > 0 ? (
           <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-72px))] lg:max-w-none">
-            <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} zones={zones} className="w-full" />
+            <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} className="w-full" />
 
             {/* step controls — translucent overlay on the map's bottom edge */}
             <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
