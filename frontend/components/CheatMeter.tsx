@@ -327,8 +327,39 @@ export function CheatMeter({
   // from Leetify / FACEIT / Steam instead, so every profile gets its career
   // panel (clearly labelled by source). Cells self-hide when a value is missing.
   const ls0 = leetify?.stats;
+  // A friends-only Leetify profile redacts the aim micro-stats (reaction / preaim
+  // / HS accuracy → 0) but keeps the RATINGS and ranks public. When the micro-
+  // stats are hidden we fill the Career-stats card from those ratings instead, so
+  // every profile shows the SAME single career panel — never a separate band.
+  const statsHidden =
+    !!leetify &&
+    leetify.total_matches > 0 &&
+    (ls0?.accuracy_head ?? 0) === 0 &&
+    (ls0?.preaim ?? 0) === 0 &&
+    (ls0?.reaction_time_ms ?? 0) === 0;
+  const sgn1 = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
+  const hiddenPerfTiles: { label: string; value: string; color?: string }[] =
+    leetify && statsHidden
+      ? [
+          { label: "Matches", value: leetify.total_matches.toLocaleString("en-US") },
+          { label: "Win rate", value: `${(leetify.winrate * 100).toFixed(0)}%`, color: tierColor(leetify.winrate * 100, 55, 45) },
+          leetify.kd ? { label: "K/D", value: leetify.kd.toFixed(2), color: kdColor(leetify.kd) } : null,
+          leetify.ranks?.leetify != null ? { label: "Rating", value: sgn1(leetify.ranks.leetify) } : null,
+          { label: "Aim", value: leetify.rating.aim.toFixed(0) },
+          { label: "Position", value: leetify.rating.positioning.toFixed(0) },
+          { label: "Utility", value: leetify.rating.utility.toFixed(0) },
+          { label: "Clutch", value: sgn1(leetify.rating.clutch * 100) },
+          { label: "Opening", value: sgn1(leetify.rating.opening * 100) },
+          leetify.peak_premier ? { label: "Peak Premier", value: leetify.peak_premier.toLocaleString("en-US") } : null,
+          leetify.avg_party_size ? { label: "Avg party", value: leetify.avg_party_size.toFixed(1) } : null,
+        ].filter((x): x is { label: string; value: string; color?: string } => x != null)
+      : [];
   const fallbackCells: { label: string; value: string; color?: string }[] = [];
   if (!showCareer) {
+    if (hiddenPerfTiles.length) {
+      // friends-only profile: fill the career card from the public ratings/ranks
+      fallbackCells.push(...hiddenPerfTiles);
+    } else {
     const st = steamStats?.stats;
     const cMatches =
       leetify?.total_matches || faceit?.matches || st?.["total_matches_played"] || 0;
@@ -385,44 +416,10 @@ export function CheatMeter({
       fallbackCells.push({ label: "MVPs", value: fmt(st["total_mvps"]) });
     if (faceit && faceit.avgKills > 0)
       fallbackCells.push({ label: "Avg kills", value: faceit.avgKills.toFixed(1) });
+    }
   }
   // The career card renders for parsed data OR a reasonably-filled fallback.
   const showCareerCard = showCareer || fallbackCells.length >= 3;
-
-  // A friends-only Leetify profile redacts the aim micro-stats (reaction/preaim/
-  // HS → 0), so most of the CheatMeter's scale cards are missing. Surface the
-  // performance stats we DO have (ratings, ranks, K/D, win rate…) right by the
-  // meter so a private profile still reads as a full page.
-  const ls = leetify?.stats;
-  const statsHidden =
-    !!leetify &&
-    leetify.total_matches > 0 &&
-    (ls?.accuracy_head ?? 0) === 0 &&
-    (ls?.preaim ?? 0) === 0 &&
-    (ls?.reaction_time_ms ?? 0) === 0;
-  const sgn1 = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}`;
-  const perfStats: { label: string; value: string }[] =
-    leetify && statsHidden
-      ? [
-          leetify.ranks?.leetify != null
-            ? { label: "Rating", value: sgn1(leetify.ranks.leetify) }
-            : null,
-          { label: "Aim", value: leetify.rating.aim.toFixed(0) },
-          { label: "Position", value: leetify.rating.positioning.toFixed(0) },
-          { label: "Utility", value: leetify.rating.utility.toFixed(0) },
-          { label: "Clutch", value: sgn1(leetify.rating.clutch * 100) },
-          { label: "Opening", value: sgn1(leetify.rating.opening * 100) },
-          leetify.kd ? { label: "K/D", value: leetify.kd.toFixed(2) } : null,
-          { label: "Win rate", value: `${(leetify.winrate * 100).toFixed(0)}%` },
-          { label: "Matches", value: leetify.total_matches.toLocaleString("en-US") },
-          leetify.peak_premier
-            ? { label: "Peak Premier", value: leetify.peak_premier.toLocaleString("en-US") }
-            : null,
-          leetify.avg_party_size
-            ? { label: "Avg party", value: leetify.avg_party_size.toFixed(1) }
-            : null,
-        ].filter((x): x is { label: string; value: string } => x != null)
-      : [];
 
   return (
     <section className="card-2 px-5 py-4">
@@ -625,29 +622,10 @@ export function CheatMeter({
       </div>
 
       {/* Career stats (left) + map win rates (right) — the real detail that
-          replaces the old scale-card row (which just duplicated the factors). */}
-      {/* Leetify performance — for friends-only profiles whose aim detail is
-          redacted, show the stats we DO have next to the meter. */}
-      {perfStats.length > 0 && (
-        <div className="mt-3 rounded-xl border border-line bg-panel/30 px-4 py-3">
-          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="stat-label">Leetify performance</span>
-            <span className="text-[10px] text-faint">
-              detailed aim stats are hidden on this friends-only profile — here&apos;s what&apos;s available
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-            {perfStats.map((st) => (
-              <div key={st.label} className="rounded-lg border border-line bg-panel px-2.5 py-1.5">
-                <div className="stat-label">{st.label}</div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums text-ink">
-                  {st.value}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+          replaces the old scale-card row (which just duplicated the factors).
+          Friends-only profiles fold their available ratings into the same
+          Career-stats card (via hiddenPerfTiles) — no separate band, so every
+          profile has the same layout regardless of what data is missing. */}
 
       {/* bottom row: career stats · map win rates · consistency + history/verdict —
           one compact strip so the whole box fits a desktop viewport. */}
