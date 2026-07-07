@@ -159,7 +159,6 @@ function CaseFile({
   const matchStats = `${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR${
     p.shots >= 40 ? `, acc ${p.accuracy.toFixed(0)}%/HS-acc ${p.hsAccuracy.toFixed(0)}%` : ""
   }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`;
-  const aiScope = `${demoId}:${view.scopeRound ?? "all"}:${view.side}`;
 
   return (
     <div className="card-2 flex flex-col gap-3 px-4 py-3 lg:h-full lg:min-h-0 lg:gap-2.5 lg:overflow-y-auto">
@@ -273,7 +272,7 @@ function CaseFile({
           matchStats={matchStats}
           cheatFactors={cheatFactors}
           tendencyLines={tendLines}
-          aiKey={`player:${aiScope}:${p.steamId}`}
+          aiKey={`player:${demoId}:${p.steamId}`}
           autoRun={autoRunAccount ? 0 : null}
         />
       </div>
@@ -334,8 +333,11 @@ export default function MatchVerdict({
     return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkAll, players.length]);
-  const aiScope = `${demoId}:${view.scopeRound ?? "all"}:${view.side}`;
-  const matchKey = `match:${aiScope}`;
+  // Reads are match-wide (aim needs samples), so the AI cache is scope-
+  // INDEPENDENT — keying it by round scope would re-bill an identical prompt on
+  // every scope change. The match read still depends on `side` (it filters the
+  // player set); a per-player read depends on neither.
+  const matchKey = `match:${demoId}:${view.side}`;
   const cachedMatchAi = getAiRead(matchKey);
   const [matchAi, setMatchAi] = useState<"idle" | "loading" | "done" | "error">(cachedMatchAi ? "done" : "idle");
   const [matchAiText, setMatchAiText] = useState(cachedMatchAi ?? "");
