@@ -505,6 +505,7 @@ function ThrowRow({
   zone,
   timing,
   active,
+  showKind,
   onClick,
   onEnter,
   onLeave,
@@ -513,6 +514,7 @@ function ThrowRow({
   zone: string | null;
   timing: Timing;
   active: boolean;
+  showKind?: boolean;
   onClick: () => void;
   onEnter?: () => void;
   onLeave?: () => void;
@@ -529,7 +531,12 @@ function ThrowRow({
     >
       <span className="flex min-w-0 items-center gap-2 text-xs">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[tw.kind] }} />
-        <span className="font-semibold text-ink">Round {tw.round}</span>
+        {showKind && (
+          <span className="shrink-0 font-semibold" style={{ color: KIND_COLOR[tw.kind] }}>
+            {KIND_LABEL[tw.kind] ?? tw.kind}
+          </span>
+        )}
+        <span className="font-semibold text-ink">R{tw.round}</span>
         {zone && <span className="truncate text-faint">{zone}</span>}
       </span>
       <span className="flex shrink-0 items-center gap-2 text-[10px] text-faint">
@@ -898,21 +905,27 @@ export default function PlayerInsights({
     ? UTIL_KINDS.filter((k) => selPlayer.utilNades.some((n) => n.kind === k))
     : [];
   // honour a kind only if it was chosen for the currently-focused player
+  // ("all" is a valid selection = every kind on the map at once)
   const pickedKind =
-    kindSel && kindSel.i === focusI && selKinds.includes(kindSel.kind) ? kindSel.kind : null;
+    kindSel && kindSel.i === focusI && (kindSel.kind === "all" || selKinds.includes(kindSel.kind))
+      ? kindSel.kind
+      : null;
   const activeKind =
     pickedKind ??
     (selPlayer && fallback && fallback.i === selPlayer.i && selKinds.includes(fallback.kind)
       ? fallback.kind
       : selKinds[0] ?? null);
+  const showAll = activeKind === "all";
   const selThrows =
     selPlayer && activeKind
       ? selPlayer.utilNades
-          .filter((n) => n.kind === activeKind)
+          .filter((n) => showAll || n.kind === activeKind)
           .slice()
           .sort((a, b) => a.round - b.round || a.t - b.t)
       : [];
-  const spots = activeKind ? clusterUtilThrows(selThrows, (x, y) => proj.project(x, y)) : [];
+  // "common spots" only makes sense within one kind; skip it for the All view
+  const spots = activeKind && !showAll ? clusterUtilThrows(selThrows, (x, y) => proj.project(x, y)) : [];
+  const activeKindLabel = showAll ? "util" : (KIND_LABEL[activeKind ?? ""] ?? activeKind ?? "").toLowerCase();
   // hovering a throw row previews it on the map; clicking pins it.
   const shownIdx = hoverIdx ?? throwIdx;
   const soloThrow = shownIdx != null && selThrows[shownIdx] ? selThrows[shownIdx] : null;
@@ -1004,6 +1017,18 @@ export default function PlayerInsights({
         </div>
         {selPlayer && selKinds.length > 0 && (
           <div className="mb-2 flex w-full flex-wrap gap-1 lg:w-[min(100cqw,calc(100cqh-72px))] lg:flex-nowrap lg:overflow-x-auto">
+            {selKinds.length > 1 && (
+              <button
+                type="button"
+                onClick={() => pickKind("all")}
+                title="Show every grenade on the map at once"
+                className={`pill shrink-0 whitespace-nowrap font-semibold transition ${
+                  showAll ? "bg-brand/15 text-brand" : "bg-panel text-muted hover:text-ink"
+                }`}
+              >
+                ✦ All {selPlayer.utilNades.length}
+              </button>
+            )}
             {selKinds.map((k) => {
               const n = selPlayer.utilNades.filter((x) => x.kind === k).length;
               return (
@@ -1045,7 +1070,7 @@ export default function PlayerInsights({
                   </span>
                 ) : (
                   <span className="text-muted">
-                    {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()} — hover a row or ◀ ▶ to step
+                    {selThrows.length} {activeKindLabel} — hover a row or ◀ ▶ to step
                   </span>
                 )}
               </div>
@@ -1130,7 +1155,7 @@ export default function PlayerInsights({
           <div className="card-2 px-3 py-2.5 lg:shrink-0">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="stat-label">
-                {selThrows.length} {(KIND_LABEL[activeKind] ?? activeKind).toLowerCase()}
+                {selThrows.length} {activeKindLabel}
               </span>
               <span className="text-[10px] text-faint">hover = preview · click = pin · dashed = throw → land</span>
             </div>
@@ -1142,6 +1167,7 @@ export default function PlayerInsights({
                   zone={zoneOf(tw.x, tw.y)}
                   timing={timingOf(tw.t)}
                   active={shownIdx === i}
+                  showKind={showAll}
                   onClick={() => setThrowIdx(throwIdx === i ? null : i)}
                   onEnter={() => setHoverIdx(i)}
                   onLeave={() => setHoverIdx(null)}

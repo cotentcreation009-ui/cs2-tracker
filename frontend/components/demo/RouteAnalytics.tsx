@@ -6,6 +6,7 @@ import { analyzeRoutes, type PlayerPath, type RouteCluster, type Side } from "@/
 import { radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
+import { teamAStarters, roundWinnerTeam } from "@/lib/demo/score";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
@@ -158,12 +159,16 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     };
   }, [individualPaths]);
 
+  // running score AFTER the scoped round — counted by TEAM (ct = team that
+  // started CT, t = started T), since sides swap at half.
   const score = useMemo(() => {
     if (view.scopeRound == null) return null;
+    const teamA = teamAStarters(rounds);
     let ct = 0, t = 0;
     for (let i = 0; i <= view.scopeRound && i < rounds.length; i++) {
-      if (rounds[i].winner === "CT") ct++;
-      else if (rounds[i].winner === "T") t++;
+      const tm = roundWinnerTeam(rounds[i], teamA);
+      if (tm === "A") ct++;
+      else if (tm === "B") t++;
     }
     return { ct, t };
   }, [rounds, view.scopeRound]);
