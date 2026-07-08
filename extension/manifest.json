@@ -19,6 +19,7 @@
   "options_page": "src/options.html",
   "permissions": ["storage"],
   "host_permissions": [
+    "https://csrun.win/*",
     "https://steamcommunity.run/*"
   ],
   "background": {

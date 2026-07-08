@@ -38,7 +38,7 @@ Without this the direct PUT fails with an opaque CORS error.
 gcloud storage buckets update gs://BUCKET --cors-file=deploy/gcs/cors.json
 ```
 
-(Edit `deploy/gcs/cors.json` if the site origin isn't `https://steamcommunity.run`.)
+(Edit `deploy/gcs/cors.json` if the site origin isn't `https://csrun.win`.)
 
 ### 3. Lifecycle — auto-delete orphaned uploads
 

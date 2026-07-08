@@ -3,7 +3,7 @@
 // public CheatMeter endpoint (host_permissions grant cross-origin, so no page
 // CORS), caches results in memory to dedupe a 10-player room, and replies.
 
-const DEFAULT_API = "https://steamcommunity.run";
+const DEFAULT_API = "https://csrun.win";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map(); // key -> { at, data }
 

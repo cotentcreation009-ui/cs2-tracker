@@ -2,7 +2,7 @@ const box = document.getElementById("enabled");
 
 chrome.storage.sync.get(["enabled", "apiBase"]).then(({ enabled, apiBase }) => {
   box.checked = enabled !== false;
-  const base = (apiBase || "https://steamcommunity.run").replace(/\/+$/, "");
+  const base = (apiBase || "https://csrun.win").replace(/\/+$/, "");
   document.getElementById("site").href = base;
 });
 

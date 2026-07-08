@@ -4,7 +4,7 @@
 // content in app/privacy and app/terms is a solid template tailored to what this
 // site does, not legal advice.
 export const SITE_NAME = "StatRun";
-export const SITE_DOMAIN = "steamcommunity.run";
+export const SITE_DOMAIN = "csrun.win";
 
 // Real, monitored inbox for privacy / data-removal / legal / ad-network (AdSense)
 // contact. A business address is fine here — it needn't match the site domain.

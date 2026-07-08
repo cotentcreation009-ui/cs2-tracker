@@ -16,17 +16,17 @@ These need your accounts/credentials — we do them together when you're ready.
   `INTERNAL_API_SECRET`, and optionally `REDIS_URL` (free Upstash). Pick a unique
   app name + region in `backend/fly.toml`.
 - **Vercel (frontend)** env: `API_INTERNAL_URL=https://<your-app>.fly.dev`,
-  `SITE_URL=https://steamcommunity.run`, `INTERNAL_API_SECRET=<same secret>`.
+  `SITE_URL=https://csrun.win`, `INTERNAL_API_SECRET=<same secret>`.
   Root Directory = `frontend`.
-- **Cloudflare**: point `steamcommunity.run` at Vercel (DNS-only / grey cloud).
+- **Cloudflare**: point `csrun.win` at Vercel (DNS-only / grey cloud).
 
 ## 2. Decisions only you can make (before flipping ads on)
 None block the backend going up; all block a *monetized public* launch.
 
-- **Domain / trademark posture.** `steamcommunity.run` deliberately mirrors
+- **Domain / trademark posture.** `csrun.win` deliberately mirrors
   Steam's URL — a trademark/impersonation gray area (Valve UDRP risk; ad networks
   ban impersonation; phishing-flag risk). Decide: accept the risk, or launch the
-  brand on a neutral domain and keep `steamcommunity.run` only as a redirect.
+  brand on a neutral domain and keep `csrun.win` only as a redirect.
 - **Privacy policy + Terms of Service.** *Required* by every ad network and by
   GDPR/CCPA. I can scaffold `/privacy` and `/terms` pages + footer links; the
   legal **content** needs your (or a lawyer's) approval.
