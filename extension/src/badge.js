@@ -47,7 +47,7 @@ const SR = {
     a.className = "sr-chip";
     a.target = "_blank";
     a.rel = "noreferrer";
-    a.href = (data && data.profileUrl) || "https://steamcommunity.run";
+    a.href = (data && data.profileUrl) || "https://csrun.win";
     a.dataset.srChip = "1";
 
     if (data && data.banned) {
@@ -111,7 +111,7 @@ const SR = {
           ${data && data.gap != null ? rank("MM vs FACEIT", (data.gap >= 0 ? "+" : "") + data.gap.toFixed(2)) : ""}
         </div>
       </div>
-      <a class="sr-cta" target="_blank" rel="noreferrer" href="${(data && data.profileUrl) || "https://steamcommunity.run"}">
+      <a class="sr-cta" target="_blank" rel="noreferrer" href="${(data && data.profileUrl) || "https://csrun.win"}">
         View full report on StatRun →
       </a>
       <div class="sr-foot">Signal, not proof — elite legit players score high too.</div>

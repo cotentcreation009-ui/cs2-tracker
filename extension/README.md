@@ -26,7 +26,7 @@ content script (faceit.js / steam.js)
    → finds player identifiers on the page
    → chrome.runtime.sendMessage({steamid | faceit})
 background service worker (background.js)
-   → fetch https://steamcommunity.run/api/public/cheatmeter?…   (host_permission → no page CORS)
+   → fetch https://csrun.win/api/public/cheatmeter?…   (host_permission → no page CORS)
    → in-memory 5-min cache (dedupes a 10-player room)
    → replies with {cheat:{score,band}, premier, faceitElo, kd, gap, banned, profileUrl}
 badge.js → renders the chip / panel
@@ -40,7 +40,7 @@ No build step — it's plain MV3 JavaScript. Load the folder as-is.
 2. **Load unpacked** → select this `extension/` folder.
 3. (Optional, for a local site build) open the extension's **Options** and set the
    site URL to `http://localhost:3000` — otherwise it reads from
-   `https://steamcommunity.run`.
+   `https://csrun.win`.
 4. Visit a **FACEIT match room** and a **Steam profile** and confirm the chips /
    panel appear.
 
@@ -57,7 +57,7 @@ running.
 3. Upload, fill the listing (name, description, screenshots, a small + large
    promo tile), link the **privacy policy** (your site already has `/privacy`),
    and justify the permissions: `storage` (settings) + host access to
-   `steamcommunity.run` (read stats), `faceit.com` / `steamcommunity.com` (inject
+   `csrun.win` (read stats), `faceit.com` / `steamcommunity.com` (inject
    badges).
 4. Submit for review (Google typically reviews in a few days).
 5. Edge Add-ons store takes the same zip separately if you want Edge too.

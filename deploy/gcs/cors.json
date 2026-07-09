@@ -1,6 +1,6 @@
 [
   {
-    "origin": ["https://steamcommunity.run"],
+    "origin": ["https://csrun.win", "https://steamcommunity.run"],
     "method": ["PUT", "OPTIONS"],
     "responseHeader": ["Content-Type"],
     "maxAgeSeconds": 3600

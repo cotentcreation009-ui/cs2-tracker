@@ -3,13 +3,20 @@
 # SSL/TLS mode can be "Full (strict)" with the orange-cloud proxy on). Browsers
 # only ever see Cloudflare's edge cert; this cert secures Cloudflare <-> origin.
 # DOMAIN is injected from the environment by docker-compose.prod.yml.
+# The retired domain (steamcommunity.run) is NOT served here — a Cloudflare
+# edge Redirect Rule 301s it to the apex, so it never reaches this origin.
 
-{$DOMAIN} {
+{$DOMAIN}, www.{$DOMAIN} {
 	encode zstd gzip
 
 	# Cloudflare Origin Certificate (generated in the Cloudflare dashboard and
-	# saved next to docker-compose.prod.yml as origin.pem / origin.key).
+	# saved next to docker-compose.prod.yml as origin.pem / origin.key). It must
+	# cover {$DOMAIN} AND *.{$DOMAIN} so the www host below is served too.
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+
+	# Canonical host: send www -> apex so the site lives at one URL (SEO).
+	@www host www.{$DOMAIN}
+	redir @www https://{$DOMAIN}{uri} permanent
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

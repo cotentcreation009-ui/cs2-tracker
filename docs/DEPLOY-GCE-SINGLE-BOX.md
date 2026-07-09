@@ -82,7 +82,7 @@ can use **Full (strict)** with the proxy on (Let's Encrypt can't validate behind
 orange cloud — Origin CA is the reliable path, valid 15 years, no renewal).
 
 1. Cloudflare → **SSL/TLS → Origin Server → Create Certificate**. Hostnames
-   `steamcommunity.run, *.steamcommunity.run`, RSA, 15 years, PEM. **Copy both**
+   `csrun.win, *.csrun.win`, RSA, 15 years, PEM. **Copy both**
    the cert and the private key (key is shown once).
 2. On the VM, in the repo dir, save them next to `docker-compose.prod.yml` as
    **`origin.pem`** (cert) and **`origin.key`** (key). They're gitignored.
@@ -101,8 +101,8 @@ Edit `.env` and set:
 POSTGRES_PASSWORD=<openssl rand -hex 24>
 STEAM_API_KEY=<your key>
 FACEIT_API_KEY=<your key>
-SITE_URL=https://steamcommunity.run
-DOMAIN=steamcommunity.run
+SITE_URL=https://csrun.win
+DOMAIN=csrun.win
 INTERNAL_API_SECRET=<the openssl value>
 ```
 Then bring it up (only Caddy binds 80/443; DB/Redis/backend/frontend stay internal):
@@ -148,10 +148,10 @@ Watch **Billing → Credits** weekly; set a calendar reminder ~10 days before da
 
 ## 8. Verify
 ```bash
-curl -sI https://steamcommunity.run/            | grep -i -E 'server|cf-cache-status'   # server: cloudflare
-curl -sI https://steamcommunity.run/api/search?q=zy                                       # works (proxied)
+curl -sI https://csrun.win/            | grep -i -E 'server|cf-cache-status'   # server: cloudflare
+curl -sI https://csrun.win/api/search?q=zy                                       # works (proxied)
 curl -k --max-time 5 https://<STATIC_IP>/                                                 # should TIME OUT (origin locked)
-curl -s https://steamcommunity.run/robots.txt   | grep -i sitemap                         # SITE_URL took effect
+curl -s https://csrun.win/robots.txt   | grep -i sitemap                         # SITE_URL took effect
 ```
 Then load the site, view a profile (live Leetify/FACEIT/Steam panels), and do a search.
 
