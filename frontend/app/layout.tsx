@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import Script from "next/script";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -17,6 +18,12 @@ import {
 } from "@/components/CookieConsent";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+
+// Cloudflare Web Analytics beacon token. Set CF_BEACON_TOKEN in .env (from the
+// Cloudflare dashboard → Web Analytics). Read at runtime like SITE_URL, so a
+// container recreate picks it up — no rebuild needed. Cookieless, so it needs no
+// consent gate. Left unset in dev → no beacon renders.
+const cfBeaconToken = process.env.CF_BEACON_TOKEN;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -88,6 +95,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </footer>
 
         <CookieConsent />
+
+        {cfBeaconToken ? (
+          <Script
+            src="https://static.cloudflareinsights.com/beacon.min.js"
+            strategy="afterInteractive"
+            data-cf-beacon={JSON.stringify({ token: cfBeaconToken })}
+          />
+        ) : null}
       </body>
     </html>
   );

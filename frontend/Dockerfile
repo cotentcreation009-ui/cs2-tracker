@@ -12,6 +12,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Cloudflare Web Analytics token. Baked in at build so statically-prerendered
+# pages (/, /demos, ...) also carry the beacon; the same value is passed as a
+# runtime env in compose so dynamic pages pick it up too. Optional/empty = off.
+ARG CF_BEACON_TOKEN=""
+ENV CF_BEACON_TOKEN=$CF_BEACON_TOKEN
 RUN npm run build
 
 # ---- runtime (standalone) --------------------------------------------------

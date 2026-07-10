@@ -156,12 +156,21 @@ services:
     # no ports: only the worker (same network) calls it at http://gc-bot:7300
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Bakes the Cloudflare Web Analytics token into statically-prerendered
+        # pages. Same value is also set as a runtime env below for dynamic pages.
+        CF_BEACON_TOKEN: ${CF_BEACON_TOKEN:-}
     restart: unless-stopped
     environment:
       API_INTERNAL_URL: http://backend:8080
       SITE_URL: ${SITE_URL:?set SITE_URL=https://yourdomain (no trailing slash) in .env}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in .env}
+      # Cloudflare Web Analytics beacon token (Cloudflare dashboard → Web
+      # Analytics). Optional — unset means no beacon renders. Read at runtime, so
+      # setting it + recreating this service is enough (no rebuild).
+      CF_BEACON_TOKEN: ${CF_BEACON_TOKEN:-}
     depends_on:
       backend:
         condition: service_healthy
