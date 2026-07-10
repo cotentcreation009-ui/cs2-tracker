@@ -2,7 +2,17 @@ import { SearchBar } from "@/components/SearchBar";
 import { Leaderboard } from "@/components/Leaderboard";
 import { FeaturedPlayers } from "@/components/FeaturedPlayers";
 import { RecentlyViewed } from "@/components/RecentlyViewed";
+import Link from "next/link";
 import { getLeaderboard } from "@/lib/api";
+import { JsonLd } from "@/components/JsonLd";
+import {
+  graph,
+  organizationSchema,
+  websiteSchema,
+  faqSchema,
+} from "@/lib/schema";
+
+const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
 // Cache the homepage (ISR); featured-player data and the leaderboard degrade
 // gracefully when the backend is unavailable.
@@ -26,11 +36,59 @@ const FEATURES = [
   },
 ];
 
+// Three-step explainer for the "how to look up CS2 stats" section.
+const STEPS: { n: string; t: string; d: string }[] = [
+  {
+    n: "1",
+    t: "Paste an ID",
+    d: "A SteamID, a Steam vanity name, or a full profile URL — whatever you have.",
+  },
+  {
+    n: "2",
+    t: "We pull it live",
+    d: "StatRun fetches the account from Leetify, FACEIT and the Steam Web API.",
+  },
+  {
+    n: "3",
+    t: "Read the full picture",
+    d: "Ranks, aim & utility ratings, trust signals and recent form in one view.",
+  },
+];
+
+// Homepage FAQ — deliberately distinct from /about's FAQ (targets lookup-intent
+// and "what does X mean" queries) so the two pages don't duplicate content. Also
+// emitted as FAQPage structured data below.
+const HOME_FAQ: { q: string; a: string }[] = [
+  {
+    q: "How do I find someone's CS2 stats?",
+    a: "Paste their SteamID, Steam vanity URL or full profile link into the search box above. StatRun instantly pulls that account's Leetify, FACEIT and Steam data into one page — no login required.",
+  },
+  {
+    q: "What do Leetify ratings mean?",
+    a: "Leetify grades a player's aim, utility and positioning against a performance baseline — higher is better. Numbers consistently above the benchmark for a player's skill level point to a strong, well-rounded game, while the sub-ratings show where someone is carrying or struggling.",
+  },
+  {
+    q: "How do FACEIT levels and ELO work?",
+    a: "FACEIT levels run from 1 to 10 and are driven by ELO: level 1 is the entry tier and level 10 begins at 2001 ELO. StatRun shows both the level badge and the exact ELO, so you can see how close a player is to the next tier.",
+  },
+  {
+    q: "Can I tell if a player is smurfing or cheating?",
+    a: "StatRun's CheatMeter, together with Steam trust signals like account age, VAC/ban status and cross-platform rank gaps, helps flag suspicious accounts. Treat it as a prompt to look closer — a starting point, not proof.",
+  },
+];
+
 export default async function HomePage() {
   const leaders = await getLeaderboard(10).catch(() => []);
 
+  const homeSchema = graph([
+    organizationSchema(siteUrl),
+    websiteSchema(siteUrl),
+    faqSchema(siteUrl, "/", HOME_FAQ),
+  ]);
+
   return (
     <div>
+      <JsonLd data={homeSchema} />
       <section
         className="relative overflow-hidden rounded-2xl border border-brand/25 bg-panel2/40 px-6 py-16 text-center backdrop-blur-sm sm:px-10 sm:py-24"
         style={{ boxShadow: "0 0 60px -14px rgba(56,214,255,0.30)" }}
@@ -90,6 +148,64 @@ export default async function HomePage() {
           <Leaderboard players={leaders} />
         </section>
       )}
+
+      {/* Editorial content — makes the homepage substantial and keyword-relevant
+          for search, without pushing the search tool below the fold. */}
+      <section className="mt-14 border-t border-line pt-10">
+        <div className="mx-auto max-w-3xl">
+          <h2 className="text-2xl font-bold tracking-tight">
+            Check any Counter-Strike 2 player in seconds
+          </h2>
+          <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">
+            Every CS2 player leaves a trail across three services — Steam for
+            identity and bans, Leetify for the deep aim and utility numbers, and
+            FACEIT for level and ELO. StatRun pulls all three together, so sizing
+            up a teammate or scouting an opponent takes one search instead of five
+            browser tabs.
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-muted sm:text-base">
+            No account and no download — the lookup works off public data, so you
+            get a full breakdown the moment you hit enter. Vet a random teammate
+            before the match starts, scout an opponent, or track your own climb
+            across Premier, FACEIT and Leetify over time.{" "}
+            <Link href="/about" className="text-brand hover:underline">
+              Learn more about StatRun →
+            </Link>
+          </p>
+
+          <h2 className="mt-10 text-2xl font-bold tracking-tight">
+            How to look up CS2 stats
+          </h2>
+          <ol className="mt-4 grid gap-4 sm:grid-cols-3">
+            {STEPS.map((s) => (
+              <li key={s.n} className="card px-5 py-5">
+                <div className="mb-3 grid h-8 w-8 place-items-center rounded-lg bg-brand/10 font-bold text-brand">
+                  {s.n}
+                </div>
+                <h3 className="font-semibold">{s.t}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted">{s.d}</p>
+              </li>
+            ))}
+          </ol>
+
+          <h2 className="mt-10 text-2xl font-bold tracking-tight">
+            CS2 stats — quick answers
+          </h2>
+          <div className="mt-4 space-y-3">
+            {HOME_FAQ.map((f) => (
+              <details
+                key={f.q}
+                className="card px-5 py-4 [&_summary]:cursor-pointer"
+              >
+                <summary className="font-semibold text-ink marker:text-faint">
+                  {f.q}
+                </summary>
+                <p className="mt-2 text-sm leading-relaxed text-muted">{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
