@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { SearchBar } from "@/components/SearchBar";
 import { Leaderboard } from "@/components/Leaderboard";
 import { FeaturedPlayers } from "@/components/FeaturedPlayers";
@@ -17,6 +18,13 @@ const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 // Cache the homepage (ISR); featured-player data and the leaderboard degrade
 // gracefully when the backend is unavailable.
 export const revalidate = 60;
+
+// Self-referencing canonical so query-param/trailing-slash/host variants of the
+// site's most important URL don't fragment its ranking. metadataBase (layout)
+// resolves the relative "/".
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 const FEATURES = [
   {
@@ -109,15 +117,15 @@ export default async function HomePage() {
           <div className="mx-auto mt-8 max-w-md">
             <SearchBar autoFocus />
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-faint">
-            <a
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted">
+            <Link
               className="font-medium text-brand hover:underline"
               href="/profiles/76561198077030352"
             >
               Try a live profile →
-            </a>
+            </Link>
             <span aria-hidden>·</span>
-            <span>Powered by Leetify · FACEIT · Steam</span>
+            <span>Public data from Leetify · FACEIT · Steam</span>
           </div>
         </div>
       </section>
@@ -126,18 +134,23 @@ export default async function HomePage() {
 
       <FeaturedPlayers />
 
-      <section className="mt-8 grid gap-4 md:grid-cols-3">
-        {FEATURES.map((f) => (
-          <div key={f.title} className="card lift px-5 py-5">
-            <div
-              className={`mb-3 grid h-9 w-9 place-items-center rounded-lg ${f.accent}`}
-            >
-              <span className="h-2 w-2 rounded-full bg-current" />
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">
+          What you get
+        </h2>
+        <div className="grid gap-4 md:grid-cols-3">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="card lift px-5 py-5">
+              <div
+                className={`mb-3 grid h-9 w-9 place-items-center rounded-lg ${f.accent}`}
+              >
+                <span className="h-2 w-2 rounded-full bg-current" />
+              </div>
+              <h3 className="font-semibold">{f.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted">{f.body}</p>
             </div>
-            <h3 className="font-semibold">{f.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-muted">{f.body}</p>
-          </div>
-        ))}
+          ))}
+        </div>
       </section>
 
       {leaders.length > 0 && (
@@ -167,8 +180,19 @@ export default async function HomePage() {
             No account and no download — the lookup works off public data, so you
             get a full breakdown the moment you hit enter. Vet a random teammate
             before the match starts, scout an opponent, or track your own climb
-            across Premier, FACEIT and Leetify over time.{" "}
-            <Link href="/about" className="text-brand hover:underline">
+            across Premier, FACEIT and Leetify over time. Studying your own play?
+            The{" "}
+            <Link
+              href="/demos"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              demo analyzer
+            </Link>{" "}
+            replays any match round by round.{" "}
+            <Link
+              href="/about"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
               Learn more about StatRun →
             </Link>
           </p>
