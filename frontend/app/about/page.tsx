@@ -8,6 +8,12 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { CONTACT_EMAIL, SITE_NAME } from "@/lib/site";
 import { JsonLd } from "@/components/JsonLd";
+import {
+  graph,
+  organizationSchema,
+  websiteSchema,
+  faqSchema,
+} from "@/lib/schema";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
@@ -96,37 +102,11 @@ function P({ children }: { children: ReactNode }) {
 }
 
 export default function AboutPage() {
-  const schema = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "Organization",
-        "@id": `${siteUrl}/#organization`,
-        name: SITE_NAME,
-        url: siteUrl,
-        email: CONTACT_EMAIL,
-        logo: `${siteUrl}/icon`,
-        description: `Independent Counter-Strike 2 analytics — Leetify, FACEIT and Steam stats plus demo analysis for any player.`,
-      },
-      {
-        "@type": "WebSite",
-        "@id": `${siteUrl}/#website`,
-        name: SITE_NAME,
-        url: siteUrl,
-        publisher: { "@id": `${siteUrl}/#organization` },
-        description: `Look up any CS2 player's Leetify rating, FACEIT level, ranks and Steam identity, and analyze match demos.`,
-      },
-      {
-        "@type": "FAQPage",
-        "@id": `${siteUrl}/about#faq`,
-        mainEntity: FAQ.map((f) => ({
-          "@type": "Question",
-          name: f.q,
-          acceptedAnswer: { "@type": "Answer", text: f.a },
-        })),
-      },
-    ],
-  };
+  const schema = graph([
+    organizationSchema(siteUrl),
+    websiteSchema(siteUrl),
+    faqSchema(siteUrl, "/about", FAQ),
+  ]);
 
   return (
     <article className="mx-auto max-w-3xl pb-20">
@@ -163,9 +143,9 @@ export default function AboutPage() {
         {SITE_NAME} brings a Counter-Strike 2 player&apos;s scattered stats into a
         single page. Instead of juggling Steam, Leetify and FACEIT across tabs,
         you paste one SteamID, vanity URL or profile link and get their Premier
-        rating, FACEIT level &amp; ELO, Wingman rank, Leetify aim, utility and
-        positioning numbers, and Steam identity — account age, CS2 friend code and
-        VAC/ban status — together.
+        rating (Valve&apos;s CS Rating), FACEIT level &amp; ELO, Wingman rank,
+        Leetify aim, utility and positioning numbers, and Steam identity — account
+        age, CS2 friend code and VAC/ban status — together.
       </P>
       <P>
         Beyond lookups, {SITE_NAME} analyzes match demos: replay the round, trace
