@@ -121,9 +121,10 @@ export default function AboutPage() {
         About <span className="gradient-text">{SITE_NAME}</span>
       </h1>
       <p className="mt-5 max-w-2xl text-pretty leading-relaxed text-muted sm:text-lg">
-        {SITE_NAME} is an independent Counter-Strike 2 analytics tool. Look up any
-        player&apos;s Leetify rating, FACEIT level and Steam identity in one
-        place — then go deeper with a full demo analyzer and cheat review.
+        {SITE_NAME} is an independent, community-built Counter-Strike 2 analytics
+        project — made by players, run transparently, and powered entirely by
+        public data. Here&apos;s what it does, where its numbers come from, and how
+        it treats the people it covers.
       </p>
       <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         <Link
@@ -212,7 +213,7 @@ export default function AboutPage() {
         wrong — or you&apos;re a player who wants your profile corrected or
         removed — you can reach a real person at{" "}
         <a
-          className="text-brand hover:underline"
+          className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
           href={`mailto:${CONTACT_EMAIL}`}
         >
           {CONTACT_EMAIL}
@@ -228,11 +229,11 @@ export default function AboutPage() {
         you&apos;re a player and want off the site, email us your SteamID and
         we&apos;ll suppress your profile and clear its cache. Full details are in
         our{" "}
-        <Link href="/privacy" className="text-brand hover:underline">
+        <Link href="/privacy" className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand">
           Privacy Policy
         </Link>{" "}
         and{" "}
-        <Link href="/terms" className="text-brand hover:underline">
+        <Link href="/terms" className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand">
           Terms of Service
         </Link>
         .
