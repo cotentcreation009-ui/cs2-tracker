@@ -121,7 +121,7 @@ function Gauge({ score, hex }: { score: number; hex: string }) {
         className="fill-muted"
         style={{ fontSize: 38, opacity: 0.12 }}
       >
-        ☠
+        ◎
       </text>
       <line
         x1={cx}
@@ -246,8 +246,8 @@ const VERDICT_TITLE: Record<Band, string> = {
   verylow: "Looks legit",
   low: "Likely legit",
   moderate: "Some flags",
-  high: "Suspicious",
-  veryhigh: "Highly suspicious",
+  high: "Elevated signals",
+  veryhigh: "High-risk signals",
 };
 
 /**
@@ -571,7 +571,7 @@ export function CheatMeter({
 
         {/* center: the meter */}
         <div className="flex flex-col items-center text-center">
-          <div className="stat-label">Cheating likelihood</div>
+          <div className="stat-label">Suspicion score</div>
           <div className={`text-5xl font-extrabold leading-none tabular-nums ${BAND_TEXT[band]}`}>
             {score.toFixed(0)}%
           </div>
@@ -750,7 +750,7 @@ export function CheatMeter({
               </div>
             )}
             <div className="card min-w-0 px-3.5 py-2.5">
-              <div className="stat-label mb-1">Overall verdict</div>
+              <div className="stat-label mb-1">Overall read</div>
               <div className="flex items-start gap-2">
                 <span style={{ color: hex }} className="mt-0.5 text-lg leading-none">
                   ⚠

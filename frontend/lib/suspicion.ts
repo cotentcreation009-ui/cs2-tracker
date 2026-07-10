@@ -440,8 +440,8 @@ export function computeSuspicion(
         verylow: "No unusual patterns detected",
         low: "Mostly normal, a couple of points above average",
         moderate: "Some stats sit above the expected range",
-        high: "Highly suspicious behaviour detected",
-        veryhigh: "Multiple strong anomalies detected",
+        high: "Several signals above the expected range",
+        veryhigh: "Multiple strong anomalies in the data",
       }[displayBand];
   const verdict: string = lowConfidence
     ? "Not enough public data for a confident read — treat this as indicative only."
