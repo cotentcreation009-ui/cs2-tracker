@@ -46,6 +46,42 @@ export function faqSchema(
   };
 }
 
+// Article node for a guide. author/publisher point at the shared Organization
+// (@id-merged), so E-E-A-T signals attach to one entity.
+export function articleSchema(
+  siteUrl: string,
+  opts: { slug: string; title: string; description: string; updated: string },
+) {
+  const url = `${siteUrl}/guides/${opts.slug}`;
+  return {
+    "@type": "Article",
+    "@id": `${url}#article`,
+    headline: opts.title,
+    description: opts.description,
+    datePublished: opts.updated,
+    dateModified: opts.updated,
+    inLanguage: "en",
+    mainEntityOfPage: url,
+    author: { "@id": `${siteUrl}/#organization` },
+    publisher: { "@id": `${siteUrl}/#organization` },
+  };
+}
+
+export function breadcrumbSchema(
+  siteUrl: string,
+  items: { name: string; path: string }[],
+) {
+  return {
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((it, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: it.name,
+      item: `${siteUrl}${it.path}`,
+    })),
+  };
+}
+
 export function graph(nodes: object[]) {
   return { "@context": "https://schema.org", "@graph": nodes };
 }

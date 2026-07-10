@@ -70,6 +70,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               >
                 Compare
               </Link>
+              <Link
+                href="/guides"
+                className="link-muted shrink-0 text-sm font-medium"
+              >
+                Guides
+              </Link>
             </nav>
           </div>
         </header>
@@ -85,6 +91,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <span className="flex items-center gap-3">
               <Link href="/about" className="hover:text-muted">
                 About
+              </Link>
+              <Link href="/guides" className="hover:text-muted">
+                Guides
               </Link>
               <Link href="/privacy" className="hover:text-muted">
                 Privacy
