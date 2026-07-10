@@ -83,6 +83,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               Steam, Leetify or FACEIT.
             </span>
             <span className="flex items-center gap-3">
+              <Link href="/about" className="hover:text-muted">
+                About
+              </Link>
               <Link href="/privacy" className="hover:text-muted">
                 Privacy
               </Link>
