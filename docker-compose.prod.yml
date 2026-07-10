@@ -159,6 +159,10 @@ services:
     build:
       context: ./frontend
       args:
+        # SITE_URL at build time so static pages bake correct canonical/OG URLs +
+        # robots sitemap line (otherwise they fall back to localhost). Also a
+        # runtime env below for ISR/dynamic routes.
+        SITE_URL: ${SITE_URL:-}
         # Bakes the Cloudflare Web Analytics token into statically-prerendered
         # pages. Same value is also set as a runtime env below for dynamic pages.
         CF_BEACON_TOKEN: ${CF_BEACON_TOKEN:-}
