@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getLeetify, getProfile, resolveSteamId } from "@/lib/api";
+import { getFaceit, getLeetify, getProfile, resolveSteamId } from "@/lib/api";
 import { ComparisonView, type ComparePlayer } from "@/components/ComparisonView";
 import { CompareForm } from "@/components/CompareForm";
 import { ShareButton } from "@/components/ShareButton";
@@ -58,10 +58,21 @@ export default async function ComparePage({
           ids.map(async (raw) => {
             try {
               const id = await resolveSteamId(raw);
-              const [profile, leetify] = await Promise.all([
+              const [profile, leetifyRaw, faceit] = await Promise.all([
                 getProfile(id),
                 getLeetify(id).catch(() => null),
+                getFaceit(id),
               ]);
+              // Show the player's CURRENT FACEIT ELO: prefer the live FACEIT
+              // profile (same source the player page uses) over Leetify's cached
+              // ranks.faceit_elo, which can lag.
+              const leetify =
+                leetifyRaw && faceit?.elo
+                  ? {
+                      ...leetifyRaw,
+                      ranks: { ...leetifyRaw.ranks, faceit_elo: faceit.elo },
+                    }
+                  : leetifyRaw;
               return profile ? { profile, leetify } : null;
             } catch {
               return null;
