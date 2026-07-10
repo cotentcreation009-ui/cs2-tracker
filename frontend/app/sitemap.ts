@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { getLeaderboard } from "@/lib/api";
+import { GUIDES } from "@/lib/guides";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
@@ -17,6 +18,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   return [
     { url: `${siteUrl}/`, changeFrequency: "daily" as const, priority: 1 },
     { url: `${siteUrl}/about`, changeFrequency: "monthly" as const, priority: 0.6 },
+    { url: `${siteUrl}/guides`, changeFrequency: "weekly" as const, priority: 0.6 },
+    ...GUIDES.map((g) => ({
+      url: `${siteUrl}/guides/${g.slug}`,
+      lastModified: g.updated,
+      changeFrequency: "monthly" as const,
+      priority: 0.7,
+    })),
     { url: `${siteUrl}/compare`, changeFrequency: "weekly" as const, priority: 0.5 },
     { url: `${siteUrl}/privacy`, changeFrequency: "yearly" as const, priority: 0.2 },
     { url: `${siteUrl}/terms`, changeFrequency: "yearly" as const, priority: 0.2 },
