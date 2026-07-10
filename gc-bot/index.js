@@ -31,6 +31,13 @@ const TOKEN_FILE = path.join(DATA_DIR, "refresh_token.json");
 // GC etiquette: one match request at a time, spaced out.
 const REQUEST_GAP_MS = Number(process.env.REQUEST_GAP_MS || 2500);
 const RESOLVE_TIMEOUT_MS = Number(process.env.RESOLVE_TIMEOUT_MS || 20000);
+// Watchdog: steam-user's autoRelogin keeps the process alive but can wedge after
+// a Steam-level drop (the socket dies and the GC never comes back), leaving the
+// container "Up" yet dead. If the GC stays unreachable this long AFTER we've had
+// a working session, exit so Docker's restart policy relaunches us — a fresh
+// process re-logs from the saved token and reconnects cleanly (the manual fix).
+const WATCHDOG_INTERVAL_MS = Number(process.env.WATCHDOG_INTERVAL_MS || 60000);
+const GC_STALE_MS = Number(process.env.GC_STALE_MS || 180000);
 
 const CREDS_OK = !!(USER && PASS);
 if (!CREDS_OK) {
@@ -48,6 +55,8 @@ let gcConnected = false;
 let guardCallback = null; // pending Steam Guard prompt → resolved via /guard-code
 let guardDomain = null;
 let loginAttempts = 0;
+let everGcConnected = false;
+let lastHealthyAt = Date.now(); // baseline so startup gets the same grace window
 
 // share code → demo URL cache (immutable once resolved)
 const cache = new Map();
@@ -98,6 +107,8 @@ user.on("loggedOn", () => {
 
 csgo.on("connectedToGC", () => {
   gcConnected = true;
+  everGcConnected = true;
+  lastHealthyAt = Date.now();
   console.log("gc-bot: connected to the CS2 Game Coordinator");
 });
 csgo.on("disconnectedFromGC", (reason) => {
@@ -130,6 +141,24 @@ user.on("error", (err) => {
   console.log(`gc-bot: retrying login in ${Math.round(backoff / 1000)}s (attempt ${loginAttempts})`);
   setTimeout(logOn, backoff);
 });
+
+// Watchdog — self-heal a wedged connection. Only acts once we've actually had a
+// session (logged on now, or the GC was up before), so a plain login failure is
+// left to the exponential backoff above and bad creds never cause a restart loop.
+setInterval(() => {
+  if (!CREDS_OK || guardCallback) return; // idle, or waiting on a human Guard code
+  if (gcConnected) {
+    lastHealthyAt = Date.now();
+    return;
+  }
+  const stuckMs = Date.now() - lastHealthyAt;
+  if (stuckMs > GC_STALE_MS && (loggedOn || everGcConnected)) {
+    console.error(
+      `gc-bot: no GC connection for ${Math.round(stuckMs / 1000)}s (loggedOn=${loggedOn}) — exiting for a clean restart`,
+    );
+    process.exit(1);
+  }
+}, WATCHDOG_INTERVAL_MS);
 
 // --- share-code decode (Valve's base-57; matchId is the first field) ---------
 // Ported from the Go internal/sharecode package. We only need the matchId, to
@@ -269,6 +298,8 @@ const server = http.createServer((req, res) => {
     return send(200, {
       loggedOn,
       gcConnected,
+      everGcConnected,
+      sinceHealthyMs: gcConnected ? 0 : Date.now() - lastHealthyAt,
       queued: queue.length,
       guardPending: !!guardCallback,
       guardDomain,
