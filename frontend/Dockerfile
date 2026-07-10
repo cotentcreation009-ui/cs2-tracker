@@ -12,6 +12,13 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# SITE_URL must be present at BUILD time: statically-prerendered pages (/about,
+# /guides/*, /privacy, /terms, robots.txt) bake their canonical + OpenGraph URLs
+# and the robots sitemap line from it. Without it they fall back to
+# http://localhost:3000 — a localhost canonical breaks indexing. The same value
+# is also a runtime env (compose) so ISR/dynamic routes stay correct.
+ARG SITE_URL=""
+ENV SITE_URL=$SITE_URL
 # Cloudflare Web Analytics token. Baked in at build so statically-prerendered
 # pages (/, /demos, ...) also carry the beacon; the same value is passed as a
 # runtime env in compose so dynamic pages pick it up too. Optional/empty = off.
