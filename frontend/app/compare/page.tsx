@@ -73,7 +73,7 @@ export default async function ComparePage({
                       ranks: { ...leetifyRaw.ranks, faceit_elo: faceit.elo },
                     }
                   : leetifyRaw;
-              return profile ? { profile, leetify } : null;
+              return profile ? { profile, leetify, faceit } : null;
             } catch {
               return null;
             }
