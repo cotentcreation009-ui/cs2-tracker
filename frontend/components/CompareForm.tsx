@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { PlayerHit } from "@/lib/types";
 import { getRecentPlayers } from "@/lib/recent";
+import { normalizeSteamInput } from "@/lib/steamInput";
 
 // 24px avatar (literal classes so Tailwind keeps them).
 function Avatar({ url, name }: { url?: string; name: string }) {
@@ -42,7 +43,9 @@ export function CompareForm({
     router.push(list.length ? `/compare?ids=${list.map(encodeURIComponent).join(",")}` : "/compare");
 
   const add = (raw: string) => {
-    const t = raw.trim();
+    // Accept a pasted profile URL, not just a bare id/vanity — strip it to the
+    // identifier the compare page can resolve (matches the main search bar).
+    const t = normalizeSteamInput(raw);
     if (!t || full || ids.includes(t)) return;
     nav([...ids, t]);
   };
