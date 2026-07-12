@@ -10,6 +10,12 @@ import { mapLabel } from "@/lib/format";
 // instead of a doomed request (FACEIT keeps demos much longer).
 const VALVE_REPLAY_MAX_AGE_MS = 31 * 24 * 3600 * 1000;
 
+// A resolvable Leetify game id is a UUID; the server rejects anything else with
+// "invalid match id". Some matches carry an incomplete Leetify record with a
+// non-UUID id — mirror the server's check so we never offer a doomed click.
+const LEETIFY_GAME_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * AnalyzeDemoButton — one-click demo analysis for a match listed on a profile.
  * Kicks the server-side pipeline (Leetify game id → share code / FACEIT id →
@@ -31,6 +37,10 @@ export function AnalyzeDemoButton({
   const [phase, setPhase] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
+
+  // No valid game id → no resolvable demo. Hide the analyze button (the
+  // "View on Leetify" link beside it stays) instead of showing one that 400s.
+  if (!LEETIFY_GAME_ID.test(gameId)) return null;
 
   const isValve = dataSource !== "faceit";
   const age = Date.now() - new Date(finishedAt).getTime();
