@@ -60,6 +60,24 @@ export function normalizeMapName(mapName: string): string {
   return shorthand[n] || `de_${n}`;
 }
 
+// The current CS2 Premier active-duty map pool (normalized de_ keys). The map
+// win-rate radar is locked to these so retired/community maps (Overpass,
+// Vertigo, Train, workshop maps, …) don't appear as vertices or skew a player's
+// Premier map profile.
+export const PREMIER_ACTIVE_MAPS: ReadonlySet<string> = new Set([
+  "de_ancient",
+  "de_anubis",
+  "de_cache",
+  "de_dust2",
+  "de_inferno",
+  "de_mirage",
+  "de_nuke",
+]);
+
+export function isActivePremierMap(map: string): boolean {
+  return PREMIER_ACTIVE_MAPS.has(normalizeMapName(map));
+}
+
 export function hasCalibration(map: string): boolean {
   return normalizeMapName(map) in MAP_CONFIGS;
 }

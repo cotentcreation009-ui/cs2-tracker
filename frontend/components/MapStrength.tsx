@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, timeAgo } from "@/lib/format";
-import { radarImage } from "@/lib/maps/calibration";
+import { isActivePremierMap, radarImage } from "@/lib/maps/calibration";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -285,8 +285,11 @@ function MapWinRadar({
 }) {
   void metric;
   const [hov, setHov] = useState<string | null>(null); // hovered vertex (map key)
-  const reliable = rows.filter((r) => r.n >= 3);
-  const base = (reliable.length >= 3 ? reliable : rows.filter((r) => r.n >= 1)).slice(0, 9);
+  // Lock the radar to the current Premier active-duty pool so retired/community
+  // maps (Overpass, Vertigo, Train, workshop maps) never appear as vertices.
+  const activeRows = rows.filter((r) => isActivePremierMap(r.map));
+  const reliable = activeRows.filter((r) => r.n >= 3);
+  const base = (reliable.length >= 3 ? reliable : activeRows.filter((r) => r.n >= 1)).slice(0, 9);
   // fixed angular order (by name) so vertices don't jump as values change
   const data = [...base].sort((a, b) => a.map.localeCompare(b.map));
 
@@ -546,11 +549,15 @@ export function MapStrength({ matches }: { matches: LeetifyRecentMatch[] }) {
       if (arr) arr.push(m);
       else byMap.set(key, [m]);
     }
-    const list = [...byMap.entries()].map(([map, ms]) => {
-      const w = ms.filter((m) => m.outcome === "win").length;
-      return { map, ms, n: ms.length, w, l: ms.length - w, winPct: (w / ms.length) * 100 };
-    });
-    return { rows: list, total: scoped.length };
+    const list = [...byMap.entries()]
+      // Premier active-duty pool only — drop retired/community maps so the pills,
+      // radar and list all describe the same (competitive) map pool.
+      .filter(([map]) => isActivePremierMap(map))
+      .map(([map, ms]) => {
+        const w = ms.filter((m) => m.outcome === "win").length;
+        return { map, ms, n: ms.length, w, l: ms.length - w, winPct: (w / ms.length) * 100 };
+      });
+    return { rows: list, total: list.reduce((s, r) => s + r.n, 0) };
   }, [matches, bucket, source]);
 
   const hasRounds = useMemo(
