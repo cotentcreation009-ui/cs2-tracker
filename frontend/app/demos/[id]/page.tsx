@@ -1019,7 +1019,7 @@ export default function ReplayPage() {
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} demoId={String(id)} onWatch={jumpToReplay} />}
 
       {tab === "replay" && (
-        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-stretch lg:gap-3 2xl:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.6fr)_minmax(320px,0.65fr)]">
+        <div className="grid gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-stretch lg:gap-3 2xl:mx-auto 2xl:w-full 2xl:max-w-[1600px] 2xl:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.6fr)_minmax(320px,0.65fr)]">
           {/* player unit. At lg+ it's a size container: the radar square takes
               min(width, height − slim transport) so the WHOLE map stays
               visible — nothing overlays map pixels. Side columns are fr-based
