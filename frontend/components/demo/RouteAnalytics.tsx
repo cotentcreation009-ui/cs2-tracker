@@ -388,8 +388,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
 
             {/* zoom controls */}
             <div className="absolute right-2 top-2 flex flex-col gap-1">
-              <button type="button" onClick={() => setZoom((z) => clamp(+(z * 1.4).toFixed(3), 1, 6))} className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-sm font-bold backdrop-blur hover:text-brand">+</button>
-              <button type="button" onClick={() => setZoom((z) => clamp(+(z / 1.4).toFixed(3), 1, 6))} className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-sm font-bold backdrop-blur hover:text-brand">−</button>
+              <button type="button" onClick={() => setZoom((z) => clamp(+(z * 1.4).toFixed(3), 1, 6))} title="Zoom in" className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-sm font-bold backdrop-blur hover:text-brand">+</button>
+              <button type="button" onClick={() => setZoom((z) => clamp(+(z / 1.4).toFixed(3), 1, 6))} title="Zoom out" className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-sm font-bold backdrop-blur hover:text-brand">−</button>
               {zoom > 1 && (
                 <button type="button" onClick={resetView} title="Reset zoom" className="grid h-7 w-7 place-items-center rounded-md border border-line bg-bg/80 text-[10px] backdrop-blur hover:text-brand">⤢</button>
               )}
@@ -445,7 +445,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
         {scopedRound ? (
           <div className="space-y-3 lg:contents lg:space-y-0">
             {typeof playerFilter === "number" && (
-              <div className="lg:h-full lg:min-h-0 lg:overflow-y-auto">
+              <div className="scroll-slim lg:h-full lg:min-h-0 lg:overflow-y-auto">
                 <PlayerRoundCard
                   round={scopedRound}
                   meta={meta}
@@ -483,7 +483,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
               <span className="stat-label">{mode === "common" ? `${clusters.length} common routes` : `${individualPaths.length} player paths`}</span>
               {selectedCluster && <button type="button" onClick={() => setSelected(null)} className="text-[10px] text-faint hover:text-ink">✕ clear</button>}
             </div>
-            <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
+            <div className="scroll-slim flex-1 space-y-1.5 overflow-y-auto pr-1">
               {(mode === "common" ? clusters.length : individualPaths.length) === 0 ? (
                 <div className="grid h-full min-h-24 place-items-center px-4 text-center text-xs text-muted">
                   No routes match the current player / round / side filter — clear it in the toolbar above.
@@ -553,6 +553,7 @@ function RoundDetail({
     onMouseEnter: () => onHover(a),
     onMouseLeave: () => onHover(null),
     onClick: () => onPin(a),
+    "aria-pressed": on,
     className: `flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition ${
       on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
     }`,
@@ -584,7 +585,7 @@ function RoundDetail({
         )}
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="scroll-slim flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* rosters */}
         <div className="grid grid-cols-2 gap-3">
           {[{ side: "CT" as Side, list: ct, hex: CT, soft: CT_SOFT }, { side: "T" as Side, list: t, hex: T, soft: T_SOFT }].map((col) => (
@@ -705,7 +706,7 @@ function Legend({ swatch, label, shape }: { swatch: string; label: string; shape
 }
 function Seg<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { key: T; label: string }[] }) {
   return <div className="flex rounded-lg border border-line bg-panel p-0.5">{options.map((o) =>
-    <button key={o.key} type="button" onClick={() => onChange(o.key)}
+    <button key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={value === o.key}
       className={`rounded-md px-2.5 py-0.5 text-xs font-medium transition ${value === o.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}>{o.label}</button>)}</div>;
 }
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -716,7 +717,7 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 const sideClass = (s: Side) => (s === "T" ? "text-[#f0cd78]" : "text-[#9cc1ff]");
 function RouteRow({ cluster, active, onClick }: { cluster: RouteCluster; active: boolean; onClick: () => void }) {
   const wc = winColor(cluster.winRate);
-  return <button type="button" onClick={onClick}
+  return <button type="button" onClick={onClick} aria-pressed={active}
     className={`w-full rounded-lg border px-3 py-2 text-left transition ${active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"}`}>
     <div className="flex items-center justify-between gap-2">
       <span className={`text-xs font-bold uppercase tracking-wide ${sideClass(cluster.side)}`}>{cluster.side} · {cluster.label}</span>

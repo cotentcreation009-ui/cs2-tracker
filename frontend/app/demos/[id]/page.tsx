@@ -218,7 +218,7 @@ function EventFeed({
         {kills.length === 0 ? (
           <div className="text-xs text-faint">No kills yet.</div>
         ) : (
-          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
+          <div className="scroll-slim max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
             {kills.map((k, i) => {
               const recent = time - k.t < 4;
               return (
@@ -945,7 +945,7 @@ export default function ReplayPage() {
 
       {/* lens pane: at lg+ this is the rest of the viewport — lenses fill it
           and scroll internally; the pane (never the page) absorbs overflow */}
-      <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+      <div className="scroll-slim lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
@@ -1188,12 +1188,12 @@ export default function ReplayPage() {
               their height and the rail scrolls if a player card overflows.
               At 2xl the rail dissolves (contents) into TWO grid columns —
               live feed | detail stack — so wide screens show everything. */}
-          <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
+          <div className="scroll-slim space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
           <div className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col 2xl:h-full 2xl:min-h-0">
             <EventFeed round={round} time={time} meta={meta} zones={zones} />
           </div>
 
-          <div className="space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">
+          <div className="scroll-slim space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">
           {focusPlayer != null ? (
             <div className="lg:shrink-0">
               <PlayerRoundCard

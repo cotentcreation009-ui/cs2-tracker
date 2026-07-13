@@ -303,6 +303,8 @@ export function PlayerRoundCard({
                   onMouseEnter={() => onUtilHover?.(n.ni)}
                   onMouseLeave={() => onUtilHover?.(null)}
                   onClick={() => onUtilPin?.(n.ni)}
+                  aria-pressed={on}
+                  title="Pin this throw on the map"
                   className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
                     on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
                   }`}

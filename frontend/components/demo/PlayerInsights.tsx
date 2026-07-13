@@ -146,6 +146,7 @@ function UtilPill({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={!!active}
       title={`Break down ${label} on the map`}
       className={`pill transition ${
         active
@@ -259,6 +260,7 @@ function PlayerCard({
           <button
             type="button"
             onClick={onCompare}
+            aria-pressed={comparing}
             title="Add to comparison (pick two)"
             className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition ${
               comparing
@@ -534,6 +536,7 @@ function RosterRow({
       <button
         type="button"
         onClick={onCompare}
+        aria-pressed={comparing}
         title="Add to comparison (pick two)"
         className={`shrink-0 rounded border px-1 py-0.5 text-[9px] transition ${
           comparing
@@ -573,6 +576,7 @@ function ThrowRow({
       onClick={onClick}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      aria-pressed={active}
       className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
         active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
       }`}
@@ -619,7 +623,7 @@ function RoundTimeline({
         </span>
         <span className="text-[10px] text-faint">click a round to scope every tab to it</span>
       </div>
-      <div className="flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-1">
+      <div className="scroll-slim flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-1">
         {rounds.map((r, ri) => {
           const side = r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
           const won = !!side && r.winner === side;
@@ -633,6 +637,7 @@ function RoundTimeline({
               key={ri}
               type="button"
               onClick={() => onPick(ri)}
+              aria-pressed={active}
               title={
                 side == null
                   ? `Round ${r.n} · did not play`
@@ -748,7 +753,7 @@ function CompareTable({ a, b, onClose }: { a: PlayerInsight; b: PlayerInsight; o
     );
   };
   return (
-    <div className="card-2 px-4 py-3 lg:max-h-80 lg:shrink-0 lg:overflow-y-auto">
+    <div className="scroll-slim card-2 px-4 py-3 lg:max-h-80 lg:shrink-0 lg:overflow-y-auto">
       <div className="mb-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <span className="truncate text-right text-sm font-bold" style={{ color: sideHex(a.team) }}>{a.name}</span>
         <span className="text-[10px] uppercase tracking-wider text-faint">vs</span>
@@ -1043,6 +1048,7 @@ export default function PlayerInsights({
                 key={a.label}
                 type="button"
                 onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
+                aria-pressed={on}
                 title={`Focus ${a.p.name}`}
                 className={`flex items-center gap-2.5 rounded-xl border py-1.5 pl-1.5 pr-3 text-left transition ${
                   on ? "border-brand/50 bg-brand/10" : "border-line bg-panel/50 hover:border-brand/40 hover:bg-panel"
@@ -1112,7 +1118,7 @@ export default function PlayerInsights({
           )}
         </div>
         {selPlayer && selKinds.length > 0 && (
-          <div className="mb-2 flex w-full flex-wrap gap-1 lg:w-[min(100cqw,calc(100cqh-72px))] lg:flex-nowrap lg:overflow-x-auto">
+          <div className="scroll-slim mb-2 flex w-full flex-wrap gap-1 lg:w-[min(100cqw,calc(100cqh-72px))] lg:flex-nowrap lg:overflow-x-auto">
             {selKinds.length > 1 && (
               <button
                 type="button"
@@ -1190,7 +1196,7 @@ export default function PlayerInsights({
       {/* right: one player at a time — a compact scoreboard picks the player,
           then just THAT player's detail shows. The column scrolls internally;
           the map never gives up space. */}
-      <div className="space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
+      <div className="scroll-slim space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
         {/* scoreboard */}
         <div className="card-2 px-3 py-2.5 lg:shrink-0">
           <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
@@ -1203,6 +1209,7 @@ export default function PlayerInsights({
                     key={s.key}
                     type="button"
                     onClick={() => setSortKey(s.key)}
+                    aria-pressed={sortKey === s.key}
                     className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium transition ${
                       sortKey === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
                     }`}
@@ -1257,7 +1264,7 @@ export default function PlayerInsights({
               </span>
               <span className="text-[10px] text-faint">hover = preview · click = pin · dashed = throw → land</span>
             </div>
-            <div className="max-h-56 space-y-1 overflow-y-auto pr-1 lg:max-h-64">
+            <div className="scroll-slim max-h-56 space-y-1 overflow-y-auto pr-1 lg:max-h-64">
               {selThrows.map((tw, i) => (
                 <ThrowRow
                   key={`${tw.round}-${tw.t}-${i}`}
