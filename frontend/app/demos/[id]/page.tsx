@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getMatch } from "@/lib/demo/store";
+import { getMatch, renameMatch } from "@/lib/demo/store";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
@@ -242,6 +242,9 @@ export default function ReplayPage() {
   const [meta, setMeta] = useState<ReplayMeta | null>(null);
   const [rounds, setRounds] = useState<ReplayRound[]>([]);
   const [name, setName] = useState("");
+  // inline demo rename (pencil in the header) — persists to the local library
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState("");
   const [loading, setLoading] = useState(true);
   const [roundIdx, setRoundIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -824,12 +827,30 @@ export default function ReplayPage() {
   // isn't the score). teamA started CT (blue), teamB started T (amber).
   const { a: teamAScore, b: teamBScore } = teamScore(rounds);
 
+  // inline rename: commit trims + persists to the library; empty/unchanged is a no-op
+  const startRename = () => {
+    setDraftName(name);
+    setEditingName(true);
+  };
+  const commitRename = () => {
+    const v = draftName.trim();
+    if (v && v !== name) {
+      setName(v);
+      void renameMatch(String(id), v);
+    }
+    setEditingName(false);
+  };
+
   return (
     <div className="full-bleed flex flex-col gap-3 px-4 lg:h-full lg:min-h-0 lg:gap-2.5 lg:px-6">
-      {/* unified header: identity + scoreline, with the lens tabs built in */}
-      <section className="card-2 shrink-0 overflow-hidden">
-        <div className="flex flex-col gap-3 px-4 pb-3 pt-3.5 sm:flex-row sm:items-center sm:px-5 lg:py-2">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+      {/* unified header: identity | centered scoreline | match stats, with the
+          lens tabs built in. Balanced three-zone layout (scoreboard style). */}
+      <section
+        className="card-2 shrink-0 overflow-hidden"
+        style={{ boxShadow: "0 0 44px -18px rgba(56,214,255,0.28)" }}
+      >
+        <div className="flex flex-col gap-3 px-4 pb-3 pt-3.5 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:gap-4 sm:px-5 lg:py-2">
+          <div className="flex min-w-0 items-center gap-3">
             <Link
               href="/demos"
               title="Back to demo library"
@@ -849,16 +870,46 @@ export default function ReplayPage() {
                 ◎
               </div>
             )}
-            <div className="min-w-0">
-              <h1 className="truncate text-lg font-extrabold leading-tight tracking-tight">
-                {name}
-              </h1>
+            <div className="min-w-0 flex-1">
+              {editingName ? (
+                <input
+                  autoFocus
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") {
+                      // reset the draft first so a stray blur can't commit it
+                      setDraftName(name);
+                      setEditingName(false);
+                    }
+                  }}
+                  maxLength={80}
+                  aria-label="Demo name"
+                  className="w-full max-w-72 rounded-lg border border-brand/50 bg-panel px-2 py-0.5 text-lg font-extrabold leading-tight tracking-tight outline-none ring-2 ring-brand/20"
+                />
+              ) : (
+                <div className="group flex min-w-0 items-center gap-1.5">
+                  <h1 className="truncate text-lg font-extrabold leading-tight tracking-tight">
+                    {name}
+                  </h1>
+                  <button
+                    type="button"
+                    onClick={startRename}
+                    title="Rename this demo"
+                    className="shrink-0 rounded p-0.5 text-faint opacity-60 transition hover:bg-panel hover:text-brand group-hover:opacity-100"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                    </svg>
+                  </button>
+                </div>
+              )}
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                 <span className="font-semibold capitalize text-ink">{mapLabel(meta.map)}</span>
-                <span className="text-faint">·</span>
-                <span className="tabular-nums">{rounds.length} rounds</span>
-                <span className="text-faint">·</span>
-                <span className="tabular-nums">{meta.players.length} players</span>
+                <span className="hidden text-faint sm:inline">·</span>
+                <span className="hidden sm:inline">demo replay</span>
               </div>
             </div>
           </div>
@@ -902,10 +953,25 @@ export default function ReplayPage() {
               </div>
             </div>
           </div>
+
+          {/* right zone: match stats, balancing the identity block */}
+          <div className="flex items-center gap-2 sm:justify-end">
+            <div className="rounded-lg border border-line bg-panel/50 px-3 py-1 text-center">
+              <div className="text-sm font-bold leading-tight tabular-nums">{rounds.length}</div>
+              <div className="text-[9px] uppercase tracking-wider text-faint">Rounds</div>
+            </div>
+            <div className="rounded-lg border border-line bg-panel/50 px-3 py-1 text-center">
+              <div className="text-sm font-bold leading-tight tabular-nums">{meta.players.length}</div>
+              <div className="text-[9px] uppercase tracking-wider text-faint">Players</div>
+            </div>
+          </div>
         </div>
 
-        {/* lens tabs — a segmented icon nav built into the header */}
-        <div className="scroll-slim flex gap-1 overflow-x-auto border-t border-line/60 bg-panel/25 px-2 py-1.5 lg:py-1">
+        {/* lens tabs — a segmented icon nav built into the header. The inner
+            w-max wrapper centers the group when it fits and still scrolls
+            correctly from the left edge when it overflows. */}
+        <div className="scroll-slim overflow-x-auto border-t border-line/60 bg-panel/25 px-2 py-1.5 lg:py-1">
+          <div className="mx-auto flex w-max gap-1">
           {TABS.map((tb) => {
             const on = tab === tb.k;
             return (
@@ -930,6 +996,7 @@ export default function ReplayPage() {
               </button>
             );
           })}
+          </div>
         </div>
       </section>
 

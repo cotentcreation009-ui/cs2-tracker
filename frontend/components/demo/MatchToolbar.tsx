@@ -146,22 +146,24 @@ export function MatchToolbar({
   return (
     <div className="card-2 flex shrink-0 flex-col gap-2 px-3 py-2.5 lg:py-2">
       {/* players — the two rosters sit in team-tinted groups so CT vs T reads
-          at a glance; the leading side tag doubles as that side's filter */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => view.setFocusPlayer(null)}
-          aria-pressed={view.focusPlayer === null}
-          title="Show all players"
-          className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-            view.focusPlayer === null
-              ? "bg-brand/15 text-brand ring-1 ring-inset ring-brand/40"
-              : "bg-panel text-muted hover:text-ink"
-          }`}
-        >
-          All
-        </button>
-        <div className="scroll-slim flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5">
+          at a glance; the leading side tag doubles as that side's filter. The
+          w-max inner wrapper centers the whole cluster when it fits and still
+          scrolls correctly from the left edge when it overflows. */}
+      <div className="scroll-slim overflow-x-auto pb-0.5">
+        <div className="mx-auto flex w-max items-center gap-2">
+          <button
+            type="button"
+            onClick={() => view.setFocusPlayer(null)}
+            aria-pressed={view.focusPlayer === null}
+            title="Show all players"
+            className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+              view.focusPlayer === null
+                ? "bg-brand/15 text-brand ring-1 ring-inset ring-brand/40"
+                : "bg-panel text-muted hover:text-ink"
+            }`}
+          >
+            All
+          </button>
           {/* CT roster */}
           {teams.ct.length > 0 && (
             <div
@@ -187,8 +189,10 @@ export function MatchToolbar({
       </div>
 
       {/* rounds — a score-flow timeline (winner-tinted, labeled halftime).
-          Hovering a chip reads like a scoreline: "Round 7 · 5–2 · CT win". */}
-      <div className="flex items-center gap-2 border-t border-line/50 pt-2">
+          Hovering a chip reads like a scoreline: "Round 7 · 5–2 · CT win".
+          Same centered w-max cluster as the roster row. */}
+      <div className="scroll-slim overflow-x-auto border-t border-line/50 pb-0.5 pt-2">
+        <div className="mx-auto flex w-max items-center gap-2">
         <button
           type="button"
           onClick={() => view.setScopeRound(null)}
@@ -202,7 +206,7 @@ export function MatchToolbar({
         >
           Match
         </button>
-        <div className="scroll-slim flex min-w-0 flex-1 items-stretch gap-0.75 overflow-x-auto pb-0.5">
+        <div className="flex items-stretch gap-0.75">
           {rounds.map((r, i) => {
             const active = view.scopeRound === i;
             // colour by the winning TEAM (A = started CT = blue, B = amber)
@@ -277,6 +281,7 @@ export function MatchToolbar({
             ))}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
