@@ -319,14 +319,17 @@ func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
 }
 
-// leetifyGameIDRe matches a Leetify game id — the id our recent-match rows
-// carry. Two shapes exist: the v3 UUID (public profiles) and the legacy
-// "<hex>-<hex>" form (e.g. 7c9bc801f1a8bb51-6e7cc3), which is what profiles
-// served by Leetify's legacy endpoint carry. GetGameDetails accepts both, so we
-// must too — a UUID-only check rejected every legacy-profile match with
-// "invalid match id". Hex + hyphen only, so the value is still safe to put in a
-// URL path.
-var leetifyGameIDRe = regexp.MustCompile(`^[0-9a-fA-F]{6,32}(?:-[0-9a-fA-F]{4,32}){1,4}$`)
+// leetifyUUIDRe matches a v3 Leetify game id (UUID). Leetify's /api/games/{id}
+// resolves these to a demo reference (share code / FACEIT id), so these are the
+// matches one-click analysis can actually handle.
+var leetifyUUIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// leetifyLegacyIDRe matches the legacy "<hex>-<hex>" id (e.g.
+// 7c9bc801f1a8bb51-6e7cc3) carried by profiles Leetify only serves from its
+// legacy endpoint. Leetify's /api/games/ rejects these (400) and the legacy
+// profile record exposes no share code — so there's no demo to resolve. We
+// detect them to return a clear message instead of a generic error.
+var leetifyLegacyIDRe = regexp.MustCompile(`^[0-9a-fA-F]{6,32}-[0-9a-fA-F]{4,32}$`)
 
 // valveReplayMaxAge is how long Valve keeps GOTV replays around. Matches older
 // than this get a clear "expired" error instead of a doomed download attempt.
@@ -358,7 +361,16 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	gameID := strings.TrimSpace(req.GameID)
-	if !leetifyGameIDRe.MatchString(gameID) {
+	switch {
+	case leetifyUUIDRe.MatchString(gameID):
+		// Resolvable via Leetify — continue below.
+	case leetifyLegacyIDRe.MatchString(gameID):
+		// Legacy-endpoint account: Leetify exposes no demo reference for these,
+		// so there's nothing to resolve. Say so plainly instead of erroring out.
+		writeError(w, http.StatusUnprocessableEntity,
+			"Leetify only has a limited record for this account, so its demos can't be analyzed automatically.")
+		return
+	default:
 		writeError(w, http.StatusBadRequest, "invalid match id")
 		return
 	}
