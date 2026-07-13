@@ -906,10 +906,8 @@ export default function ReplayPage() {
                   </button>
                 </div>
               )}
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+              <div className="mt-1 text-xs text-muted">
                 <span className="font-semibold capitalize text-ink">{mapLabel(meta.map)}</span>
-                <span className="hidden text-faint sm:inline">·</span>
-                <span className="hidden sm:inline">demo replay</span>
               </div>
             </div>
           </div>
