@@ -281,12 +281,50 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 );
               })}
 
+              {/* damage-taken reveal: hovering an attacker in the round card
+                  highlights THEIR route for this round, even though the map is
+                  scoped to the selected player (bullet damage has no coords —
+                  the attacker's path is the "where it came from") */}
+              {scopedRound &&
+                typeof playerFilter === "number" &&
+                active?.kind === "player" &&
+                active.id !== playerFilter &&
+                (() => {
+                  const p = analysis.paths.find(
+                    (pp) => pp.round === scopedRound.n && pp.playerIndex === active.id,
+                  );
+                  if (!p) return null;
+                  const dd = pathD(p, pt);
+                  if (!dd) return null;
+                  return (
+                    <g>
+                      <path
+                        d={dd}
+                        fill="none"
+                        stroke={sideHex(p.side)}
+                        strokeWidth={0.8 * s}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        opacity={0.95}
+                      />
+                      <StartEnd path={p} winRate={p.won ? 1 : 0} pt={pt} scale={s} />
+                    </g>
+                  );
+                })()}
+
               {scopedRound ? (
                 <>
                   {/* util: origin → landing, interactive */}
                   {(scopedRound.nades ?? []).map((n, i) => {
-                    // when a player is selected, only their own util — not everyone's
-                    if (playerFilter !== "all" && n.by !== playerFilter) return null;
+                    // when a player is selected: their own util, PLUS any enemy
+                    // grenade that damaged them (a damage-taken source, so the
+                    // card's hover can point at it)
+                    if (
+                      playerFilter !== "all" &&
+                      n.by !== playerFilter &&
+                      (n.dmg?.[playerFilter] ?? 0) <= 0
+                    )
+                      return null;
                     const c = pt(n.x, n.y); if (!c) return null;
                     const col = KIND_COLOR[n.k] ?? "#8a7dff";
                     const o = throwOrigin(scopedRound, n);
@@ -455,6 +493,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                   onUtilHover={(id) => onHover(id == null ? null : { kind: "util", id })}
                   onUtilPin={(id) => onPin({ kind: "util", id })}
                   activeUtilId={active?.kind === "util" ? active.id : null}
+                  onRefHover={(r) => onHover(r)}
+                  onRefPin={(r) => onPin(r)}
+                  activeRef={active}
                   zoneOf={zoneOf}
                 />
               </div>
