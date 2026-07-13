@@ -409,6 +409,7 @@ export function StrategyMap({
                 key={l.key}
                 type="button"
                 onClick={() => toggle(l.key)}
+                aria-pressed={active.has(l.key)}
                 className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
                   active.has(l.key)
                     ? "border-brand/50 bg-brand/15 text-brand"
@@ -429,6 +430,7 @@ export function StrategyMap({
                     key={sp.key}
                     type="button"
                     onClick={() => setSpread(sp.key)}
+                    aria-pressed={spread === sp.key}
                     className={`flex-1 rounded-md px-2 py-0.5 text-xs font-medium transition ${
                       spread === sp.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
                     }`}
@@ -457,6 +459,7 @@ export function StrategyMap({
                     key={s}
                     type="button"
                     onClick={() => setLocalSide(s)}
+                    aria-pressed={side === s}
                     className={`rounded-md px-2.5 py-0.5 text-xs font-medium uppercase transition ${
                       side === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
                     }`}
@@ -484,7 +487,7 @@ export function StrategyMap({
             <div className="stat-label mb-2 lg:shrink-0">
               Zone breakdown <span className="font-normal lowercase text-faint">· hold · K/D in zone</span>
             </div>
-            <div className="space-y-1.5 lg:min-h-0 lg:overflow-y-auto">
+            <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:overflow-y-auto">
               {zoneStats.slice(0, 9).map((z) => (
                 <div key={z.name} className="flex items-center gap-2 text-xs">
                   <span className="w-24 shrink-0 truncate text-muted" title={z.name}>{z.name}</span>

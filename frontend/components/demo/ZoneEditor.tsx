@@ -437,7 +437,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
 
       <div
         className={`space-y-3 ${
-          fit ? "lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto" : ""
+          fit ? "scroll-slim lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto" : ""
         }`}
       >
         {!editing ? (
@@ -481,7 +481,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
                 <span className="stat-label">Call-outs ({shown.length})</span>
                 <span className="text-[10px] text-faint">click one to rename</span>
               </div>
-              <div className="flex-1 space-y-0.5 overflow-y-auto pr-1">
+              <div className="scroll-slim flex-1 space-y-0.5 overflow-y-auto pr-1">
                 {shown.map((z) => (
                   <button
                     key={z.id}
@@ -529,6 +529,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
                 <button
                   type="button"
                   onClick={() => { setTool(tool === "anchor" ? "none" : "anchor"); setDraft([]); }}
+                  aria-pressed={tool === "anchor"}
                   className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${tool === "anchor" ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"}`}
                 >
                   + Anchor (click)
@@ -536,6 +537,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
                 <button
                   type="button"
                   onClick={() => { setTool(tool === "polygon" ? "none" : "polygon"); setDraft([]); }}
+                  aria-pressed={tool === "polygon"}
                   className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${tool === "polygon" ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"}`}
                 >
                   Draw polygon
@@ -574,7 +576,7 @@ export function ZoneEditor({ map, fit = false }: { map: string; fit?: boolean })
               {editing.zones.length === 0 ? (
                 <div className="text-xs text-muted">None yet — add an anchor or draw a polygon.</div>
               ) : (
-                <div className="flex-1 space-y-1 overflow-y-auto pr-1">
+                <div className="scroll-slim flex-1 space-y-1 overflow-y-auto pr-1">
                   {editing.zones
                     .filter((z) => !query || z.name.toLowerCase().includes(query.toLowerCase()))
                     .map((z) => (
@@ -635,7 +637,7 @@ function SetRow({
 }) {
   return (
     <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${active ? "border-brand/50 bg-brand/5" : "border-line"}`}>
-      <button type="button" onClick={onActivate} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <button type="button" onClick={onActivate} aria-pressed={active} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? "border-brand" : "border-line2"}`}>
           {active && <span className="h-2 w-2 rounded-full bg-brand" />}
         </span>

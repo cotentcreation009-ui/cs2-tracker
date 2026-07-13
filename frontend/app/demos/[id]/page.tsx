@@ -145,10 +145,42 @@ function EventFeed({
         <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
       </div>
 
+      {/* alive bar: counts + one life dot per player (dim = dead). The dots are
+          decorative duplication of the counts (aria-hidden) and only render for
+          normal-size rosters — a 10v10 casual demo degrades to counts-only
+          rather than overflowing the rail card. */}
       <div className="mb-2 flex items-center justify-center gap-3 rounded-md bg-panel/50 py-1.5 text-base font-extrabold tabular-nums">
-        <span style={{ color: CT }}>CT {ctAlive}</span>
+        <span className="flex items-center gap-1.5">
+          <span style={{ color: CT }}>CT {ctAlive}</span>
+          {(round.ct?.length ?? 0) <= 6 && (
+            <span className="flex gap-0.5" aria-hidden>
+              {(round.ct ?? []).map((i) => (
+                <span
+                  key={i}
+                  title={`${name(i)}${dead.has(i) ? " · dead" : ""}`}
+                  className="h-1.5 w-1.5 shrink-0 rounded-full transition-opacity"
+                  style={{ background: CT, opacity: dead.has(i) ? 0.22 : 1 }}
+                />
+              ))}
+            </span>
+          )}
+        </span>
         <span className="text-xs font-normal text-faint">alive</span>
-        <span style={{ color: T }}>{tAlive} T</span>
+        <span className="flex items-center gap-1.5">
+          {(round.t?.length ?? 0) <= 6 && (
+            <span className="flex gap-0.5" aria-hidden>
+              {(round.t ?? []).map((i) => (
+                <span
+                  key={i}
+                  title={`${name(i)}${dead.has(i) ? " · dead" : ""}`}
+                  className="h-1.5 w-1.5 shrink-0 rounded-full transition-opacity"
+                  style={{ background: T, opacity: dead.has(i) ? 0.22 : 1 }}
+                />
+              ))}
+            </span>
+          )}
+          <span style={{ color: T }}>{tAlive} T</span>
+        </span>
       </div>
 
       {plant && !ended && (
@@ -186,7 +218,7 @@ function EventFeed({
         {kills.length === 0 ? (
           <div className="text-xs text-faint">No kills yet.</div>
         ) : (
-          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
+          <div className="scroll-slim max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
             {kills.map((k, i) => {
               const recent = time - k.t < 4;
               return (
@@ -831,13 +863,21 @@ export default function ReplayPage() {
             </div>
           </div>
 
-          {/* scoreline — final score by team (winner emphasized). Teams are
-              identified by the side they started on; they swap at halftime. */}
-          <div className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5 lg:py-1">
+          {/* scoreline — final score by team (winner emphasized with a soft
+              glow). Teams are identified by the side they started on; they
+              swap at halftime. */}
+          <div
+            className="flex shrink-0 items-center justify-center gap-4 rounded-xl border border-line bg-panel/50 px-5 py-1.5 lg:py-1"
+            title="Final score by team — sides swap at halftime, so each team is named for the side it started on"
+          >
             <div className="text-center">
               <div
                 className="text-2xl font-extrabold leading-none tabular-nums"
-                style={{ color: CT, opacity: teamAScore >= teamBScore ? 1 : 0.55 }}
+                style={{
+                  color: CT,
+                  opacity: teamAScore >= teamBScore ? 1 : 0.55,
+                  textShadow: teamAScore > teamBScore ? `0 0 16px ${colA(CT, 0.6)}` : "none",
+                }}
               >
                 {teamAScore}
               </div>
@@ -849,7 +889,11 @@ export default function ReplayPage() {
             <div className="text-center">
               <div
                 className="text-2xl font-extrabold leading-none tabular-nums"
-                style={{ color: T, opacity: teamBScore >= teamAScore ? 1 : 0.55 }}
+                style={{
+                  color: T,
+                  opacity: teamBScore >= teamAScore ? 1 : 0.55,
+                  textShadow: teamBScore > teamAScore ? `0 0 16px ${colA(T, 0.6)}` : "none",
+                }}
               >
                 {teamBScore}
               </div>
@@ -861,7 +905,7 @@ export default function ReplayPage() {
         </div>
 
         {/* lens tabs — a segmented icon nav built into the header */}
-        <div className="flex gap-1 overflow-x-auto border-t border-line/60 bg-panel/25 px-2 py-1.5 lg:py-1">
+        <div className="scroll-slim flex gap-1 overflow-x-auto border-t border-line/60 bg-panel/25 px-2 py-1.5 lg:py-1">
           {TABS.map((tb) => {
             const on = tab === tb.k;
             return (
@@ -870,14 +914,19 @@ export default function ReplayPage() {
                 type="button"
                 onClick={() => setTab(tb.k)}
                 aria-current={on ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition lg:py-1 ${
+                className={`relative flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition lg:py-1 ${
                   on
                     ? "bg-brand/15 text-brand shadow-[inset_0_0_0_1px] shadow-brand/30"
                     : "text-muted hover:bg-panel/70 hover:text-ink"
                 }`}
               >
-                <TabIcon k={tb.k} className={`h-3.5 w-3.5 ${on ? "opacity-100" : "opacity-70"}`} />
+                <TabIcon k={tb.k} className={`h-3.5 w-3.5 transition-opacity ${on ? "opacity-100" : "opacity-70"}`} />
                 {tb.label}
+                {/* underline offset must stay <= the strip's bottom padding at
+                    every breakpoint or it clips (py-1.5 sub-lg, lg:py-1) */}
+                {on && (
+                  <span className="absolute inset-x-3 -bottom-1.25 h-0.5 rounded-full bg-brand/70 lg:-bottom-0.75" aria-hidden />
+                )}
               </button>
             );
           })}
@@ -896,7 +945,7 @@ export default function ReplayPage() {
 
       {/* lens pane: at lg+ this is the rest of the viewport — lenses fill it
           and scroll internally; the pane (never the page) absorbs overflow */}
-      <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+      <div className="scroll-slim lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
@@ -1139,12 +1188,12 @@ export default function ReplayPage() {
               their height and the rail scrolls if a player card overflows.
               At 2xl the rail dissolves (contents) into TWO grid columns —
               live feed | detail stack — so wide screens show everything. */}
-          <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
+          <div className="scroll-slim space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
           <div className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col 2xl:h-full 2xl:min-h-0">
             <EventFeed round={round} time={time} meta={meta} zones={zones} />
           </div>
 
-          <div className="space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">
+          <div className="scroll-slim space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">
           {focusPlayer != null ? (
             <div className="lg:shrink-0">
               <PlayerRoundCard

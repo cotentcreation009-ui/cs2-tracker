@@ -65,6 +65,7 @@ function SuspectRow({
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={selected}
       className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition ${
         selected ? "border-brand/50 bg-brand/10" : "border-transparent hover:bg-panel/60"
       }`}
@@ -161,7 +162,7 @@ function CaseFile({
   }${p.aimSamples >= 6 ? `, reaction ${p.reactionMs.toFixed(0)}ms, snap ${p.snapRate.toFixed(0)}%` : ""}`;
 
   return (
-    <div className="card-2 flex flex-col gap-3 px-4 py-3 lg:h-full lg:min-h-0 lg:gap-2.5 lg:overflow-y-auto">
+    <div className="scroll-slim card-2 flex flex-col gap-3 px-4 py-3 lg:h-full lg:min-h-0 lg:gap-2.5 lg:overflow-y-auto">
       {/* identity */}
       <div className="flex items-center gap-2 lg:shrink-0">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-sm font-black" style={{ background: `${hex}22`, color: hex }}>
@@ -449,7 +450,7 @@ export default function MatchVerdict({
       </div>
 
       {matchAiOpen && matchAi !== "idle" && (
-        <div className="mb-3 rounded-lg border border-brand/30 bg-brand/5 px-4 py-2.5 lg:mb-2 lg:max-h-36 lg:shrink-0 lg:overflow-y-auto lg:px-3 lg:py-2">
+        <div className="scroll-slim mb-3 rounded-lg border border-brand/30 bg-brand/5 px-4 py-2.5 lg:mb-2 lg:max-h-36 lg:shrink-0 lg:overflow-y-auto lg:px-3 lg:py-2">
           <div className="flex items-center justify-between gap-2">
             <span className="stat-label">AI match read</span>
             <button type="button" onClick={() => setMatchAiOpen(false)} className="text-xs text-faint transition hover:text-ink">
@@ -469,7 +470,7 @@ export default function MatchVerdict({
             <span className="stat-label">Suspicion ranking</span>
             <span className="text-[10px] text-faint">aim anomaly ↓</span>
           </div>
-          <div className="space-y-0.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-0.5">
+          <div className="scroll-slim space-y-0.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-0.5">
             {players.map(({ p, cheat }, idx) => (
               <SuspectRow
                 key={p.steamId}

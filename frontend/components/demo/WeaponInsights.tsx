@@ -105,6 +105,7 @@ function WeaponRow({
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={onSelect ? !!selected : undefined}
       title={onSelect ? `Show ${w.label} ${unit === "D" ? "deaths" : "kills"} on the map` : undefined}
       className={`group block w-full rounded-lg px-1.5 py-1 text-left transition ${
         selected ? "bg-panel/70" : "hover:bg-panel/40"
@@ -199,7 +200,7 @@ function WeaponPanel({
         <div className="py-6 text-center text-xs text-muted lg:my-auto">{empty}</div>
       ) : (
         <>
-          <div className="space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {data.weapons.slice(0, 8).map((w) => (
               <WeaponRow
                 key={w.key}
@@ -260,7 +261,7 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
         <span className="font-bold text-good">{m.upset}</span> upset frags ({upsetPct.toFixed(0)}%) — killing an
         equal-or-richer enemy while on the weaker buy.
       </p>
-      <div className="overflow-x-auto lg:min-h-0 lg:overflow-y-auto">
+      <div className="scroll-slim overflow-x-auto lg:min-h-0 lg:overflow-y-auto">
         <div
           className="inline-grid gap-1 text-[11px]"
           style={{ gridTemplateColumns: `auto repeat(${BUY_KEYS.length}, 2.4rem)` }}
@@ -396,6 +397,7 @@ function DuelMap({
                 onClearWeapon(); // manual mode toggle leaves the weapon drilldown
                 setMode(mm);
               }}
+              aria-pressed={activeMode === mm}
               className={`rounded-md px-2 py-0.5 font-medium capitalize transition ${
                 activeMode === mm ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
               }`}
@@ -407,6 +409,8 @@ function DuelMap({
         <button
           type="button"
           onClick={() => setAngle((a) => !a)}
+          aria-pressed={angle}
+          title="Show the shot angle line on each marker"
           className={`rounded-md border px-2 py-0.5 text-[11px] transition ${
             angle ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
           }`}
@@ -442,6 +446,7 @@ function DuelMap({
               key={c.key}
               type="button"
               onClick={() => setCls(c.key)}
+              aria-pressed={cls === c.key}
               className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
                 cls === c.key ? "border-current" : "border-line text-muted hover:text-ink"
               }`}
@@ -573,7 +578,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
         {duels.length === 0 ? (
           <div className="py-6 text-center text-xs text-muted lg:my-auto">No duels in this scope.</div>
         ) : (
-          <div className="space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
             {duels.map((d) => {
               const tot = d.for + d.against || 1;
               const col = teamColor(d.opp.team);
@@ -623,7 +628,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
         <h3 className="stat-label">Head-to-head · net frags</h3>
         <span className="text-[10px] text-faint">row vs column · green = row leads · click a name</span>
       </div>
-      <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+      <div className="scroll-slim overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <div
           className="inline-grid gap-0.5 text-[11px]"
           style={{ gridTemplateColumns: `minmax(7rem,auto) repeat(${players.length}, 1.9rem)` }}
@@ -823,7 +828,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
             <h3 className="stat-label">Per-player weapons</h3>
             <span className="text-[10px] text-faint">click to expand · sets the scoped player</span>
           </div>
-          <div className="grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
+          <div className="scroll-slim grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
             {roster.players.map((p) => (
               <PlayerCard
                 key={p.i}

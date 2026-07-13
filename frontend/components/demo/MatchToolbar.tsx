@@ -7,6 +7,13 @@ import { teamAStarters, roundWinnerTeam } from "@/lib/demo/score";
 const CT = "#5b9dff";
 const T = "#e7b53c";
 const OTHER = "#8a93a5"; // concrete hex (not a CSS var) so `${hex}22` stays valid
+// lightened "text on team tint" hues — the same soft pair the round chips and
+// Both/CT/T segments use, so active text is consistent across the toolbar.
+const SOFT: Record<string, string> = {
+  [CT]: "#9cc1ff",
+  [T]: "#f0cd78",
+  [OTHER]: "#c3ccda",
+};
 
 export type SideFilter = "all" | "CT" | "T";
 
@@ -39,15 +46,19 @@ function PlayerChip({
     <button
       type="button"
       onClick={onToggle}
+      aria-pressed={active}
       title={`Focus ${name} across every tab`}
-      className="flex max-w-36 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-panel2"
+      className="flex max-w-36 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition hover:brightness-110"
       style={{
-        background: active ? `${hex}22` : "var(--color-panel)",
-        color: active ? hex : "var(--color-muted)",
-        boxShadow: active ? `inset 0 0 0 1px ${hex}` : "none",
+        background: active ? `${hex}2e` : "var(--color-panel)",
+        color: active ? (SOFT[hex] ?? "var(--color-ink)") : "var(--color-muted)",
+        boxShadow: active ? `inset 0 0 0 1px ${hex}` : "inset 0 0 0 1px transparent",
       }}
     >
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: hex }} />
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ background: hex, boxShadow: active ? `0 0 6px ${hex}` : "none" }}
+      />
       <span className="truncate">{name}</span>
     </button>
   );
@@ -89,6 +100,27 @@ export function MatchToolbar({
   // TEAM, matching the header's team score rather than raw CT/T side wins.
   const teamA = useMemo(() => teamAStarters(rounds), [rounds]);
 
+  // running team score AFTER each round — shown in the round chips' tooltips so
+  // hovering the strip reads like a scoreline ("Round 7 · 5–2"). Mirrors
+  // teamScore(): when the starting roster is unknown (older parses), fall back
+  // to a raw side count so the tooltips agree with the header scoreline.
+  const scoreAfter = useMemo(() => {
+    let a = 0;
+    let b = 0;
+    const fallback = teamA.size === 0;
+    return rounds.map((r) => {
+      if (fallback) {
+        if (r.winner === "CT") a++;
+        else if (r.winner === "T") b++;
+      } else {
+        const tm = roundWinnerTeam(r, teamA);
+        if (tm === "A") a++;
+        else if (tm === "B") b++;
+      }
+      return { a, b };
+    });
+  }, [rounds, teamA]);
+
   // halftime = first round where the CT roster is what was the T roster at
   // round 0 (i.e. the sides have swapped). -1 when it can't be determined.
   const swapAt = useMemo(() => {
@@ -113,11 +145,13 @@ export function MatchToolbar({
 
   return (
     <div className="card-2 flex shrink-0 flex-col gap-2 px-3 py-2.5 lg:py-2">
-      {/* players — two team rosters */}
+      {/* players — the two rosters sit in team-tinted groups so CT vs T reads
+          at a glance; the leading side tag doubles as that side's filter */}
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => view.setFocusPlayer(null)}
+          aria-pressed={view.focusPlayer === null}
           title="Show all players"
           className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
             view.focusPlayer === null
@@ -127,33 +161,38 @@ export function MatchToolbar({
         >
           All
         </button>
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">
+        <div className="scroll-slim flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5">
           {/* CT roster */}
           {teams.ct.length > 0 && (
-            <>
+            <div
+              className="flex shrink-0 items-center gap-1 rounded-lg py-0.5 pl-1.5 pr-1"
+              style={{ background: "rgba(91,157,255,0.07)", boxShadow: "inset 0 0 0 1px rgba(91,157,255,0.16)" }}
+            >
               <SideTag label="CT" hex={CT} active={view.side === "CT"} onClick={() => view.setSide(view.side === "CT" ? "all" : "CT")} enabled={showSide} />
               {teams.ct.map((p) => chip(p.i, p.name, CT))}
-            </>
-          )}
-          {teams.ct.length > 0 && teams.t.length > 0 && (
-            <span className="mx-1 h-6 w-px shrink-0 bg-line/70" />
+            </div>
           )}
           {/* T roster */}
           {teams.t.length > 0 && (
-            <>
+            <div
+              className="flex shrink-0 items-center gap-1 rounded-lg py-0.5 pl-1.5 pr-1"
+              style={{ background: "rgba(231,181,60,0.07)", boxShadow: "inset 0 0 0 1px rgba(231,181,60,0.16)" }}
+            >
               <SideTag label="T" hex={T} active={view.side === "T"} onClick={() => view.setSide(view.side === "T" ? "all" : "T")} enabled={showSide} />
               {teams.t.map((p) => chip(p.i, p.name, T))}
-            </>
+            </div>
           )}
           {teams.other.map((p) => chip(p.i, p.name, OTHER))}
         </div>
       </div>
 
-      {/* rounds — a score-flow timeline (winner-tinted, halftime divider) */}
+      {/* rounds — a score-flow timeline (winner-tinted, labeled halftime).
+          Hovering a chip reads like a scoreline: "Round 7 · 5–2 · CT win". */}
       <div className="flex items-center gap-2 border-t border-line/50 pt-2">
         <button
           type="button"
           onClick={() => view.setScopeRound(null)}
+          aria-pressed={view.scopeRound === null}
           title="Whole match"
           className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
             view.scopeRound === null
@@ -163,25 +202,34 @@ export function MatchToolbar({
         >
           Match
         </button>
-        <div className="flex min-w-0 flex-1 items-stretch gap-0.75 overflow-x-auto pb-0.5">
+        <div className="scroll-slim flex min-w-0 flex-1 items-stretch gap-0.75 overflow-x-auto pb-0.5">
           {rounds.map((r, i) => {
             const active = view.scopeRound === i;
             // colour by the winning TEAM (A = started CT = blue, B = amber)
             const tm = roundWinnerTeam(r, teamA);
             const ct = tm === "A";
             const t = tm === "B";
+            const sc = scoreAfter[i];
             return (
               <span key={i} className="flex shrink-0 items-stretch">
                 {i === swapAt && (
-                  <span className="mx-1 flex items-center" title="Halftime — sides swap">
-                    <span className="h-full w-px bg-line" />
+                  <span
+                    className="mx-1 flex shrink-0 flex-col items-center justify-center gap-0.5"
+                    title="Halftime — sides swap"
+                  >
+                    <span className="w-px flex-1 bg-line" />
+                    <span className="text-[9px] font-bold uppercase leading-none tracking-wider text-muted">
+                      HT
+                    </span>
+                    <span className="w-px flex-1 bg-line" />
                   </span>
                 )}
                 <button
                   type="button"
                   onClick={() => view.setScopeRound(active ? null : i)}
-                  title={`Round ${r.n}${r.winner ? ` · ${r.winner} win` : ""} — scope every tab to it`}
-                  className={`grid h-7 w-6 place-items-center rounded text-[10px] font-bold tabular-nums transition ${
+                  aria-pressed={active}
+                  title={`Round ${r.n} · ${sc.a}–${sc.b}${r.winner ? ` · ${r.winner} win` : ""} — scope every tab to it`}
+                  className={`grid h-7 w-7 place-items-center rounded-md text-[10px] font-bold tabular-nums transition ${
                     active
                       ? "text-ink ring-2 ring-inset ring-brand"
                       : ct
@@ -213,6 +261,7 @@ export function MatchToolbar({
                 key={s}
                 type="button"
                 onClick={() => view.setSide(s)}
+                aria-pressed={view.side === s}
                 className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition ${
                   view.side === s
                     ? s === "CT"
@@ -249,7 +298,7 @@ function SideTag({
 }) {
   if (!enabled) {
     return (
-      <span className="shrink-0 px-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: hex }}>
+      <span className="shrink-0 pl-0.5 pr-1 text-[10px] font-black uppercase tracking-wider" style={{ color: hex }}>
         {label}
       </span>
     );
@@ -258,12 +307,13 @@ function SideTag({
     <button
       type="button"
       onClick={onClick}
-      title={`Filter to ${label} side`}
-      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition"
+      aria-pressed={active}
+      title={`Filter every tab to the ${label} side`}
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider transition hover:brightness-125"
       style={{
         color: hex,
-        background: active ? `${hex}26` : "transparent",
-        boxShadow: active ? `inset 0 0 0 1px ${hex}66` : "none",
+        background: active ? `${hex}30` : "transparent",
+        boxShadow: active ? `inset 0 0 0 1px ${hex}88` : "none",
       }}
     >
       {label}
