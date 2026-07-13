@@ -49,6 +49,27 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
       };
     })
     .sort((a, b) => b.dmg - a.dmg);
+  // damage TAKEN per attacker this round, each with its best map reference:
+  // the kill that downed us (has coordinates), a grenade that burned us (has a
+  // throw arc), or — bullets only — the attacker themself (their route).
+  const dmgFrom = (round.stats ?? [])
+    .filter((s) => s.i !== i && (s.dmgTo?.[i] ?? 0) > 0)
+    .map((s) => {
+      const killIdx = (round.kills ?? []).findIndex((k) => k.k === s.i && k.v === i);
+      const nadeNis = (round.nades ?? [])
+        .map((n, ni) => ({ n, ni }))
+        .filter(({ n }) => n.by === s.i && (n.dmg?.[i] ?? 0) > 0)
+        .map(({ ni }) => ni);
+      return {
+        i: s.i,
+        name: meta.players[s.i]?.name ?? "?",
+        dmg: s.dmgTo?.[i] ?? 0,
+        killedYou: killIdx >= 0,
+        killIdx: killIdx >= 0 ? killIdx : null,
+        nadeNis,
+      };
+    })
+    .sort((a, b) => b.dmg - a.dmg);
   return {
     name: meta.players[i]?.name ?? "?",
     steamId: meta.players[i]?.steamId ?? "",
@@ -74,8 +95,12 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
     nades,
     topWeapon,
     dmgTo,
+    dmgFrom,
   };
 }
+
+// A highlightable element on the routes map — mirrors RouteAnalytics' Active.
+export type MapRef = { kind: "util" | "kill" | "player"; id: number };
 
 
 // Loss bonus the player's team is sitting on entering this round: $1400 + $500
@@ -116,6 +141,9 @@ export function PlayerRoundCard({
   onUtilHover,
   onUtilPin,
   activeUtilId,
+  onRefHover,
+  onRefPin,
+  activeRef,
   zoneOf,
 }: {
   round: ReplayRound;
@@ -127,9 +155,14 @@ export function PlayerRoundCard({
   onUtilHover?: (nadeIndex: number | null) => void;
   onUtilPin?: (nadeIndex: number) => void;
   activeUtilId?: number | null;
+  // optional map cross-link for the damage-taken rows (kill / util / player)
+  onRefHover?: (ref: MapRef | null) => void;
+  onRefPin?: (ref: MapRef) => void;
+  activeRef?: MapRef | null;
   zoneOf?: (x: number, y: number) => string | null;
 }) {
   const utilInteractive = !!onUtilHover || !!onUtilPin;
+  const refInteractive = !!onRefHover || !!onRefPin;
   const d = computePlayerRound(round, meta, i);
   const col = d.side === "T" ? T : CT;
   const loss = rounds ? lossInfo(rounds, round, i) : null;
@@ -255,6 +288,75 @@ export function PlayerRoundCard({
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {d.dmgFrom.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[10px] uppercase tracking-wider text-faint">
+            Damage taken{refInteractive && <span className="ml-1 normal-case text-faint">· hover to find on map</span>}
+          </div>
+          <div className="mt-0.5 space-y-1">
+            {d.dmgFrom.map((x) => {
+              // best map target: the kill that downed us → the grenade that hit
+              // us → the attacker's route (bullets leave no coordinates)
+              const ref: MapRef =
+                x.killIdx != null
+                  ? { kind: "kill", id: x.killIdx }
+                  : x.nadeNis.length
+                    ? { kind: "util", id: x.nadeNis[0] }
+                    : { kind: "player", id: x.i };
+              const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
+              const row = (
+                <span className="flex w-full items-center gap-1.5">
+                  <span className="w-20 shrink-0 truncate text-muted">{x.name}</span>
+                  <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
+                    <span
+                      className="absolute inset-y-0 left-0 rounded-full"
+                      style={{
+                        width: `${Math.min(100, (x.dmg / Math.max(1, d.dmgFrom[0].dmg)) * 100)}%`,
+                        background: x.killedYou ? "#f5694a" : "#e7b53c",
+                      }}
+                    />
+                  </span>
+                  <span className="w-7 shrink-0 text-right font-semibold tabular-nums">{x.dmg}</span>
+                  {x.killedYou ? (
+                    <span className="text-bad" title="killed this player">
+                      ☠
+                    </span>
+                  ) : (
+                    <span className="w-[1ch]" />
+                  )}
+                </span>
+              );
+              return refInteractive ? (
+                <button
+                  key={x.i}
+                  type="button"
+                  onMouseEnter={() => onRefHover?.(ref)}
+                  onMouseLeave={() => onRefHover?.(null)}
+                  onClick={() => onRefPin?.(ref)}
+                  aria-pressed={on}
+                  title={
+                    x.killIdx != null
+                      ? "Show where they got the kill on the map"
+                      : x.nadeNis.length
+                        ? "Show the grenade that hit on the map"
+                        : "Show their route on the map"
+                  }
+                  className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
+                    on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
+                  }`}
+                >
+                  {row}
+                </button>
+              ) : (
+                <div key={x.i} className="px-1 text-[11px]">
+                  {row}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
