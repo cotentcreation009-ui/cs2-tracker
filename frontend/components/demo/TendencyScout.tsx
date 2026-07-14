@@ -2,15 +2,17 @@
 
 // Tendencies — the counter-intelligence lens. Pick an opponent and get a
 // scouting dossier built from this demo: WHERE they set up (radar positions by
-// side + round phase, with named-callout percentages), HOW they play (role,
+// side + round phase, with named-callout reads), HOW they play (role,
 // space/lurk meters, duels, timing, economy) and — the point of it all — a
-// synthesized "How to counter" playbook. Expands lib/demo/tendencies.ts from a
-// text block into a full lens.
+// synthesized "How to counter" playbook where every line cites the demo
+// evidence (counts + round numbers) it was derived from. Special lenses show
+// where they hold when carrying a sniper and where they play on save rounds.
 
 import { useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { computeInsights, weaponLabel, type PlayerInsight } from "@/lib/demo/insights";
 import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
+import { classifyBuy } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
 import { getActiveZones, classifyPosition } from "@/lib/maps/zones";
 import { radarImage } from "@/lib/maps/calibration";
@@ -22,6 +24,9 @@ const CT_SOFT = "#9cc1ff";
 const T_SOFT = "#f0cd78";
 const UNIT_TO_M = 0.01905;
 const SNIPER_RE = /awp|ssg|scar-?20|g3sg1/i;
+// Below this speed (game units/second) between consecutive samples a player is
+// "holding" — walking speed is ~250 u/s, so this is genuinely standing still.
+const STILL_SPEED = 70;
 
 const sideHex = (s: "CT" | "T" | "") => (s === "T" ? T : CT);
 const sideSoft = (s: "CT" | "T" | "") => (s === "T" ? T_SOFT : CT_SOFT);
@@ -41,20 +46,48 @@ function roleOf(p: PlayerInsight, t?: PlayerTendencies): string {
 
 type Phase = "opening" | "full";
 type SideView = "both" | "CT" | "T";
+type Lens = "all" | "awp" | "eco";
+
+// A named-callout read: the rounds (numbers) whose opening setup was this zone.
+interface ZoneRead {
+  name: string;
+  rounds: number[];
+  sideRounds: number;
+}
+
+interface SpotRead {
+  name: string;
+  rounds: number[];
+}
 
 interface ScoutData {
-  // radar-space position samples for the phase/side filters
-  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean }[];
-  deaths: { x: number; y: number; side: "CT" | "T" }[];
-  // top named callouts per side (opening window)
-  zonesCT: { name: string; pct: number }[];
-  zonesT: { name: string; pct: number }[];
+  // radar-space position samples for the phase/side/lens filters
+  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean; rn: number; still: boolean }[];
+  deaths: { x: number; y: number; side: "CT" | "T"; rn: number }[];
+  // per-round dominant opening callout, per side
+  zonesCT: ZoneRead[];
+  zonesT: ZoneRead[];
+  sideRounds: { CT: number; T: number };
   calibrated: boolean;
   avgKillDist: number | null; // meters
+  killDistN: number;
   avgDeathDist: number | null;
   // kills/deaths by round phase (post-freeze thirds: 0-25s / 25-55s / 55s+)
   killTiming: [number, number, number];
   deathTiming: [number, number, number];
+  // first duel of the round, by round number
+  openWon: number[];
+  openLost: number[];
+  earlyDeaths: number[]; // rounds where they died inside the first 25s
+  totalDeaths: number;
+  totalKills: number;
+  // sniper (AWP/SSG/auto) intel
+  sniperRounds: number[];
+  sniperKills: number;
+  sniperHold: SpotRead | null; // favourite stationary hold in sniper rounds
+  // save-round intel (eco/semi buys)
+  ecoRounds: number[];
+  ecoSpot: SpotRead | null;
 }
 
 const OPENING_WINDOW = 20; // seconds after freeze that define "opening setup"
@@ -64,105 +97,253 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
   const zones = getActiveZones(meta.map);
   const pts: ScoutData["pts"] = [];
   const deaths: ScoutData["deaths"] = [];
-  const zoneCount = { CT: new Map<string, number>(), T: new Map<string, number>() };
-  const zoneN = { CT: 0, T: 0 };
+  const zoneRounds = { CT: new Map<string, number[]>(), T: new Map<string, number[]>() };
+  const sideRounds = { CT: 0, T: 0 };
   let killDistSum = 0, killDistN = 0, deathDistSum = 0, deathDistN = 0;
   const killTiming: [number, number, number] = [0, 0, 0];
   const deathTiming: [number, number, number] = [0, 0, 0];
+  const openWon: number[] = [];
+  const openLost: number[] = [];
+  const earlyDeaths: number[] = [];
+  let totalDeaths = 0, totalKills = 0;
+  const sniperRounds: number[] = [];
+  let sniperKills = 0;
+  const holdCount = new Map<string, { samples: number; rounds: Set<number> }>();
+  const ecoRounds: number[] = [];
+  const ecoCount = new Map<string, { samples: number; rounds: Set<number> }>();
 
   for (const rd of rounds) {
     const freeze = rd.freezeEnd ?? 15;
     const side: "CT" | "T" | "" = rd.ct?.includes(idx) ? "CT" : rd.t?.includes(idx) ? "T" : "";
     if (!side) continue;
+    sideRounds[side]++;
 
+    // economy + gear for this round
+    const st = rd.stats?.find((s) => s.i === idx);
+    const buyKind = st?.buy ?? (st?.equip != null ? classifyBuy(st.equip, rd.n).key : null);
+    const isEco = buyKind === "eco" || buyKind === "semi";
+    if (isEco) ecoRounds.push(rd.n);
+    const gear = [...(st?.bought ?? []), ...(st?.pickedUp ?? [])];
+    const sniperKillsHere = (rd.kills ?? []).filter((k) => k.k === idx && SNIPER_RE.test(k.w)).length;
+    const hasSniper = sniperKillsHere > 0 || gear.some((g) => SNIPER_RE.test(g));
+    if (hasSniper) sniperRounds.push(rd.n);
+
+    const roundZone = new Map<string, number>();
+    let prev: { x: number; y: number; t: number } | null = null;
     for (const f of rd.frames ?? []) {
       if (f.t < freeze) continue;
       const p = f.p.find((pp) => pp.i === idx && pp.h > 0);
-      if (!p) continue;
+      if (!p) {
+        prev = null;
+        continue;
+      }
       const r = proj.project(p.x, p.y);
       if (!r) continue;
+      const still =
+        prev != null && Math.hypot(p.x - prev.x, p.y - prev.y) / Math.max(1, f.t - prev.t) < STILL_SPEED;
+      prev = { x: p.x, y: p.y, t: f.t };
       const opening = f.t <= freeze + OPENING_WINDOW;
-      pts.push({ x: r.x * 100, y: r.y * 100, side, opening });
-      if (opening && proj.calibrated) {
-        const z = classifyPosition(meta.map, p.x, p.y, zones);
-        if (z?.name) {
-          zoneCount[side].set(z.name, (zoneCount[side].get(z.name) ?? 0) + 1);
-          zoneN[side]++;
-        }
+      pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still });
+      if (!proj.calibrated) continue;
+      const z = classifyPosition(meta.map, p.x, p.y, zones);
+      if (!z?.name) continue;
+      if (opening) roundZone.set(z.name, (roundZone.get(z.name) ?? 0) + 1);
+      if (hasSniper && still) {
+        const c = holdCount.get(z.name) ?? { samples: 0, rounds: new Set() };
+        c.samples++;
+        c.rounds.add(rd.n);
+        holdCount.set(z.name, c);
       }
+      if (isEco) {
+        const c = ecoCount.get(z.name) ?? { samples: 0, rounds: new Set() };
+        c.samples++;
+        c.rounds.add(rd.n);
+        ecoCount.set(z.name, c);
+      }
+    }
+    // the round's setup = the callout they spent most of the opening window in
+    const dom = [...roundZone.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (dom && dom[1] >= 2) {
+      const arr = zoneRounds[side].get(dom[0]) ?? [];
+      arr.push(rd.n);
+      zoneRounds[side].set(dom[0], arr);
     }
 
     const bucket = (t: number) => (t < freeze + 25 ? 0 : t < freeze + 55 ? 1 : 2);
+    let first: (typeof rd.kills)[number] | null = null;
     for (const k of rd.kills ?? []) {
+      if (first == null || k.t < first.t) first = k;
       const d = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
       if (k.k === idx) {
+        totalKills++;
         killTiming[bucket(k.t)]++;
         killDistSum += d;
         killDistN++;
       }
       if (k.v === idx) {
+        totalDeaths++;
         deathTiming[bucket(k.t)]++;
+        if (bucket(k.t) === 0) earlyDeaths.push(rd.n);
         deathDistSum += d;
         deathDistN++;
         const r = proj.project(k.vx, k.vy);
-        if (r) deaths.push({ x: r.x * 100, y: r.y * 100, side });
+        if (r) deaths.push({ x: r.x * 100, y: r.y * 100, side, rn: rd.n });
       }
+    }
+    if (first) {
+      if (first.k === idx) openWon.push(rd.n);
+      else if (first.v === idx) openLost.push(rd.n);
     }
   }
 
   const tops = (side: "CT" | "T") =>
-    [...zoneCount[side].entries()]
-      .map(([name, n]) => ({ name, pct: zoneN[side] ? (n / zoneN[side]) * 100 : 0 }))
-      .sort((a, b) => b.pct - a.pct)
+    [...zoneRounds[side].entries()]
+      .map(([name, rns]) => ({ name, rounds: rns, sideRounds: sideRounds[side] }))
+      .sort((a, b) => b.rounds.length - a.rounds.length)
       .slice(0, 3);
+  const topSpot = (m: Map<string, { samples: number; rounds: Set<number> }>, minSamples: number): SpotRead | null => {
+    const best = [...m.entries()].sort((a, b) => b[1].samples - a[1].samples)[0];
+    if (!best || best[1].samples < minSamples || best[1].rounds.size < 2) return null;
+    return { name: best[0], rounds: [...best[1].rounds].sort((a, b) => a - b) };
+  };
 
   return {
     pts,
     deaths,
     zonesCT: tops("CT"),
     zonesT: tops("T"),
+    sideRounds,
     calibrated: proj.calibrated,
     avgKillDist: killDistN ? killDistSum / killDistN : null,
+    killDistN,
     avgDeathDist: deathDistN ? deathDistSum / deathDistN : null,
     killTiming,
     deathTiming,
+    openWon,
+    openLost,
+    earlyDeaths,
+    totalDeaths,
+    totalKills,
+    sniperRounds,
+    sniperKills,
+    sniperHold: topSpot(holdCount, 4),
+    ecoRounds,
+    ecoSpot: topSpot(ecoCount, 3),
   };
 }
 
-// The playbook: actionable counters synthesized from every read we have.
-function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: ScoutData): string[] {
-  const out: string[] = [];
-  const zoneTip = (side: "CT" | "T", z: { name: string; pct: number }[]) => {
-    if (z[0] && z[0].pct >= 50) out.push(`On their ${side} side, pre-aim ${z[0].name} — they set up there ${z[0].pct.toFixed(0)}% of rounds.`);
+// One playbook entry: the counter move, plus the demo evidence it rests on.
+interface Tip {
+  text: string;
+  why: string;
+}
+
+const fmtR = (ns: number[], cap = 6) =>
+  ns.slice(0, cap).map((n) => `R${n}`).join(" · ") + (ns.length > cap ? ` +${ns.length - cap} more` : "");
+
+// The playbook: actionable counters, each citing the counts + rounds behind it.
+function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: ScoutData): Tip[] {
+  const out: Tip[] = [];
+  const zoneTip = (side: "CT" | "T", zs: ZoneRead[]) => {
+    const z = zs[0];
+    if (z && z.sideRounds >= 3 && z.rounds.length / z.sideRounds >= 0.5) {
+      out.push({
+        text: `On their ${side} side, pre-aim ${z.name} — it's their default setup.`,
+        why: `opened the round there in ${z.rounds.length} of ${z.sideRounds} ${side} rounds (${fmtR(z.rounds)})`,
+      });
+    }
   };
   zoneTip("CT", s.zonesCT);
   zoneTip("T", s.zonesT);
 
-  if (t && t.rounds >= 5) {
-    if (t.spacePct <= 25) out.push("First through the door — hold close angles and set up instant trades; don't give free entries.");
-    if (t.lurkPct >= 75) out.push("Lurker — clear flanks before committing late-round; never rotate everyone off their side.");
-    if (t.zoneSamples >= 12 && t.rotationsPerRound >= 1.6) out.push("Heavy roamer — mid-round info (one spot check) tells you where the rest of the team isn't.");
+  if (s.sniperHold && s.sniperRounds.length >= 2) {
+    out.push({
+      text: `Their sniper lives at ${s.sniperHold.name} — smoke it off before crossing, or hit a different path entirely.`,
+      why: `held ${s.sniperHold.name} stationary in ${s.sniperHold.rounds.length} of ${s.sniperRounds.length} sniper rounds (${fmtR(s.sniperHold.rounds)})`,
+    });
   }
-  if (p.openingAttempts >= 4 && p.openingWinPct >= 60) {
-    out.push(`Wins ${p.openingWinPct.toFixed(0)}% of first duels — never peek them dry; flash first or refuse the opening fight.`);
-  } else if (p.openingAttempts >= 4 && p.openingWinPct <= 35) {
-    out.push(`Loses ${(100 - p.openingWinPct).toFixed(0)}% of first duels — hunt the opening pick against them.`);
+  if (s.ecoSpot && s.ecoRounds.length >= 2) {
+    out.push({
+      text: `On save rounds, expect them at ${s.ecoSpot.name} with pistols — clear it with utility instead of walking in.`,
+      why: `played ${s.ecoSpot.name} in ${s.ecoSpot.rounds.length} of ${s.ecoRounds.length} eco/light-buy rounds (${fmtR(s.ecoSpot.rounds)})`,
+    });
   }
-  if (SNIPER_RE.test(p.favoriteWeapons?.[0]?.weapon ?? "")) {
-    out.push("AWPer — force close-range fights: smoke their angle, hit unscoped timings, and repeek wide with a flash.");
-  } else if (s.avgKillDist != null && s.avgKillDist >= 22) {
-    out.push(`Fights long ranges (~${s.avgKillDist.toFixed(0)}m avg kill) — close the distance with smokes before engaging.`);
-  } else if (s.avgKillDist != null && s.avgKillDist <= 9 && p.kills >= 5) {
-    out.push(`Close-range killer (~${s.avgKillDist.toFixed(0)}m avg) — keep them at distance and deny close positions with molotovs.`);
-  }
-  const nb = p.buys.eco + p.buys.semi + p.buys.force + p.buys.full;
-  if (nb >= 5 && p.buys.force / nb >= 0.3) out.push("Force-buys often after losses — expect upgraded pistols/SMGs on their 'save' rounds; don't over-push their ecos.");
-  const dt = s.deathTiming[0] + s.deathTiming[1] + s.deathTiming[2];
-  if (dt >= 5 && s.deathTiming[0] / dt >= 0.6) out.push("Dies early most rounds — over-aggressive; punish with pre-placed crossfires on their usual first steps.");
-  if (p.clutchTotal >= 3 && p.clutchWon / p.clutchTotal >= 0.5) out.push(`Dangerous in clutches (${p.clutchWon}/${p.clutchTotal} won) — play the bomb/time, don't peek them 1vX.`);
-  if (p.enemiesFlashed >= 8) out.push("Heavy flash usage — turn away on their utility timings and punish the follow-up peek.");
 
-  if (!out.length) out.push("No strong reads this demo — they play standard; win on fundamentals and utility.");
+  if (t && t.rounds >= 5) {
+    if (t.spacePct <= 25)
+      out.push({
+        text: "First through the door — hold close angles and set up instant trades; don't give free entries.",
+        why: `distance to the nearest enemy in the ${t.spacePct}th percentile of this lobby across ${t.rounds} rounds`,
+      });
+    if (t.lurkPct >= 75)
+      out.push({
+        text: "Lurker — clear flanks before committing late-round; never rotate everyone off their side.",
+        why: `distance from their own teammates in the ${t.lurkPct}th percentile of this lobby (${t.rounds} rounds)`,
+      });
+    if (t.zoneSamples >= 12 && t.rotationsPerRound >= 1.6)
+      out.push({
+        text: "Heavy roamer — one mid-round spot check tells you where the rest of their team isn't.",
+        why: `moved between map areas ${t.rotationsPerRound.toFixed(1)} times per round`,
+      });
+  }
+
+  const openN = s.openWon.length + s.openLost.length;
+  if (openN >= 4 && s.openWon.length / openN >= 0.6) {
+    out.push({
+      text: "Never peek them dry — flash first or refuse the opening fight and trade instead.",
+      why: `took the first kill of the round ${s.openWon.length} of ${openN} times it involved them (${fmtR(s.openWon)})`,
+    });
+  } else if (openN >= 4 && s.openLost.length / openN >= 0.65) {
+    out.push({
+      text: "Hunt the opening pick against them — they keep losing the first fight.",
+      why: `died first in ${s.openLost.length} of ${openN} first duels (${fmtR(s.openLost)})`,
+    });
+  }
+
+  if (s.sniperKills >= 3) {
+    out.push({
+      text: "Sniper threat — force close-range fights: smoke their angle, hit unscoped timings, repeek wide off a flash.",
+      why: `${s.sniperKills} of their ${s.totalKills} kills came with a sniper rifle, carried in ${s.sniperRounds.length} rounds`,
+    });
+  } else if (s.avgKillDist != null && s.killDistN >= 5 && s.avgKillDist >= 22) {
+    out.push({
+      text: "Fights long ranges — close the distance with smokes before engaging.",
+      why: `${s.killDistN} kills averaging ~${s.avgKillDist.toFixed(0)}m apart`,
+    });
+  } else if (s.avgKillDist != null && s.killDistN >= 5 && s.avgKillDist <= 9) {
+    out.push({
+      text: "Close-range killer — keep them at distance and deny tight positions with molotovs.",
+      why: `${s.killDistN} kills averaging only ~${s.avgKillDist.toFixed(0)}m apart`,
+    });
+  }
+
+  const nb = p.buys.eco + p.buys.semi + p.buys.force + p.buys.full;
+  if (nb >= 5 && p.buys.force / nb >= 0.3)
+    out.push({
+      text: "Force-buys often after losses — expect upgraded pistols/SMGs on their 'save' rounds; don't over-push their ecos.",
+      why: `${p.buys.force} force buys vs ${p.buys.eco} full saves across ${nb} gun rounds`,
+    });
+  if (s.totalDeaths >= 5 && s.earlyDeaths.length / s.totalDeaths >= 0.6)
+    out.push({
+      text: "Dies early most rounds — over-aggressive; punish with pre-placed crossfires on their usual first steps.",
+      why: `${s.earlyDeaths.length} of ${s.totalDeaths} deaths inside the first 25s (${fmtR(s.earlyDeaths)})`,
+    });
+  if (p.clutchTotal >= 3 && p.clutchWon / p.clutchTotal >= 0.5)
+    out.push({
+      text: "Dangerous in clutches — play the bomb and the clock, don't peek them 1vX.",
+      why: `won ${p.clutchWon} of ${p.clutchTotal} 1vX situations this match`,
+    });
+  if (p.enemiesFlashed >= 8)
+    out.push({
+      text: "Heavy flash usage — turn away on their utility timings and punish the follow-up peek.",
+      why: `flashed ${p.enemiesFlashed} enemies this match`,
+    });
+
+  if (!out.length)
+    out.push({
+      text: "No strong reads this demo — they play standard; win on fundamentals and utility.",
+      why: `${t?.rounds ?? 0} rounds analyzed — no habit repeated often enough to bank on`,
+    });
   return out;
 }
 
@@ -177,7 +358,7 @@ function Meter({ label, pct, leftWord, rightWord }: { label: string; pct: number
         <div className="absolute inset-y-0 left-1/2 w-px bg-line" />
         <div
           className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-bg"
-          style={{ left: `${pct}%`, background: "var(--color-brand)" }}
+          style={{ left: `${Math.min(96, Math.max(4, pct))}%`, background: "var(--color-brand)" }}
         />
       </div>
       <div className="mt-0.5 flex justify-between text-[9px] text-faint">
@@ -221,6 +402,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   const focus = view.focusPlayer;
   const [phase, setPhase] = useState<Phase>("opening");
   const [sideView, setSideView] = useState<SideView>("both");
+  const [lens, setLens] = useState<Lens>("all");
 
   const player = focus != null ? insights.players.find((p) => p.i === focus) ?? null : null;
   const tend = player ? tendencies.get(player.steamId) : undefined;
@@ -292,24 +474,42 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   // ---------- full dossier ----------
   const lines = playstyleSummary(player, tend);
   const plan = counterPlan(player, tend, scout);
+  // lens state can be stale from a previously scouted player — fall back safely
+  const eLens: Lens =
+    lens === "awp" && scout.sniperRounds.length >= 2 ? "awp" : lens === "eco" && scout.ecoRounds.length >= 2 ? "eco" : "all";
+  const lensRounds = eLens === "awp" ? new Set(scout.sniperRounds) : eLens === "eco" ? new Set(scout.ecoRounds) : null;
   const shownPts = scout.pts.filter(
-    (p) => (phase === "full" || p.opening) && (sideView === "both" || p.side === sideView),
+    (p) =>
+      (eLens !== "all" ? lensRounds!.has(p.rn) : phase === "full" || p.opening) &&
+      (sideView === "both" || p.side === sideView),
   );
-  const shownDeaths = scout.deaths.filter((d) => sideView === "both" || d.side === sideView);
-  const zoneList = (side: "CT" | "T", zs: { name: string; pct: number }[]) =>
+  const shownDeaths = scout.deaths.filter(
+    (d) => (sideView === "both" || d.side === sideView) && (lensRounds == null || lensRounds.has(d.rn)),
+  );
+  const pickLens = (l: Lens) => {
+    setLens(l);
+    if (l !== "all") setPhase("full");
+  };
+  const openN = scout.openWon.length + scout.openLost.length;
+  const zoneList = (side: "CT" | "T", zs: ZoneRead[]) =>
     zs.length > 0 && (
       <div>
         <div className="mb-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: sideSoft(side) }}>
-          {side}-side setups
+          {side}-side setups <span className="font-normal normal-case text-faint">· rounds opened there</span>
         </div>
         <div className="space-y-1">
           {zs.map((z) => (
-            <div key={z.name} className="flex items-center gap-2 text-[11px]">
+            <div key={z.name} className="flex items-center gap-2 text-[11px]" title={fmtR(z.rounds, 10)}>
               <span className="w-24 shrink-0 truncate text-muted" title={z.name}>{z.name}</span>
               <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
-                <span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${z.pct}%`, background: sideHex(side) }} />
+                <span
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{ width: `${(z.rounds.length / Math.max(1, z.sideRounds)) * 100}%`, background: sideHex(side) }}
+                />
               </span>
-              <span className="w-8 shrink-0 text-right font-semibold tabular-nums">{z.pct.toFixed(0)}%</span>
+              <span className="w-10 shrink-0 text-right font-semibold tabular-nums">
+                {z.rounds.length}/{z.sideRounds}
+              </span>
             </div>
           ))}
         </div>
@@ -341,14 +541,16 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
         <div className="space-y-2 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:space-y-0 lg:@container-size">
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-[min(100cqw,calc(100cqh-40px))] lg:shrink-0">
             <span className="stat-label">Positions</span>
-            <div className="flex rounded-lg border border-line bg-panel p-0.5">
-              {(["opening", "full"] as const).map((ph) => (
-                <button key={ph} type="button" onClick={() => setPhase(ph)} aria-pressed={phase === ph}
-                  className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize transition ${phase === ph ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}>
-                  {ph === "opening" ? `First ${OPENING_WINDOW}s` : "Whole round"}
-                </button>
-              ))}
-            </div>
+            {eLens === "all" && (
+              <div className="flex rounded-lg border border-line bg-panel p-0.5">
+                {(["opening", "full"] as const).map((ph) => (
+                  <button key={ph} type="button" onClick={() => setPhase(ph)} aria-pressed={phase === ph}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize transition ${phase === ph ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}>
+                    {ph === "opening" ? `First ${OPENING_WINDOW}s` : "Whole round"}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex rounded-lg border border-line bg-panel p-0.5">
               {(["both", "CT", "T"] as const).map((sv) => (
                 <button key={sv} type="button" onClick={() => setSideView(sv)} aria-pressed={sideView === sv}
@@ -361,6 +563,28 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                 </button>
               ))}
             </div>
+            {(scout.sniperRounds.length >= 2 || scout.ecoRounds.length >= 2) && (
+              <div className="flex rounded-lg border border-line bg-panel p-0.5">
+                <button type="button" onClick={() => pickLens("all")} aria-pressed={eLens === "all"}
+                  className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${eLens === "all" ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}>
+                  All buys
+                </button>
+                {scout.sniperRounds.length >= 2 && (
+                  <button type="button" onClick={() => pickLens("awp")} aria-pressed={eLens === "awp"}
+                    title={`rounds carrying a sniper rifle: ${fmtR(scout.sniperRounds, 10)}`}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${eLens === "awp" ? "bg-[#b48cff]/20 text-[#cdb2ff]" : "text-muted hover:text-ink"}`}>
+                    AWP · {scout.sniperRounds.length}
+                  </button>
+                )}
+                {scout.ecoRounds.length >= 2 && (
+                  <button type="button" onClick={() => pickLens("eco")} aria-pressed={eLens === "eco"}
+                    title={`eco / light-buy rounds: ${fmtR(scout.ecoRounds, 10)}`}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${eLens === "eco" ? "bg-good/20 text-[#7fe39a]" : "text-muted hover:text-ink"}`}>
+                    Ecos · {scout.ecoRounds.length}
+                  </button>
+                )}
+              </div>
+            )}
             <span className="ml-auto text-[10px] text-faint">{shownPts.length} samples · ✕ deaths</span>
           </div>
           <div className="relative aspect-square w-full max-w-240 overflow-hidden rounded-xl border border-line bg-panel2 lg:w-[min(100cqw,calc(100cqh-40px))] lg:max-w-none lg:shrink-0">
@@ -370,9 +594,13 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               ) : (
                 <rect x={0} y={0} width={100} height={100} fill="#0a1020" />
               )}
-              {shownPts.map((p, i) => (
-                <circle key={i} cx={p.x} cy={p.y} r={0.8} fill={sideHex(p.side)} opacity={0.5} />
-              ))}
+              {shownPts.map((p, i) =>
+                eLens !== "all" && p.still ? (
+                  <circle key={i} cx={p.x} cy={p.y} r={1.15} fill={sideHex(p.side)} opacity={0.95} stroke="#fff" strokeWidth={0.18} />
+                ) : (
+                  <circle key={i} cx={p.x} cy={p.y} r={eLens !== "all" ? 0.55 : 0.8} fill={sideHex(p.side)} opacity={eLens !== "all" ? 0.28 : 0.5} />
+                ),
+              )}
               {shownDeaths.map((d, i) => (
                 <g key={`d${i}`} stroke="#f5694a" strokeWidth={0.4} opacity={0.9}>
                   <line x1={d.x - 1} y1={d.y - 1} x2={d.x + 1} y2={d.y + 1} />
@@ -380,6 +608,13 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                 </g>
               ))}
             </svg>
+            {eLens !== "all" && (
+              <div className="pointer-events-none absolute bottom-2 left-1/2 w-max max-w-[95%] -translate-x-1/2 rounded-full bg-black/55 px-2.5 py-0.5 text-[10px] text-ink backdrop-blur-sm">
+                {eLens === "awp"
+                  ? `sniper rounds only (${fmtR(scout.sniperRounds, 4)}) — bright ringed dots = stationary holds`
+                  : `save rounds only (${fmtR(scout.ecoRounds, 4)}) — where they play on eco / light buys`}
+              </div>
+            )}
             {!scout.calibrated && (
               <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">
                 {meta.map} uncalibrated — positions auto-scaled, callouts unavailable
@@ -418,11 +653,9 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               <div className="text-[9px] uppercase tracking-wider text-faint">Avg kill range</div>
               <div className="text-sm font-bold tabular-nums">{scout.avgKillDist != null ? `~${scout.avgKillDist.toFixed(0)}m` : "—"}</div>
             </div>
-            <div className="rounded-lg bg-panel/50 px-2 py-1.5">
-              <div className="text-[9px] uppercase tracking-wider text-faint">Opening duels</div>
-              <div className="text-sm font-bold tabular-nums">
-                {player.openingAttempts ? `${player.openingWinPct.toFixed(0)}% of ${player.openingAttempts}` : "—"}
-              </div>
+            <div className="rounded-lg bg-panel/50 px-2 py-1.5" title={openN ? `won: ${fmtR(scout.openWon, 8) || "—"}` : undefined}>
+              <div className="text-[9px] uppercase tracking-wider text-faint">First duels</div>
+              <div className="text-sm font-bold tabular-nums">{openN ? `${scout.openWon.length}/${openN} won` : "—"}</div>
             </div>
           </div>
 
@@ -458,14 +691,19 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
           </div>
           <ol className="space-y-2">
             {plan.map((tip, i) => (
-              <li key={i} className="flex gap-2 rounded-lg bg-panel/50 px-3 py-2 text-[12px] leading-snug text-ink">
-                <span className="shrink-0 font-black tabular-nums text-brand">{i + 1}.</span>
-                <span>{tip}</span>
+              <li key={i} className="flex gap-2 rounded-lg bg-panel/50 px-3 py-2">
+                <span className="shrink-0 font-black tabular-nums text-brand text-[12px]">{i + 1}.</span>
+                <span className="min-w-0">
+                  <span className="block text-[12px] leading-snug text-ink">{tip.text}</span>
+                  <span className="mt-1 block text-[10px] leading-snug text-faint">
+                    <span className="font-semibold uppercase tracking-wide text-muted/80">evidence</span> · {tip.why}
+                  </span>
+                </span>
               </li>
             ))}
           </ol>
           <p className="mt-auto border-t border-line pt-2 text-[10px] leading-relaxed text-faint">
-            Built from this demo only ({scopedRounds.length} round{scopedRounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Positions sample at 1 Hz after freeze time.
+            Built from this demo only ({scopedRounds.length} round{scopedRounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Positions sample at 1 Hz after freeze time; &quot;stationary&quot; means under ~1.3 m/s between samples.
           </p>
         </div>
       </div>
