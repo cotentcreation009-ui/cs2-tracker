@@ -109,7 +109,13 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
 }
 
 // A highlightable element on the routes map — mirrors RouteAnalytics' Active.
-export type MapRef = { kind: "util" | "kill" | "player"; id: number };
+// "duel" pinpoints a bullets-only damage exchange: the map shows the two
+// players at their closest approach (id encodes the pair, attacker*64+victim).
+export type MapRef = { kind: "util" | "kill" | "player" | "duel"; id: number };
+export const duelRef = (attacker: number, victim: number): MapRef => ({
+  kind: "duel",
+  id: attacker * 64 + victim,
+});
 
 
 // Loss bonus the player's team is sitting on entering this round: $1400 + $500
@@ -279,13 +285,13 @@ export function PlayerRoundCard({
           <div className="mt-0.5 space-y-1">
             {d.dmgTo.map((x) => {
               // best map target: the kill we landed → the grenade that hit them
-              // → the victim's route (plain bullet damage has no coordinates)
+              // → the closest-approach duel spot (bullets carry no coordinates)
               const ref: MapRef =
                 x.killIdx != null
                   ? { kind: "kill", id: x.killIdx }
                   : x.nadeNis.length
                     ? { kind: "util", id: x.nadeNis[0] }
-                    : { kind: "player", id: x.i };
+                    : duelRef(i, x.i);
               const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
               const row = (
                 <span className="flex w-full items-center gap-1.5">
@@ -322,7 +328,7 @@ export function PlayerRoundCard({
                       ? "Show where the kill happened on the map"
                       : x.nadeNis.length
                         ? "Show the grenade that hit them on the map"
-                        : "Show their route on the map"
+                        : "Show where the fight happened on the map (closest approach)"
                   }
                   className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
                     on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
@@ -348,13 +354,13 @@ export function PlayerRoundCard({
           <div className="mt-0.5 space-y-1">
             {d.dmgFrom.map((x) => {
               // best map target: the kill that downed us → the grenade that hit
-              // us → the attacker's route (bullets leave no coordinates)
+              // us → the closest-approach duel spot (bullets carry no coordinates)
               const ref: MapRef =
                 x.killIdx != null
                   ? { kind: "kill", id: x.killIdx }
                   : x.nadeNis.length
                     ? { kind: "util", id: x.nadeNis[0] }
-                    : { kind: "player", id: x.i };
+                    : duelRef(x.i, i);
               const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
               const row = (
                 <span className="flex w-full items-center gap-1.5">
@@ -391,7 +397,7 @@ export function PlayerRoundCard({
                       ? "Show where they got the kill on the map"
                       : x.nadeNis.length
                         ? "Show the grenade that hit on the map"
-                        : "Show their route on the map"
+                        : "Show where the fight happened on the map (closest approach)"
                   }
                   className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
                     on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
