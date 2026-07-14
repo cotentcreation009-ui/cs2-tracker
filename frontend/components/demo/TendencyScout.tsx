@@ -10,7 +10,7 @@
 
 import { useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
-import { computeInsights, weaponLabel, type PlayerInsight } from "@/lib/demo/insights";
+import { computeInsights, clusterUtilThrows, weaponLabel, type PlayerInsight, type UtilThrow } from "@/lib/demo/insights";
 import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
 import { classifyBuy } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
@@ -60,9 +60,25 @@ interface SpotRead {
   rounds: number[];
 }
 
+// A repeated grenade lineup: same kind landing in the same spot, N times.
+interface NadeSpot {
+  kind: string;
+  name: string | null; // callout of the landing cluster (calibrated maps)
+  count: number;
+  rounds: number[];
+  avgAfterFreeze: number; // avg seconds after freeze when it lands
+}
+
+interface UtilRead {
+  counts: { smoke: number; flash: number; molotov: number; he: number };
+  total: number;
+  early: number; // thrown within 25s of freeze
+  spots: NadeSpot[];
+}
+
 interface ScoutData {
   // radar-space position samples for the phase/side/lens filters
-  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean; rn: number; still: boolean }[];
+  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean; rn: number; still: boolean; dir: number }[];
   deaths: { x: number; y: number; side: "CT" | "T"; rn: number }[];
   // per-round dominant opening callout, per side
   zonesCT: ZoneRead[];
@@ -88,6 +104,7 @@ interface ScoutData {
   // save-round intel (eco/semi buys)
   ecoRounds: number[];
   ecoSpot: SpotRead | null;
+  util: UtilRead;
 }
 
 const OPENING_WINDOW = 20; // seconds after freeze that define "opening setup"
@@ -111,6 +128,9 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
   const holdCount = new Map<string, { samples: number; rounds: Set<number> }>();
   const ecoRounds: number[] = [];
   const ecoCount = new Map<string, { samples: number; rounds: Set<number> }>();
+  const utilCounts = { smoke: 0, flash: 0, molotov: 0, he: 0 };
+  let utilTotal = 0, utilEarly = 0;
+  const throwsByKind = new Map<string, UtilThrow[]>();
 
   for (const rd of rounds) {
     const freeze = rd.freezeEnd ?? 15;
@@ -143,7 +163,7 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         prev != null && Math.hypot(p.x - prev.x, p.y - prev.y) / Math.max(1, f.t - prev.t) < STILL_SPEED;
       prev = { x: p.x, y: p.y, t: f.t };
       const opening = f.t <= freeze + OPENING_WINDOW;
-      pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still });
+      pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still, dir: p.d });
       if (!proj.calibrated) continue;
       const z = classifyPosition(meta.map, p.x, p.y, zones);
       if (!z?.name) continue;
@@ -167,6 +187,20 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
       const arr = zoneRounds[side].get(dom[0]) ?? [];
       arr.push(rd.n);
       zoneRounds[side].set(dom[0], arr);
+    }
+
+    // this player's grenades: kind counts, execute timing, repeated lineups
+    for (const n of rd.nades ?? []) {
+      if (n.by !== idx) continue;
+      const kind = n.k === "molotov" || n.k === "inferno" || n.k === "incgrenade" ? "molotov" : n.k;
+      if (kind === "decoy") continue;
+      if (kind in utilCounts) utilCounts[kind as keyof typeof utilCounts]++;
+      utilTotal++;
+      if (n.t <= freeze + 25) utilEarly++;
+      const arr = throwsByKind.get(kind) ?? [];
+      // t is stored relative to freeze so cluster avgT reads as "lands at ~Xs"
+      arr.push({ kind, x: n.x, y: n.y, ox: n.ox ?? n.x, oy: n.oy ?? n.y, t: Math.max(0, n.t - freeze), round: rd.n });
+      throwsByKind.set(kind, arr);
     }
 
     const bucket = (t: number) => (t < freeze + 25 ? 0 : t < freeze + 55 ? 1 : 2);
@@ -207,6 +241,23 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     return { name: best[0], rounds: [...best[1].rounds].sort((a, b) => a - b) };
   };
 
+  // repeated lineups: cluster each grenade kind by landing spot, keep repeats
+  const nadeSpots: NadeSpot[] = [];
+  for (const [, throws] of throwsByKind) {
+    for (const c of clusterUtilThrows(throws, proj.project)) {
+      if (c.count < 2) continue;
+      const z = proj.calibrated ? classifyPosition(meta.map, c.cx, c.cy, zones) : null;
+      nadeSpots.push({
+        kind: c.kind,
+        name: z?.name ?? null,
+        count: c.count,
+        rounds: c.throws.map((tw) => tw.round),
+        avgAfterFreeze: c.avgT,
+      });
+    }
+  }
+  nadeSpots.sort((a, b) => b.count - a.count);
+
   return {
     pts,
     deaths,
@@ -229,6 +280,7 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     sniperHold: topSpot(holdCount, 4),
     ecoRounds,
     ecoSpot: topSpot(ecoCount, 3),
+    util: { counts: utilCounts, total: utilTotal, early: utilEarly, spots: nadeSpots.slice(0, 3) },
   };
 }
 
@@ -266,6 +318,20 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
     out.push({
       text: `On save rounds, expect them at ${s.ecoSpot.name} with pistols — clear it with utility instead of walking in.`,
       why: `played ${s.ecoSpot.name} in ${s.ecoSpot.rounds.length} of ${s.ecoRounds.length} eco/light-buy rounds (${fmtR(s.ecoSpot.rounds)})`,
+    });
+  }
+
+  const lineup = s.util.spots.find((sp) => sp.count >= 3 && sp.name);
+  if (lineup) {
+    out.push({
+      text: `Same ${lineup.kind} every time — it lands ${lineup.name} like clockwork. The moment it blooms, you know the play; pre-position to punish it.`,
+      why: `landed a ${lineup.kind} at ${lineup.name} in ${lineup.count} rounds (${fmtR(lineup.rounds)}), ~${lineup.avgAfterFreeze.toFixed(0)}s after freeze`,
+    });
+  }
+  if (s.util.total >= 8 && s.util.early / s.util.total >= 0.65) {
+    out.push({
+      text: "Their utility front-runs the execute — the first grenade you see is your rotate call.",
+      why: `${s.util.early} of ${s.util.total} grenades thrown inside the first 25s of the round`,
     });
   }
 
@@ -336,8 +402,44 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (p.enemiesFlashed >= 8)
     out.push({
       text: "Heavy flash usage — turn away on their utility timings and punish the follow-up peek.",
-      why: `flashed ${p.enemiesFlashed} enemies this match`,
+      why: `flashed ${p.enemiesFlashed} enemies this match (${p.flashDuration.toFixed(0)}s of total blind time)`,
     });
+
+  if (p.kills >= 8 && p.hsPct >= 55)
+    out.push({
+      text: "Crosshair lives at head level — don't stand still in their angles; jiggle for info and wide-swing crouched.",
+      why: `${p.headshots} of ${p.kills} kills were headshots (${p.hsPct.toFixed(0)}%)`,
+    });
+  else if (p.kills >= 8 && p.hsPct <= 20)
+    out.push({
+      text: "Body-sprayer — head-level crosshair wins you the first bullet in straight duels.",
+      why: `only ${p.headshots} of ${p.kills} kills were headshots (${p.hsPct.toFixed(0)}%)`,
+    });
+  if (p.shots >= 120 && p.accuracy <= 15)
+    out.push({
+      text: "Wild sprayer — take fights at range and off-angles; their volume aim falls apart at distance.",
+      why: `${p.accuracy.toFixed(0)}% of ${p.shots} bullets hit anything`,
+    });
+  const bigRounds = p.multiKills.k3 + p.multiKills.k4 + p.multiKills.k5;
+  if (bigRounds >= 2)
+    out.push({
+      text: "Snowballs fights — never trickle in one at a time; group up and hit them as a unit.",
+      why: `${bigRounds} rounds with 3+ kills this match (3K ×${p.multiKills.k3}${p.multiKills.k4 ? `, 4K ×${p.multiKills.k4}` : ""}${p.multiKills.k5 ? `, ACE ×${p.multiKills.k5}` : ""})`,
+    });
+  if (p.kills >= 8 && p.tradeKillPct >= 40)
+    out.push({
+      text: "A trade player — after they refrag, their own position is briefly exposed; keep a third gun on the exchange.",
+      why: `${p.tradeKills} of ${p.kills} kills (${p.tradeKillPct.toFixed(0)}%) were refrags of a teammate's death`,
+    });
+  if (t && t.rounds >= 5) {
+    const pairs: ["A" | "B", number][] = [["A", t.t.a], ["B", t.t.b]];
+    const pref = pairs.sort((a, b) => b[1] - a[1])[0];
+    if (pref[1] >= 0.55)
+      out.push({
+        text: `On T side they gravitate to ${pref[0]} — weight your defensive setup and lurk checks toward it.`,
+        why: `${Math.round(pref[1] * 100)}% of their T-side site presence was around ${pref[0]}`,
+      });
+  }
 
   if (!out.length)
     out.push({
@@ -594,6 +696,21 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               ) : (
                 <rect x={0} y={0} width={100} height={100} fill="#0a1020" />
               )}
+              {eLens !== "all" &&
+                shownPts.map((p, i) => {
+                  // facing cone on holds — which way they're actually aiming
+                  if (!p.still) return null;
+                  const a = (p.dir * Math.PI) / 180;
+                  const L = 7, S = 0.3; // reach + half-spread (~17°)
+                  return (
+                    <polygon
+                      key={`c${i}`}
+                      points={`${p.x},${p.y} ${p.x + L * Math.cos(a - S)},${p.y - L * Math.sin(a - S)} ${p.x + L * Math.cos(a + S)},${p.y - L * Math.sin(a + S)}`}
+                      fill={sideHex(p.side)}
+                      opacity={0.12}
+                    />
+                  );
+                })}
               {shownPts.map((p, i) =>
                 eLens !== "all" && p.still ? (
                   <circle key={i} cx={p.x} cy={p.y} r={1.15} fill={sideHex(p.side)} opacity={0.95} stroke="#fff" strokeWidth={0.18} />
@@ -611,8 +728,8 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             {eLens !== "all" && (
               <div className="pointer-events-none absolute bottom-2 left-1/2 w-max max-w-[95%] -translate-x-1/2 rounded-full bg-black/55 px-2.5 py-0.5 text-[10px] text-ink backdrop-blur-sm">
                 {eLens === "awp"
-                  ? `sniper rounds only (${fmtR(scout.sniperRounds, 4)}) — bright ringed dots = stationary holds`
-                  : `save rounds only (${fmtR(scout.ecoRounds, 4)}) — where they play on eco / light buys`}
+                  ? `sniper rounds only (${fmtR(scout.sniperRounds, 4)}) — ringed dots = stationary holds, cones = where they're aiming`
+                  : `save rounds only (${fmtR(scout.ecoRounds, 4)}) — ringed dots = where they camp on eco / light buys`}
               </div>
             )}
             {!scout.calibrated && (
@@ -647,6 +764,49 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             <TimingBars label="Kills by phase" data={scout.killTiming} hex="#46d369" />
             <TimingBars label="Deaths by phase" data={scout.deathTiming} hex="#f5694a" />
           </div>
+
+          {scout.util.total > 0 && (
+            <div className="border-t border-line pt-3">
+              <div className="stat-label mb-1.5">Utility habits</div>
+              <div className="flex flex-wrap gap-1.5 text-[10px]">
+                {(
+                  [
+                    ["smoke", "Smokes", "#8fa3bd"],
+                    ["flash", "Flashes", "#e7d178"],
+                    ["molotov", "Molotovs", "#f08c4a"],
+                    ["he", "HE", "#f5694a"],
+                  ] as const
+                ).map(([k, label, hex]) =>
+                  scout.util.counts[k] > 0 ? (
+                    <span key={k} className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-muted">
+                      <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: hex }} />
+                      {label} · {scout.util.counts[k]}
+                    </span>
+                  ) : null,
+                )}
+                <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-faint" title="grenades thrown within 25s of freeze — execute utility">
+                  {scout.util.early}/{scout.util.total} early
+                </span>
+              </div>
+              {scout.util.spots.filter((sp) => sp.name).length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {scout.util.spots
+                    .filter((sp) => sp.name)
+                    .map((sp, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[11px] text-muted" title={fmtR(sp.rounds, 10)}>
+                        <span className="capitalize text-faint">{sp.kind}</span>
+                        <span aria-hidden>→</span>
+                        <span className="truncate font-medium text-ink">{sp.name}</span>
+                        <span className="ml-auto shrink-0 tabular-nums">
+                          ×{sp.count} <span className="text-faint">· ~{sp.avgAfterFreeze.toFixed(0)}s</span>
+                        </span>
+                      </div>
+                    ))}
+                  <div className="text-[9px] text-faint">repeated lineups — same grenade landing the same spot; ~time is after freeze</div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 border-t border-line pt-3 text-center">
             <div className="rounded-lg bg-panel/50 px-2 py-1.5">
