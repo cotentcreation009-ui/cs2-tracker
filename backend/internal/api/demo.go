@@ -498,6 +498,13 @@ func (s *Server) analyzeViaGC(
 			fail(http.StatusServiceUnavailable, "the demo bot isn't connected right now — try again shortly")
 			return
 		}
+		if errors.Is(err, gcbot.ErrNoReply) {
+			// The GC silently ignores recent-match requests for accounts whose
+			// "Game details" privacy isn't Public — no reply is the only signal.
+			fail(http.StatusUnprocessableEntity,
+				"Steam won't share this player's matches — their Steam privacy setting \"Game details\" must be Public (Edit Profile → Privacy Settings). Once it is, this button works; until then, upload the .dem file instead.")
+			return
+		}
 		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "gc recent lookup failed")
 		s.serverError(w, "gc recent games", err)
 		return

@@ -21,6 +21,11 @@ var (
 	ErrNotFound = errors.New("gcbot: match replay not found (expired or not recorded)")
 	// ErrUnavailable means the bot isn't connected/logged in right now.
 	ErrUnavailable = errors.New("gcbot: game coordinator bot is not available right now")
+	// ErrNoReply means the Game Coordinator never answered the request. For
+	// recent-match lookups this almost always means the target account's Steam
+	// "Game details" privacy is not Public — the GC silently drops the request
+	// instead of returning an error or an empty list.
+	ErrNoReply = errors.New("gcbot: the game coordinator did not answer")
 )
 
 // Client talks to the gc-bot sidecar.
@@ -123,6 +128,9 @@ func (c *Client) Recent(ctx context.Context, steamID64 string) ([]RecentMatch, e
 		return out.Matches, nil
 	case http.StatusServiceUnavailable:
 		return nil, ErrUnavailable
+	case http.StatusBadGateway:
+		// The sidecar's only 502 on /recent is its GC-reply timeout.
+		return nil, ErrNoReply
 	default:
 		if out.Error != "" {
 			return nil, fmt.Errorf("gcbot: %s", out.Error)
