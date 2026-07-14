@@ -21,10 +21,11 @@ var (
 	ErrNotFound = errors.New("gcbot: match replay not found (expired or not recorded)")
 	// ErrUnavailable means the bot isn't connected/logged in right now.
 	ErrUnavailable = errors.New("gcbot: game coordinator bot is not available right now")
-	// ErrNoReply means the Game Coordinator never answered the request. For
-	// recent-match lookups this almost always means the target account's Steam
-	// "Game details" privacy is not Public — the GC silently drops the request
-	// instead of returning an error or an empty list.
+	// ErrNoReply means the bot dispatched the request and the Game Coordinator
+	// never answered it. For recent-match lookups this usually means the target
+	// account's Steam "Game details" privacy is not Public — the GC silently
+	// drops those requests rather than returning an error (rarely it's a GC
+	// hiccup, which is why the user-facing message hedges with "usually").
 	ErrNoReply = errors.New("gcbot: the game coordinator did not answer")
 )
 
@@ -97,7 +98,8 @@ type RecentMatch struct {
 
 // Recent fetches a player's ~8 most recent official matches straight from the
 // Game Coordinator — no Leetify involvement. Requires the account's "Game
-// details" privacy to be Public; otherwise the list comes back empty.
+// details" privacy to be Public; otherwise the GC usually never replies at all
+// (surfaced as ErrNoReply via the sidecar's reply timeout).
 func (c *Client) Recent(ctx context.Context, steamID64 string) ([]RecentMatch, error) {
 	body, err := json.Marshal(map[string]string{"steamId": steamID64})
 	if err != nil {
@@ -127,9 +129,11 @@ func (c *Client) Recent(ctx context.Context, steamID64 string) ([]RecentMatch, e
 	case http.StatusOK:
 		return out.Matches, nil
 	case http.StatusServiceUnavailable:
+		// bot not connected, or the request never got a queue turn — retryable
 		return nil, ErrUnavailable
-	case http.StatusBadGateway:
-		// The sidecar's only 502 on /recent is its GC-reply timeout.
+	case http.StatusGatewayTimeout, http.StatusBadGateway:
+		// 504: dispatched but the GC never answered (usually privacy).
+		// 502 kept for older sidecars whose only /recent failure was that timeout.
 		return nil, ErrNoReply
 	default:
 		if out.Error != "" {

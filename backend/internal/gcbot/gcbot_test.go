@@ -80,15 +80,30 @@ func TestRecent(t *testing.T) {
 }
 
 func TestRecentNoReply(t *testing.T) {
+	// 504 = new sidecar (dispatched, GC silent); 502 = older sidecar timeout
+	for _, status := range []int{http.StatusGatewayTimeout, http.StatusBadGateway} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+			w.Write([]byte(`{"error":"the Game Coordinator did not answer"}`))
+		}))
+		_, err := New(srv.URL).Recent(context.Background(), "76561197995150836")
+		srv.Close()
+		if !errors.Is(err, ErrNoReply) {
+			t.Fatalf("status %d: want ErrNoReply, got %v", status, err)
+		}
+	}
+}
+
+func TestRecentQueueBusy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte(`{"error":"timeout waiting for the Game Coordinator"}`))
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"timed out queued behind other requests — try again shortly"}`))
 	}))
 	defer srv.Close()
 
 	_, err := New(srv.URL).Recent(context.Background(), "76561197995150836")
-	if !errors.Is(err, ErrNoReply) {
-		t.Fatalf("want ErrNoReply, got %v", err)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("want ErrUnavailable, got %v", err)
 	}
 }
 
