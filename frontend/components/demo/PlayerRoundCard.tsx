@@ -345,11 +345,21 @@ export function PlayerRoundCard({
                     <span className="w-7 shrink-0 text-[10px] font-semibold tabular-nums text-good">
                       {f.dealt ? `+${f.dealt}` : ""}
                     </span>
-                    <span className="w-3 shrink-0 text-center">
+                    <span className="w-9 shrink-0 text-center">
                       {f.killedThem ? (
-                        <span className="text-good" title="you killed them">☠</span>
+                        <span
+                          className="rounded bg-good/20 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-good"
+                          title="you killed them"
+                        >
+                          Kill
+                        </span>
                       ) : f.killedYou ? (
-                        <span className="text-bad" title="they killed you">☠</span>
+                        <span
+                          className="rounded bg-bad/20 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-bad"
+                          title="they killed you"
+                        >
+                          Died
+                        </span>
                       ) : null}
                     </span>
                   </span>
