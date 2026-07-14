@@ -424,7 +424,16 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       const on =
                         active?.kind === "duel" && (active.id === idDealt || active.id === idTaken);
                       const hoverId = m.dealt > 0 ? idDealt : idTaken;
-                      const r = (on ? 1.5 : 1.1) * s;
+                      // size encodes fight intensity (total damage traded);
+                      // split fill = a real exchange (green dealt / red taken),
+                      // solid = one-way damage. Amounts live in the styled
+                      // tooltip overlay (rendered outside the svg).
+                      const rr = (0.95 + 0.6 * Math.min(1, (m.dealt + m.taken) / 150)) * (on ? 1.3 : 1) * s;
+                      const top = `${c.x},${c.y - rr}`;
+                      const rt = `${c.x + rr},${c.y}`;
+                      const bot = `${c.x},${c.y + rr}`;
+                      const lt = `${c.x - rr},${c.y}`;
+                      const split = m.dealt > 0 && m.taken > 0;
                       return (
                         <g
                           key={`dm${m.o}`}
@@ -434,27 +443,15 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                           onMouseLeave={() => onHover(null)}
                           onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onPin({ kind: "duel", id: hoverId }); }}
                         >
-                          <title>{`fight vs ${name(m.o)}${m.dealt ? ` · dealt ${m.dealt}` : ""}${m.taken ? ` · took ${m.taken}` : ""} · ~${mmss(m.t)}`}</title>
-                          <rect
-                            x={c.x - r}
-                            y={c.y - r}
-                            width={2 * r}
-                            height={2 * r}
-                            transform={`rotate(45 ${c.x} ${c.y})`}
-                            fill={m.dealt >= m.taken ? "#46d369" : "#f5694a"}
-                            stroke="#04060e"
-                            strokeWidth={0.3 * s}
-                          />
-                          {on && (
-                            <g fontSize={2.3 * s} fontWeight="bold" textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.7 * s} strokeLinejoin="round">
-                              {m.dealt > 0 && (
-                                <text x={c.x} y={c.y - 2.2 * s} fill="#46d369">+{m.dealt}</text>
-                              )}
-                              {m.taken > 0 && (
-                                <text x={c.x} y={c.y + 3.8 * s} fill="#f5694a">−{m.taken}</text>
-                              )}
-                            </g>
+                          {split ? (
+                            <>
+                              <polygon points={`${top} ${lt} ${bot}`} fill="#f5694a" />
+                              <polygon points={`${top} ${rt} ${bot}`} fill="#46d369" />
+                            </>
+                          ) : (
+                            <polygon points={`${top} ${rt} ${bot} ${lt}`} fill={m.dealt > 0 ? "#46d369" : "#f5694a"} />
                           )}
+                          <polygon points={`${top} ${rt} ${bot} ${lt}`} fill="none" stroke="#04060e" strokeWidth={0.3 * s} />
                           <circle cx={c.x} cy={c.y} r={2.6 * s} fill="transparent" pointerEvents="all" />
                         </g>
                       );
@@ -570,6 +567,36 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 </>
               )}
             </svg>
+
+            {/* fight tooltip — a styled overlay above the active fight badge
+                (native <title> is slow and plain). Shows for badge hover AND
+                the card's fight-row hover, since both drive the same duel ref. */}
+            {active?.kind === "duel" &&
+              typeof playerFilter === "number" &&
+              (() => {
+                const a = Math.floor(active.id / 64);
+                const v = active.id % 64;
+                const m = duelMarks.find(
+                  (mm) => (a === playerFilter && mm.o === v) || (v === playerFilter && mm.o === a),
+                );
+                if (!m) return null;
+                const c = pt(m.x, m.y);
+                if (!c) return null;
+                const lx = ((c.x - (cc.x - half)) / (2 * half)) * 100;
+                const ly = ((c.y - (cc.y - half)) / (2 * half)) * 100;
+                if (lx < 2 || lx > 98 || ly < 4 || ly > 100) return null;
+                return (
+                  <div
+                    className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-line2 bg-bg/90 px-2.5 py-1 text-[11px] leading-snug shadow-xl backdrop-blur"
+                    style={{ left: `${lx}%`, top: `calc(${ly}% - 8px)` }}
+                  >
+                    <span className="font-bold text-ink">⚔ {name(m.o)}</span>
+                    {m.dealt > 0 && <span className="ml-1.5 font-semibold text-good">+{m.dealt}</span>}
+                    {m.taken > 0 && <span className="ml-1 font-semibold text-bad">−{m.taken}</span>}
+                    <span className="ml-1.5 text-faint">~{mmss(m.t)}</span>
+                  </div>
+                );
+              })()}
 
             {/* zoom controls */}
             <div className="absolute right-2 top-2 flex flex-col gap-1">
