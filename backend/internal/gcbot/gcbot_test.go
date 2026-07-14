@@ -79,6 +79,19 @@ func TestRecent(t *testing.T) {
 	}
 }
 
+func TestRecentNoReply(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"timeout waiting for the Game Coordinator"}`))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL).Recent(context.Background(), "76561197995150836")
+	if !errors.Is(err, ErrNoReply) {
+		t.Fatalf("want ErrNoReply, got %v", err)
+	}
+}
+
 func TestRecentUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
