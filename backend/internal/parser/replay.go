@@ -431,13 +431,19 @@ func (rc *replayCollector) onFrameDone(events.FrameDone) {
 	if rc.cur == nil || rc.p.GameState().IsWarmupPeriod() {
 		return
 	}
-	tick := float64(rc.p.GameState().IngameTick())
+	gs := rc.p.GameState()
+
+	// Aim-tell tracking runs at FULL frame resolution, ahead of the capture
+	// throttle: reaction time is (kill − spot), so sampling spots at the 1 Hz
+	// position cadence stamped them up to a second late and understated every
+	// reaction by 0–1000 ms (biasing the card tile and the CheatMeter factors).
+	rc.scanSpotted(gs)
+
+	tick := float64(gs.IngameTick())
 	if tick-rc.lastCap < rc.capEvery {
 		return
 	}
 	rc.lastCap = tick
-
-	gs := rc.p.GameState()
 	var carrier uint64
 	if b := gs.Bomb(); b != nil && b.Carrier != nil {
 		carrier = b.Carrier.SteamID64
@@ -466,9 +472,13 @@ func (rc *replayCollector) onFrameDone(events.FrameDone) {
 		rc.cur.Frames = append(rc.cur.Frames, frame)
 	}
 
-	// Aim-tell tracking: detect the rising edge of "victim spotted by enemy k",
-	// recording the time + k's crosshair offset to the victim at that instant.
-	// onKill reads the latest episode to derive reaction + pre-aim.
+}
+
+// scanSpotted detects the rising edge of "victim spotted by enemy k", recording
+// the time + k's crosshair offset to the victim at that instant. onKill reads
+// the latest episode to derive reaction + pre-aim. Runs every demo frame (NOT
+// at the 1 Hz capture cadence) so spot timestamps are tick-accurate.
+func (rc *replayCollector) scanSpotted(gs dem.GameState) {
 	now := rc.rt()
 	alive := gs.Participants().Playing()
 	for _, v := range alive {
