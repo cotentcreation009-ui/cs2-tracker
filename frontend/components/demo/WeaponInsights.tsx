@@ -128,12 +128,21 @@ function WeaponRow({
         )}
         <span className="ml-auto flex items-center gap-2 text-xs tabular-nums">
           <span className="text-faint">{w.kills} {unit}</span>
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[10px] font-bold"
-            style={{ background: `${hsColor(w.hsPct)}1f`, color: hsColor(w.hsPct) }}
-          >
-            {w.hsPct.toFixed(0)}% HS
-          </span>
+          {w.kills >= 3 ? (
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+              style={{ background: `${hsColor(w.hsPct)}1f`, color: hsColor(w.hsPct) }}
+            >
+              {w.hsPct.toFixed(0)}% HS
+            </span>
+          ) : (
+            <span
+              className="rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-bold text-faint"
+              title="sample too small to judge headshot rate"
+            >
+              {w.hsPct.toFixed(0)}% HS
+            </span>
+          )}
         </span>
       </div>
       <div className="relative h-1.5 overflow-hidden rounded-full bg-panel">
@@ -263,6 +272,8 @@ function computeRangeData(
     if (roundFilter && !roundFilter(r, idx)) return;
     for (const k of r.kills ?? []) {
       if (k.k < 0 || !k.w) continue;
+      // guns only: a lobbed grenade (or knife) isn't an engagement range
+      if (weaponMeta(k.w).cls === "other") continue;
       const d = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
       const e = per.get(k.w) ?? { sum: 0, n: 0, max: 0 };
       e.sum += d;
@@ -311,7 +322,7 @@ function RangePanel({
     <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
       <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
         <h3 className="stat-label">Range profile</h3>
-        <span className="text-[10px] text-faint">avg kill distance · click a weapon → map</span>
+        <span className="text-[10px] text-faint">gun kills only · click a weapon → map</span>
       </div>
       {data.rows.length === 0 ? (
         <div className="py-6 text-center text-xs text-muted lg:my-auto">No kills to measure.</div>
@@ -372,6 +383,111 @@ function RangePanel({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// --- round highlights (multi-kills + opener conversion) ---------------------
+// The pro's first scan of a match: who dropped the 3K/4K/ACE rounds, and how
+// often each side converted the opening pick into the round. Chips jump the
+// whole workspace to that round + player (every lens follows).
+
+function RoundHighlights({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
+  const data = useMemo(() => {
+    const marks: { idx: number; n: number; player: number; count: number; weapon: string }[] = [];
+    let ctOpen = 0, ctConv = 0, tOpen = 0, tConv = 0;
+    rounds.forEach((r, idx) => {
+      const kills = (r.kills ?? []).filter((k) => k.k >= 0);
+      const enemyKill = (k: (typeof kills)[number]) => {
+        const ks = sideOf(r, k.k, meta);
+        return ks !== "" && ks !== sideOf(r, k.v, meta);
+      };
+      // multi-kills (enemy kills only — no teamkill "aces")
+      const per = new Map<number, { n: number; w: Map<string, number> }>();
+      for (const k of kills) {
+        if (!enemyKill(k)) continue;
+        const e = per.get(k.k) ?? { n: 0, w: new Map<string, number>() };
+        e.n++;
+        e.w.set(k.w, (e.w.get(k.w) ?? 0) + 1);
+        per.set(k.k, e);
+      }
+      for (const [p, e] of per) {
+        if (e.n >= 3) {
+          const weapon = [...e.w.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          marks.push({ idx, n: r.n, player: p, count: e.n, weapon });
+        }
+      }
+      // opening pick → did the opener's side win the round?
+      const first = kills.filter(enemyKill).sort((a, b) => a.t - b.t)[0];
+      if (first) {
+        const s = sideOf(r, first.k, meta);
+        if (s === "CT") {
+          ctOpen++;
+          if (r.winner === "CT") ctConv++;
+        } else if (s === "T") {
+          tOpen++;
+          if (r.winner === "T") tConv++;
+        }
+      }
+    });
+    marks.sort((a, b) => a.idx - b.idx || b.count - a.count);
+    return { marks, ctOpen, ctConv, tOpen, tConv };
+  }, [meta, rounds]);
+
+  if (!data.marks.length && !data.ctOpen && !data.tOpen) return null;
+
+  const tier = (c: number) =>
+    c >= 5
+      ? { label: "ACE", chip: "bg-good/15 text-good", ring: "ring-good/40" }
+      : c === 4
+        ? { label: "4K", chip: "bg-mid/15 text-mid", ring: "ring-mid/40" }
+        : { label: "3K", chip: "bg-panel text-muted", ring: "ring-line" };
+
+  return (
+    <div className="scroll-slim flex items-center gap-2 overflow-x-auto pb-0.5 lg:shrink-0">
+      <span className="stat-label shrink-0">Highlights</span>
+      {data.marks.map((m) => {
+        const t = tier(m.count);
+        const on = view.scopeRound === m.idx && view.focusPlayer === m.player;
+        return (
+          <button
+            key={`${m.idx}:${m.player}`}
+            type="button"
+            onClick={() => {
+              view.setScopeRound(on ? null : m.idx);
+              view.setFocusPlayer(on ? null : m.player);
+            }}
+            aria-pressed={on}
+            title={`Round ${m.n}: ${meta.players[m.player]?.name ?? "?"} ${m.count}K with ${weaponMeta(m.weapon).label} — scope the workspace to it`}
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset transition hover:brightness-110 ${t.chip} ${
+              on ? "ring-2 ring-brand" : t.ring
+            }`}
+          >
+            <span className="font-black">{t.label}</span>
+            <span className="text-ink">{meta.players[m.player]?.name ?? "?"}</span>
+            <span className="text-faint">
+              R{m.n} · {weaponMeta(m.weapon).label}
+            </span>
+          </button>
+        );
+      })}
+      {data.marks.length === 0 && <span className="text-[11px] text-faint">no 3K+ rounds</span>}
+      <span className="ml-auto shrink-0 pl-3 text-[11px] tabular-nums text-muted">
+        Opening picks:{" "}
+        <span className="font-semibold" style={{ color: CT }}>
+          CT {data.ctOpen}
+        </span>
+        {data.ctOpen > 0 && (
+          <span className="text-faint"> ({Math.round((data.ctConv / data.ctOpen) * 100)}% won)</span>
+        )}
+        <span className="text-faint"> · </span>
+        <span className="font-semibold" style={{ color: T }}>
+          T {data.tOpen}
+        </span>
+        {data.tOpen > 0 && (
+          <span className="text-faint"> ({Math.round((data.tConv / data.tOpen) * 100)}% won)</span>
+        )}
+      </span>
     </div>
   );
 }
@@ -953,6 +1069,10 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           />
         )}
       </div>
+
+      {/* round highlights — multi-kill chips (jump the workspace) + opener
+          conversion, the pro's first scan of a match */}
+      <RoundHighlights meta={meta} rounds={rounds} view={view} />
 
       {/* main analysis row — five lg columns across the very wide pane
           (offense | threat | duels+economy | map | roster); plain vertical
