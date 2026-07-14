@@ -255,7 +255,7 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
       </Group>
 
       {/* recent matches (Leetify) — click a row to inspect per-match stats */}
-      <LeetifyRecentMatches matches={recent} />
+      <LeetifyRecentMatches matches={recent} steamId={p.steam64_id} />
     </section>
   );
 }

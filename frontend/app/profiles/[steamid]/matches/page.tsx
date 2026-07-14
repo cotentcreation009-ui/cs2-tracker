@@ -53,7 +53,7 @@ export default async function PlayerMatchesPage({
           </h1>
         </div>
         {matches.length > 0 ? (
-          <LeetifyRecentMatches matches={matches} />
+          <LeetifyRecentMatches matches={matches} steamId={steamid} />
         ) : (
           <div className="card px-5 py-6 text-sm text-muted">
             No recent Leetify matches for this player.

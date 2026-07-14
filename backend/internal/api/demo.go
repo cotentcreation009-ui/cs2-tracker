@@ -13,13 +13,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/faceit"
+	"github.com/cs2tracker/server/internal/gcbot"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/queue"
+	"github.com/cs2tracker/server/internal/steam"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -355,21 +358,26 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 	}
 	var req struct {
 		GameID string `json:"gameId"`
+		// The GC fallback (legacy Leetify accounts) matches the clicked row
+		// against the player's recent Game Coordinator matches:
+		SteamID    string `json:"steamId"`    // profile the match was listed on
+		FinishedAt string `json:"finishedAt"` // RFC3339 (legacy records are day-rounded)
+		Score      []int  `json:"score"`      // [team, enemy] as the row shows it
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	gameID := strings.TrimSpace(req.GameID)
+	legacy := false
 	switch {
 	case leetifyUUIDRe.MatchString(gameID):
 		// Resolvable via Leetify — continue below.
 	case leetifyLegacyIDRe.MatchString(gameID):
-		// Legacy-endpoint account: Leetify exposes no demo reference for these,
-		// so there's nothing to resolve. Say so plainly instead of erroring out.
-		writeError(w, http.StatusUnprocessableEntity,
-			"Leetify only has a limited record for this account, so its demos can't be analyzed automatically.")
-		return
+		// Legacy-endpoint account: Leetify exposes no demo reference for these.
+		// Fall back to the Game Coordinator: our Steam bot can list the player's
+		// recent official matches (with replay URLs) directly.
+		legacy = true
 	default:
 		writeError(w, http.StatusBadRequest, "invalid match id")
 		return
@@ -387,6 +395,11 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 	fail := func(status int, msg string) {
 		_ = s.db.SetDemoStatus(r.Context(), id, "failed", msg)
 		writeError(w, status, msg)
+	}
+
+	if legacy {
+		s.analyzeViaGC(w, r, id, fail, req.SteamID, req.FinishedAt, req.Score)
+		return
 	}
 
 	gd, err := s.leetify.GetGameDetails(r.Context(), gameID)
@@ -445,6 +458,102 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		Source:    source,
 		DemoURL:   demoURL,
 		ShareCode: shareCode,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
+		s.serverError(w, "enqueue", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
+// analyzeViaGC resolves a match for a legacy-Leetify account straight from the
+// Game Coordinator: the Steam bot lists the player's recent official matches
+// (with replay URLs) and we pick the one matching the clicked row's score and
+// (day-rounded) finish time. Steam only exposes a player's ~8 most recent
+// matches, and only while their "Game details" privacy is Public.
+func (s *Server) analyzeViaGC(
+	w http.ResponseWriter,
+	r *http.Request,
+	id string,
+	fail func(status int, msg string),
+	steamID, finishedAt string,
+	score []int,
+) {
+	if s.cfg.GCBotURL == "" {
+		fail(http.StatusUnprocessableEntity,
+			"Leetify only has a limited record for this account, so its demos can't be analyzed automatically.")
+		return
+	}
+	sid, ok := steam.ParseSteamID64(strings.TrimSpace(steamID))
+	if !ok {
+		fail(http.StatusBadRequest, "invalid profile id")
+		return
+	}
+
+	bot := gcbot.New(s.cfg.GCBotURL)
+	matches, err := bot.Recent(r.Context(), strconv.FormatUint(sid, 10))
+	if err != nil {
+		if errors.Is(err, gcbot.ErrUnavailable) {
+			fail(http.StatusServiceUnavailable, "the demo bot isn't connected right now — try again shortly")
+			return
+		}
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "gc recent lookup failed")
+		s.serverError(w, "gc recent games", err)
+		return
+	}
+
+	var ft time.Time
+	if t, terr := time.Parse(time.RFC3339, finishedAt); terr == nil {
+		ft = t
+	}
+	var best *gcbot.RecentMatch
+	var bestDiff time.Duration
+	for i := range matches {
+		m := &matches[i]
+		if len(score) == 2 && len(m.Scores) == 2 {
+			a, b := score[0], score[1]
+			if !((m.Scores[0] == a && m.Scores[1] == b) || (m.Scores[0] == b && m.Scores[1] == a)) {
+				continue
+			}
+		}
+		if !ft.IsZero() && m.Time > 0 {
+			diff := time.Unix(m.Time, 0).Sub(ft)
+			if diff < 0 {
+				diff = -diff
+			}
+			// legacy finish times are rounded to midnight UTC — allow the full
+			// day plus timezone slack
+			if diff > 40*time.Hour {
+				continue
+			}
+			if best == nil || diff < bestDiff {
+				best, bestDiff = m, diff
+			}
+		} else if best == nil {
+			best = m
+		}
+	}
+
+	if best == nil {
+		fail(http.StatusUnprocessableEntity,
+			"Steam couldn't match this game — the Game Coordinator only lists a player's ~8 most recent matches, and their Steam \"Game details\" privacy must be Public. You can still analyze it by uploading the .dem.")
+		return
+	}
+	if best.Time > 0 && time.Since(time.Unix(best.Time, 0)) > valveReplayMaxAge {
+		fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
+		return
+	}
+	if best.DemoURL == "" {
+		fail(http.StatusUnprocessableEntity, "Steam has no downloadable replay for this match.")
+		return
+	}
+
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:      id,
+		Type:    queue.JobParseReplay,
+		Source:  "valve",
+		DemoURL: best.DemoURL,
 	})
 	if err != nil {
 		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
