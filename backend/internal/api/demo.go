@@ -500,9 +500,10 @@ func (s *Server) analyzeViaGC(
 		}
 		if errors.Is(err, gcbot.ErrNoReply) {
 			// The GC silently ignores recent-match requests for accounts whose
-			// "Game details" privacy isn't Public — no reply is the only signal.
+			// "Game details" privacy isn't Public — no reply is the usual signal
+			// (rarely it's a Game Coordinator hiccup, hence "usually").
 			fail(http.StatusUnprocessableEntity,
-				"Steam won't share this player's matches — their Steam privacy setting \"Game details\" must be Public (Edit Profile → Privacy Settings). Once it is, this button works; until then, upload the .dem file instead.")
+				"Steam didn't return this player's match list — usually their Steam privacy setting \"Game details\" isn't Public (Edit Profile → Privacy Settings). Once it's Public this button works; until then, upload the .dem file instead.")
 			return
 		}
 		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "gc recent lookup failed")
@@ -514,8 +515,14 @@ func (s *Server) analyzeViaGC(
 	if t, terr := time.Parse(time.RFC3339, finishedAt); terr == nil {
 		ft = t
 	}
+	// Legacy finish times are day-rounded to midnight UTC, so on a score
+	// collision "closest to ft" would systematically prefer the previous
+	// evening's game over the actual afternoon one. Rank candidates instead:
+	// matches INSIDE the row's UTC day beat matches merely near it, and within
+	// the same class the most recent wins (the user clicked a recent row).
 	var best *gcbot.RecentMatch
-	var bestDiff time.Duration
+	bestInDay := false
+	var bestTime int64 = -1
 	for i := range matches {
 		m := &matches[i]
 		if len(score) == 2 && len(m.Scores) == 2 {
@@ -524,21 +531,24 @@ func (s *Server) analyzeViaGC(
 				continue
 			}
 		}
+		inDay := false
 		if !ft.IsZero() && m.Time > 0 {
-			diff := time.Unix(m.Time, 0).Sub(ft)
+			mt := time.Unix(m.Time, 0)
+			diff := mt.Sub(ft)
 			if diff < 0 {
 				diff = -diff
 			}
-			// legacy finish times are rounded to midnight UTC — allow the full
-			// day plus timezone slack
+			// allow the full day plus timezone slack either way
 			if diff > 40*time.Hour {
 				continue
 			}
-			if best == nil || diff < bestDiff {
-				best, bestDiff = m, diff
-			}
-		} else if best == nil {
-			best = m
+			inDay = !mt.Before(ft) && mt.Before(ft.Add(24*time.Hour))
+		}
+		better := best == nil ||
+			(inDay && !bestInDay) ||
+			(inDay == bestInDay && m.Time > bestTime)
+		if better {
+			best, bestInDay, bestTime = m, inDay, m.Time
 		}
 	}
 

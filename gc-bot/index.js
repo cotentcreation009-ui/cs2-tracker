@@ -225,11 +225,16 @@ function enqueueResolve(shareCode) {
 // Public. Serialized through the same single-flight queue as share codes.
 function enqueueRecent(steamId64) {
   return new Promise((resolve, reject) => {
-    const item = { kind: "recent", steamId64, resolve, reject, settled: false };
-    item.timer = setTimeout(
-      () => settle(item, item.reject, new Error("timeout waiting for the Game Coordinator")),
-      RESOLVE_TIMEOUT_MS,
-    );
+    const item = { kind: "recent", steamId64, resolve, reject, settled: false, sent: false };
+    item.timer = setTimeout(() => {
+      // Distinguish "the GC never answered our dispatched request" (the
+      // privacy-shaped silence, 504) from "we never got a turn on the
+      // single-flight queue" (busy bot, 503 — retryable).
+      const err = item.sent
+        ? Object.assign(new Error("the Game Coordinator did not answer"), { code: 504 })
+        : Object.assign(new Error("timed out queued behind other requests — try again shortly"), { code: 503 });
+      settle(item, item.reject, err);
+    }, RESOLVE_TIMEOUT_MS);
     queue.push(item);
     pump();
   });
@@ -275,14 +280,24 @@ function settle(item, fn, val) {
 // Single global listener: the GC emits ONE uncorrelated matchList per reply, so
 // we verify each reply's matchid against the in-flight request. A late reply
 // from a timed-out request (matchid mismatch) is ignored — never mis-cached.
-csgo.on("matchList", (matches) => {
+// The GC's MatchList reply carries msgrequestid (which request kind it
+// answers) and accountid — use both so a stale reply to a TIMED-OUT earlier
+// request can never settle the wrong in-flight item with wrong-shaped data.
+const MSG_RECENT = 9141; // MatchListRequestRecentUserGames
+const MSG_FULLGAME = 9147; // MatchListRequestFullGameInfo
+
+csgo.on("matchList", (matches, reply) => {
   const item = current;
   if (!item || item.settled) return;
-  // recent-games request: the reply is the player's match list itself (no
-  // matchid to correlate) — single-flight queueing keeps replies unambiguous.
+  const reqId = reply && Number(reply.msgrequestid);
   if (item.kind === "recent") {
+    if (reqId && reqId !== MSG_RECENT) return; // stale sharecode reply — not ours
+    if (reqId === MSG_RECENT && reply.accountid && item.accountId && Number(reply.accountid) !== item.accountId) {
+      return; // someone else's recent list from a timed-out request
+    }
     return settle(item, item.resolve, (matches || []).map(summarizeMatch));
   }
+  if (reqId && reqId !== MSG_FULLGAME) return; // recent-list reply while a sharecode is in flight
   let found = false;
   let url = null;
   for (const m of matches || []) {
@@ -308,8 +323,14 @@ function pump() {
   busy = true;
   current = item;
   try {
-    if (item.kind === "recent") csgo.requestRecentGames(item.steamId64);
-    else csgo.requestGame(item.shareCode);
+    if (item.kind === "recent") {
+      // SteamID64 -> accountid (low 32 bits), for correlating the GC's reply
+      item.accountId = Number(BigInt(item.steamId64) & 0xffffffffn);
+      csgo.requestRecentGames(item.steamId64);
+    } else {
+      csgo.requestGame(item.shareCode);
+    }
+    item.sent = true;
   } catch (e) {
     settle(item, item.reject, e);
   }
@@ -380,7 +401,7 @@ const server = http.createServer((req, res) => {
         const matches = await enqueueRecent(steamId);
         return send(200, { matches });
       } catch (e) {
-        return send(502, { error: e.message });
+        return send(e.code === 504 || e.code === 503 ? e.code : 502, { error: e.message });
       }
     });
   }
