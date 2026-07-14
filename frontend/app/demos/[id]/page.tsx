@@ -11,6 +11,7 @@ import { mapLabel } from "@/lib/format";
 import RouteAnalytics from "@/components/demo/RouteAnalytics";
 import WeaponInsights from "@/components/demo/WeaponInsights";
 import PlayerInsights from "@/components/demo/PlayerInsights";
+import TendencyScout from "@/components/demo/TendencyScout";
 import MatchVerdict from "@/components/demo/MatchVerdict";
 import { StrategyMap } from "@/components/demo/StrategyMap";
 import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/MatchToolbar";
@@ -26,6 +27,7 @@ const TABS = [
   { k: "routes", label: "Routes" },
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Insights" },
+  { k: "scout", label: "Tendencies" },
   { k: "map", label: "Heatmap" },
   { k: "zones", label: "Zones" },
   { k: "verdict", label: "Cheat / AI" },
@@ -43,6 +45,7 @@ const TAB_ICON: Record<Tab, string> = {
   routes: "M4 18h5a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h5M17 3l3 3-3 3M4 15l-3 3 3 3", // rough path
   weapons: "M12 2v4M12 18v4M2 12h4M18 12h4M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // crosshair
   insights: "M4 20V10M10 20V4M16 20v-7M22 20H2", // bars
+  scout: "M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // eye
   map: "M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6zM9 3v15M15 6v15", // folded map
   zones: "M12 2l9 5v10l-9 5-9-5V7l9-5zM12 2v20M3 7l9 5 9-5", // hexagon
   verdict: "M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4zM9 12l2 2 4-4", // shield-check
@@ -1014,6 +1017,7 @@ export default function ReplayPage() {
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <PlayerInsights meta={meta} rounds={rounds} view={view} demoId={String(id)} />}
+      {tab === "scout" && <TendencyScout meta={meta} rounds={rounds} view={view} />}
       {tab === "map" && <StrategyMap meta={meta} rounds={rounds} name={name} view={view} />}
       {tab === "zones" && <ZoneEditor map={meta.map} fit />}
       {tab === "verdict" && <MatchVerdict meta={meta} rounds={rounds} view={view} demoId={String(id)} onWatch={jumpToReplay} />}
