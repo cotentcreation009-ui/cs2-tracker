@@ -79,6 +79,32 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
       };
     })
     .sort((a, b) => b.dmg - a.dmg);
+  // one FIGHT per opponent: both damage directions merged, with the pair's best
+  // map reference — drives the unified tug-of-war rows and the map badges.
+  const fightMap = new Map<
+    number,
+    { o: number; name: string; dealt: number; taken: number; killedThem: boolean; killedYou: boolean; killIdx: number | null; nadeNi: number | null }
+  >();
+  for (const x of dmgTo) {
+    fightMap.set(x.i, {
+      o: x.i, name: x.name, dealt: x.dmg, taken: 0,
+      killedThem: x.killed, killedYou: false,
+      killIdx: x.killIdx, nadeNi: x.nadeNis[0] ?? null,
+    });
+  }
+  for (const x of dmgFrom) {
+    const e = fightMap.get(x.i) ?? {
+      o: x.i, name: x.name, dealt: 0, taken: 0,
+      killedThem: false, killedYou: false, killIdx: null, nadeNi: null,
+    };
+    e.taken = x.dmg;
+    e.killedYou = x.killedYou;
+    if (e.killIdx == null) e.killIdx = x.killIdx;
+    if (e.nadeNi == null) e.nadeNi = x.nadeNis[0] ?? null;
+    fightMap.set(x.i, e);
+  }
+  const fights = [...fightMap.values()].sort((a, b) => b.dealt + b.taken - (a.dealt + a.taken));
+
   return {
     name: meta.players[i]?.name ?? "?",
     steamId: meta.players[i]?.steamId ?? "",
@@ -105,6 +131,7 @@ export function computePlayerRound(round: ReplayRound, meta: ReplayMeta, i: numb
     topWeapon,
     dmgTo,
     dmgFrom,
+    fights,
   };
 }
 
@@ -277,143 +304,87 @@ export function PlayerRoundCard({
         </div>
       )}
 
-      {d.dmgTo.length > 0 && (
-        <div className="mt-2">
-          <div className="text-[10px] uppercase tracking-wider text-faint">
-            Damage dealt{refInteractive && <span className="ml-1 normal-case text-faint">· hover to find on map</span>}
-          </div>
-          <div className="mt-0.5 space-y-1">
-            {d.dmgTo.map((x) => {
-              // best map target: the kill we landed → the grenade that hit them
-              // → the closest-approach duel spot (bullets carry no coordinates)
-              const ref: MapRef =
-                x.killIdx != null
-                  ? { kind: "kill", id: x.killIdx }
-                  : x.nadeNis.length
-                    ? { kind: "util", id: x.nadeNis[0] }
-                    : duelRef(i, x.i);
-              const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
-              const row = (
-                <span className="flex w-full items-center gap-1.5">
-                  <span className="w-20 shrink-0 truncate text-muted">{x.name}</span>
-                  <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
-                    <span
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{
-                        width: `${Math.min(100, (x.dmg / Math.max(1, d.dmgTo[0].dmg)) * 100)}%`,
-                        background: x.killed ? "#f5694a" : "#5b9dff",
-                      }}
-                    />
-                  </span>
-                  <span className="w-7 shrink-0 text-right font-semibold tabular-nums">{x.dmg}</span>
-                  {x.killed ? (
-                    <span className="text-bad" title="killed this player">
-                      ☠
+      {d.fights.length > 0 && (() => {
+        const maxSide = Math.max(1, ...d.fights.map((f) => Math.max(f.dealt, f.taken)));
+        return (
+          <div className="mt-2">
+            <div className="text-[10px] uppercase tracking-wider text-faint">
+              Fights <span className="normal-case">· <span className="text-good">+dealt</span> / <span className="text-bad">−taken</span></span>
+              {refInteractive && <span className="ml-1 normal-case text-faint">· hover to find on map</span>}
+            </div>
+            <div className="mt-0.5 space-y-1">
+              {d.fights.map((f) => {
+                // best map target: the kill → the grenade → the closest-approach
+                // duel spot (bullets carry no coordinates)
+                const ref: MapRef =
+                  f.killIdx != null
+                    ? { kind: "kill", id: f.killIdx }
+                    : f.nadeNi != null
+                      ? { kind: "util", id: f.nadeNi }
+                      : f.dealt > 0
+                        ? duelRef(i, f.o)
+                        : duelRef(f.o, i);
+                const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
+                const row = (
+                  <span className="flex w-full items-center gap-1.5">
+                    <span className="w-16 shrink-0 truncate text-muted">{f.name}</span>
+                    <span className="w-7 shrink-0 text-right text-[10px] font-semibold tabular-nums text-bad">
+                      {f.taken ? `−${f.taken}` : ""}
                     </span>
-                  ) : (
-                    <span className="w-[1ch]" />
-                  )}
-                </span>
-              );
-              return refInteractive ? (
-                <button
-                  key={x.i}
-                  type="button"
-                  onMouseEnter={() => onRefHover?.(ref)}
-                  onMouseLeave={() => onRefHover?.(null)}
-                  onClick={() => onRefPin?.(ref)}
-                  aria-pressed={on}
-                  title={
-                    x.killIdx != null
-                      ? "Show where the kill happened on the map"
-                      : x.nadeNis.length
-                        ? "Show the grenade that hit them on the map"
-                        : "Show where the fight happened on the map (closest approach)"
-                  }
-                  className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
-                    on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
-                  }`}
-                >
-                  {row}
-                </button>
-              ) : (
-                <div key={x.i} className="flex items-center gap-1.5 px-1 text-[11px]">
-                  {row}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {d.dmgFrom.length > 0 && (
-        <div className="mt-2">
-          <div className="text-[10px] uppercase tracking-wider text-faint">
-            Damage taken{refInteractive && <span className="ml-1 normal-case text-faint">· hover to find on map</span>}
-          </div>
-          <div className="mt-0.5 space-y-1">
-            {d.dmgFrom.map((x) => {
-              // best map target: the kill that downed us → the grenade that hit
-              // us → the closest-approach duel spot (bullets carry no coordinates)
-              const ref: MapRef =
-                x.killIdx != null
-                  ? { kind: "kill", id: x.killIdx }
-                  : x.nadeNis.length
-                    ? { kind: "util", id: x.nadeNis[0] }
-                    : duelRef(x.i, i);
-              const on = !!activeRef && activeRef.kind === ref.kind && activeRef.id === ref.id;
-              const row = (
-                <span className="flex w-full items-center gap-1.5">
-                  <span className="w-20 shrink-0 truncate text-muted">{x.name}</span>
-                  <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
-                    <span
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{
-                        width: `${Math.min(100, (x.dmg / Math.max(1, d.dmgFrom[0].dmg)) * 100)}%`,
-                        background: x.killedYou ? "#f5694a" : "#e7b53c",
-                      }}
-                    />
-                  </span>
-                  <span className="w-7 shrink-0 text-right font-semibold tabular-nums">{x.dmg}</span>
-                  {x.killedYou ? (
-                    <span className="text-bad" title="killed this player">
-                      ☠
+                    <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
+                      <span
+                        className="absolute inset-y-0 rounded-l-full"
+                        style={{ right: "50%", width: `${(f.taken / maxSide) * 50}%`, background: "#f5694a" }}
+                      />
+                      <span
+                        className="absolute inset-y-0 rounded-r-full"
+                        style={{ left: "50%", width: `${(f.dealt / maxSide) * 50}%`, background: "#46d369" }}
+                      />
+                      <span className="absolute inset-y-0 left-1/2 w-px bg-line/80" />
                     </span>
-                  ) : (
-                    <span className="w-[1ch]" />
-                  )}
-                </span>
-              );
-              return refInteractive ? (
-                <button
-                  key={x.i}
-                  type="button"
-                  onMouseEnter={() => onRefHover?.(ref)}
-                  onMouseLeave={() => onRefHover?.(null)}
-                  onClick={() => onRefPin?.(ref)}
-                  aria-pressed={on}
-                  title={
-                    x.killIdx != null
-                      ? "Show where they got the kill on the map"
-                      : x.nadeNis.length
-                        ? "Show the grenade that hit on the map"
-                        : "Show where the fight happened on the map (closest approach)"
-                  }
-                  className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
-                    on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
-                  }`}
-                >
-                  {row}
-                </button>
-              ) : (
-                <div key={x.i} className="px-1 text-[11px]">
-                  {row}
-                </div>
-              );
-            })}
+                    <span className="w-7 shrink-0 text-[10px] font-semibold tabular-nums text-good">
+                      {f.dealt ? `+${f.dealt}` : ""}
+                    </span>
+                    <span className="w-3 shrink-0 text-center">
+                      {f.killedThem ? (
+                        <span className="text-good" title="you killed them">☠</span>
+                      ) : f.killedYou ? (
+                        <span className="text-bad" title="they killed you">☠</span>
+                      ) : null}
+                    </span>
+                  </span>
+                );
+                return refInteractive ? (
+                  <button
+                    key={f.o}
+                    type="button"
+                    onMouseEnter={() => onRefHover?.(ref)}
+                    onMouseLeave={() => onRefHover?.(null)}
+                    onClick={() => onRefPin?.(ref)}
+                    aria-pressed={on}
+                    title={
+                      f.killIdx != null
+                        ? "Show where the kill happened on the map"
+                        : f.nadeNi != null
+                          ? "Show the grenade that hit on the map"
+                          : "Show where the fight happened on the map (closest approach)"
+                    }
+                    className={`block w-full rounded px-1 py-0.5 text-left text-[11px] transition ${
+                      on ? "bg-brand/15 ring-1 ring-brand/40" : "hover:bg-panel/60"
+                    }`}
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <div key={f.o} className="px-1 text-[11px]">
+                    {row}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {d.flashed > 0 && (
         <div className="mt-1.5 text-[11px] text-muted">
