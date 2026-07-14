@@ -24,8 +24,10 @@ const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.max(0, Math.rou
 interface Props { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView; }
 type ViewMode = "common" | "individual";
 
-// shared cross-highlight selection between the map and the round-detail lists
-type Active = { kind: "util" | "kill" | "player"; id: number } | null;
+// shared cross-highlight selection between the map and the round-detail lists.
+// "duel" pinpoints a bullets-only damage exchange between two players (id =
+// attacker*64+victim): the map marks their closest approach while both lived.
+type Active = { kind: "util" | "kill" | "player" | "duel"; id: number } | null;
 const sameActive = (a: Active, b: Active) => !!a && !!b && a.kind === b.kind && a.id === b.id;
 
 function reasonLabel(reason: string, winner: string): string {
@@ -404,6 +406,49 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       </g>
                     );
                   })}
+
+                  {/* duel spot: a bullets-only damage exchange has no event
+                      coordinates, so mark the two players at their CLOSEST
+                      APPROACH while both were alive — where the fight happened */}
+                  {active?.kind === "duel" &&
+                    (() => {
+                      const a = Math.floor(active.id / 64);
+                      const v = active.id % 64;
+                      const deathT = (idx: number) => {
+                        const k = (scopedRound.kills ?? []).find((kk) => kk.v === idx);
+                        return k ? k.t : Infinity;
+                      };
+                      const cutoff = Math.min(deathT(a), deathT(v));
+                      let best: { d: number; ax: number; ay: number; vx: number; vy: number; t: number } | null = null;
+                      for (const f of scopedRound.frames ?? []) {
+                        if (f.t > cutoff + 0.5) break;
+                        const pa = f.p.find((p) => p.i === a);
+                        const pv = f.p.find((p) => p.i === v);
+                        if (!pa || !pv) continue;
+                        const dd = Math.hypot(pa.x - pv.x, pa.y - pv.y);
+                        if (!best || dd < best.d) best = { d: dd, ax: pa.x, ay: pa.y, vx: pv.x, vy: pv.y, t: f.t };
+                      }
+                      if (!best) return null;
+                      const ca = pt(best.ax, best.ay);
+                      const cv = pt(best.vx, best.vy);
+                      if (!ca || !cv) return null;
+                      const aHex = sideHex(sideOfIdx(scopedRound, a));
+                      const vHex = sideHex(sideOfIdx(scopedRound, v));
+                      return (
+                        <g>
+                          <line x1={ca.x} y1={ca.y} x2={cv.x} y2={cv.y} stroke="#f5b942" strokeWidth={0.45 * s} strokeDasharray={`${1.2 * s} ${0.9 * s}`} opacity={0.9} />
+                          <circle cx={ca.x} cy={ca.y} r={1.2 * s} fill={aHex} stroke="#04060e" strokeWidth={0.3 * s} />
+                          <circle cx={cv.x} cy={cv.y} r={1.2 * s} fill={vHex} stroke="#04060e" strokeWidth={0.3 * s} />
+                          <g fontSize={2.9 * s} fontWeight="bold" textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.8 * s} strokeLinejoin="round">
+                            <text x={ca.x} y={ca.y - 2.2 * s} fill={aHex}>{name(a)}</text>
+                            <text x={cv.x} y={cv.y + 4 * s} fill={vHex}>{name(v)}</text>
+                            <text x={(ca.x + cv.x) / 2} y={(ca.y + cv.y) / 2 - 1.6 * s} fill="#f5b942" fontSize={2.3 * s}>
+                              ~{mmss(best.t)}
+                            </text>
+                          </g>
+                        </g>
+                      );
+                    })()}
 
                   {/* bomb plant */}
                   {(scopedRound.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => {
