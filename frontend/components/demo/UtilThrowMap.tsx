@@ -534,7 +534,7 @@ export function UtilThrowMap({
           ↺
         </button>
       </div>
-      {/* top-anchored so bottom-edge overlays (e.g. the insights step
+      {/* top-anchored so bottom-edge overlays (e.g. the Utility tab's step
           controls) can never cover it */}
       {!calibrated && throws.length > 0 && (
         <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-mid/15 px-2 py-0.5 text-[10px] text-mid">

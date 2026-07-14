@@ -12,6 +12,7 @@ import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeInsights,
   clusterUtilThrows,
+  throwOrigin,
   type PlayerInsight,
   type UtilThrow,
 } from "@/lib/demo/insights";
@@ -24,19 +25,39 @@ import type { DemoView } from "@/components/demo/MatchToolbar";
 const UTIL_KINDS = ["smoke", "flash", "he", "molotov", "decoy"] as const;
 type Timing = "early" | "mid" | "late";
 
+// Buy-menu price per grenade (for the died-with-unused-utility estimate).
+const NADE_PRICE: [RegExp, number][] = [
+  [/smoke/i, 300],
+  [/flash/i, 200],
+  [/HE|explosive/i, 300],
+  [/molotov/i, 400],
+  [/incendiary/i, 600],
+  [/decoy/i, 50],
+];
+const GRENADE_RE = /smoke|flash|HE Grenade|explosive|molotov|incendiary|decoy/i;
+const nadePrice = (name: string) => NADE_PRICE.find(([re]) => re.test(name))?.[1] ?? 0;
+
+// normalize a raw round-data nade kind to the insights kind vocabulary
+const normKind = (k: string) =>
+  k === "inferno" || k === "incgrenade" ? "molotov" : k;
+
 const CT = "#5b9dff";
 const T = "#e7b53c";
+const CT_SOFT_HEX = "#9cc1ff";
+const T_SOFT_HEX = "#f0cd78";
 const sideHex = (t: PlayerInsight["team"]) => (t === "T" ? T : CT);
-const mmss = (t: number) =>
-  `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`;
+const mmss = (t: number) => {
+  const total = Math.round(t);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
 
 // ---------------------------------------------------------------- sorting ---
 type SortKey = "thrown" | "flashed" | "blind" | "utildmg";
 const SORTS: { key: SortKey; label: string; title: string }[] = [
   { key: "thrown", label: "Thrown", title: "grenades thrown" },
   { key: "flashed", label: "Flashed", title: "enemies blinded" },
-  { key: "blind", label: "Blind s", title: "total enemy blind seconds dealt" },
-  { key: "utildmg", label: "Util dmg", title: "HE + molotov damage dealt" },
+  { key: "blind", label: "Blind time", title: "total enemy blind seconds dealt" },
+  { key: "utildmg", label: "Util dmg", title: "grenade damage dealt to enemies" },
 ];
 function sortValue(p: PlayerInsight, key: SortKey): number {
   switch (key) {
@@ -169,6 +190,16 @@ function ThrowRow({
         {zone && <span className="truncate text-faint">{zone}</span>}
       </span>
       <span className="flex shrink-0 items-center gap-2 text-[10px] text-faint">
+        {(tw.kind === "he" || tw.kind === "molotov") &&
+          (tw.dmg ? (
+            <span className="pill bg-bad/10 tabular-nums text-bad" title={`hit ${tw.hit} enem${tw.hit === 1 ? "y" : "ies"}`}>
+              {tw.dmg} dmg
+            </span>
+          ) : (
+            <span className="pill bg-panel text-faint" title="detonated without damaging anyone">
+              dud
+            </span>
+          ))}
         <TimingBadge timing={timing} />
         <span className="tabular-nums">{mmss(tw.t)}</span>
       </span>
@@ -317,26 +348,42 @@ function RosterRow({
   );
 }
 
+// Extra per-player reads joined from the raw rounds (waste + effectiveness).
+export interface UtilExtras {
+  blankFlashRounds: number; // rounds with 1+ flash thrown and zero enemies blinded
+  flashThrows: number;
+  diedWithUtilRounds: number[];
+  wastedDollars: number; // est. value of grenades still in pocket on death
+  ctThrows: number; // by the side they were on THAT round
+  tThrows: number;
+}
+
 // The focused player's utility card — everything we know about their grenades.
 function UtilityCard({
   p,
   teamTotal,
   timingOf,
   activeKind,
+  extras,
   onUtil,
 }: {
   p: PlayerInsight;
   teamTotal: number; // nades thrown by their whole team (for the share)
-  timingOf: (t: number) => Timing;
+  timingOf: (tw: { t: number; round: number }) => Timing;
   activeKind: string | null;
+  extras: UtilExtras;
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
   const hex = sideHex(p.team);
   const n = p.utilNades.length;
   const timing = { early: 0, mid: 0, late: 0 };
-  for (const tw of p.utilNades) timing[timingOf(tw.t)]++;
+  for (const tw of p.utilNades) timing[timingOf(tw)]++;
   const share = teamTotal ? (n / teamTotal) * 100 : 0;
   const perRound = p.roundsPlayed ? n / p.roundsPlayed : 0;
+  const dmgNades = p.utilNades.filter((tw) => tw.kind === "he" || tw.kind === "molotov");
+  const duds = dmgNades.filter((tw) => !tw.dmg).length;
+  const perFlash = extras.flashThrows ? p.enemiesFlashed / extras.flashThrows : 0;
+  const sideN = extras.ctThrows + extras.tThrows;
   return (
     <div className="card relative overflow-hidden py-3 pl-3 pr-4">
       <span className="absolute inset-y-0 left-0 w-1" style={{ background: hex }} />
@@ -358,19 +405,53 @@ function UtilityCard({
         </div>
       )}
 
-      <div className="mt-2.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+      {sideN > 0 && (
+        <div className="mt-2" title="grenades split by the side they were on that round">
+          <div className="flex h-1.5 overflow-hidden rounded-full bg-panel">
+            <div className="bar-grow" style={{ width: `${(extras.ctThrows / sideN) * 100}%`, background: CT }} />
+            <div className="bar-grow" style={{ width: `${(extras.tThrows / sideN) * 100}%`, background: T }} />
+          </div>
+          <div className="mt-0.5 flex justify-between text-[9px] tabular-nums text-faint">
+            <span style={{ color: "#9cc1ff" }}>CT · {extras.ctThrows}</span>
+            <span style={{ color: "#f0cd78" }}>T · {extras.tThrows}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-2.5 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         <Stat
           label="Enemies flashed"
           value={`${p.enemiesFlashed}`}
-          sub={p.flashDuration > 0 ? `${p.flashDuration.toFixed(1)}s total blind` : undefined}
+          sub={
+            extras.flashThrows > 0
+              ? `${perFlash.toFixed(1)}/flash · ${extras.blankFlashRounds} blank rd${extras.blankFlashRounds === 1 ? "" : "s"}`
+              : undefined
+          }
         />
-        <Stat label="Util damage" value={`${p.utilDamage}`} sub="HE + molotov HP" />
         <Stat
-          label="Execute util"
+          label="Util damage"
+          value={`${p.utilDamage}`}
+          sub={
+            dmgNades.length
+              ? `${(p.utilDamage / dmgNades.length).toFixed(0)}/nade · ${duds} dud${duds === 1 ? "" : "s"}`
+              : "grenade HP dealt"
+          }
+        />
+        <Stat
+          label="Early util"
           value={n ? `${Math.round((timing.early / n) * 100)}%` : "—"}
-          sub="thrown early-round"
+          sub="in first 25s post-freeze"
         />
         <Stat label="Team share" value={`${share.toFixed(0)}%`} sub="of their team's nades" />
+        <Stat
+          label="Died w/ util"
+          value={extras.diedWithUtilRounds.length ? `${extras.diedWithUtilRounds.length} rds` : "0"}
+          sub={
+            extras.wastedDollars > 0
+              ? `~$${extras.wastedDollars.toLocaleString()} unthrown (est.)`
+              : "never wasted a nade"
+          }
+        />
       </div>
 
       {n > 0 && (
@@ -406,6 +487,7 @@ export default function UtilityBreakdown({
   const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
   const [throwIdx, setThrowIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [teamPin, setTeamPin] = useState<number | null>(null); // index into executes
   const [zones, setZones] = useState<Zone[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("thrown");
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
@@ -413,13 +495,14 @@ export default function UtilityBreakdown({
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
 
   // scope to the toolbar's round + side selection
-  const data = useMemo(() => {
-    const scoped =
+  const scopedRounds = useMemo(
+    () =>
       view.scopeRound != null && rounds[view.scopeRound]
         ? [rounds[view.scopeRound]]
-        : rounds;
-    return computeInsights(meta, scoped);
-  }, [meta, rounds, view.scopeRound]);
+        : rounds,
+    [rounds, view.scopeRound],
+  );
+  const data = useMemo(() => computeInsights(meta, scopedRounds), [meta, scopedRounds]);
 
   const players = useMemo(
     () => data.players.filter((p) => view.side === "all" || p.team === view.side),
@@ -437,7 +520,7 @@ export default function UtilityBreakdown({
   );
   const statFor = (p: PlayerInsight): RosterStat => {
     const v = sortValue(p, sortKey);
-    const frac = Math.min(1, Math.max(0.04, v / statMax));
+    const frac = v <= 0 ? 0 : Math.min(1, Math.max(0.04, v / statMax));
     const display =
       sortKey === "blind" ? `${v.toFixed(1)}s` : sortKey === "thrown" ? `${p.utilNades.length}` : `${Math.round(v)}`;
     return { display, frac, color: "var(--color-brand)" };
@@ -501,16 +584,125 @@ export default function UtilityBreakdown({
 
   const focusI = view.focusPlayer ?? fallback?.i ?? null;
 
-  // timing tertiles across all util throws in the (scoped) match — robust to
-  // the freeze-time offset baked into t (seconds since round start).
-  const timingOf = useMemo(() => {
-    const ts = players.flatMap((p) => p.utilNades.map((n) => n.t)).sort((a, b) => a - b);
-    if (ts.length < 3) return (_t: number): Timing => "mid";
-    const q = (f: number) => ts[Math.min(ts.length - 1, Math.floor((ts.length - 1) * f))];
-    const t1 = q(1 / 3);
-    const t2 = q(2 / 3);
-    return (t: number): Timing => (t <= t1 ? "early" : t <= t2 ? "mid" : "late");
-  }, [players]);
+  // fixed freeze-relative timing windows (same definition the Tendencies tab
+  // uses): early = first 25s after freeze, mid = 25-55s, late = later.
+  const freezeOf = useMemo(
+    () => new Map(rounds.map((r) => [r.n, r.freezeEnd ?? 15])),
+    [rounds],
+  );
+  const timingOf = (tw: { t: number; round: number }): Timing => {
+    const rel = tw.t - (freezeOf.get(tw.round) ?? 15);
+    return rel < 25 ? "early" : rel < 55 ? "mid" : "late";
+  };
+
+  // per-player waste/effectiveness reads joined from the raw rounds
+  const extrasOf = useMemo(() => {
+    const m = new Map<number, UtilExtras>();
+    const get = (i: number) => {
+      let v = m.get(i);
+      if (!v) {
+        v = { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0 };
+        m.set(i, v);
+      }
+      return v;
+    };
+    for (const r of scopedRounds) {
+      const flashesBy = new Map<number, number>();
+      const thrownBy = new Map<number, number>();
+      for (const nd of r.nades ?? []) {
+        if (nd.by < 0) continue;
+        const e = get(nd.by);
+        if (r.ct?.includes(nd.by)) e.ctThrows++;
+        else if (r.t?.includes(nd.by)) e.tThrows++;
+        thrownBy.set(nd.by, (thrownBy.get(nd.by) ?? 0) + 1);
+        if (nd.k === "flash") {
+          e.flashThrows++;
+          flashesBy.set(nd.by, (flashesBy.get(nd.by) ?? 0) + 1);
+        }
+      }
+      for (const [i, nFlash] of flashesBy) {
+        if (nFlash > 0 && ((r.stats ?? []).find((s) => s.i === i)?.flashed ?? 0) === 0) {
+          get(i).blankFlashRounds++;
+        }
+      }
+      // died holding grenades: freeze-end grenades minus detonations (estimate;
+      // mid-round pickups are invisible, in-flight nades count as thrown)
+      const dead = new Set((r.kills ?? []).map((k) => k.v));
+      for (const s of r.stats ?? []) {
+        if (!dead.has(s.i)) continue;
+        const carried = (s.bought ?? []).filter((g) => GRENADE_RE.test(g));
+        const unused = carried.length - (thrownBy.get(s.i) ?? 0);
+        if (unused > 0) {
+          const e = get(s.i);
+          e.diedWithUtilRounds.push(r.n);
+          // price the cheapest `unused` of what they carried (conservative)
+          const prices = carried.map(nadePrice).sort((a, b) => a - b);
+          e.wastedDollars += prices.slice(0, unused).reduce((a, b) => a + b, 0);
+        }
+      }
+    }
+    return (i: number): UtilExtras =>
+      m.get(i) ?? { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0 };
+  }, [scopedRounds]);
+
+  // team executes: 3+ grenades from one side detonating within a 10s window —
+  // the coordinated package, with plant correlation and round outcome
+  const executes = useMemo(() => {
+    const out: {
+      rn: number;
+      ri: number; // index into `rounds` for scoping
+      side: "CT" | "T";
+      kinds: Record<string, number>;
+      zone: string | null;
+      plantDelay: number | null;
+      won: boolean;
+      throws: UtilThrow[];
+    }[] = [];
+    for (const r of scopedRounds) {
+      const ri = rounds.indexOf(r);
+      for (const side of ["CT", "T"] as const) {
+        const roster = new Set(side === "CT" ? r.ct ?? [] : r.t ?? []);
+        const nades = (r.nades ?? [])
+          .filter((nd) => roster.has(nd.by) && nd.k !== "decoy")
+          .sort((a, b) => a.t - b.t);
+        // greedy windows: start at each unconsumed nade, absorb all within 10s
+        let s = 0;
+        while (s < nades.length) {
+          let e = s;
+          while (e + 1 < nades.length && nades[e + 1].t - nades[s].t <= 10) e++;
+          if (e - s + 1 >= 3) {
+            const group = nades.slice(s, e + 1);
+            const kinds: Record<string, number> = {};
+            for (const nd of group) {
+              const k = normKind(nd.k);
+              kinds[k] = (kinds[k] ?? 0) + 1;
+            }
+            const plant = (r.bomb ?? []).find((b) => b.k === "plant" && b.t >= group[0].t);
+            out.push({
+              rn: r.n,
+              ri,
+              side,
+              kinds,
+              zone: null, // classified below once zones load
+              plantDelay: plant ? Math.max(0, Math.round(plant.t - group[group.length - 1].t)) : null,
+              won: r.winner === side,
+              throws: group.map((nd) => {
+                const o = throwOrigin(r, nd);
+                return {
+                  kind: normKind(nd.k), x: nd.x, y: nd.y, round: r.n, t: nd.t,
+                  ox: o?.x ?? nd.ox ?? nd.x, oy: o?.y ?? nd.oy ?? nd.y,
+                };
+              }),
+            });
+            s = e + 1;
+          } else {
+            s++;
+          }
+        }
+      }
+    }
+    return out;
+  }, [scopedRounds, rounds]);
 
   useEffect(() => {
     setZones(loadZones(meta.map));
@@ -521,10 +713,12 @@ export default function UtilityBreakdown({
     setKindSel(null);
     setThrowIdx(null);
     setHoverIdx(null);
+    setTeamPin(null);
   }, [view.scopeRound, view.side]);
   useEffect(() => {
     setThrowIdx(null);
     setHoverIdx(null);
+    setTeamPin(null);
   }, [focusI]);
   useEffect(() => {
     if (view.focusPlayer != null)
@@ -574,9 +768,19 @@ export default function UtilityBreakdown({
   const activeKindLabel = showAll ? "util" : (KIND_LABEL[activeKind ?? ""] ?? activeKind ?? "").toLowerCase();
   const shownIdx = hoverIdx ?? throwIdx;
   const soloThrow = shownIdx != null && selThrows[shownIdx] ? selThrows[shownIdx] : null;
-  const mapThrows = soloThrow ? [soloThrow] : selThrows;
+  const pinnedExec = teamPin != null ? executes[teamPin] ?? null : null;
+  const mapThrows = pinnedExec ? pinnedExec.throws : soloThrow ? [soloThrow] : selThrows;
   const zoneOf = (x: number, y: number) =>
     classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  // name an execute by the callout most of its grenades landed in
+  const execZone = (ex: (typeof executes)[number]): string | null => {
+    const counts = new Map<string, number>();
+    for (const tw of ex.throws) {
+      const z = zoneOf(tw.x, tw.y);
+      if (z) counts.set(z, (counts.get(z) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  };
   const stepThrow = (d: number) => {
     setHoverIdx(null);
     setThrowIdx((i) => {
@@ -716,19 +920,37 @@ export default function UtilityBreakdown({
             </div>
           )}
 
-          {selPlayer && activeKind && selThrows.length > 0 ? (
+          {pinnedExec || (selPlayer && activeKind && selThrows.length > 0) ? (
             <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-72px))] lg:max-w-none">
               <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} className="w-full" />
 
               <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
-                <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">◀</button>
+                {!pinnedExec && (
+                  <button type="button" onClick={() => stepThrow(-1)} title="Previous throw" aria-label="Previous throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">◀</button>
+                )}
                 <div className="min-w-0 flex-1 text-center text-[11px]">
-                  {soloThrow ? (
+                  {pinnedExec ? (
+                    <span>
+                      <span className="font-semibold" style={{ color: pinnedExec.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
+                        R{pinnedExec.rn} {pinnedExec.side} execute
+                      </span>
+                      <span className="text-faint">
+                        {" "}· {pinnedExec.throws.length} nades over {Math.round(pinnedExec.throws[pinnedExec.throws.length - 1].t - pinnedExec.throws[0].t)}s
+                        {execZone(pinnedExec) ? ` · ${execZone(pinnedExec)}` : ""}
+                      </span>
+                      <span className={pinnedExec.won ? "text-good" : "text-bad"}> · {pinnedExec.won ? "won" : "lost"}</span>
+                    </span>
+                  ) : soloThrow ? (
                     <span title="dashed line = thrown from → landed">
                       <span className="font-semibold text-ink">Throw {(shownIdx ?? 0) + 1}/{selThrows.length}</span>
                       <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
                       {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
-                      <span className="text-brand"> · {timingOf(soloThrow.t)}</span>
+                      <span className="text-brand"> · {timingOf(soloThrow)}</span>
+                      {(soloThrow.kind === "he" || soloThrow.kind === "molotov") && (
+                        <span className={soloThrow.dmg ? "text-bad" : "text-faint"}>
+                          {" "}· {soloThrow.dmg ? `${soloThrow.dmg} dmg` : "dud"}
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="text-muted">
@@ -736,10 +958,16 @@ export default function UtilityBreakdown({
                     </span>
                   )}
                 </div>
-                {soloThrow && (
-                  <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">all</button>
+                {pinnedExec ? (
+                  <button type="button" onClick={() => setTeamPin(null)} title="Back to the focused player's throws" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">✕ execute</button>
+                ) : (
+                  <>
+                    {soloThrow && (
+                      <button type="button" onClick={() => setThrowIdx(null)} title="Show all" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">all</button>
+                    )}
+                    <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">▶</button>
+                  </>
                 )}
-                <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">▶</button>
               </div>
             </div>
           ) : (
@@ -756,6 +984,54 @@ export default function UtilityBreakdown({
         {/* right: utility-ranked roster → the focused player's utility detail.
             The column scrolls internally; the map never gives up space. */}
         <div className="scroll-slim space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
+          {executes.length > 0 && (
+            <div className="card-2 px-3 py-2.5 lg:shrink-0">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="stat-label">Team executes</span>
+                <span className="text-[10px] tabular-nums text-faint">
+                  {executes.length} detected · won {executes.filter((e) => e.won).length}
+                </span>
+              </div>
+              <div className="scroll-slim max-h-40 space-y-1 overflow-y-auto pr-1">
+                {executes.map((ex, i) => {
+                  const z = execZone(ex);
+                  const kindStr = Object.entries(ex.kinds)
+                    .map(([k, c]) => `${c} ${KIND_LABEL[k]?.toLowerCase() ?? k}`)
+                    .join(" + ");
+                  const active = teamPin === i;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setTeamPin(active ? null : i)}
+                      aria-pressed={active}
+                      title="Play this execute's grenades together on the map"
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
+                        active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2 text-xs">
+                        <span className="shrink-0 font-semibold" style={{ color: ex.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
+                          R{ex.rn} {ex.side}
+                        </span>
+                        <span className="truncate text-faint">
+                          {z ? `${z} · ` : ""}{kindStr}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums">
+                        {ex.plantDelay != null && <span className="text-mid" title="bomb planted this long after the last grenade">plant +{ex.plantDelay}s</span>}
+                        <span className={ex.won ? "text-good" : "text-bad"}>{ex.won ? "won" : "lost"}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-[9px] text-faint">
+                3+ grenades from one side detonating within 10s — click to replay the package on the map
+              </div>
+            </div>
+          )}
+
           <div className="card-2 px-3 py-2.5 lg:shrink-0">
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
               <span className="stat-label">Players</span>
@@ -783,7 +1059,7 @@ export default function UtilityBreakdown({
               <span className="w-4" />
               <span className="w-2" />
               <span className="min-w-0 flex-1">Player</span>
-              <span className="w-12 text-right">Rate</span>
+              <span className="w-12 text-right">Nades/rd</span>
               <span className="w-14 truncate whitespace-nowrap text-right text-brand/80">
                 {SORTS.find((s) => s.key === sortKey)?.label ?? "Thrown"}
               </span>
@@ -816,6 +1092,7 @@ export default function UtilityBreakdown({
                 teamTotal={teamTotalOf(selPlayer)}
                 timingOf={timingOf}
                 activeKind={activeKind}
+                extras={extrasOf(selPlayer.i)}
                 onUtil={pickUtil}
               />
             </div>
@@ -836,7 +1113,7 @@ export default function UtilityBreakdown({
                     key={`${tw.round}-${tw.t}-${i}`}
                     tw={tw}
                     zone={zoneOf(tw.x, tw.y)}
-                    timing={timingOf(tw.t)}
+                    timing={timingOf(tw)}
                     active={shownIdx === i}
                     showKind={showAll}
                     onClick={() => setThrowIdx(throwIdx === i ? null : i)}
@@ -859,7 +1136,7 @@ export default function UtilityBreakdown({
                           onClick={() => first >= 0 && setThrowIdx(first)}
                           onMouseEnter={() => first >= 0 && setHoverIdx(first)}
                           onMouseLeave={() => setHoverIdx(null)}
-                          title={`${sp.count}× · usually ${timingOf(sp.avgT)} · avg ${mmss(sp.avgT)} · R${sp.throws.map((t) => t.round).join(", R")}`}
+                          title={`${sp.count}× · usually ${timingOf(sp.throws[0])} · avg ${mmss(sp.avgT)} · R${sp.throws.map((t) => t.round).join(", R")}`}
                           className="pill bg-panel text-muted hover:text-ink"
                         >
                           {z ?? "spot"} ×{sp.count}
@@ -872,11 +1149,11 @@ export default function UtilityBreakdown({
             </div>
           )}
 
-          {focusI != null && (
+          {selPlayer && (
             <UtilTimeline
               rounds={rounds}
               meta={meta}
-              i={focusI}
+              i={selPlayer.i}
               scope={view.scopeRound}
               onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
             />
@@ -893,8 +1170,7 @@ export default function UtilityBreakdown({
           <p className="px-1 text-[10px] leading-relaxed text-faint lg:shrink-0">
             <span className="font-semibold text-muted">Data notes:</span> Flash stats are enemies
             blinded + blind-seconds dealt, not flash-assists (we don&apos;t tie a flash to a
-            teammate&apos;s kill). Molotov/HE damage is enemy HP dealt by that grenade. Throw timing
-            buckets (early / mid / late) are tertiles of every throw in this {scopeLabel}.
+            teammate&apos;s kill). Molotov/HE damage is enemy HP dealt by that grenade. Timing buckets use detonation time relative to each round's freeze end: early = first 25s, mid = 25–55s, late = later.
           </p>
 
           <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-faint lg:shrink-0">
