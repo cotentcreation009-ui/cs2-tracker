@@ -4,8 +4,9 @@
 // util_damage, flash_blind, economy and a hand-authored map-zone database. We
 // have NONE of that. Everything below is reconstructed from the three streams we
 // actually capture per round: kills, 1 Hz positions (frames), and grenade lands
-// (nades). Gaps are documented in PLAYER_INSIGHTS_LIMITATIONS and surfaced in
-// the UI so numbers are never silently fabricated.
+// (nades). Known gaps (proxy assists, no flash-assists, bucketed economy) are
+// surfaced in the consuming tabs' data notes so numbers are never silently
+// fabricated.
 
 import type { ReplayMeta, ReplayNade, ReplayRound } from "@/lib/demo/types";
 import { classifyBuy, type BuyKey } from "@/lib/demo/economy";
@@ -48,6 +49,8 @@ export interface UtilThrow {
   oy: number;
   t: number; // seconds since round start
   round: number;
+  dmg?: number; // HE/molotov: enemy HP this detonation dealt (absent = none)
+  hit?: number; // HE/molotov: victims it damaged
 }
 
 // A cluster of one player's throws of a kind that land near the same spot — the
@@ -75,16 +78,6 @@ export interface InsightsResult {
 }
 
 const TRADE_WINDOW = 5; // seconds
-
-export const PLAYER_INSIGHTS_LIMITATIONS = [
-  "ADR is enemy health-damage per round; it can differ slightly from official (no per-hit overkill cap).",
-  "Flash stats are enemies blinded + blind-seconds dealt, not flash-assists (we don't tie a flash to a teammate's kill).",
-  "Assists are a trade-proximity proxy (our data has no assist event).",
-  "Economy is a coarse equipment-value bucket (pistol / eco / semi-buy / force / full), not real money or a full loadout.",
-  "Map areas (A / B / Mid) are inferred from observed bomb-plant spots — directional, not named zones.",
-  "KAST counts rounds with a kill, real assist, survival or traded death; clutches (1vX) are reconstructed from the kill timeline, with 1v1s credited to the round winner.",
-  "Grenades whose thrower the demo didn't record are counted in match totals but can't be attributed to a player on the map.",
-].join(" ");
 
 const sideOf = (r: ReplayRound, i: number, meta: ReplayMeta): "CT" | "T" | "" => {
   if (r.ct?.includes(i)) return "CT";
@@ -425,9 +418,16 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       else if (n.k === "decoy") { util.decoy++; kind = "decoy"; if (a) a.util.decoy++; }
       if (a && kind) {
         const o = throwOrigin(r, n);
+        let dmg = 0;
+        let hit = 0;
+        for (const v of Object.values(n.dmg ?? {})) {
+          dmg += v;
+          hit++;
+        }
         a.nadeList.push({
           kind, x: n.x, y: n.y, round: r.n, t: n.t,
           ox: o?.x ?? n.x, oy: o?.y ?? n.y,
+          ...(dmg > 0 ? { dmg, hit } : {}),
         });
       }
     }

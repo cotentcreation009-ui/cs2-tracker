@@ -1151,8 +1151,8 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       <p className="text-[10px] leading-relaxed text-faint lg:shrink-0">
         Derived from kill events (killer · weapon · headshot · positions) plus per-round buy values. A kill
         records only the killer&apos;s weapon, so &quot;deaths by weapon&quot; means what killed you, never your own
-        gun. The economy ladder needs per-round buy data (re-parse older demos). For aim quality, ADR, KAST and
-        economy discipline, see the Insights tab.
+        gun. The economy ladder needs per-round buy data (re-parse older demos). For grenade usage and lineups
+        see the Utility tab; for playstyle reads and counters, Tendencies.
       </p>
     </section>
   );

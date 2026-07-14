@@ -8,7 +8,7 @@
 // evidence (counts + round numbers) it was derived from. Special lenses show
 // where they hold when carrying a sniper and where they play on save rounds.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { computeInsights, clusterUtilThrows, weaponLabel, type PlayerInsight, type UtilThrow } from "@/lib/demo/insights";
 import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
@@ -31,7 +31,7 @@ const STILL_SPEED = 70;
 const sideHex = (s: "CT" | "T" | "") => (s === "T" ? T : CT);
 const sideSoft = (s: "CT" | "T" | "") => (s === "T" ? T_SOFT : CT_SOFT);
 
-// One-word role, same heuristics the Insights cards use.
+// One-word role heuristic (weapon + opening duels + positioning).
 function roleOf(p: PlayerInsight, t?: PlayerTendencies): string {
   if (SNIPER_RE.test(p.favoriteWeapons?.[0]?.weapon ?? "")) return "AWPer";
   if (t && t.rounds >= 5) {
@@ -46,7 +46,7 @@ function roleOf(p: PlayerInsight, t?: PlayerTendencies): string {
 
 type Phase = "opening" | "full";
 type SideView = "both" | "CT" | "T";
-type Lens = "all" | "awp" | "eco";
+type Lens = "all" | "awp" | "eco" | "plant";
 
 // A named-callout read: the rounds (numbers) whose opening setup was this zone.
 interface ZoneRead {
@@ -78,7 +78,7 @@ interface UtilRead {
 
 interface ScoutData {
   // radar-space position samples for the phase/side/lens filters
-  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean; rn: number; still: boolean; dir: number }[];
+  pts: { x: number; y: number; side: "CT" | "T"; opening: boolean; rn: number; still: boolean; dir: number; post: boolean }[];
   deaths: { x: number; y: number; side: "CT" | "T"; rn: number }[];
   // per-round dominant opening callout, per side
   zonesCT: ZoneRead[];
@@ -105,6 +105,13 @@ interface ScoutData {
   ecoRounds: number[];
   ecoSpot: SpotRead | null;
   util: UtilRead;
+  // where their kills come FROM (killer position, with the victim direction)
+  killPts: { x: number; y: number; vx: number; vy: number; side: "CT" | "T"; rn: number }[];
+  // post-plant intel: rounds with a plant where this player was still alive
+  plantRounds: number[];
+  // bomb-carrier profile (T side)
+  bombRounds: number[];
+  bombDeaths: number; // died while still carrying (before any plant)
 }
 
 const OPENING_WINDOW = 20; // seconds after freeze that define "opening setup"
@@ -131,6 +138,10 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
   const utilCounts = { smoke: 0, flash: 0, molotov: 0, he: 0 };
   let utilTotal = 0, utilEarly = 0;
   const throwsByKind = new Map<string, UtilThrow[]>();
+  const killPts: ScoutData["killPts"] = [];
+  const plantRounds: number[] = [];
+  const bombRounds: number[] = [];
+  let bombDeaths = 0;
 
   for (const rd of rounds) {
     const freeze = rd.freezeEnd ?? 15;
@@ -145,8 +156,13 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     if (isEco) ecoRounds.push(rd.n);
     const gear = [...(st?.bought ?? []), ...(st?.pickedUp ?? [])];
     const sniperKillsHere = (rd.kills ?? []).filter((k) => k.k === idx && SNIPER_RE.test(k.w)).length;
+    sniperKills += sniperKillsHere;
     const hasSniper = sniperKillsHere > 0 || gear.some((g) => SNIPER_RE.test(g));
     if (hasSniper) sniperRounds.push(rd.n);
+
+    const plant = (rd.bomb ?? []).find((b) => b.k === "plant") ?? null;
+    let carriedBomb = false;
+    let sawPostPlant = false;
 
     const roundZone = new Map<string, number>();
     let prev: { x: number; y: number; t: number } | null = null;
@@ -157,13 +173,16 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         prev = null;
         continue;
       }
+      if (p.b) carriedBomb = true;
       const r = proj.project(p.x, p.y);
       if (!r) continue;
       const still =
         prev != null && Math.hypot(p.x - prev.x, p.y - prev.y) / Math.max(1, f.t - prev.t) < STILL_SPEED;
       prev = { x: p.x, y: p.y, t: f.t };
       const opening = f.t <= freeze + OPENING_WINDOW;
-      pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still, dir: p.d });
+      const post = plant != null && f.t >= plant.t;
+      if (post) sawPostPlant = true;
+      pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still, dir: p.d, post });
       if (!proj.calibrated) continue;
       const z = classifyPosition(meta.map, p.x, p.y, zones);
       if (!z?.name) continue;
@@ -204,22 +223,40 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     }
 
     const bucket = (t: number) => (t < freeze + 25 ? 0 : t < freeze + 55 ? 1 : 2);
+    // first duel = earliest REAL opposing-team kill (world/fall deaths,
+    // suicides and teamkills don't count as duels)
     let first: (typeof rd.kills)[number] | null = null;
+    let myDeathT: number | null = null;
     for (const k of rd.kills ?? []) {
-      if (first == null || k.t < first.t) first = k;
+      const duel =
+        k.k >= 0 && k.v >= 0 && k.k !== k.v && rd.ct?.includes(k.k) !== rd.ct?.includes(k.v);
+      if (duel && (first == null || k.t < first.t)) first = k;
       const d = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
-      if (k.k === idx) {
+      if (k.k === idx && k.v !== idx) {
         totalKills++;
         killTiming[bucket(k.t)]++;
         killDistSum += d;
         killDistN++;
+        const kr = proj.project(k.kx, k.ky);
+        const vr = proj.project(k.vx, k.vy);
+        if (kr) {
+          killPts.push({
+            x: kr.x * 100, y: kr.y * 100,
+            vx: (vr ?? kr).x * 100, vy: (vr ?? kr).y * 100,
+            side, rn: rd.n,
+          });
+        }
       }
       if (k.v === idx) {
         totalDeaths++;
+        if (myDeathT == null || k.t < myDeathT) myDeathT = k.t;
         deathTiming[bucket(k.t)]++;
         if (bucket(k.t) === 0) earlyDeaths.push(rd.n);
-        deathDistSum += d;
-        deathDistN++;
+        if (k.k >= 0) {
+          // unknown killers leave kx/ky at the origin — garbage distance
+          deathDistSum += d;
+          deathDistN++;
+        }
         const r = proj.project(k.vx, k.vy);
         if (r) deaths.push({ x: r.x * 100, y: r.y * 100, side, rn: rd.n });
       }
@@ -227,6 +264,11 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     if (first) {
       if (first.k === idx) openWon.push(rd.n);
       else if (first.v === idx) openLost.push(rd.n);
+    }
+    if (plant != null && sawPostPlant) plantRounds.push(rd.n);
+    if (carriedBomb) {
+      bombRounds.push(rd.n);
+      if (myDeathT != null && (plant == null || myDeathT < plant.t)) bombDeaths++;
     }
   }
 
@@ -251,7 +293,7 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         kind: c.kind,
         name: z?.name ?? null,
         count: c.count,
-        rounds: c.throws.map((tw) => tw.round),
+        rounds: [...new Set(c.throws.map((tw) => tw.round))].sort((a, b) => a - b),
         avgAfterFreeze: c.avgT,
       });
     }
@@ -281,13 +323,19 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     ecoRounds,
     ecoSpot: topSpot(ecoCount, 3),
     util: { counts: utilCounts, total: utilTotal, early: utilEarly, spots: nadeSpots.slice(0, 3) },
+    killPts,
+    plantRounds,
+    bombRounds,
+    bombDeaths,
   };
 }
 
 // One playbook entry: the counter move, plus the demo evidence it rests on.
+// `rounds` (when present) renders as clickable chips that scope the workspace.
 interface Tip {
   text: string;
   why: string;
+  rounds?: number[];
 }
 
 const fmtR = (ns: number[], cap = 6) =>
@@ -301,7 +349,8 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
     if (z && z.sideRounds >= 3 && z.rounds.length / z.sideRounds >= 0.5) {
       out.push({
         text: `On their ${side} side, pre-aim ${z.name} — it's their default setup.`,
-        why: `opened the round there in ${z.rounds.length} of ${z.sideRounds} ${side} rounds (${fmtR(z.rounds)})`,
+        why: `opened the round there in ${z.rounds.length} of ${z.sideRounds} ${side} rounds`,
+        rounds: z.rounds,
       });
     }
   };
@@ -311,13 +360,15 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (s.sniperHold && s.sniperRounds.length >= 2) {
     out.push({
       text: `Their sniper lives at ${s.sniperHold.name} — smoke it off before crossing, or hit a different path entirely.`,
-      why: `held ${s.sniperHold.name} stationary in ${s.sniperHold.rounds.length} of ${s.sniperRounds.length} sniper rounds (${fmtR(s.sniperHold.rounds)})`,
+      why: `held ${s.sniperHold.name} stationary in ${s.sniperHold.rounds.length} of ${s.sniperRounds.length} sniper rounds`,
+      rounds: s.sniperHold.rounds,
     });
   }
   if (s.ecoSpot && s.ecoRounds.length >= 2) {
     out.push({
       text: `On save rounds, expect them at ${s.ecoSpot.name} with pistols — clear it with utility instead of walking in.`,
-      why: `played ${s.ecoSpot.name} in ${s.ecoSpot.rounds.length} of ${s.ecoRounds.length} eco/light-buy rounds (${fmtR(s.ecoSpot.rounds)})`,
+      why: `played ${s.ecoSpot.name} in ${s.ecoSpot.rounds.length} of ${s.ecoRounds.length} eco/light-buy rounds`,
+      rounds: s.ecoSpot.rounds,
     });
   }
 
@@ -325,13 +376,14 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (lineup) {
     out.push({
       text: `Same ${lineup.kind} every time — it lands ${lineup.name} like clockwork. The moment it blooms, you know the play; pre-position to punish it.`,
-      why: `landed a ${lineup.kind} at ${lineup.name} in ${lineup.count} rounds (${fmtR(lineup.rounds)}), ~${lineup.avgAfterFreeze.toFixed(0)}s after freeze`,
+      why: `landed a ${lineup.kind} at ${lineup.name} ${lineup.count}× across ${lineup.rounds.length} round${lineup.rounds.length === 1 ? "" : "s"}, ~${lineup.avgAfterFreeze.toFixed(0)}s after freeze`,
+      rounds: lineup.rounds,
     });
   }
   if (s.util.total >= 8 && s.util.early / s.util.total >= 0.65) {
     out.push({
       text: "Their utility front-runs the execute — the first grenade you see is your rotate call.",
-      why: `${s.util.early} of ${s.util.total} grenades thrown inside the first 25s of the round`,
+      why: `${s.util.early} of ${s.util.total} grenades detonating inside 25s of freeze`,
     });
   }
 
@@ -357,12 +409,14 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (openN >= 4 && s.openWon.length / openN >= 0.6) {
     out.push({
       text: "Never peek them dry — flash first or refuse the opening fight and trade instead.",
-      why: `took the first kill of the round ${s.openWon.length} of ${openN} times it involved them (${fmtR(s.openWon)})`,
+      why: `took the first kill of the round ${s.openWon.length} of ${openN} times it involved them`,
+      rounds: s.openWon,
     });
   } else if (openN >= 4 && s.openLost.length / openN >= 0.65) {
     out.push({
       text: "Hunt the opening pick against them — they keep losing the first fight.",
-      why: `died first in ${s.openLost.length} of ${openN} first duels (${fmtR(s.openLost)})`,
+      why: `died first in ${s.openLost.length} of ${openN} first duels`,
+      rounds: s.openLost,
     });
   }
 
@@ -392,7 +446,8 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (s.totalDeaths >= 5 && s.earlyDeaths.length / s.totalDeaths >= 0.6)
     out.push({
       text: "Dies early most rounds — over-aggressive; punish with pre-placed crossfires on their usual first steps.",
-      why: `${s.earlyDeaths.length} of ${s.totalDeaths} deaths inside the first 25s (${fmtR(s.earlyDeaths)})`,
+      why: `${s.earlyDeaths.length} of ${s.totalDeaths} deaths inside the first 25s`,
+      rounds: s.earlyDeaths,
     });
   if (p.clutchTotal >= 3 && p.clutchWon / p.clutchTotal >= 0.5)
     out.push({
@@ -418,7 +473,7 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
   if (p.shots >= 120 && p.accuracy <= 15)
     out.push({
       text: "Wild sprayer — take fights at range and off-angles; their volume aim falls apart at distance.",
-      why: `${p.accuracy.toFixed(0)}% of ${p.shots} bullets hit anything`,
+      why: `only ${p.accuracy.toFixed(0)}% of ${p.shots} bullets fired damaged an enemy`,
     });
   const bigRounds = p.multiKills.k3 + p.multiKills.k4 + p.multiKills.k5;
   if (bigRounds >= 2)
@@ -431,14 +486,18 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
       text: "A trade player — after they refrag, their own position is briefly exposed; keep a third gun on the exchange.",
       why: `${p.tradeKills} of ${p.kills} kills (${p.tradeKillPct.toFixed(0)}%) were refrags of a teammate's death`,
     });
-  if (t && t.rounds >= 5) {
-    const pairs: ["A" | "B", number][] = [["A", t.t.a], ["B", t.t.b]];
-    const pref = pairs.sort((a, b) => b[1] - a[1])[0];
-    if (pref[1] >= 0.55)
-      out.push({
-        text: `On T side they gravitate to ${pref[0]} — weight your defensive setup and lurk checks toward it.`,
-        why: `${Math.round(pref[1] * 100)}% of their T-side site presence was around ${pref[0]}`,
-      });
+  if (t && t.rounds >= 5 && t.zoneSamples >= 12) {
+    // share among SITE presence only (A vs B) — mid time doesn't dilute the read
+    const site = t.t.a + t.t.b;
+    if (site >= 0.2) {
+      const pairs: ["A" | "B", number][] = [["A", t.t.a / site], ["B", t.t.b / site]];
+      const pref = pairs.sort((a, b) => b[1] - a[1])[0];
+      if (pref[1] >= 0.7)
+        out.push({
+          text: `On T side they gravitate to ${pref[0]} — weight your defensive setup and lurk checks toward it.`,
+          why: `${Math.round(pref[1] * 100)}% of their T-side site (A/B) presence was around ${pref[0]}`,
+        });
+    }
   }
 
   if (!out.length)
@@ -454,7 +513,7 @@ function Meter({ label, pct, leftWord, rightWord }: { label: string; pct: number
     <div>
       <div className="flex items-center justify-between text-[10px]">
         <span className="uppercase tracking-wider text-faint">{label}</span>
-        <span className="tabular-nums text-muted">{pct}th pctile</span>
+        <span className="tabular-nums text-muted" title="percentile rank among the 10 players in this match">{pct}/100 vs lobby</span>
       </div>
       <div className="relative mt-1 h-1.5 rounded-full bg-panel">
         <div className="absolute inset-y-0 left-1/2 w-px bg-line" />
@@ -505,12 +564,82 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   const [phase, setPhase] = useState<Phase>("opening");
   const [sideView, setSideView] = useState<SideView>("both");
   const [lens, setLens] = useState<Lens>("all");
+  const [showKills, setShowKills] = useState(false);
+
+  // the toolbar's side filter drives the map's side view (still overridable)
+  useEffect(() => {
+    setSideView(view.side === "all" ? "both" : view.side);
+  }, [view.side]);
 
   const player = focus != null ? insights.players.find((p) => p.i === focus) ?? null : null;
   const tend = player ? tendencies.get(player.steamId) : undefined;
   const scout = useMemo(
     () => (focus != null ? computeScout(meta, scopedRounds, focus) : null),
     [meta, scopedRounds, focus],
+  );
+
+  // lobby medians for context under the stat tiles — one cheap pass over kills
+  const lobby = useMemo(() => {
+    const distSum = new Map<number, { s: number; n: number }>();
+    const duel = new Map<number, { w: number; n: number }>();
+    for (const rd of scopedRounds) {
+      let first: { t: number; k: number; v: number } | null = null;
+      for (const k of rd.kills ?? []) {
+        if (k.k >= 0 && k.v >= 0 && k.k !== k.v && rd.ct?.includes(k.k) !== rd.ct?.includes(k.v)) {
+          if (first == null || k.t < first.t) first = k;
+          const d = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
+          const e = distSum.get(k.k) ?? { s: 0, n: 0 };
+          e.s += d;
+          e.n++;
+          distSum.set(k.k, e);
+        }
+      }
+      if (first) {
+        const w = duel.get(first.k) ?? { w: 0, n: 0 };
+        w.w++;
+        w.n++;
+        duel.set(first.k, w);
+        const l = duel.get(first.v) ?? { w: 0, n: 0 };
+        l.n++;
+        duel.set(first.v, l);
+      }
+    }
+    const median = (xs: number[]) => {
+      if (!xs.length) return null;
+      const s = [...xs].sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)];
+    };
+    return {
+      killDist: median([...distSum.values()].filter((e) => e.n >= 3).map((e) => e.s / e.n)),
+      duelWinPct: median([...duel.values()].filter((e) => e.n >= 2).map((e) => (e.w / e.n) * 100)),
+    };
+  }, [scopedRounds]);
+
+  // round number -> index for the clickable evidence chips
+  const roundIndexOf = useMemo(() => new Map(rounds.map((r, i) => [r.n, i])), [rounds]);
+  const RoundChips = ({ rounds: rns, cap = 8 }: { rounds: number[]; cap?: number }) => (
+    <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">
+      {rns.slice(0, cap).map((n) => {
+        const ri = roundIndexOf.get(n);
+        const active = ri != null && view.scopeRound === ri;
+        return (
+          <button
+            key={n}
+            type="button"
+            disabled={ri == null}
+            onClick={() => ri != null && view.setScopeRound(active ? null : ri)}
+            aria-pressed={active}
+            title={`Scope the whole workspace to round ${n} — check it in Routes or Replay`}
+            className={`rounded px-1 text-[9px] font-semibold tabular-nums leading-4 transition ${
+              active ? "bg-brand/25 text-brand" : "bg-panel text-muted hover:bg-brand/15 hover:text-brand"
+            }`}
+          >
+            R{n}
+          </button>
+        );
+      })}
+      {rns.length > cap && <span className="text-[9px] text-faint">+{rns.length - cap}</span>}
+    </span>
   );
 
   // ---------- picker (no player selected) ----------
@@ -557,7 +686,9 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
           <span className="text-xs text-faint">pick a player to build their counter-intel dossier — habits, positions, and how to beat them</span>
         </div>
         <div className="scroll-slim grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:content-start lg:gap-3 lg:overflow-y-auto">
-          {(["CT", "T"] as const).map((team) => (
+          {(["CT", "T"] as const)
+            .filter((team) => view.side === "all" || team === view.side)
+            .map((team) => (
             <div key={team} className="card-2 px-4 py-3">
               <div className="mb-2 flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full" style={{ background: sideHex(team) }} />
@@ -578,16 +709,38 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   const plan = counterPlan(player, tend, scout);
   // lens state can be stale from a previously scouted player — fall back safely
   const eLens: Lens =
-    lens === "awp" && scout.sniperRounds.length >= 2 ? "awp" : lens === "eco" && scout.ecoRounds.length >= 2 ? "eco" : "all";
-  const lensRounds = eLens === "awp" ? new Set(scout.sniperRounds) : eLens === "eco" ? new Set(scout.ecoRounds) : null;
+    lens === "awp" && scout.sniperRounds.length >= 2
+      ? "awp"
+      : lens === "eco" && scout.ecoRounds.length >= 2
+        ? "eco"
+        : lens === "plant" && scout.plantRounds.length >= 2
+          ? "plant"
+          : "all";
+  const lensRounds =
+    eLens === "awp"
+      ? new Set(scout.sniperRounds)
+      : eLens === "eco"
+        ? new Set(scout.ecoRounds)
+        : eLens === "plant"
+          ? new Set(scout.plantRounds)
+          : null;
   const shownPts = scout.pts.filter(
     (p) =>
-      (eLens !== "all" ? lensRounds!.has(p.rn) : phase === "full" || p.opening) &&
+      (eLens === "plant"
+        ? p.post
+        : eLens !== "all"
+          ? lensRounds!.has(p.rn)
+          : phase === "full" || p.opening) &&
       (sideView === "both" || p.side === sideView),
   );
   const shownDeaths = scout.deaths.filter(
     (d) => (sideView === "both" || d.side === sideView) && (lensRounds == null || lensRounds.has(d.rn)),
   );
+  const shownKills = showKills
+    ? scout.killPts.filter(
+        (k) => (sideView === "both" || k.side === sideView) && (lensRounds == null || lensRounds.has(k.rn)),
+      )
+    : [];
   const pickLens = (l: Lens) => {
     setLens(l);
     if (l !== "all") setPhase("full");
@@ -665,11 +818,11 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                 </button>
               ))}
             </div>
-            {(scout.sniperRounds.length >= 2 || scout.ecoRounds.length >= 2) && (
+            {(scout.sniperRounds.length >= 2 || scout.ecoRounds.length >= 2 || scout.plantRounds.length >= 2) && (
               <div className="flex rounded-lg border border-line bg-panel p-0.5">
                 <button type="button" onClick={() => pickLens("all")} aria-pressed={eLens === "all"}
                   className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${eLens === "all" ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}>
-                  All buys
+                  All
                 </button>
                 {scout.sniperRounds.length >= 2 && (
                   <button type="button" onClick={() => pickLens("awp")} aria-pressed={eLens === "awp"}
@@ -685,9 +838,31 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                     Ecos · {scout.ecoRounds.length}
                   </button>
                 )}
+                {scout.plantRounds.length >= 2 && (
+                  <button type="button" onClick={() => pickLens("plant")} aria-pressed={eLens === "plant"}
+                    title={`rounds where they were alive after the plant: ${fmtR(scout.plantRounds, 10)} — post-plant holds & retake paths`}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium transition ${eLens === "plant" ? "bg-bad/20 text-[#ff9d8a]" : "text-muted hover:text-ink"}`}>
+                    Plant · {scout.plantRounds.length}
+                  </button>
+                )}
               </div>
             )}
-            <span className="ml-auto text-[10px] text-faint">{shownPts.length} samples · ✕ deaths</span>
+            {scout.killPts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowKills((v) => !v)}
+                aria-pressed={showKills}
+                title="Show where their kills came FROM — dot at their position, line toward the victim"
+                className={`rounded-lg border px-2 py-0.5 text-xs font-medium transition ${
+                  showKills ? "border-good/40 bg-good/15 text-good" : "border-line bg-panel text-muted hover:text-ink"
+                }`}
+              >
+                ● kills
+              </button>
+            )}
+            <span className="ml-auto text-[10px] text-faint">
+              {shownPts.length} samples · ✕ deaths{showKills ? " · ● kill origins" : ""}
+            </span>
           </div>
           <div className="relative aspect-square w-full max-w-240 overflow-hidden rounded-xl border border-line bg-panel2 lg:w-[min(100cqw,calc(100cqh-40px))] lg:max-w-none lg:shrink-0">
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full select-none">
@@ -724,12 +899,33 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                   <line x1={d.x + 1} y1={d.y - 1} x2={d.x - 1} y2={d.y + 1} />
                 </g>
               ))}
+              {shownKills.map((k, i) => {
+                const dx = k.vx - k.x;
+                const dy = k.vy - k.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const L = Math.min(4, len);
+                return (
+                  <g key={`k${i}`}>
+                    <line x1={k.x} y1={k.y} x2={k.x + (dx / len) * L} y2={k.y + (dy / len) * L} stroke="#46d369" strokeWidth={0.25} opacity={0.55} />
+                    <circle cx={k.x} cy={k.y} r={0.7} fill="#46d369" opacity={0.9} />
+                  </g>
+                );
+              })}
             </svg>
+            {shownPts.length === 0 && shownDeaths.length === 0 && shownKills.length === 0 && (
+              <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                <div className="rounded-lg bg-black/55 px-3 py-1.5 text-center text-[11px] text-muted backdrop-blur-sm">
+                  No samples for this view — widen the side / phase / lens filters.
+                </div>
+              </div>
+            )}
             {eLens !== "all" && (
               <div className="pointer-events-none absolute bottom-2 left-1/2 w-max max-w-[95%] -translate-x-1/2 rounded-full bg-black/55 px-2.5 py-0.5 text-[10px] text-ink backdrop-blur-sm">
                 {eLens === "awp"
                   ? `sniper rounds only (${fmtR(scout.sniperRounds, 4)}) — ringed dots = stationary holds, cones = where they're aiming`
-                  : `save rounds only (${fmtR(scout.ecoRounds, 4)}) — ringed dots = where they camp on eco / light buys`}
+                  : eLens === "eco"
+                    ? `save rounds only (${fmtR(scout.ecoRounds, 4)}) — ringed dots = where they camp on eco / light buys`
+                    : `after the plant only (${fmtR(scout.plantRounds, 4)}) — their post-plant / retake positions`}
               </div>
             )}
             {!scout.calibrated && (
@@ -749,6 +945,14 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               {zoneList("T", scout.zonesT)}
               {!scout.zonesCT.length && !scout.zonesT.length && (
                 <div className="text-[11px] text-faint">No callout data (uncalibrated map or too few frames).</div>
+              )}
+              {scout.bombRounds.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 text-[10px]" title={fmtR(scout.bombRounds, 10)}>
+                  <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-muted">
+                    Bomb · carried in {scout.bombRounds.length} rd{scout.bombRounds.length === 1 ? "" : "s"}
+                    {scout.bombDeaths > 0 ? ` · died with it ${scout.bombDeaths}×` : ""}
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -784,7 +988,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                     </span>
                   ) : null,
                 )}
-                <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-faint" title="grenades thrown within 25s of freeze — execute utility">
+                <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-faint" title="grenades detonating within 25s of freeze — execute utility">
                   {scout.util.early}/{scout.util.total} early
                 </span>
               </div>
@@ -812,10 +1016,12 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             <div className="rounded-lg bg-panel/50 px-2 py-1.5">
               <div className="text-[9px] uppercase tracking-wider text-faint">Avg kill range</div>
               <div className="text-sm font-bold tabular-nums">{scout.avgKillDist != null ? `~${scout.avgKillDist.toFixed(0)}m` : "—"}</div>
+              {lobby.killDist != null && <div className="text-[9px] tabular-nums text-faint">lobby ~{lobby.killDist.toFixed(0)}m</div>}
             </div>
             <div className="rounded-lg bg-panel/50 px-2 py-1.5" title={openN ? `won: ${fmtR(scout.openWon, 8) || "—"}` : undefined}>
               <div className="text-[9px] uppercase tracking-wider text-faint">First duels</div>
               <div className="text-sm font-bold tabular-nums">{openN ? `${scout.openWon.length}/${openN} won` : "—"}</div>
+              {lobby.duelWinPct != null && openN > 0 && <div className="text-[9px] tabular-nums text-faint">lobby {lobby.duelWinPct.toFixed(0)}%</div>}
             </div>
           </div>
 
@@ -857,13 +1063,14 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                   <span className="block text-[12px] leading-snug text-ink">{tip.text}</span>
                   <span className="mt-1 block text-[10px] leading-snug text-faint">
                     <span className="font-semibold uppercase tracking-wide text-muted/80">evidence</span> · {tip.why}
+                    {tip.rounds && tip.rounds.length > 0 && <RoundChips rounds={tip.rounds} />}
                   </span>
                 </span>
               </li>
             ))}
           </ol>
           <p className="mt-auto border-t border-line pt-2 text-[10px] leading-relaxed text-faint">
-            Built from this demo only ({scopedRounds.length} round{scopedRounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Positions sample at 1 Hz after freeze time; &quot;stationary&quot; means under ~1.3 m/s between samples.
+            Built from this demo only ({scopedRounds.length} round{scopedRounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Round chips scope the whole workspace — verify any claim in Routes or Replay. Positions sample at 1 Hz after freeze; &quot;stationary&quot; means under ~1.3 m/s between samples; grenade timing uses detonation time.
           </p>
         </div>
       </div>
