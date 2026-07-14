@@ -9,6 +9,8 @@
 //   GET  /health            → { loggedOn, gcConnected, queued, guardPending }
 //   POST /guard-code {code} → submit the one-time Steam Guard email code
 //   POST /resolve {shareCode} → { demoUrl } | { error }
+//   POST /recent {steamId} → { matches: [{matchId,time,demoUrl,scores}] } — the
+//        player's ~8 most recent official matches (needs public Game details)
 //
 // Login flow: first start uses STEAM_BOT_USER/STEAM_BOT_PASS; Steam emails a
 // Guard code — submit it via POST /guard-code. After login the refresh token is
@@ -206,7 +208,7 @@ function enqueueResolve(shareCode) {
     } catch (e) {
       return reject(e);
     }
-    const item = { shareCode, wantMatchId, resolve, reject, settled: false };
+    const item = { kind: "sharecode", shareCode, wantMatchId, resolve, reject, settled: false };
     // Deadline covers BOTH queue-wait and in-flight time, so a request can't
     // strand forever if the GC drops while it's queued behind another.
     item.timer = setTimeout(
@@ -216,6 +218,40 @@ function enqueueResolve(shareCode) {
     queue.push(item);
     pump();
   });
+}
+
+// enqueueRecent asks the GC for a player's recent matches (their last ~8
+// official games). Works only while the account's "Game details" privacy is
+// Public. Serialized through the same single-flight queue as share codes.
+function enqueueRecent(steamId64) {
+  return new Promise((resolve, reject) => {
+    const item = { kind: "recent", steamId64, resolve, reject, settled: false };
+    item.timer = setTimeout(
+      () => settle(item, item.reject, new Error("timeout waiting for the Game Coordinator")),
+      RESOLVE_TIMEOUT_MS,
+    );
+    queue.push(item);
+    pump();
+  });
+}
+
+// summarize a GC match for the /recent reply: time, demo URL and final score.
+function summarizeMatch(m) {
+  const stats = m.roundstatsall || (m.roundstats_legacy ? [m.roundstats_legacy] : []);
+  let demoUrl = null;
+  let scores = null;
+  for (const rs of stats) {
+    if (rs && typeof rs.map === "string" && rs.map.startsWith("http")) demoUrl = rs.map;
+    if (rs && Array.isArray(rs.team_scores) && rs.team_scores.length === 2) {
+      scores = [Number(rs.team_scores[0]), Number(rs.team_scores[1])];
+    }
+  }
+  return {
+    matchId: String(m.matchid),
+    time: Number(m.matchtime) || 0, // unix seconds
+    demoUrl,
+    scores,
+  };
 }
 
 function settle(item, fn, val) {
@@ -242,6 +278,11 @@ function settle(item, fn, val) {
 csgo.on("matchList", (matches) => {
   const item = current;
   if (!item || item.settled) return;
+  // recent-games request: the reply is the player's match list itself (no
+  // matchid to correlate) — single-flight queueing keeps replies unambiguous.
+  if (item.kind === "recent") {
+    return settle(item, item.resolve, (matches || []).map(summarizeMatch));
+  }
   let found = false;
   let url = null;
   for (const m of matches || []) {
@@ -267,7 +308,8 @@ function pump() {
   busy = true;
   current = item;
   try {
-    csgo.requestGame(item.shareCode);
+    if (item.kind === "recent") csgo.requestRecentGames(item.steamId64);
+    else csgo.requestGame(item.shareCode);
   } catch (e) {
     settle(item, item.reject, e);
   }
@@ -319,6 +361,27 @@ const server = http.createServer((req, res) => {
       guardCallback = null;
       cb(code);
       return send(200, { ok: true });
+    });
+  }
+
+  if (req.method === "POST" && req.url === "/recent") {
+    return readBody(req, async (body) => {
+      let steamId = "";
+      try {
+        steamId = String(JSON.parse(body).steamId || "").trim();
+      } catch {}
+      if (!/^7656119\d{10}$/.test(steamId)) {
+        return send(400, { error: "invalid steamId (expected a SteamID64)" });
+      }
+      if (!gcConnected) {
+        return send(503, { error: "not connected to the Game Coordinator yet — try again shortly", guardPending: !!guardCallback });
+      }
+      try {
+        const matches = await enqueueRecent(steamId);
+        return send(200, { matches });
+      } catch (e) {
+        return send(502, { error: e.message });
+      }
     });
   }
 

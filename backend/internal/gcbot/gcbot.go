@@ -81,3 +81,52 @@ func (c *Client) Resolve(ctx context.Context, shareCode string) (string, error) 
 		return "", fmt.Errorf("gcbot: unexpected status %d", resp.StatusCode)
 	}
 }
+
+// RecentMatch is one entry of a player's Game Coordinator match list.
+type RecentMatch struct {
+	MatchID string `json:"matchId"`
+	Time    int64  `json:"time"` // unix seconds the match finished
+	DemoURL string `json:"demoUrl"`
+	Scores  []int  `json:"scores"` // final [team1, team2]
+}
+
+// Recent fetches a player's ~8 most recent official matches straight from the
+// Game Coordinator — no Leetify involvement. Requires the account's "Game
+// details" privacy to be Public; otherwise the list comes back empty.
+func (c *Client) Recent(ctx context.Context, steamID64 string) ([]RecentMatch, error) {
+	body, err := json.Marshal(map[string]string{"steamId": steamID64})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/recent", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gcbot: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Matches []RecentMatch `json:"matches"`
+		Error   string        `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && resp.StatusCode == http.StatusOK {
+		return nil, fmt.Errorf("gcbot: decode: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return out.Matches, nil
+	case http.StatusServiceUnavailable:
+		return nil, ErrUnavailable
+	default:
+		if out.Error != "" {
+			return nil, fmt.Errorf("gcbot: %s", out.Error)
+		}
+		return nil, fmt.Errorf("gcbot: unexpected status %d", resp.StatusCode)
+	}
+}

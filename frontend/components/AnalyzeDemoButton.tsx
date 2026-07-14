@@ -18,14 +18,18 @@ const VALVE_REPLAY_MAX_AGE_MS = 31 * 24 * 3600 * 1000;
  */
 export function AnalyzeDemoButton({
   gameId,
+  steamId,
   dataSource,
   finishedAt,
   mapName,
+  score,
 }: {
   gameId: string;
+  steamId: string;
   dataSource: string;
   finishedAt: string;
   mapName: string;
+  score?: number[];
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<string | null>(null);
@@ -41,7 +45,11 @@ export function AnalyzeDemoButton({
     busyRef.current = true;
     setError(null);
     try {
-      const { meta, rounds } = await analyzeMatch(gameId, { onPhase: setPhase });
+      const { meta, rounds } = await analyzeMatch(
+        gameId,
+        { steamId, finishedAt, score },
+        { onPhase: setPhase },
+      );
       const saved = await saveMatch(meta, rounds, mapLabel(mapName) || "Match");
       router.push(`/demos/${saved.id}`);
     } catch (e) {

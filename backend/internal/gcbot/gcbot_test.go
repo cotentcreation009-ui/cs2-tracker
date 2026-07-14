@@ -53,3 +53,41 @@ func TestResolveErrors(t *testing.T) {
 		srv.Close()
 	}
 }
+
+func TestRecent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/recent" || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			SteamID string `json:"steamId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.SteamID != "76561197995150836" {
+			t.Errorf("steamId = %q", body.SteamID)
+		}
+		w.Write([]byte(`{"matches":[{"matchId":"1","time":1752345600,"demoUrl":"http://replay1.valve.net/730/m.dem.bz2","scores":[13,10]}]}`))
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL).Recent(context.Background(), "76561197995150836")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].DemoURL == "" || got[0].Scores[0] != 13 {
+		t.Fatalf("unexpected matches: %+v", got)
+	}
+}
+
+func TestRecentUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"not connected"}`))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL).Recent(context.Background(), "76561197995150836")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("want ErrUnavailable, got %v", err)
+	}
+}

@@ -38,8 +38,10 @@ function Stat({ label, value }: { label: string; value: string }) {
  */
 export function LeetifyRecentMatches({
   matches,
+  steamId,
 }: {
   matches: LeetifyRecentMatch[];
+  steamId: string;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   if (matches.length === 0) return null;
@@ -121,9 +123,11 @@ export function LeetifyRecentMatches({
                     <div className="mt-2.5 flex flex-wrap items-center gap-3">
                       <AnalyzeDemoButton
                         gameId={m.id}
+                        steamId={steamId}
                         dataSource={m.data_source}
                         finishedAt={m.finished_at}
                         mapName={m.map_name}
+                        score={m.score}
                       />
                       <a
                         href={`https://leetify.com/app/match-details/${m.id}`}

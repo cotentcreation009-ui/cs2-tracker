@@ -187,9 +187,12 @@ export async function parseDemoFromUrl(
 
 // Analyze a match listed on a profile by its Leetify game id — the server looks
 // the match up, resolves its demo (FACEIT Download API or the Valve GC bot) and
-// parses it. One click, no file handling for the user.
+// parses it. One click, no file handling for the user. `row` carries the
+// clicked row's identity so legacy-Leetify accounts can fall back to the Game
+// Coordinator (the bot matches the row against the player's recent matches).
 export async function analyzeMatch(
   gameId: string,
+  row: { steamId: string; finishedAt: string; score?: number[] },
   handlers: ParseHandlers = {},
 ): Promise<ParseResult> {
   const { signal } = handlers;
@@ -197,7 +200,12 @@ export async function analyzeMatch(
   const res = await fetch("/api/demos/analyze-match", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ gameId }),
+    body: JSON.stringify({
+      gameId,
+      steamId: row.steamId,
+      finishedAt: row.finishedAt,
+      score: row.score,
+    }),
     signal,
   });
   if (!res.ok) throw new Error(await errText(res, "could not start analysis"));
