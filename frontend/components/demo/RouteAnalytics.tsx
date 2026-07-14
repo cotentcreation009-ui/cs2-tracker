@@ -161,6 +161,51 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     };
   }, [individualPaths]);
 
+  // Fight badges for the focused player's route: one marker per opponent they
+  // traded bullet damage with this round, placed at the player's position at
+  // the pair's closest approach (bullets carry no event coordinates). Pairs
+  // that ended in a kill are excluded — the kill marker already shows those.
+  const duelMarks = useMemo(() => {
+    if (!scopedRound || typeof playerFilter !== "number") return [];
+    const pf = playerFilter;
+    const stats = scopedRound.stats ?? [];
+    const kills = scopedRound.kills ?? [];
+    const opps = new Map<number, { dealt: number; taken: number }>();
+    const myStat = stats.find((s) => s.i === pf);
+    for (const [vi, dm] of Object.entries(myStat?.dmgTo ?? {})) {
+      if (dm > 0) opps.set(Number(vi), { dealt: dm, taken: 0 });
+    }
+    for (const s of stats) {
+      if (s.i === pf) continue;
+      const dm = s.dmgTo?.[pf] ?? 0;
+      if (dm > 0) {
+        const e = opps.get(s.i) ?? { dealt: 0, taken: 0 };
+        e.taken = dm;
+        opps.set(s.i, e);
+      }
+    }
+    const deathT = (idx: number) => {
+      const k = kills.find((kk) => kk.v === idx);
+      return k ? k.t : Infinity;
+    };
+    const out: { o: number; x: number; y: number; t: number; dealt: number; taken: number }[] = [];
+    for (const [o, v] of opps) {
+      if (kills.some((k) => (k.k === pf && k.v === o) || (k.k === o && k.v === pf))) continue;
+      const cutoff = Math.min(deathT(pf), deathT(o));
+      let best: { d: number; x: number; y: number; t: number } | null = null;
+      for (const f of scopedRound.frames ?? []) {
+        if (f.t > cutoff + 0.5) break;
+        const pa = f.p.find((p) => p.i === pf);
+        const pv = f.p.find((p) => p.i === o);
+        if (!pa || !pv) continue;
+        const dd = Math.hypot(pa.x - pv.x, pa.y - pv.y);
+        if (!best || dd < best.d) best = { d: dd, x: pa.x, y: pa.y, t: f.t };
+      }
+      if (best) out.push({ o, x: best.x, y: best.y, t: best.t, dealt: v.dealt, taken: v.taken });
+    }
+    return out;
+  }, [scopedRound, playerFilter]);
+
   // running score AFTER the scoped round — counted by TEAM (ct = team that
   // started CT, t = started T), since sides swap at half.
   const score = useMemo(() => {
@@ -207,6 +252,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
       <Legend swatch={KIND_COLOR.flash} label="flash" />
       <Legend swatch={KIND_COLOR.he} label="HE" />
       <Legend swatch={KIND_COLOR.molotov} label="molly" />
+      {scopedRound && focused && <Legend swatch="#46d369" label="fight" shape="d" />}
       {scopedRound && <span className="ml-auto">dashed = util throw → land · scroll to zoom</span>}
     </>
   );
@@ -358,6 +404,62 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                     );
                   })}
 
+                  {/* fight badges: where the focused player traded bullet
+                      damage (no kill) — diamond on THEIR route at the pair's
+                      closest approach; green = came out ahead, red = behind.
+                      Hover/click links to the card's damage rows (duel refs). */}
+                  {typeof playerFilter === "number" &&
+                    duelMarks.map((m) => {
+                      const c = pt(m.x, m.y);
+                      if (!c) return null;
+                      const idDealt = playerFilter * 64 + m.o;
+                      const idTaken = m.o * 64 + playerFilter;
+                      const related = !active
+                        ? true
+                        : active.kind === "duel"
+                          ? active.id === idDealt || active.id === idTaken
+                          : active.kind === "player"
+                            ? active.id === playerFilter || active.id === m.o
+                            : false;
+                      const on =
+                        active?.kind === "duel" && (active.id === idDealt || active.id === idTaken);
+                      const hoverId = m.dealt > 0 ? idDealt : idTaken;
+                      const r = (on ? 1.5 : 1.1) * s;
+                      return (
+                        <g
+                          key={`dm${m.o}`}
+                          opacity={dim(related)}
+                          style={{ cursor: "pointer" }}
+                          onMouseEnter={() => onHover({ kind: "duel", id: hoverId })}
+                          onMouseLeave={() => onHover(null)}
+                          onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onPin({ kind: "duel", id: hoverId }); }}
+                        >
+                          <title>{`fight vs ${name(m.o)}${m.dealt ? ` · dealt ${m.dealt}` : ""}${m.taken ? ` · took ${m.taken}` : ""} · ~${mmss(m.t)}`}</title>
+                          <rect
+                            x={c.x - r}
+                            y={c.y - r}
+                            width={2 * r}
+                            height={2 * r}
+                            transform={`rotate(45 ${c.x} ${c.y})`}
+                            fill={m.dealt >= m.taken ? "#46d369" : "#f5694a"}
+                            stroke="#04060e"
+                            strokeWidth={0.3 * s}
+                          />
+                          {on && (
+                            <g fontSize={2.3 * s} fontWeight="bold" textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.7 * s} strokeLinejoin="round">
+                              {m.dealt > 0 && (
+                                <text x={c.x} y={c.y - 2.2 * s} fill="#46d369">+{m.dealt}</text>
+                              )}
+                              {m.taken > 0 && (
+                                <text x={c.x} y={c.y + 3.8 * s} fill="#f5694a">−{m.taken}</text>
+                              )}
+                            </g>
+                          )}
+                          <circle cx={c.x} cy={c.y} r={2.6 * s} fill="transparent" pointerEvents="all" />
+                        </g>
+                      );
+                    })}
+
                   {/* kills: killer X + victim ring, interactive */}
                   {(scopedRound.kills ?? []).map((k, i) => {
                     if (k.k < 0) return null;
@@ -487,10 +589,11 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                 const pf = playerFilter;
                 const involved =
                   (scopedRound.kills ?? []).some((k) => k.k >= 0 && (k.k === pf || k.v === pf)) ||
-                  (scopedRound.nades ?? []).some((n) => n.by === pf);
+                  (scopedRound.nades ?? []).some((n) => n.by === pf) ||
+                  duelMarks.length > 0;
                 return involved ? null : (
                   <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted backdrop-blur">
-                    No kills or utility for {name(pf)} this round
+                    No kills, damage or utility for {name(pf)} this round
                   </div>
                 );
               }
@@ -776,13 +879,15 @@ function StartEnd({ path, winRate, pt, scale }: { path: PlayerPath; winRate: num
   return <>{start && <circle cx={start.x} cy={start.y} r={0.55 * scale} fill={path.side === "T" ? T : CT} />}
     {end && <circle cx={end.x} cy={end.y} r={0.7 * scale} fill={winColor(winRate)} />}</>;
 }
-function Legend({ swatch, label, shape }: { swatch: string; label: string; shape?: "x" | "o" }) {
+function Legend({ swatch, label, shape }: { swatch: string; label: string; shape?: "x" | "o" | "d" }) {
   return (
     <span className="flex items-center gap-1">
       {shape === "x" ? (
         <span style={{ color: swatch }} className="font-bold">✕</span>
       ) : shape === "o" ? (
         <span style={{ color: swatch }}>◯</span>
+      ) : shape === "d" ? (
+        <span className="h-2 w-2 rotate-45" style={{ background: swatch }} />
       ) : (
         <span className="h-2 w-2 rounded-full" style={{ background: swatch }} />
       )}
