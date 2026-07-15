@@ -8,7 +8,9 @@ import {
   mb,
   parseDemoFile,
   parseDemoFromUrl,
+  type ParseHandlers,
 } from "@/lib/demo/parseClient";
+import { computePercent, phaseOf, type UploadPhase } from "@/lib/demo/uploadProgress";
 import {
   deleteMatch,
   listMatches,
@@ -22,12 +24,67 @@ import { mapLabel } from "@/lib/format";
 export default function DemosPage() {
   const [list, setList] = useState<MatchSummary[]>([]);
   const [parsing, setParsing] = useState(false);
-  const [phase, setPhase] = useState("");
+  const [phase, setPhase] = useState(""); // human label
+  const [percent, setPercent] = useState(0); // 0..100, monotonic
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [url, setUrl] = useState("");
   const acRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // progress model state: current phase, real upload fraction, and when the
+  // (time-eased) parse phase began. percentRef enforces monotonicity.
+  const lifeRef = useRef<UploadPhase>("idle");
+  const uploadFracRef = useRef(0);
+  const parseStartRef = useRef(0);
+  const hasUploadRef = useRef(true);
+  const percentRef = useRef(0);
+
+  const recompute = useCallback(() => {
+    const p = computePercent({
+      phase: lifeRef.current,
+      uploadFraction: uploadFracRef.current,
+      parseElapsedMs: parseStartRef.current ? Date.now() - parseStartRef.current : 0,
+      hasUpload: hasUploadRef.current,
+    });
+    if (p > percentRef.current) percentRef.current = p;
+    setPercent(Math.min(100, Math.round(percentRef.current)));
+  }, []);
+
+  // resets the progress model at the start of a new upload/parse
+  const beginProgress = useCallback((hasUpload: boolean) => {
+    lifeRef.current = hasUpload ? "uploading" : "queueing";
+    uploadFracRef.current = 0;
+    parseStartRef.current = 0;
+    hasUploadRef.current = hasUpload;
+    percentRef.current = 0;
+    setPercent(0);
+  }, []);
+
+  // shared onPhase/onUploadProgress handlers for both the file and URL paths
+  const progressHandlers = useCallback(
+    (): Pick<ParseHandlers, "onPhase" | "onUploadProgress"> => ({
+      onPhase: (label) => {
+        setPhase(label);
+        const ph = phaseOf(label);
+        lifeRef.current = ph;
+        if (ph === "parsing" && !parseStartRef.current) parseStartRef.current = Date.now();
+        recompute();
+      },
+      onUploadProgress: (f) => {
+        uploadFracRef.current = f;
+        recompute();
+      },
+    }),
+    [recompute],
+  );
+
+  // during the parse phase the bar advances on a time curve — tick it forward
+  useEffect(() => {
+    if (!parsing || phaseOf(phase) !== "parsing") return;
+    const iv = setInterval(recompute, 250);
+    return () => clearInterval(iv);
+  }, [parsing, phase, recompute]);
 
   const refresh = useCallback(async () => {
     try {
@@ -56,15 +113,22 @@ export default function DemosPage() {
       }
       setParsing(true);
       setPhase("uploading…");
+      beginProgress(true);
       const ac = new AbortController();
       acRef.current = ac;
       try {
         const { meta, rounds } = await parseDemoFile(file, {
-          onPhase: (p) => setPhase(p),
+          ...progressHandlers(),
           signal: ac.signal,
         });
+        setPhase("saving…");
+        lifeRef.current = "saving";
+        recompute();
         const name = file.name.replace(/\.dem$/i, "");
         await saveMatch(meta, rounds, name);
+        lifeRef.current = "done";
+        percentRef.current = 100;
+        setPercent(100);
         await refresh();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -75,7 +139,7 @@ export default function DemosPage() {
         acRef.current = null;
       }
     },
-    [refresh],
+    [refresh, beginProgress, progressHandlers, recompute],
   );
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,13 +154,17 @@ export default function DemosPage() {
     setError(null);
     setParsing(true);
     setPhase("queueing…");
+    beginProgress(false); // server fetches the demo — no client upload phase
     const ac = new AbortController();
     acRef.current = ac;
     try {
       const { meta, rounds } = await parseDemoFromUrl(u, {
-        onPhase: (p) => setPhase(p),
+        ...progressHandlers(),
         signal: ac.signal,
       });
+      setPhase("saving…");
+      lifeRef.current = "saving";
+      recompute();
       // Display name: FACEIT room links get "FACEIT <id>"; file URLs use the
       // basename with the (possibly compressed) .dem extension stripped.
       const roomMatch = u.match(/\/room\/([0-9]+-[0-9a-f-]{36})/i) ?? u.match(/^([0-9]+-[0-9a-f-]{36})$/i);
@@ -107,6 +175,9 @@ export default function DemosPage() {
             "",
           ) || "Demo";
       await saveMatch(meta, rounds, name);
+      lifeRef.current = "done";
+      percentRef.current = 100;
+      setPercent(100);
       setUrl("");
       await refresh();
     } catch (e) {
@@ -117,7 +188,7 @@ export default function DemosPage() {
       setPhase("");
       acRef.current = null;
     }
-  }, [url, parsing, refresh]);
+  }, [url, parsing, refresh, beginProgress, progressHandlers, recompute]);
 
   return (
     <div className="space-y-6">
@@ -177,17 +248,55 @@ export default function DemosPage() {
       >
         {parsing ? (
           <>
-            <div className="grid h-12 w-12 place-items-center rounded-full bg-brand/10 text-brand">
-              <svg viewBox="0 0 24 24" className="h-6 w-6 animate-spin" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" />
+            <div className="relative grid h-14 w-14 place-items-center">
+              {/* circular percentage ring */}
+              <svg viewBox="0 0 36 36" className="absolute inset-0 h-full w-full -rotate-90">
+                <circle cx="18" cy="18" r="16" fill="none" stroke="currentColor" strokeWidth="3" className="text-panel" />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="16"
+                  fill="none"
+                  stroke="url(#demoProgress)"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray={2 * Math.PI * 16}
+                  strokeDashoffset={2 * Math.PI * 16 * (1 - percent / 100)}
+                  style={{ transition: "stroke-dashoffset 0.3s ease-out" }}
+                />
+                <defs>
+                  <linearGradient id="demoProgress" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="var(--color-brand)" />
+                    <stop offset="100%" stopColor="var(--color-brand2)" />
+                  </linearGradient>
+                </defs>
               </svg>
+              <span className="text-xs font-bold tabular-nums text-ink">{percent}%</span>
             </div>
             <div className="text-sm font-semibold text-ink">{phase || "working…"}</div>
-            <div className="h-1.5 w-56 overflow-hidden rounded-full bg-panel">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-linear-to-r from-brand to-brand2" />
+            <div
+              className="h-2 w-64 max-w-full overflow-hidden rounded-full bg-panel"
+              role="progressbar"
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Demo processing progress"
+            >
+              <div
+                className="relative h-full overflow-hidden rounded-full bg-linear-to-r from-brand to-brand2"
+                style={{ width: `${percent}%`, transition: "width 0.3s ease-out" }}
+              >
+                {/* sweeping sheen so the bar reads as active even while the
+                    parse phase eases slowly toward its ceiling */}
+                <div className="progress-sheen pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-linear-to-r from-transparent via-white/25 to-transparent" />
+              </div>
             </div>
             <div className="text-[11px] text-faint">
-              Large demos can take a minute or two.
+              {phaseOf(phase) === "uploading"
+                ? "Uploading your demo to our servers…"
+                : phaseOf(phase) === "parsing"
+                  ? "Parsing on our servers — large demos can take a minute or two."
+                  : "Large demos can take a minute or two."}
             </div>
             <button
               type="button"
