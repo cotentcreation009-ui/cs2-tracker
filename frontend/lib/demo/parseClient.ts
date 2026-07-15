@@ -22,6 +22,7 @@ export interface ParseHandlers {
   onReady?: () => void; // upload accepted; server has started parsing
   onProgress?: (rounds: number) => void; // kept for API compatibility (unused)
   onPhase?: (phase: string) => void; // human-readable status updates
+  onUploadProgress?: (fraction: number) => void; // 0..1 bytes sent (upload phase)
   signal?: AbortSignal;
 }
 
@@ -76,6 +77,49 @@ async function errText(res: Response, fallback: string): Promise<string> {
   return `${fallback} (${res.status})`;
 }
 
+interface XhrResult {
+  status: number;
+  responseText: string;
+}
+
+// fetch() exposes no upload-progress events, so uploads that need a real byte
+// percentage go through XMLHttpRequest, which fires upload.onprogress. Rejects
+// with Error("cancelled") on abort and Error("network") on transport failure so
+// callers can map those to friendly, path-specific messages.
+function xhrUpload(opts: {
+  url: string;
+  method: "PUT" | "POST";
+  body: Blob | FormData;
+  headers?: Record<string, string>;
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+}): Promise<XhrResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(opts.method, opts.url, true);
+    for (const [k, v] of Object.entries(opts.headers ?? {})) xhr.setRequestHeader(k, v);
+    if (opts.onProgress && xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) opts.onProgress!(e.loaded / e.total);
+      };
+    }
+    const onAbort = () => xhr.abort();
+    xhr.onload = () => resolve({ status: xhr.status, responseText: xhr.responseText });
+    xhr.onerror = () => reject(new Error("network"));
+    xhr.ontimeout = () => reject(new Error("network"));
+    xhr.onabort = () => reject(new Error("cancelled"));
+    xhr.onloadend = () => opts.signal?.removeEventListener("abort", onAbort);
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        xhr.abort();
+        return reject(new Error("cancelled"));
+      }
+      opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    xhr.send(opts.body);
+  });
+}
+
 // Uploads the demo (via object storage if available, else through our server)
 // and returns the parse-job id to poll.
 async function uploadAndQueue(
@@ -98,29 +142,32 @@ async function uploadAndQueue(
   if (!pres.ok) throw new Error(await errText(pres, "could not start upload"));
   const info = (await pres.json()) as PresignResp;
 
-  // Primary: direct-to-object-storage upload.
+  // Primary: direct-to-object-storage upload (XHR so we get real byte progress).
   if (info.mode === "gcs" && info.url && info.id) {
     handlers.onPhase?.("uploading…");
-    let put: Response;
+    let put: XhrResult;
     try {
-      put = await fetch(info.url, {
+      put = await xhrUpload({
+        url: info.url,
         method: "PUT",
-        headers: { "content-type": info.contentType || contentType },
         body: file,
+        headers: { "content-type": info.contentType || contentType },
+        onProgress: handlers.onUploadProgress,
         signal,
       });
     } catch (e) {
-      // A thrown fetch here is a cancel, or (most often) a CORS/network failure
-      // on the direct-to-storage PUT — normalize both so the UI shows something
-      // sensible instead of "Failed to fetch" / "The user aborted a request.".
-      if (signal?.aborted || (e as Error)?.name === "AbortError") {
+      // A thrown request here is a cancel, or (most often) a CORS/network
+      // failure on the direct-to-storage PUT — normalize both so the UI shows
+      // something sensible instead of a raw transport error.
+      if ((e as Error).message === "cancelled" || signal?.aborted) {
         throw new Error("cancelled");
       }
       throw new Error("Upload to storage failed — please try again.");
     }
-    if (!put.ok) {
+    if (put.status < 200 || put.status >= 300) {
       throw new Error(`Upload to storage failed (${put.status}).`);
     }
+    handlers.onUploadProgress?.(1);
     handlers.onPhase?.("queueing…");
     const trig = await fetch("/api/demos/parse", {
       method: "POST",
@@ -142,13 +189,31 @@ async function uploadAndQueue(
   handlers.onPhase?.("uploading…");
   const form = new FormData();
   form.append("demo", file, file.name);
-  const up = await fetch("/api/demos/upload", {
-    method: "POST",
-    body: form,
-    signal,
-  });
-  if (!up.ok) throw new Error(await errText(up, "upload failed"));
-  const { id } = (await up.json()) as { id: string };
+  let up: XhrResult;
+  try {
+    up = await xhrUpload({
+      url: "/api/demos/upload",
+      method: "POST",
+      body: form, // browser sets the multipart content-type + boundary
+      onProgress: handlers.onUploadProgress,
+      signal,
+    });
+  } catch (e) {
+    if ((e as Error).message === "cancelled" || signal?.aborted) throw new Error("cancelled");
+    throw new Error("upload failed");
+  }
+  if (up.status < 200 || up.status >= 300) {
+    let msg = `upload failed (${up.status})`;
+    try {
+      const b = JSON.parse(up.responseText) as { error?: string };
+      if (b.error) msg = b.error;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(msg);
+  }
+  handlers.onUploadProgress?.(1);
+  const { id } = JSON.parse(up.responseText) as { id: string };
   return id;
 }
 

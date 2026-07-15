@@ -174,6 +174,20 @@ body {
   animation: barGrow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Progress bar sheen: a light band sweeping across the filled portion so the
+   bar reads as active even while the parse phase eases slowly. */
+@keyframes progressSheen {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+.progress-sheen {
+  animation: progressSheen 1.5s ease-in-out infinite;
+}
+
 /* Stats-peek modal: backdrop fade + dialog pop-in. */
 @keyframes modalBackdropIn {
   from {
@@ -203,7 +217,8 @@ body {
   .insight-card-in,
   .bar-grow,
   .modal-backdrop-in,
-  .modal-pop {
+  .modal-pop,
+  .progress-sheen {
     animation: none;
   }
 }
