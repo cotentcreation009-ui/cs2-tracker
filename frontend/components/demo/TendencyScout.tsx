@@ -112,6 +112,16 @@ interface ScoutData {
   // bomb-carrier profile (T side)
   bombRounds: number[];
   bombDeaths: number; // died while still carrying (before any plant)
+  // "death magnet" — the named callout they keep dying in (>=3 deaths)
+  deathSpot: SpotRead | null;
+  // what they do in the ~5s after getting a kill (from the 1 Hz frames)
+  postKill: { reHold: number; move: number; tradedRounds: number[] };
+  // conditioned economy: what they buy after a loss / win, pistol record
+  econ: {
+    afterLoss: { force: number; save: number; full: number; n: number; forceRounds: number[] };
+    afterWin: { force: number; save: number; full: number; n: number };
+    pistols: { won: number; n: number };
+  };
 }
 
 const OPENING_WINDOW = 20; // seconds after freeze that define "opening setup"
@@ -142,6 +152,14 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
   const plantRounds: number[] = [];
   const bombRounds: number[] = [];
   let bombDeaths = 0;
+  const deathZone = new Map<string, number[]>(); // callout -> rounds died there
+  const postKill = { reHold: 0, move: 0, tradedRounds: [] as number[] };
+  const econ: ScoutData["econ"] = {
+    afterLoss: { force: 0, save: 0, full: 0, n: 0, forceRounds: [] },
+    afterWin: { force: 0, save: 0, full: 0, n: 0 },
+    pistols: { won: 0, n: 0 },
+  };
+  let prevResult: boolean | null = null; // did their side win the previous round
 
   for (const rd of rounds) {
     const freeze = rd.freezeEnd ?? 15;
@@ -154,6 +172,21 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     const buyKind = st?.buy ?? (st?.equip != null ? classifyBuy(st.equip, rd.n).key : null);
     const isEco = buyKind === "eco" || buyKind === "semi";
     if (isEco) ecoRounds.push(rd.n);
+
+    // conditioned economy: what did they buy GIVEN the previous round's result?
+    if (rd.n === 1 || rd.n === 13) {
+      econ.pistols.n++;
+      if (rd.winner === side) econ.pistols.won++;
+    } else if (prevResult != null && buyKind != null) {
+      const bucket = prevResult ? econ.afterWin : econ.afterLoss;
+      bucket.n++;
+      if (buyKind === "force") {
+        bucket.force++;
+        if (!prevResult) econ.afterLoss.forceRounds.push(rd.n);
+      } else if (isEco) bucket.save++;
+      else if (buyKind === "full") bucket.full++;
+    }
+    prevResult = rd.winner ? rd.winner === side : null;
     const gear = [...(st?.bought ?? []), ...(st?.pickedUp ?? [])];
     const sniperKillsHere = (rd.kills ?? []).filter((k) => k.k === idx && SNIPER_RE.test(k.w)).length;
     sniperKills += sniperKillsHere;
@@ -246,6 +279,25 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
             side, rn: rd.n,
           });
         }
+        // what do they do in the ~5s after the kill? (1 Hz samples permitting)
+        const at = (lo: number, hi: number) => {
+          for (const f of rd.frames ?? []) {
+            if (f.t < lo || f.t > hi) continue;
+            const pp = f.p.find((q) => q.i === idx && q.h > 0);
+            if (pp) return pp;
+          }
+          return null;
+        };
+        const p0 = at(k.t - 1, k.t + 2);
+        const p1 = at(k.t + 3.5, k.t + 7);
+        if (p0 && p1) {
+          if (Math.hypot(p1.x - p0.x, p1.y - p0.y) < 130) postKill.reHold++;
+          else postKill.move++;
+        }
+        const tradedBack = (rd.kills ?? []).some(
+          (k2) => k2.v === idx && k2.t > k.t && k2.t - k.t <= 5,
+        );
+        if (tradedBack && !postKill.tradedRounds.includes(rd.n)) postKill.tradedRounds.push(rd.n);
       }
       if (k.v === idx) {
         totalDeaths++;
@@ -259,6 +311,14 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         }
         const r = proj.project(k.vx, k.vy);
         if (r) deaths.push({ x: r.x * 100, y: r.y * 100, side, rn: rd.n });
+        if (proj.calibrated) {
+          const dz = classifyPosition(meta.map, k.vx, k.vy, zones);
+          if (dz?.name) {
+            const arr = deathZone.get(dz.name) ?? [];
+            arr.push(rd.n);
+            deathZone.set(dz.name, arr);
+          }
+        }
       }
     }
     if (first) {
@@ -327,6 +387,12 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     plantRounds,
     bombRounds,
     bombDeaths,
+    deathSpot: (() => {
+      const best = [...deathZone.entries()].sort((a, b) => b[1].length - a[1].length)[0];
+      return best && best[1].length >= 3 ? { name: best[0], rounds: best[1] } : null;
+    })(),
+    postKill,
+    econ,
   };
 }
 
@@ -437,8 +503,38 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
     });
   }
 
+  if (s.deathSpot) {
+    out.push({
+      text: `They keep dying at ${s.deathSpot.name} — pre-set the crossfire there and let them walk into it.`,
+      why: `${s.deathSpot.rounds.length} of ${s.totalDeaths} deaths in that same callout`,
+      rounds: s.deathSpot.rounds,
+    });
+  }
+  const pkN = s.postKill.reHold + s.postKill.move;
+  if (pkN >= 4 && s.postKill.reHold / pkN >= 0.7) {
+    out.push({
+      text: "They re-hold the same angle after a kill — the refrag is free; trade wide immediately.",
+      why: `stayed put after ${s.postKill.reHold} of ${pkN} sampled kills${s.postKill.tradedRounds.length ? `; already died within 5s of a kill ${s.postKill.tradedRounds.length}×` : ""}`,
+      rounds: s.postKill.tradedRounds.length ? s.postKill.tradedRounds : undefined,
+    });
+  } else if (pkN >= 4 && s.postKill.move / pkN >= 0.7) {
+    out.push({
+      text: "They relocate after every kill — don't re-swing the same angle; clear wide for the new position.",
+      why: `repositioned after ${s.postKill.move} of ${pkN} sampled kills`,
+    });
+  }
+
+  // conditioned force read beats the flat histogram; fall back when thin
+  const condForce = s.econ.afterLoss.n >= 4 && s.econ.afterLoss.force / s.econ.afterLoss.n >= 0.5;
+  if (condForce) {
+    out.push({
+      text: "After losing a round they force — expect armor + upgraded pistols/SMGs, not an eco; don't over-chase.",
+      why: `forced ${s.econ.afterLoss.force} of ${s.econ.afterLoss.n} rounds that followed a loss`,
+      rounds: s.econ.afterLoss.forceRounds,
+    });
+  }
   const nb = p.buys.eco + p.buys.semi + p.buys.force + p.buys.full;
-  if (nb >= 5 && p.buys.force / nb >= 0.3)
+  if (!condForce && nb >= 5 && p.buys.force / nb >= 0.3)
     out.push({
       text: "Force-buys often after losses — expect upgraded pistols/SMGs on their 'save' rounds; don't over-push their ecos.",
       why: `${p.buys.force} force buys vs ${p.buys.eco} full saves across ${nb} gun rounds`,
@@ -946,12 +1042,19 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               {!scout.zonesCT.length && !scout.zonesT.length && (
                 <div className="text-[11px] text-faint">No callout data (uncalibrated map or too few frames).</div>
               )}
-              {scout.bombRounds.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1 text-[10px]" title={fmtR(scout.bombRounds, 10)}>
-                  <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-muted">
-                    Bomb · carried in {scout.bombRounds.length} rd{scout.bombRounds.length === 1 ? "" : "s"}
-                    {scout.bombDeaths > 0 ? ` · died with it ${scout.bombDeaths}×` : ""}
-                  </span>
+              {(scout.bombRounds.length > 0 || scout.deathSpot) && (
+                <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                  {scout.bombRounds.length > 0 && (
+                    <span className="rounded-full bg-panel px-2 py-0.5 tabular-nums text-muted" title={fmtR(scout.bombRounds, 10)}>
+                      Bomb · carried in {scout.bombRounds.length} rd{scout.bombRounds.length === 1 ? "" : "s"}
+                      {scout.bombDeaths > 0 ? ` · died with it ${scout.bombDeaths}×` : ""}
+                    </span>
+                  )}
+                  {scout.deathSpot && (
+                    <span className="rounded-full bg-bad/10 px-2 py-0.5 tabular-nums text-bad" title={fmtR(scout.deathSpot.rounds, 10)}>
+                      ✕ dies at {scout.deathSpot.name} — {scout.deathSpot.rounds.length} of {scout.totalDeaths}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -1012,7 +1115,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2 border-t border-line pt-3 text-center">
+          <div className="grid grid-cols-3 gap-2 border-t border-line pt-3 text-center">
             <div className="rounded-lg bg-panel/50 px-2 py-1.5">
               <div className="text-[9px] uppercase tracking-wider text-faint">Avg kill range</div>
               <div className="text-sm font-bold tabular-nums">{scout.avgKillDist != null ? `~${scout.avgKillDist.toFixed(0)}m` : "—"}</div>
@@ -1023,7 +1126,61 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               <div className="text-sm font-bold tabular-nums">{openN ? `${scout.openWon.length}/${openN} won` : "—"}</div>
               {lobby.duelWinPct != null && openN > 0 && <div className="text-[9px] tabular-nums text-faint">lobby {lobby.duelWinPct.toFixed(0)}%</div>}
             </div>
+            {(() => {
+              const pk = scout.postKill;
+              const n = pk.reHold + pk.move;
+              return (
+                <div
+                  className="rounded-lg bg-panel/50 px-2 py-1.5"
+                  title={n ? `movement in the ~5s after a kill, from 1 Hz samples (${n} kills sampled)${pk.tradedRounds.length ? ` · died ≤5s after a kill: ${fmtR(pk.tradedRounds, 6)}` : ""}` : "no kills with usable follow-up samples"}
+                >
+                  <div className="text-[9px] uppercase tracking-wider text-faint">After a kill</div>
+                  <div className="text-sm font-bold tabular-nums">
+                    {n ? `${Math.round((pk.reHold / n) * 100)}% re-hold` : "—"}
+                  </div>
+                  {pk.tradedRounds.length > 0 && (
+                    <div className="text-[9px] tabular-nums text-bad">traded back ×{pk.tradedRounds.length}</div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
+
+          {(scout.econ.afterLoss.n >= 3 || scout.econ.afterWin.n >= 3 || scout.econ.pistols.n > 0) && (
+            <div className="border-t border-line pt-3">
+              <div className="stat-label mb-1.5">Economy reactions</div>
+              <div className="space-y-1 text-[11px] text-muted">
+                {scout.econ.afterLoss.n >= 3 && (
+                  <div title={scout.econ.afterLoss.forceRounds.length ? `forces: ${fmtR(scout.econ.afterLoss.forceRounds, 8)}` : undefined}>
+                    <span className="text-faint">after a loss</span>{" "}
+                    <span className="tabular-nums">
+                      {scout.econ.afterLoss.force > 0 && <span className="text-mid">force {scout.econ.afterLoss.force}/{scout.econ.afterLoss.n}</span>}
+                      {scout.econ.afterLoss.force > 0 && (scout.econ.afterLoss.save > 0 || scout.econ.afterLoss.full > 0) && " · "}
+                      {scout.econ.afterLoss.save > 0 && <span>save {scout.econ.afterLoss.save}/{scout.econ.afterLoss.n}</span>}
+                      {scout.econ.afterLoss.save > 0 && scout.econ.afterLoss.full > 0 && " · "}
+                      {scout.econ.afterLoss.full > 0 && <span>full {scout.econ.afterLoss.full}/{scout.econ.afterLoss.n}</span>}
+                    </span>
+                  </div>
+                )}
+                {scout.econ.afterWin.n >= 3 && (
+                  <div>
+                    <span className="text-faint">after a win</span>{" "}
+                    <span className="tabular-nums">
+                      full {scout.econ.afterWin.full}/{scout.econ.afterWin.n}
+                      {scout.econ.afterWin.save > 0 && ` · save ${scout.econ.afterWin.save}/${scout.econ.afterWin.n}`}
+                      {scout.econ.afterWin.force > 0 && ` · force ${scout.econ.afterWin.force}/${scout.econ.afterWin.n}`}
+                    </span>
+                  </div>
+                )}
+                {scout.econ.pistols.n > 0 && (
+                  <div>
+                    <span className="text-faint">pistol rounds</span>{" "}
+                    <span className="tabular-nums">won {scout.econ.pistols.won} of {scout.econ.pistols.n}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {lines.length > 0 && (
             <div className="border-t border-line pt-3">
