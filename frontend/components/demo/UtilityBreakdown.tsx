@@ -16,6 +16,7 @@ import {
   type PlayerInsight,
   type UtilThrow,
 } from "@/lib/demo/insights";
+import { classifyBuy } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { KIND_COLOR, KIND_LABEL } from "@/components/demo/RadarMap";
@@ -52,12 +53,13 @@ const mmss = (t: number) => {
 };
 
 // ---------------------------------------------------------------- sorting ---
-type SortKey = "thrown" | "flashed" | "blind" | "utildmg";
+type SortKey = "thrown" | "flashed" | "blind" | "utildmg" | "taken";
 const SORTS: { key: SortKey; label: string; title: string }[] = [
   { key: "thrown", label: "Thrown", title: "grenades thrown" },
   { key: "flashed", label: "Flashed", title: "enemies blinded" },
   { key: "blind", label: "Blind time", title: "total enemy blind seconds dealt" },
   { key: "utildmg", label: "Util dmg", title: "grenade damage dealt to enemies" },
+  { key: "taken", label: "Taken", title: "grenade damage absorbed from enemies" },
 ];
 function sortValue(p: PlayerInsight, key: SortKey): number {
   switch (key) {
@@ -356,6 +358,10 @@ export interface UtilExtras {
   wastedDollars: number; // est. value of grenades still in pocket on death
   ctThrows: number; // by the side they were on THAT round
   tThrows: number;
+  utilTaken: number; // HP absorbed from ENEMY grenades
+  nadeDeaths: number; // deaths where the kill weapon was a grenade/molotov
+  // grenade output by buy tier (per this player's buy bucket that round)
+  tier: Record<string, { rds: number; nades: number; low: number }>; // low = rounds with <=1 nade
 }
 
 // The focused player's utility card — everything we know about their grenades.
@@ -365,6 +371,7 @@ function UtilityCard({
   timingOf,
   activeKind,
   extras,
+  execJoin,
   onUtil,
 }: {
   p: PlayerInsight;
@@ -372,6 +379,7 @@ function UtilityCard({
   timingOf: (tw: { t: number; round: number }) => Timing;
   activeKind: string | null;
   extras: UtilExtras;
+  execJoin: { joined: number; eligible: number; inExec: number } | null;
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
   const hex = sideHex(p.team);
@@ -452,7 +460,46 @@ function UtilityCard({
               : "never wasted a nade"
           }
         />
+        <Stat
+          label="Util taken"
+          value={`${extras.utilTaken}`}
+          sub={extras.nadeDeaths > 0 ? `died to nades ×${extras.nadeDeaths}` : "HP absorbed from enemy nades"}
+        />
       </div>
+
+      {(execJoin?.eligible ?? 0) > 0 && (
+        <div
+          className="mt-2 text-[10px] tabular-nums text-muted"
+          title="team executes = 3+ grenades from their side within 10s; joined = they threw at least one grenade inside it"
+        >
+          <span className="text-faint">Team executes</span> · joined {execJoin!.joined}/{execJoin!.eligible}
+          {n > 0 && <> · {execJoin!.inExec} of {n} nades thrown inside them</>}
+        </div>
+      )}
+
+      {(() => {
+        const tiers = (["full", "force", "semi", "eco", "pistol"] as const)
+          .map((k) => ({ k, t: extras.tier[k] }))
+          .filter((x) => x.t && x.t.rds > 0);
+        if (!tiers.length) return null;
+        const full = extras.tier.full;
+        const leak = full && full.rds >= 3 && full.low / full.rds >= 0.5;
+        return (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted">
+            <span className="text-faint">nades/rd by buy</span>
+            {tiers.map(({ k, t }) => (
+              <span key={k} title={`${t!.nades} grenades across ${t!.rds} ${k} round${t!.rds === 1 ? "" : "s"}`}>
+                {k} {(t!.nades / t!.rds).toFixed(1)}
+              </span>
+            ))}
+            {leak && (
+              <span className="rounded-full bg-mid/15 px-1.5 py-0.5 text-mid" title="rounds with a full buy but at most one grenade thrown — money on guns, none on utility">
+                full buy, ≤1 nade in {full!.low}/{full!.rds}
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {n > 0 && (
         <div className="mt-2.5">
@@ -509,17 +556,92 @@ export default function UtilityBreakdown({
     [data, view.side],
   );
 
+  // per-player waste/effectiveness reads joined from the raw rounds
+  const extrasOf = useMemo(() => {
+    const m = new Map<number, UtilExtras>();
+    const get = (i: number) => {
+      let v = m.get(i);
+      if (!v) {
+        v = { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tier: {} };
+        m.set(i, v);
+      }
+      return v;
+    };
+    for (const r of scopedRounds) {
+      const flashesBy = new Map<number, number>();
+      const thrownBy = new Map<number, number>();
+      for (const nd of r.nades ?? []) {
+        // damage ABSORBED — credit each damaged victim of an enemy grenade
+        for (const [vi, hp] of Object.entries(nd.dmg ?? {})) {
+          const v = Number(vi);
+          const vCT = r.ct?.includes(v);
+          const bCT = nd.by >= 0 ? r.ct?.includes(nd.by) : undefined;
+          if (bCT !== undefined && vCT !== undefined && bCT !== vCT) get(v).utilTaken += hp;
+        }
+        if (nd.by < 0) continue;
+        const e = get(nd.by);
+        if (r.ct?.includes(nd.by)) e.ctThrows++;
+        else if (r.t?.includes(nd.by)) e.tThrows++;
+        thrownBy.set(nd.by, (thrownBy.get(nd.by) ?? 0) + 1);
+        if (nd.k === "flash") {
+          e.flashThrows++;
+          flashesBy.set(nd.by, (flashesBy.get(nd.by) ?? 0) + 1);
+        }
+      }
+      for (const k of r.kills ?? []) {
+        if (k.v >= 0 && /he.?grenade|molotov|inferno|incendiar/i.test(k.w)) get(k.v).nadeDeaths++;
+      }
+      // grenade output by the thrower's own buy tier that round
+      for (const st of r.stats ?? []) {
+        const buy = st.buy ?? (st.equip != null ? classifyBuy(st.equip, r.n).key : null);
+        if (!buy) continue;
+        const e = get(st.i);
+        const t = (e.tier[buy] ??= { rds: 0, nades: 0, low: 0 });
+        t.rds++;
+        const thrown = thrownBy.get(st.i) ?? 0;
+        t.nades += thrown;
+        if (thrown <= 1) t.low++;
+      }
+      for (const [i, nFlash] of flashesBy) {
+        if (nFlash > 0 && ((r.stats ?? []).find((s) => s.i === i)?.flashed ?? 0) === 0) {
+          get(i).blankFlashRounds++;
+        }
+      }
+      // died holding grenades: freeze-end grenades minus detonations (estimate;
+      // mid-round pickups are invisible, in-flight nades count as thrown)
+      const dead = new Set((r.kills ?? []).map((k) => k.v));
+      for (const s of r.stats ?? []) {
+        if (!dead.has(s.i)) continue;
+        const carried = (s.bought ?? []).filter((g) => GRENADE_RE.test(g));
+        const unused = carried.length - (thrownBy.get(s.i) ?? 0);
+        if (unused > 0) {
+          const e = get(s.i);
+          e.diedWithUtilRounds.push(r.n);
+          // price the cheapest `unused` of what they carried (conservative)
+          const prices = carried.map(nadePrice).sort((a, b) => a - b);
+          e.wastedDollars += prices.slice(0, unused).reduce((a, b) => a + b, 0);
+        }
+      }
+    }
+    return (i: number): UtilExtras =>
+      m.get(i) ?? { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tier: {} };
+  }, [scopedRounds]);
+
+  const sortVal = (p: PlayerInsight) =>
+    sortKey === "taken" ? extrasOf(p.i).utilTaken : sortValue(p, sortKey);
   const sortedPlayers = useMemo(
-    () => [...players].sort((a, b) => sortValue(b, sortKey) - sortValue(a, sortKey)),
-    [players, sortKey],
+    () => [...players].sort((a, b) => sortVal(b) - sortVal(a)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [players, sortKey, extrasOf],
   );
 
   const statMax = useMemo(
-    () => Math.max(0.0001, ...players.map((p) => sortValue(p, sortKey))),
-    [players, sortKey],
+    () => Math.max(0.0001, ...players.map((p) => sortVal(p))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [players, sortKey, extrasOf],
   );
   const statFor = (p: PlayerInsight): RosterStat => {
-    const v = sortValue(p, sortKey);
+    const v = sortVal(p);
     const frac = v <= 0 ? 0 : Math.min(1, Math.max(0.04, v / statMax));
     const display =
       sortKey === "blind" ? `${v.toFixed(1)}s` : sortKey === "thrown" ? `${p.utilNades.length}` : `${Math.round(v)}`;
@@ -595,56 +717,6 @@ export default function UtilityBreakdown({
     return rel < 25 ? "early" : rel < 55 ? "mid" : "late";
   };
 
-  // per-player waste/effectiveness reads joined from the raw rounds
-  const extrasOf = useMemo(() => {
-    const m = new Map<number, UtilExtras>();
-    const get = (i: number) => {
-      let v = m.get(i);
-      if (!v) {
-        v = { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0 };
-        m.set(i, v);
-      }
-      return v;
-    };
-    for (const r of scopedRounds) {
-      const flashesBy = new Map<number, number>();
-      const thrownBy = new Map<number, number>();
-      for (const nd of r.nades ?? []) {
-        if (nd.by < 0) continue;
-        const e = get(nd.by);
-        if (r.ct?.includes(nd.by)) e.ctThrows++;
-        else if (r.t?.includes(nd.by)) e.tThrows++;
-        thrownBy.set(nd.by, (thrownBy.get(nd.by) ?? 0) + 1);
-        if (nd.k === "flash") {
-          e.flashThrows++;
-          flashesBy.set(nd.by, (flashesBy.get(nd.by) ?? 0) + 1);
-        }
-      }
-      for (const [i, nFlash] of flashesBy) {
-        if (nFlash > 0 && ((r.stats ?? []).find((s) => s.i === i)?.flashed ?? 0) === 0) {
-          get(i).blankFlashRounds++;
-        }
-      }
-      // died holding grenades: freeze-end grenades minus detonations (estimate;
-      // mid-round pickups are invisible, in-flight nades count as thrown)
-      const dead = new Set((r.kills ?? []).map((k) => k.v));
-      for (const s of r.stats ?? []) {
-        if (!dead.has(s.i)) continue;
-        const carried = (s.bought ?? []).filter((g) => GRENADE_RE.test(g));
-        const unused = carried.length - (thrownBy.get(s.i) ?? 0);
-        if (unused > 0) {
-          const e = get(s.i);
-          e.diedWithUtilRounds.push(r.n);
-          // price the cheapest `unused` of what they carried (conservative)
-          const prices = carried.map(nadePrice).sort((a, b) => a - b);
-          e.wastedDollars += prices.slice(0, unused).reduce((a, b) => a + b, 0);
-        }
-      }
-    }
-    return (i: number): UtilExtras =>
-      m.get(i) ?? { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0 };
-  }, [scopedRounds]);
-
   // team executes: 3+ grenades from one side detonating within a 10s window —
   // the coordinated package, with plant correlation and round outcome
   const executes = useMemo(() => {
@@ -656,6 +728,7 @@ export default function UtilityBreakdown({
       zone: string | null;
       plantDelay: number | null;
       won: boolean;
+      bys: number[];
       throws: UtilThrow[];
     }[] = [];
     for (const r of scopedRounds) {
@@ -686,6 +759,7 @@ export default function UtilityBreakdown({
               zone: null, // classified below once zones load
               plantDelay: plant ? Math.max(0, Math.round(plant.t - group[group.length - 1].t)) : null,
               won: r.winner === side,
+              bys: group.map((nd) => nd.by),
               throws: group.map((nd) => {
                 const o = throwOrigin(r, nd);
                 return {
@@ -1093,6 +1167,20 @@ export default function UtilityBreakdown({
                 timingOf={timingOf}
                 activeKind={activeKind}
                 extras={extrasOf(selPlayer.i)}
+                execJoin={(() => {
+                  const mine = executes.filter((ex) => {
+                    const r = rounds[ex.ri];
+                    const roster = ex.side === "CT" ? r?.ct : r?.t;
+                    return roster?.includes(selPlayer.i);
+                  });
+                  if (!mine.length) return null;
+                  const joined = mine.filter((ex) => ex.bys.includes(selPlayer.i));
+                  return {
+                    joined: joined.length,
+                    eligible: mine.length,
+                    inExec: joined.reduce((s, ex) => s + ex.bys.filter((b) => b === selPlayer.i).length, 0),
+                  };
+                })()}
                 onUtil={pickUtil}
               />
             </div>
