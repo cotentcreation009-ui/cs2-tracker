@@ -1,13 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
   computeBuyMatrix,
   computeNemesis,
   computeDuels,
-  computeDuelMatrix,
   weaponMeta,
   type PlayerWeaponStat,
   type WeaponStat,
@@ -85,8 +84,10 @@ function StatPill({
   );
 }
 
-// weapon bar: bar = count, pill = headshot %. `unit` is K (kills) or D (deaths).
-// Clicking it plots exactly those kills/deaths on the map (selected = ring).
+// One weapon row. The bar length = kill share; within it a bright leading
+// segment = the headshot fraction (dim = body shots), so precision reads at a
+// glance. Clicking plots exactly those kills/deaths on the map (the star
+// interaction) — selected rows get a coloured ring + an "on map" chip.
 function WeaponRow({
   w,
   max,
@@ -101,59 +102,53 @@ function WeaponRow({
   onSelect?: () => void;
 }) {
   const pct = max ? (w.kills / max) * 100 : 0;
+  const enough = w.kills >= 3;
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={onSelect ? !!selected : undefined}
-      title={onSelect ? `Show ${w.label} ${unit === "D" ? "deaths" : "kills"} on the map` : undefined}
-      className={`group block w-full rounded-lg px-1.5 py-1 text-left transition ${
+      title={onSelect ? `Plot ${w.label} ${unit === "D" ? "deaths" : "kills"} on the map` : undefined}
+      className={`group block w-full rounded-lg px-2 py-1.5 text-left transition ${
         selected ? "bg-panel/70" : "hover:bg-panel/40"
       }`}
       style={selected ? { boxShadow: `inset 0 0 0 1px ${w.color}` } : undefined}
     >
-      <div className="mb-1 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <WeaponBadge w={w} />
-        <span className="text-sm font-semibold text-ink">{w.label}</span>
+        <span className="truncate text-sm font-semibold text-ink">{w.label}</span>
         {selected ? (
-          <span className="rounded-full px-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ background: `${w.color}22`, color: w.color }}>
+          <span className="shrink-0 rounded-full px-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ background: `${w.color}22`, color: w.color }}>
             on map
           </span>
         ) : (
           onSelect && (
-            <span className="hidden text-[9px] font-semibold uppercase tracking-wider text-faint group-hover:inline">
+            <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wider text-brand/70 group-hover:inline">
               → map
             </span>
           )
         )}
-        <span className="ml-auto flex items-center gap-2 text-xs tabular-nums">
-          <span className="text-faint">{w.kills} {unit}</span>
-          {w.kills >= 3 ? (
-            <span
-              className="rounded-full px-1.5 py-0.5 text-[10px] font-bold"
-              style={{ background: `${hsColor(w.hsPct)}1f`, color: hsColor(w.hsPct) }}
-            >
-              {w.hsPct.toFixed(0)}% HS
-            </span>
-          ) : (
-            <span
-              className="rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-bold text-faint"
-              title="sample too small to judge headshot rate"
-            >
-              {w.hsPct.toFixed(0)}% HS
-            </span>
-          )}
+        <span className="ml-auto flex shrink-0 items-baseline gap-2 tabular-nums">
+          <span className="text-sm font-bold text-ink">
+            {w.kills}
+            <span className="ml-0.5 text-[10px] font-normal text-faint">{unit}</span>
+          </span>
+          <span
+            className="w-11 text-right text-[10px] font-bold"
+            style={{ color: enough ? hsColor(w.hsPct) : "var(--color-faint)" }}
+            title={enough ? undefined : "sample too small to judge headshot rate"}
+          >
+            {w.hsPct.toFixed(0)}% HS
+          </span>
         </span>
       </div>
-      <div className="relative h-1.5 overflow-hidden rounded-full bg-panel">
-        <div
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{ width: `${pct}%`, background: w.color, boxShadow: `0 0 8px -2px ${w.color}` }}
-        />
-        <div
-          className="absolute inset-y-0 left-0 rounded-full opacity-90"
-          style={{ width: `${(pct * w.hsPct) / 100}%`, background: "linear-gradient(90deg, transparent, rgba(255,255,255,.35))" }}
-        />
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-panel">
+        <div className="relative h-full rounded-full" style={{ width: `${pct}%`, background: `${w.color}59` }}>
+          <div
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{ width: `${w.hsPct}%`, background: w.color, boxShadow: `0 0 8px -2px ${w.color}` }}
+          />
+        </div>
       </div>
     </button>
   );
@@ -186,49 +181,88 @@ function ClassMix({ data }: { data: WeaponInsightsData }) {
   );
 }
 
-// one weapon panel: kills OR deaths by weapon + a class mix. The dual-lens core.
-function WeaponPanel({
-  title,
-  subtitle,
-  data,
-  unit,
-  empty,
+// The Arsenal panel — the offense/defense weapon list with one lens toggle
+// (Kills / Deaths) instead of two side-by-side panels. Clicking a weapon plots
+// exactly those kills (or deaths) on the map. Deaths are only meaningful once a
+// player or side is scoped (unscoped, every kill is someone's death, so the two
+// lists are identical) — the toggle disables itself and explains why.
+function Arsenal({
+  offense,
+  defense,
+  unscoped,
+  scopeLabel,
+  lens,
+  onLens,
   selectedWeapon,
   onSelectWeapon,
 }: {
-  title: string;
-  subtitle: string;
-  data: WeaponInsightsData;
-  unit: string;
-  empty: string;
-  selectedWeapon?: string | null;
-  onSelectWeapon?: (key: string) => void;
+  offense: WeaponInsightsData;
+  defense: WeaponInsightsData;
+  unscoped: boolean;
+  scopeLabel: string;
+  lens: "kills" | "deaths";
+  onLens: (l: "kills" | "deaths") => void;
+  selectedWeapon: string | null;
+  onSelectWeapon: (key: string) => void;
 }) {
+  const showDeaths = lens === "deaths" && !unscoped;
+  const data = showDeaths ? defense : offense;
+  const unit = showDeaths ? "D" : "K";
   const max = data.weapons[0]?.kills ?? 1;
   return (
     <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
-        <h3 className="stat-label">{title}</h3>
-        <span className="text-[10px] text-faint">{subtitle}</span>
+      <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
+        <h3 className="stat-label">Arsenal</h3>
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => onLens("kills")}
+            aria-pressed={!showDeaths}
+            className={`rounded-md px-2 py-0.5 font-medium transition ${!showDeaths ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"}`}
+          >
+            Kills
+          </button>
+          <button
+            type="button"
+            onClick={() => !unscoped && onLens("deaths")}
+            aria-pressed={showDeaths}
+            disabled={unscoped}
+            title={unscoped ? "Pick a player or side to see what kills them" : undefined}
+            className={`rounded-md px-2 py-0.5 font-medium transition ${showDeaths ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"} disabled:cursor-not-allowed disabled:opacity-40`}
+          >
+            Deaths
+          </button>
+        </div>
+      </div>
+      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-faint lg:shrink-0">
+        <span className="truncate">
+          {showDeaths ? `what kills ${scopeLabel}` : `${scopeLabel} kills by weapon`}
+        </span>
+        <span className="shrink-0 text-brand/70">click a weapon → map</span>
       </div>
       {data.weapons.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted lg:my-auto">{empty}</div>
+        <div className="py-6 text-center text-xs text-muted lg:my-auto">
+          No {showDeaths ? "deaths" : "kills"} in this scope.
+        </div>
       ) : (
         <>
-          <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-            {data.weapons.slice(0, 8).map((w) => (
+          <div className="scroll-slim space-y-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+            {data.weapons.slice(0, 9).map((w) => (
               <WeaponRow
                 key={w.key}
                 w={w}
                 max={max}
                 unit={unit}
                 selected={selectedWeapon === w.key}
-                onSelect={onSelectWeapon ? () => onSelectWeapon(w.key) : undefined}
+                onSelect={() => onSelectWeapon(w.key)}
               />
             ))}
           </div>
-          <div className="mt-4 border-t border-line pt-3 lg:mt-3 lg:shrink-0">
-            <div className="stat-label mb-2">Class mix</div>
+          <div className="mt-3 border-t border-line pt-3 lg:shrink-0">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="stat-label">Class mix</div>
+              <span className="text-[9px] text-faint">bar: bright = headshots</span>
+            </div>
             <ClassMix data={data} />
           </div>
         </>
@@ -237,154 +271,45 @@ function WeaponPanel({
   );
 }
 
-// --- range profile (unscoped only) ------------------------------------------
-// Per-weapon engagement distances from the kill coordinates. Replaces the
-// "Deaths by weapon" panel when nothing is scoped — in that state deaths-by-
-// weapon is an exact mirror of kills-by-weapon (every kill is someone's death),
-// so this shows fresh signal instead of a duplicate list.
+// --- longest kill (a single headline stat) ----------------------------------
+// The full "range profile" panel was dropped as competitively thin; we keep only
+// the one recognisable number — the match's (or scoped player's) longest gun
+// kill — computed straight from the kill coordinates.
 
 const UNIT_TO_M = 0.01905; // CS2 world units → meters (16u ≈ 1ft)
 
-interface RangeRow {
-  key: string;
+interface LongestKill {
+  d: number;
   label: string;
   color: string;
-  avg: number; // meters
-  max: number;
-  n: number;
-}
-export interface RangeData {
-  rows: RangeRow[];
-  overallAvg: number;
-  longest: { d: number; key: string; label: string; color: string; killer: string; victim: string; rn: number } | null;
+  killer: string;
+  victim: string;
+  rn: number;
 }
 
-function computeRangeData(
+function longestKillOf(
   meta: ReplayMeta,
   rounds: ReplayRound[],
-  roundFilter?: (r: ReplayRound, idx: number) => boolean,
-): RangeData {
-  const per = new Map<string, { sum: number; n: number; max: number }>();
-  let longest: RangeData["longest"] = null;
-  let sumAll = 0;
-  let nAll = 0;
+  roundFilter: ((r: ReplayRound, idx: number) => boolean) | undefined,
+  side: "all" | "CT" | "T",
+  focus: number | null,
+): LongestKill | null {
+  let best: LongestKill | null = null;
   rounds.forEach((r, idx) => {
     if (roundFilter && !roundFilter(r, idx)) return;
     for (const k of r.kills ?? []) {
       if (k.k < 0 || !k.w) continue;
-      // guns only: a lobbed grenade (or knife) isn't an engagement range
-      if (weaponMeta(k.w).cls === "other") continue;
+      if (weaponMeta(k.w).cls === "other") continue; // guns only — no lobbed nades
+      if (focus != null && k.k !== focus) continue;
+      if (side !== "all" && sideOf(r, k.k, meta) !== side) continue;
       const d = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
-      const e = per.get(k.w) ?? { sum: 0, n: 0, max: 0 };
-      e.sum += d;
-      e.n++;
-      if (d > e.max) e.max = d;
-      per.set(k.w, e);
-      sumAll += d;
-      nAll++;
-      if (!longest || d > longest.d) {
+      if (!best || d > best.d) {
         const wm = weaponMeta(k.w);
-        longest = {
-          d,
-          key: k.w,
-          label: wm.label,
-          color: wm.color,
-          killer: meta.players[k.k]?.name ?? "?",
-          victim: meta.players[k.v]?.name ?? "?",
-          rn: r.n,
-        };
+        best = { d, label: wm.label, color: wm.color, killer: meta.players[k.k]?.name ?? "?", victim: meta.players[k.v]?.name ?? "?", rn: r.n };
       }
     }
   });
-  const rows: RangeRow[] = [...per.entries()]
-    .map(([key, e]) => {
-      const wm = weaponMeta(key);
-      return { key, label: wm.label, color: wm.color, avg: e.sum / e.n, max: e.max, n: e.n };
-    })
-    .sort((a, b) => b.avg - a.avg);
-  return { rows, overallAvg: nAll ? sumAll / nAll : 0, longest };
-}
-
-// Range panel: how far each weapon's kills happen — AWP long, SMGs close. Rows
-// share the map selection (click → plot that weapon's kills), so it stays part
-// of the same cross-linked system as the kills panel.
-function RangePanel({
-  data,
-  selectedWeapon,
-  onSelectWeapon,
-}: {
-  data: RangeData;
-  selectedWeapon?: string | null;
-  onSelectWeapon?: (key: string) => void;
-}) {
-  const maxAvg = Math.max(1, ...data.rows.map((r) => r.avg));
-  return (
-    <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
-        <h3 className="stat-label">Range profile</h3>
-        <span className="text-[10px] text-faint">gun kills only · click a weapon → map</span>
-      </div>
-      {data.rows.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted lg:my-auto">No kills to measure.</div>
-      ) : (
-        <>
-          <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-            {data.rows.slice(0, 10).map((r) => {
-              const selected = selectedWeapon === r.key;
-              return (
-                <button
-                  key={r.key}
-                  type="button"
-                  onClick={onSelectWeapon ? () => onSelectWeapon(r.key) : undefined}
-                  aria-pressed={!!selected}
-                  title={`Show ${r.label} kills on the map`}
-                  className={`group block w-full rounded-lg px-1.5 py-1 text-left transition ${
-                    selected ? "bg-panel/70" : "hover:bg-panel/40"
-                  }`}
-                  style={selected ? { boxShadow: `inset 0 0 0 1px ${r.color}` } : undefined}
-                >
-                  <div className="mb-1 flex items-center gap-2">
-                    <WeaponBadge w={r} />
-                    <span className="text-sm font-semibold text-ink">{r.label}</span>
-                    {selected ? (
-                      <span className="rounded-full px-1.5 text-[9px] font-bold uppercase tracking-wider" style={{ background: `${r.color}22`, color: r.color }}>
-                        on map
-                      </span>
-                    ) : (
-                      <span className="hidden text-[9px] font-semibold uppercase tracking-wider text-faint group-hover:inline">
-                        → map
-                      </span>
-                    )}
-                    <span className="ml-auto flex items-center gap-2 text-xs tabular-nums">
-                      <span className="font-semibold text-ink">~{r.avg.toFixed(0)}m</span>
-                      <span className="text-faint">max {r.max.toFixed(0)}m · {r.n}K</span>
-                    </span>
-                  </div>
-                  <div className="relative h-1.5 overflow-hidden rounded-full bg-panel">
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{ width: `${(r.avg / maxAvg) * 100}%`, background: r.color, boxShadow: `0 0 8px -2px ${r.color}` }}
-                    />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-4 border-t border-line pt-3 text-[11px] text-muted lg:mt-3 lg:shrink-0">
-            Average engagement <span className="font-semibold text-ink">~{data.overallAvg.toFixed(0)}m</span>
-            {data.longest && (
-              <>
-                {" "}· longest{" "}
-                <span className="font-semibold" style={{ color: data.longest.color }}>
-                  {data.longest.d.toFixed(0)}m {data.longest.label}
-                </span>
-              </>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
+  return best;
 }
 
 // --- round highlights (multi-kills + opener conversion) ---------------------
@@ -821,6 +746,9 @@ function PlayerCard({ p, open, onToggle }: { p: PlayerWeaponStat; open: boolean;
 
 // --- head-to-head (player vs player) ---------------------------------------
 
+// Focused-player head-to-head: their kill/death record vs every opponent, with
+// the weapon they mostly beat each one with. Only renders when a player is
+// focused — the old unscoped 10×10 net-frag matrix was dropped as clutter.
 function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
   const focus = view.focusPlayer;
   const roundFilter = useMemo(
@@ -831,122 +759,54 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
     () => (focus != null ? computeDuels(meta, rounds, focus, roundFilter) : []),
     [meta, rounds, focus, roundFilter],
   );
-  const matrix = useMemo(
-    () => (focus == null ? computeDuelMatrix(meta, rounds, roundFilter) : null),
-    [meta, rounds, focus, roundFilter],
-  );
   const focusName = focus != null ? meta.players[focus]?.name : null;
+  if (focus == null) return null;
 
-  // focused player → their duel list vs every opponent
-  if (focus != null) {
-    return (
-      <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
-        <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
-          <h3 className="stat-label">Head-to-head · {focusName}</h3>
-          <span className="text-[10px] text-faint">your kills vs theirs · click to switch player</span>
-        </div>
-        {duels.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted lg:my-auto">No duels in this scope.</div>
-        ) : (
-          <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-            {duels.map((d) => {
-              const tot = d.for + d.against || 1;
-              const col = teamColor(d.opp.team);
-              const netCol = d.net > 0 ? "var(--color-good)" : d.net < 0 ? "var(--color-bad)" : "var(--color-faint)";
-              return (
-                <button
-                  key={d.opp.i}
-                  type="button"
-                  onClick={() => view.setFocusPlayer(d.opp.i)}
-                  title={`${d.for} kills${d.forWeapon ? ` (mostly ${d.forWeapon.label})` : ""} · ${d.against} deaths${d.againstWeapon ? ` (mostly ${d.againstWeapon.label})` : ""}`}
-                  className="flex w-full items-center gap-2 rounded px-1 py-1 text-left transition hover:bg-panel/60"
-                >
-                  <span className="w-28 shrink-0 truncate text-[12px] font-semibold" style={{ color: col }}>
-                    {d.opp.name}
-                  </span>
-                  <span className="w-12 shrink-0 text-right text-[12px] tabular-nums">
-                    <span className="font-bold text-good">{d.for}</span>
-                    <span className="text-faint">–</span>
-                    <span className="font-bold text-bad">{d.against}</span>
-                  </span>
-                  <span className="relative flex h-2 flex-1 overflow-hidden rounded-full bg-panel">
-                    <span className="h-full" style={{ width: `${(d.for / tot) * 100}%`, background: "var(--color-good)" }} />
-                    <span className="h-full" style={{ width: `${(d.against / tot) * 100}%`, background: "var(--color-bad)" }} />
-                  </span>
-                  {d.forWeapon && <WeaponBadge w={d.forWeapon} size={14} />}
-                  <span className="w-9 shrink-0 text-right text-[12px] font-bold tabular-nums" style={{ color: netCol }}>
-                    {d.net > 0 ? `+${d.net}` : d.net}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div className="mt-2 text-[10px] text-faint lg:shrink-0">
-          <span className="text-good">green</span> = your kills, <span className="text-bad">red</span> = your deaths to them. Spans the whole match (duels cross sides).
-        </div>
-      </div>
-    );
-  }
-
-  // no focus → full net-frag matrix
-  if (!matrix || matrix.players.length === 0) return null;
-  const { players, net, maxAbs } = matrix;
   return (
     <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
-        <h3 className="stat-label">Head-to-head · net frags</h3>
-        <span className="text-[10px] text-faint">row vs column · green = row leads · click a name</span>
+      <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
+        <h3 className="stat-label">Head-to-head · {focusName}</h3>
+        <span className="text-[10px] text-faint">click to switch player</span>
       </div>
-      <div className="scroll-slim overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-        <div
-          className="inline-grid gap-0.5 text-[11px]"
-          style={{ gridTemplateColumns: `minmax(7rem,auto) repeat(${players.length}, 1.9rem)` }}
-        >
-          <div />
-          {players.map((p, j) => (
-            <div key={p.i} title={p.name} className="grid place-items-center text-[9px] font-semibold" style={{ color: teamColor(p.team) }}>
-              {j + 1}
-            </div>
-          ))}
-          {players.map((p, a) => (
-            <Fragment key={p.i}>
+      {duels.length === 0 ? (
+        <div className="py-6 text-center text-xs text-muted lg:my-auto">No duels in this scope.</div>
+      ) : (
+        <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          {duels.map((d) => {
+            const tot = d.for + d.against || 1;
+            const col = teamColor(d.opp.team);
+            const netCol = d.net > 0 ? "var(--color-good)" : d.net < 0 ? "var(--color-bad)" : "var(--color-faint)";
+            return (
               <button
+                key={d.opp.i}
                 type="button"
-                onClick={() => view.setFocusPlayer(p.i)}
-                className="flex items-center gap-1 truncate pr-1 text-left transition hover:text-ink"
-                style={{ color: teamColor(p.team) }}
+                onClick={() => view.setFocusPlayer(d.opp.i)}
+                title={`${d.for} kills${d.forWeapon ? ` (mostly ${d.forWeapon.label})` : ""} · ${d.against} deaths${d.againstWeapon ? ` (mostly ${d.againstWeapon.label})` : ""}`}
+                className="flex w-full items-center gap-2 rounded px-1 py-1 text-left transition hover:bg-panel/60"
               >
-                <span className="w-4 shrink-0 text-faint">{a + 1}</span>
-                <span className="truncate font-semibold">{p.name}</span>
+                <span className="w-28 shrink-0 truncate text-[12px] font-semibold" style={{ color: col }}>
+                  {d.opp.name}
+                </span>
+                <span className="w-12 shrink-0 text-right text-[12px] tabular-nums">
+                  <span className="font-bold text-good">{d.for}</span>
+                  <span className="text-faint">–</span>
+                  <span className="font-bold text-bad">{d.against}</span>
+                </span>
+                <span className="relative flex h-2 flex-1 overflow-hidden rounded-full bg-panel">
+                  <span className="h-full" style={{ width: `${(d.for / tot) * 100}%`, background: "var(--color-good)" }} />
+                  <span className="h-full" style={{ width: `${(d.against / tot) * 100}%`, background: "var(--color-bad)" }} />
+                </span>
+                {d.forWeapon && <WeaponBadge w={d.forWeapon} size={14} />}
+                <span className="w-9 shrink-0 text-right text-[12px] font-bold tabular-nums" style={{ color: netCol }}>
+                  {d.net > 0 ? `+${d.net}` : d.net}
+                </span>
               </button>
-              {players.map((q, b) => {
-                if (a === b) return <div key={q.i} className="grid h-7 place-items-center text-line2">·</div>;
-                const v = net[a][b];
-                const inten = maxAbs ? Math.abs(v) / maxAbs : 0;
-                const bg =
-                  v > 0
-                    ? `color-mix(in srgb, var(--color-good) ${Math.round(15 + inten * 55)}%, var(--color-panel))`
-                    : v < 0
-                      ? `color-mix(in srgb, var(--color-bad) ${Math.round(15 + inten * 55)}%, var(--color-panel))`
-                      : "var(--color-panel)";
-                return (
-                  <div
-                    key={q.i}
-                    title={`${p.name} vs ${q.name}: ${matrix.for[a][b]}–${matrix.for[b][a]} (net ${v > 0 ? "+" : ""}${v})`}
-                    className="grid h-7 place-items-center rounded tabular-nums"
-                    style={{ background: bg, color: v !== 0 ? "var(--color-ink)" : "var(--color-faint)" }}
-                  >
-                    {v > 0 ? `+${v}` : v || "0"}
-                  </div>
-                );
-              })}
-            </Fragment>
-          ))}
+            );
+          })}
         </div>
-      </div>
+      )}
       <div className="mt-2 text-[10px] text-faint lg:shrink-0">
-        Numbers index the rows. Each cell = that row player&apos;s net kills against the column player (whole match).
+        <span className="text-good">green</span> = {focusName}&apos;s kills, <span className="text-bad">red</span> = deaths to them. Spans the whole match (duels cross sides).
       </div>
     </div>
   );
@@ -962,11 +822,13 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
     if (focus != null) setOpenPlayer(focus);
   }, [focus]);
 
-  // a weapon picked from either kills/deaths panel drives the map; reset it
-  // whenever the scope/side/focus changes (the underlying kill set changed).
+  // Arsenal lens (kills / deaths) + the weapon picked from it, which drives the
+  // map. Both reset when the scope/side/focus changes (the kill set changed).
+  const [lens, setLens] = useState<"kills" | "deaths">("kills");
   const [weaponSel, setWeaponSel] = useState<{ key: string; mode: "kills" | "deaths" } | null>(null);
   useEffect(() => {
     setWeaponSel(null);
+    setLens("kills");
   }, [roundSel, view.side, focus]);
   const pickWeapon = (key: string, mode: "kills" | "deaths") =>
     setWeaponSel((s) => (s && s.key === key && s.mode === mode ? null : { key, mode }));
@@ -984,16 +846,16 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   const nemesis = useMemo(() => (focus != null ? computeNemesis(meta, rounds, focus, roundFilter) : null), [meta, rounds, focus, roundFilter]);
 
   // Unscoped, deaths-by-weapon exactly mirrors kills-by-weapon (every kill is
-  // someone's death), so the threat panel/tile would duplicate the offense ones.
-  // In that state show engagement RANGES instead — fresh signal from the same
-  // kill events. Any player/side scope brings the real deaths lens back.
+  // someone's death), so the Deaths lens and threat tile only mean something
+  // once a player or side is scoped.
   const unscoped = focus == null && view.side === "all";
-  const range = useMemo(
-    () => (unscoped ? computeRangeData(meta, rounds, roundFilter) : null),
-    [unscoped, meta, rounds, roundFilter],
+  const longest = useMemo(
+    () => longestKillOf(meta, rounds, roundFilter, view.side, focus),
+    [meta, rounds, roundFilter, view.side, focus],
   );
 
   const focusName = focus != null ? meta.players[focus]?.name : null;
+  const scopeLabel = focusName ?? (view.side !== "all" ? `${view.side} side` : "the match");
 
   if (!roster.totalKills) {
     return (
@@ -1032,25 +894,14 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       <div className="grid gap-3 sm:grid-cols-2 lg:shrink-0 lg:grid-cols-4">
         <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills · ${offense.topWeapon.hsPct.toFixed(0)}% HS` : undefined} hex={offense.topWeapon?.color} weapon={offense.topWeapon} />
         <StatPill tone="offense" label="Headshot rate" value={`${offense.overallHsPct.toFixed(0)}%`} hint={`${offense.totalHeadshots}/${offense.totalKills} kills`} hex={hsColor(offense.overallHsPct)} />
-        {range?.longest ? (
-          <StatPill
-            tone="offense"
-            label="Longest kill"
-            value={`${range.longest.d.toFixed(0)}m`}
-            hint={`${range.longest.killer} → ${range.longest.victim} · ${range.longest.label} · R${range.longest.rn}`}
-            hex={range.longest.color}
-            weapon={range.longest}
-          />
-        ) : (
-          <StatPill
-            tone="threat"
-            label={focusName ? "Most killed by" : "Deadliest weapon"}
-            value={defense.topWeapon ? defense.topWeapon.label : "—"}
-            hint={defense.topWeapon ? `${defense.topWeapon.kills} ${focusName ? "of your deaths" : "deaths"}` : undefined}
-            hex={defense.topWeapon?.color}
-            weapon={defense.topWeapon}
-          />
-        )}
+        <StatPill
+          tone="offense"
+          label="Longest kill"
+          value={longest ? `${longest.d.toFixed(0)}m` : "—"}
+          hint={longest ? `${longest.killer} → ${longest.victim} · ${longest.label} · R${longest.rn}` : undefined}
+          hex={longest?.color}
+          weapon={longest}
+        />
         {focusName ? (
           <StatPill
             tone="threat"
@@ -1074,45 +925,26 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           conversion, the pro's first scan of a match */}
       <RoundHighlights meta={meta} rounds={rounds} view={view} />
 
-      {/* main analysis row — five lg columns across the very wide pane
-          (offense | threat | duels+economy | map | roster); plain vertical
-          stack below lg exactly as before */}
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1.2fr)_minmax(0,1.05fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3">
-        {/* dual-lens: kills (offense) vs deaths (threat) */}
-        <WeaponPanel
-          title={focusName ? `${focusName} · kills by weapon` : view.side !== "all" ? `${view.side} kills by weapon` : "Kills by weapon"}
-          subtitle="click a weapon → map"
-          data={offense}
-          unit="K"
-          empty="No kills in this scope."
-          selectedWeapon={weaponSel?.mode === "kills" ? weaponSel.key : null}
-          onSelectWeapon={(k) => pickWeapon(k, "kills")}
+      {/* main analysis — three lg columns: Arsenal · the map (hero, widest) ·
+          economy + roster/head-to-head. Plain vertical stack below lg. The
+          weapon selection cross-links the Arsenal list to the map. */}
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(240px,0.92fr)_minmax(0,1.6fr)_minmax(300px,1.05fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3">
+        {/* arsenal — kills/deaths lens; click a weapon → plot it on the map */}
+        <Arsenal
+          offense={offense}
+          defense={defense}
+          unscoped={unscoped}
+          scopeLabel={scopeLabel}
+          lens={lens}
+          onLens={(l) => {
+            setLens(l);
+            setWeaponSel(null);
+          }}
+          selectedWeapon={weaponSel && weaponSel.mode === lens ? weaponSel.key : null}
+          onSelectWeapon={(k) => pickWeapon(k, lens)}
         />
-        {range ? (
-          <RangePanel
-            data={range}
-            selectedWeapon={weaponSel?.mode === "kills" ? weaponSel.key : null}
-            onSelectWeapon={(k) => pickWeapon(k, "kills")}
-          />
-        ) : (
-          <WeaponPanel
-            title={focusName ? `What kills ${focusName}` : `What kills ${view.side}`}
-            subtitle="click a weapon → map"
-            data={defense}
-            unit="D"
-            empty="No deaths in this scope."
-            selectedWeapon={weaponSel?.mode === "deaths" ? weaponSel.key : null}
-            onSelectWeapon={(k) => pickWeapon(k, "deaths")}
-          />
-        )}
 
-        {/* head-to-head duels (grows, scrolls) + economy ladder (natural height) */}
-        <div className="grid gap-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:gap-3">
-          <HeadToHead meta={meta} rounds={rounds} view={view} />
-          <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
-        </div>
-
-        {/* kill / death map — driven by the shared weapon selection */}
+        {/* kill / death map — the hero. Driven by the shared weapon selection */}
         <DuelMap
           meta={meta}
           rounds={rounds}
@@ -1125,34 +957,41 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           onClearWeapon={() => setWeaponSel(null)}
         />
 
-        {/* per-player breakdown (offense, whole roster) */}
-        <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
-          <div className="mb-3 flex items-center justify-between lg:mb-2 lg:shrink-0">
-            <h3 className="stat-label">Per-player weapons</h3>
-            <span className="text-[10px] text-faint">click to expand · sets the scoped player</span>
-          </div>
-          <div className="scroll-slim grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
-            {roster.players.map((p) => (
-              <PlayerCard
-                key={p.i}
-                p={p}
-                open={openPlayer === p.i}
-                onToggle={() => {
-                  const next = openPlayer === p.i ? null : p.i;
-                  setOpenPlayer(next);
-                  view.setFocusPlayer(next);
-                }}
-              />
-            ))}
-          </div>
+        {/* economy ladder (natural height) + roster or head-to-head (fills, scrolls) */}
+        <div className="grid gap-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:gap-3">
+          <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
+          {focus != null ? (
+            <HeadToHead meta={meta} rounds={rounds} view={view} />
+          ) : (
+            <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
+              <div className="mb-2 flex items-center justify-between lg:shrink-0">
+                <h3 className="stat-label">Per-player weapons</h3>
+                <span className="text-[10px] text-faint">click to expand · scopes the player</span>
+              </div>
+              <div className="scroll-slim grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
+                {roster.players.map((p) => (
+                  <PlayerCard
+                    key={p.i}
+                    p={p}
+                    open={openPlayer === p.i}
+                    onToggle={() => {
+                      const next = openPlayer === p.i ? null : p.i;
+                      setOpenPlayer(next);
+                      view.setFocusPlayer(next);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       <p className="text-[10px] leading-relaxed text-faint lg:shrink-0">
         Derived from kill events (killer · weapon · headshot · positions) plus per-round buy values. A kill
-        records only the killer&apos;s weapon, so &quot;deaths by weapon&quot; means what killed you, never your own
-        gun. The economy ladder needs per-round buy data (re-parse older demos). For grenade usage and lineups
-        see the Utility tab; for playstyle reads and counters, Tendencies.
+        records only the killer&apos;s weapon, so the Deaths lens means what killed a player, never their own gun.
+        Click any weapon to plot exactly those kills on the map. The economy ladder needs per-round buy data
+        (re-parse older demos). For grenade usage see the Utility tab; for playstyle reads, Tendencies.
       </p>
     </section>
   );
