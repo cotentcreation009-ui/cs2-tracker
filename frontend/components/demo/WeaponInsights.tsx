@@ -13,8 +13,9 @@ import {
   type WeaponInsightsData,
   type WeaponClass,
 } from "@/lib/demo/weapons";
-import { BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
+import { classifyBuy, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
+import { getActiveZones, classifyPosition } from "@/lib/maps/zones";
 import { radarImage } from "@/lib/maps/calibration";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 
@@ -536,6 +537,14 @@ const PHASES: { key: MapPhase; label: string; title: string }[] = [
   { key: "postplant", label: "Post-plant", title: "Only kills after the bomb was planted" },
 ];
 
+type BuyTier = "any" | "full" | "force" | "eco";
+const BUY_TIERS: { key: BuyTier; label: string; match: (b: string) => boolean; title: string }[] = [
+  { key: "any", label: "Any buy", match: () => true, title: "Every buy tier" },
+  { key: "full", label: "Full", match: (b) => b === "full", title: "The killer/victim was on a full buy" },
+  { key: "force", label: "Force", match: (b) => b === "force", title: "…on a force buy" },
+  { key: "eco", label: "Eco", match: (b) => b === "eco" || b === "semi", title: "…on an eco / light buy" },
+];
+
 function DuelMap({
   meta,
   rounds,
@@ -551,20 +560,24 @@ function DuelMap({
 }) {
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
   const calibrated = proj.calibrated;
+  const zones = useMemo(() => (calibrated ? getActiveZones(meta.map) : []), [calibrated, meta.map]);
   const [mode, setMode] = useState<"kills" | "deaths">("kills");
   const [cls, setCls] = useState<WeaponClass | "all">("all");
   const [angle, setAngle] = useState(false);
   const [render, setRender] = useState<"marks" | "heat">("marks");
   const [phase, setPhase] = useState<MapPhase>("any");
+  const [buy, setBuy] = useState<BuyTier>("any");
   const [hsOnly, setHsOnly] = useState(false);
 
   // a weapon picked from the kill/death panels drives the map (its own mode);
   // otherwise the map uses its local mode + class-chip filter.
   const activeMode = weaponSel ? weaponSel.mode : mode;
 
-  const marks = useMemo(() => {
+  const plot = useMemo(() => {
     const scoped = view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
     const out: { vx: number; vy: number; kx: number | null; ky: number | null; color: string }[] = [];
+    const spots = new Map<string, number>(); // callout → kills there (calibrated only)
+    const buyMatch = BUY_TIERS.find((t) => t.key === buy)!.match;
     for (const r of scoped) {
       const kills = r.kills ?? [];
       // opening kill = earliest enemy kill of the round (first blood)
@@ -588,19 +601,35 @@ function DuelMap({
         if (hsOnly && !k.hs) continue;
         if (phase === "opening" && k.t !== openT) continue;
         if (phase === "postplant" && (plantT == null || k.t < plantT)) continue;
+        if (buy !== "any") {
+          // the subject's buy that round (killer in kills mode, victim in deaths)
+          const st = r.stats?.find((s) => s.i === subj);
+          const bk = st?.buy ?? (st?.equip != null ? classifyBuy(st.equip, r.n).key : null);
+          if (!bk || !buyMatch(bk)) continue;
+        }
         const v = proj.project(k.vx, k.vy);
         if (!v) continue;
         const kp = proj.project(k.kx, k.ky);
         out.push({ vx: v.x * 100, vy: v.y * 100, kx: kp ? kp.x * 100 : null, ky: kp ? kp.y * 100 : null, color: wm.color });
+        if (zones.length) {
+          const z = classifyPosition(meta.map, k.vx, k.vy, zones);
+          if (z?.name) spots.set(z.name, (spots.get(z.name) ?? 0) + 1);
+        }
       }
     }
-    return out;
-  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, hsOnly]);
+    const callouts = [...spots.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
+    return { pts: out, callouts };
+  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, hsOnly]);
 
+  const marks = plot.pts;
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
   const heatColor =
     weaponSel?.color ?? (cls !== "all" ? CLASS_CHIPS.find((c) => c.key === cls)?.color ?? "#ff7a45" : "#ff7a45");
-  const filterNote = [phase !== "any" ? PHASES.find((p) => p.key === phase)?.label.toLowerCase() : null, hsOnly ? "HS" : null].filter(Boolean).join(" · ");
+  const filterNote = [
+    phase !== "any" ? PHASES.find((p) => p.key === phase)?.label.toLowerCase() : null,
+    buy !== "any" ? `${buy} buy` : null,
+    hsOnly ? "HS" : null,
+  ].filter(Boolean).join(" · ");
 
   return (
     // natural height — the map is a big fixed square so hotspots read clearly;
@@ -696,7 +725,7 @@ function DuelMap({
         </div>
       )}
 
-      {/* phase + headshot filters — compose with everything above */}
+      {/* phase · buy tier · headshot filters — all compose with each other */}
       <div className="mb-2 flex flex-wrap items-center gap-1.5 lg:shrink-0">
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[10px]">
           {PHASES.map((p) => (
@@ -711,6 +740,22 @@ function DuelMap({
               }`}
             >
               {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[10px]">
+          {BUY_TIERS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setBuy(t.key)}
+              aria-pressed={buy === t.key}
+              title={t.title}
+              className={`rounded-md px-1.5 py-0.5 font-medium transition ${
+                buy === t.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+              }`}
+            >
+              {t.label}
             </button>
           ))}
         </div>
@@ -775,11 +820,29 @@ function DuelMap({
           </div>
         )}
       </div>
+
+      {/* top named callouts for the current filtered set — where these
+          kills/deaths actually concentrate (calibrated maps only) */}
+      {plot.callouts.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 lg:shrink-0">
+          <span className="text-[10px] uppercase tracking-wider text-faint">Top spots</span>
+          {plot.callouts.slice(0, 4).map((c) => (
+            <span
+              key={c.name}
+              className="rounded-full bg-panel px-2 py-0.5 text-[10px] tabular-nums text-muted"
+              title={`${c.n} ${activeMode} at ${c.name}`}
+            >
+              {c.name} <span className="font-semibold text-ink">{c.n}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="mt-2 text-[10px] text-faint lg:shrink-0">
         {render === "heat"
           ? `Density heatmap — brighter clusters = more ${activeMode} here${weaponSel ? ` with the ${weaponSel.label}` : ""}. `
           : `✕ at the victim's spot, coloured by weapon. `}
-        Filter by phase (opening pick / post-plant) or headshots, and click a weapon in the Arsenal to isolate it.
+        Filter by phase (opening / post-plant), buy tier, or headshots, and click a weapon in the Arsenal to isolate it.
       </div>
     </div>
   );
