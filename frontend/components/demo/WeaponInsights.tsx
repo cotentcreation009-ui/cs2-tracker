@@ -644,6 +644,16 @@ function DuelMap({
   }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly]);
 
   const marks = plot.pts;
+  const anyFilter = cls !== "all" || phase !== "any" || buy !== "any" || dist !== "any" || hsOnly || tradedOnly;
+  const resetFilters = () => {
+    setCls("all");
+    setPhase("any");
+    setBuy("any");
+    setDist("any");
+    setHsOnly(false);
+    setTradedOnly(false);
+    onClearWeapon();
+  };
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
   const heatColor =
     weaponSel?.color ?? (cls !== "all" ? CLASS_CHIPS.find((c) => c.key === cls)?.color ?? "#ff7a45" : "#ff7a45");
@@ -821,6 +831,16 @@ function DuelMap({
         >
           Traded
         </button>
+        {(anyFilter || weaponSel) && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            title="Clear every map filter"
+            className="rounded-full border border-line px-2 py-0.5 text-[10px] font-medium text-muted transition hover:border-brand/50 hover:text-brand"
+          >
+            ⟲ Reset
+          </button>
+        )}
       </div>
 
       <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-140">
@@ -848,7 +868,12 @@ function DuelMap({
               {angle &&
                 marks.map((mk, i) =>
                   mk.kx != null && mk.ky != null ? (
-                    <line key={`l${i}`} x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.25} opacity={0.4} />
+                    // engagement line: shooter dot (•) → victim (✕). The dot marks
+                    // WHERE the shot came from so the direction is unambiguous.
+                    <g key={`l${i}`}>
+                      <line x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.28} opacity={0.5} />
+                      <circle cx={mk.kx} cy={mk.ky} r={0.75} fill={mk.color} opacity={0.85} />
+                    </g>
                   ) : null,
                 )}
               {marks.map((mk, i) => (
@@ -861,8 +886,17 @@ function DuelMap({
           )}
         </svg>
         {marks.length === 0 && (
-          <div className="absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted">
-            No {activeMode} for the current filter{filterNote ? ` (${filterNote})` : ""}.
+          <div className="absolute inset-0 grid place-items-center gap-2 px-4 text-center text-xs text-muted">
+            <span>No {activeMode} for the current filter{filterNote ? ` (${filterNote})` : ""}.</span>
+            {(anyFilter || weaponSel) && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="rounded-full border border-brand/50 bg-brand/10 px-3 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
+              >
+                ⟲ Clear filters
+              </button>
+            )}
           </div>
         )}
         {!calibrated && (
@@ -892,7 +926,7 @@ function DuelMap({
       <div className="mt-2 text-[10px] text-faint lg:shrink-0">
         {render === "heat"
           ? `Density heatmap — brighter clusters = more ${activeMode} here${weaponSel ? ` with the ${weaponSel.label}` : ""}. `
-          : `✕ at the victim's spot, coloured by weapon. `}
+          : `✕ = the victim's spot, coloured by weapon${angle ? "; the angle line runs from the shooter (•) to the victim" : " — toggle the angle line for the shot direction"}. `}
         Filter by phase (opening / post-plant), buy tier, range, headshots, or trades, and click a weapon in the Arsenal to isolate it.
       </div>
     </div>
