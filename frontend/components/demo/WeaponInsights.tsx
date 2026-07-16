@@ -545,6 +545,16 @@ const BUY_TIERS: { key: BuyTier; label: string; match: (b: string) => boolean; t
   { key: "eco", label: "Eco", match: (b) => b === "eco" || b === "semi", title: "…on an eco / light buy" },
 ];
 
+type DistBand = "any" | "close" | "mid" | "long";
+const DISTS: { key: DistBand; label: string; test: (m: number) => boolean; title: string }[] = [
+  { key: "any", label: "Any range", test: () => true, title: "Every engagement distance" },
+  { key: "close", label: "Close", test: (m) => m < 10, title: "Under ~10m — close quarters" },
+  { key: "mid", label: "Mid", test: (m) => m >= 10 && m < 22, title: "~10–22m" },
+  { key: "long", label: "Long", test: (m) => m >= 22, title: "Over ~22m — long range" },
+];
+
+const TRADE_WINDOW = 5; // seconds — a kill is "traded" if the killer dies within this
+
 function DuelMap({
   meta,
   rounds,
@@ -567,7 +577,9 @@ function DuelMap({
   const [render, setRender] = useState<"marks" | "heat">("marks");
   const [phase, setPhase] = useState<MapPhase>("any");
   const [buy, setBuy] = useState<BuyTier>("any");
+  const [dist, setDist] = useState<DistBand>("any");
   const [hsOnly, setHsOnly] = useState(false);
+  const [tradedOnly, setTradedOnly] = useState(false);
 
   // a weapon picked from the kill/death panels drives the map (its own mode);
   // otherwise the map uses its local mode + class-chip filter.
@@ -578,6 +590,7 @@ function DuelMap({
     const out: { vx: number; vy: number; kx: number | null; ky: number | null; color: string }[] = [];
     const spots = new Map<string, number>(); // callout → kills there (calibrated only)
     const buyMatch = BUY_TIERS.find((t) => t.key === buy)!.match;
+    const distTest = DISTS.find((d) => d.key === dist)!.test;
     for (const r of scoped) {
       const kills = r.kills ?? [];
       // opening kill = earliest enemy kill of the round (first blood)
@@ -607,6 +620,15 @@ function DuelMap({
           const bk = st?.buy ?? (st?.equip != null ? classifyBuy(st.equip, r.n).key : null);
           if (!bk || !buyMatch(bk)) continue;
         }
+        if (dist !== "any") {
+          const m = Math.hypot(k.kx - k.vx, k.ky - k.vy) * UNIT_TO_M;
+          if (!distTest(m)) continue;
+        }
+        if (tradedOnly) {
+          // the kill was traded if its killer dies within the trade window after
+          const traded = kills.some((k2) => k2.k >= 0 && k2.v === k.k && k2.t > k.t && k2.t - k.t <= TRADE_WINDOW);
+          if (!traded) continue;
+        }
         const v = proj.project(k.vx, k.vy);
         if (!v) continue;
         const kp = proj.project(k.kx, k.ky);
@@ -619,7 +641,7 @@ function DuelMap({
     }
     const callouts = [...spots.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
     return { pts: out, callouts };
-  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, hsOnly]);
+  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly]);
 
   const marks = plot.pts;
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
@@ -628,7 +650,9 @@ function DuelMap({
   const filterNote = [
     phase !== "any" ? PHASES.find((p) => p.key === phase)?.label.toLowerCase() : null,
     buy !== "any" ? `${buy} buy` : null,
+    dist !== "any" ? `${dist} range` : null,
     hsOnly ? "HS" : null,
+    tradedOnly ? "traded" : null,
   ].filter(Boolean).join(" · ");
 
   return (
@@ -759,6 +783,22 @@ function DuelMap({
             </button>
           ))}
         </div>
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[10px]">
+          {DISTS.map((d) => (
+            <button
+              key={d.key}
+              type="button"
+              onClick={() => setDist(d.key)}
+              aria-pressed={dist === d.key}
+              title={d.title}
+              className={`rounded-md px-1.5 py-0.5 font-medium transition ${
+                dist === d.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+              }`}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={() => setHsOnly((h) => !h)}
@@ -769,6 +809,17 @@ function DuelMap({
           }`}
         >
           HS only
+        </button>
+        <button
+          type="button"
+          onClick={() => setTradedOnly((t) => !t)}
+          aria-pressed={tradedOnly}
+          title={`Only kills that were traded — the killer died within ${TRADE_WINDOW}s (over-extended picks)`}
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+            tradedOnly ? "border-good/50 bg-good/15 text-good" : "border-line text-muted hover:text-ink"
+          }`}
+        >
+          Traded
         </button>
       </div>
 
@@ -842,7 +893,7 @@ function DuelMap({
         {render === "heat"
           ? `Density heatmap — brighter clusters = more ${activeMode} here${weaponSel ? ` with the ${weaponSel.label}` : ""}. `
           : `✕ at the victim's spot, coloured by weapon. `}
-        Filter by phase (opening / post-plant), buy tier, or headshots, and click a weapon in the Arsenal to isolate it.
+        Filter by phase (opening / post-plant), buy tier, range, headshots, or trades, and click a weapon in the Arsenal to isolate it.
       </div>
     </div>
   );
