@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
@@ -8,7 +8,6 @@ import {
   computeNemesis,
   computeDuels,
   weaponMeta,
-  type PlayerWeaponStat,
   type WeaponStat,
   type WeaponInsightsData,
   type WeaponClass,
@@ -447,75 +446,88 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
   const rank = (k: BuyKey) => BUY_KEYS.indexOf(k);
   const upsetPct = m.total ? (m.upset / m.total) * 100 : 0;
 
+  const totalPct = (n: number) => (m.total ? Math.round((n / m.total) * 100) : 0);
   return (
     <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="stat-label">Economy ladder · killer buy vs victim buy</h3>
+        <h3 className="stat-label">Economy ladder · who frags up the buy</h3>
         <span className="text-[10px] text-faint">cell = kills · green ring = punching up</span>
       </div>
-      <p className="mb-3 text-xs text-muted lg:mb-2">
+      <p className="mb-3 text-xs text-muted">
         <span className="font-bold text-good">{m.upset}</span> upset frags ({upsetPct.toFixed(0)}%) — killing an
-        equal-or-richer enemy while on the weaker buy.
+        equal-or-richer enemy while on the weaker buy · {m.total} gun kills with economy data.
       </p>
       <div className="scroll-slim overflow-x-auto">
         <div
-          className="inline-grid gap-1 text-[11px]"
-          style={{ gridTemplateColumns: `auto repeat(${BUY_KEYS.length}, 2.4rem)` }}
+          className="inline-grid gap-1 text-xs"
+          style={{ gridTemplateColumns: `2.4rem repeat(${BUY_KEYS.length}, minmax(2.6rem, 1fr)) 2.9rem` }}
         >
+          {/* header row: victim buy tiers + Σ */}
           <div className="flex items-end justify-end pr-1 text-[9px] uppercase tracking-wider text-faint">K\V</div>
           {BUY_KEYS.map((vk) => (
-            <div key={vk} className="text-center text-[10px] font-semibold" style={{ color: TIER[vk].color }}>
+            <div key={vk} className="pb-0.5 text-center text-[11px] font-bold" style={{ color: TIER[vk].color }}>
               {TIER[vk].label}
             </div>
           ))}
+          <div className="flex items-end justify-center pb-0.5 text-[10px] font-bold uppercase text-faint">Σ</div>
+
+          {/* body rows */}
           {BUY_KEYS.map((kk) => (
-            <BuyRow key={kk} kk={kk} m={m} rank={rank} />
+            <Fragment key={kk}>
+              <div className="flex items-center justify-end pr-1 text-[11px] font-bold" style={{ color: TIER[kk].color }}>
+                {TIER[kk].label}
+              </div>
+              {BUY_KEYS.map((vk) => {
+                const n = m.cells[kk][vk];
+                const intensity = m.max ? n / m.max : 0;
+                const upset = rank(kk) > rank(vk);
+                return (
+                  <div
+                    key={vk}
+                    title={`${TIER[kk].label} buy killed ${TIER[vk].label} buy: ${n} time${n === 1 ? "" : "s"}${upset && n > 0 ? " (punching up)" : ""}`}
+                    className={`grid h-11 place-items-center rounded font-semibold tabular-nums lg:h-9 ${upset && n > 0 ? "ring-1 ring-good/70" : ""}`}
+                    style={{
+                      background: n
+                        ? `color-mix(in srgb, var(--color-brand) ${Math.round(12 + intensity * 60)}%, var(--color-panel))`
+                        : "var(--color-panel)",
+                      color: n ? "var(--color-ink)" : "var(--color-faint)",
+                    }}
+                  >
+                    {n || "·"}
+                  </div>
+                );
+              })}
+              {/* row total: kills made on this buy tier */}
+              <div
+                title={`${TIER[kk].label} buys got ${m.rowTotals[kk]} kills (${totalPct(m.rowTotals[kk])}% of all)`}
+                className="grid h-11 place-items-center rounded bg-panel/60 text-[11px] font-bold tabular-nums text-muted lg:h-9"
+              >
+                {m.rowTotals[kk] || "·"}
+              </div>
+            </Fragment>
           ))}
+
+          {/* totals row: deaths by victim buy + grand total */}
+          <div className="flex items-center justify-center text-[10px] font-bold uppercase text-faint">Σ</div>
+          {BUY_KEYS.map((vk) => (
+            <div
+              key={vk}
+              title={`${TIER[vk].label} buys were killed ${m.colTotals[vk]} times`}
+              className="grid h-8 place-items-center rounded bg-panel/60 text-[11px] font-bold tabular-nums text-muted"
+            >
+              {m.colTotals[vk] || "·"}
+            </div>
+          ))}
+          <div className="grid h-8 place-items-center rounded bg-brand/10 text-[11px] font-black tabular-nums text-brand">
+            {m.total}
+          </div>
         </div>
       </div>
       <div className="mt-2 text-[10px] text-faint">
-        Rows = killer&apos;s buy, columns = victim&apos;s buy. Cells above the diagonal = the killer was on a
-        cheaper buy than who they killed.
+        Rows = killer&apos;s buy, columns = the victim&apos;s. Cells above the diagonal (green ring) = the killer
+        was on a cheaper buy than who they killed. Σ = kills by that buy (row) / deaths on it (column).
       </div>
     </div>
-  );
-}
-
-function BuyRow({
-  kk,
-  m,
-  rank,
-}: {
-  kk: BuyKey;
-  m: ReturnType<typeof computeBuyMatrix>;
-  rank: (k: BuyKey) => number;
-}) {
-  return (
-    <>
-      <div className="flex items-center justify-end pr-1 text-[10px] font-semibold" style={{ color: TIER[kk].color }}>
-        {TIER[kk].label}
-      </div>
-      {BUY_KEYS.map((vk) => {
-        const n = m.cells[kk][vk];
-        const intensity = m.max ? n / m.max : 0;
-        const upset = rank(kk) > rank(vk);
-        return (
-          <div
-            key={vk}
-            title={`${TIER[kk].label} buy → killed ${TIER[vk].label} buy: ${n}`}
-            className={`grid h-9 place-items-center rounded tabular-nums lg:h-7 ${upset && n > 0 ? "ring-1 ring-good/70" : ""}`}
-            style={{
-              background: n
-                ? `color-mix(in srgb, var(--color-brand) ${Math.round(12 + intensity * 60)}%, var(--color-panel))`
-                : "var(--color-panel)",
-              color: n ? "var(--color-ink)" : "var(--color-faint)",
-            }}
-          >
-            {n || "·"}
-          </div>
-        );
-      })}
-    </>
   );
 }
 
@@ -933,58 +945,6 @@ function DuelMap({
   );
 }
 
-// --- per-player drilldown (offense) ----------------------------------------
-
-function PlayerCard({ p, open, onToggle }: { p: PlayerWeaponStat; open: boolean; onToggle: () => void }) {
-  const col = teamColor(p.team);
-  const top = p.topWeapon;
-  const barMax = p.weapons[0]?.kills ?? 1;
-  return (
-    <div className={`card px-4 py-3 ${open ? "ring-1 ring-brand/40" : ""}`}>
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 text-left">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-sm font-black" style={{ background: `${col}22`, color: col }}>
-          {(p.name || "?").slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-bold text-ink">{p.name}</span>
-            <span className="rounded px-1 text-[9px] font-bold" style={{ background: `${col}22`, color: col }}>{p.team || "—"}</span>
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-faint">
-            {top && <WeaponBadge w={top} size={14} />}
-            <span className="truncate">{top ? top.label : "—"}</span>
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-lg font-extrabold tabular-nums text-ink">{p.totalKills}</div>
-          <div className="text-[10px] tabular-nums" style={{ color: hsColor(p.hsPct) }}>{p.hsPct.toFixed(0)}% HS</div>
-        </div>
-        <svg className={`h-4 w-4 shrink-0 text-faint transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div className="mt-3 space-y-2 border-t border-line pt-3">
-          {p.weapons.map((w) => {
-            const pct = barMax ? (w.kills / barMax) * 100 : 0;
-            return (
-              <div key={w.key} className="flex items-center gap-2">
-                <WeaponBadge w={w} size={18} />
-                <span className="w-24 shrink-0 truncate text-[11px] font-medium text-muted">{w.label}</span>
-                <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
-                  <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: w.color }} />
-                </div>
-                <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-faint">{w.kills}</span>
-                <span className="w-12 shrink-0 text-right text-[11px] tabular-nums" style={{ color: hsColor(w.hsPct) }}>{w.hsPct.toFixed(0)}%</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // --- head-to-head (player vs player) ---------------------------------------
 
 // Focused-player head-to-head: their kill/death record vs every opponent, with
@@ -1053,15 +1013,85 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
   );
 }
 
+// --- team gunfights (CT vs T aggregate comparison) --------------------------
+
+function TeamCompare({
+  ct,
+  t,
+  openings,
+}: {
+  ct: WeaponInsightsData;
+  t: WeaponInsightsData;
+  openings: { ctOpen: number; ctWon: number; tOpen: number; tWon: number };
+}) {
+  const side = (data: WeaponInsightsData, s: "CT" | "T", open: number, won: number) => {
+    const hex = s === "T" ? T : CT;
+    const soft = s === "T" ? "#f0cd78" : "#9cc1ff";
+    return (
+      <div className="min-w-0 space-y-2.5">
+        <div className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: hex }} />
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: soft }}>
+            {s}
+          </span>
+          <span className="ml-auto text-2xl font-extrabold tabular-nums text-ink">
+            {data.totalKills}
+            <span className="ml-1 text-[10px] font-normal text-faint">kills</span>
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-panel/50 px-2 py-1.5">
+            <div className="text-[9px] uppercase tracking-wider text-faint">Headshot</div>
+            <div className="text-sm font-bold tabular-nums" style={{ color: hsColor(data.overallHsPct) }}>
+              {data.overallHsPct.toFixed(0)}%
+            </div>
+          </div>
+          <div className="rounded-lg bg-panel/50 px-2 py-1.5" title="the round's first duel, won = the side went on to win the round">
+            <div className="text-[9px] uppercase tracking-wider text-faint">Opening picks</div>
+            <div className="text-sm font-bold tabular-nums text-ink">
+              {open ? `${won}/${open}` : "—"}
+              {open > 0 && <span className="ml-1 text-[10px] font-normal text-faint">{Math.round((won / open) * 100)}% won</span>}
+            </div>
+          </div>
+        </div>
+        {data.classes.length > 0 && <ClassMix data={data} />}
+        <div className="space-y-1">
+          {data.weapons.slice(0, 3).map((w) => (
+            <div key={w.key} className="flex items-center gap-2 text-[11px]">
+              <WeaponBadge w={w} size={16} />
+              <span className="truncate font-medium text-muted">{w.label}</span>
+              <span className="ml-auto shrink-0 tabular-nums text-faint">
+                {w.kills} · {w.hsPct.toFixed(0)}% HS
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="stat-label">Team gunfights · CT vs T</h3>
+        <span className="text-[10px] text-faint">who&apos;s winning the guns</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:gap-5">
+        <div className="border-r border-line pr-4 lg:pr-5">{side(ct, "CT", openings.ctOpen, openings.ctWon)}</div>
+        <div>{side(t, "T", openings.tOpen, openings.tWon)}</div>
+      </div>
+      <div className="mt-3 border-t border-line pt-2 text-[10px] text-faint">
+        Aggregated by the side each player was on that round (both halves). Opening picks = the round&apos;s first duel;
+        won = that side went on to win the round.
+      </div>
+    </div>
+  );
+}
+
 // --- main -------------------------------------------------------------------
 
 export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
   const roundSel = view.scopeRound;
   const focus = view.focusPlayer;
-  const [openPlayer, setOpenPlayer] = useState<number | null>(null);
-  useEffect(() => {
-    if (focus != null) setOpenPlayer(focus);
-  }, [focus]);
 
   // Arsenal lens (kills / deaths) + the weapon picked from it, which drives the
   // map. Both reset when the scope/side/focus changes (the kill set changed).
@@ -1085,6 +1115,28 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   const roster = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, view.side, { by: "killer", focus: null }), [meta, rounds, roundFilter, view.side]);
   const defense = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, view.side, { by: "victim", focus }), [meta, rounds, roundFilter, view.side, focus]);
   const nemesis = useMemo(() => (focus != null ? computeNemesis(meta, rounds, focus, roundFilter) : null), [meta, rounds, focus, roundFilter]);
+
+  // team gunfights — each side's fragging aggregated over the whole match
+  // (both halves), independent of the side filter so it stays a real comparison.
+  const teamCT = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, "CT", { by: "killer" }), [meta, rounds, roundFilter]);
+  const teamT = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, "T", { by: "killer" }), [meta, rounds, roundFilter]);
+  const openings = useMemo(() => {
+    let ctOpen = 0, ctWon = 0, tOpen = 0, tWon = 0;
+    rounds.forEach((r, idx) => {
+      if (roundFilter && !roundFilter(r, idx)) return;
+      let first: { t: number; k: number } | null = null;
+      for (const k of r.kills ?? []) {
+        if (k.k < 0 || k.v < 0) continue;
+        const ks = sideOf(r, k.k, meta);
+        if (ks && ks !== sideOf(r, k.v, meta) && (!first || k.t < first.t)) first = { t: k.t, k: k.k };
+      }
+      if (!first) return;
+      const s = sideOf(r, first.k, meta);
+      if (s === "CT") { ctOpen++; if (r.winner === "CT") ctWon++; }
+      else if (s === "T") { tOpen++; if (r.winner === "T") tWon++; }
+    });
+    return { ctOpen, ctWon, tOpen, tWon };
+  }, [meta, rounds, roundFilter]);
 
   // Unscoped, deaths-by-weapon exactly mirrors kills-by-weapon (every kill is
   // someone's death), so the Deaths lens and threat tile only mean something
@@ -1203,33 +1255,14 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
         />
       </div>
 
-      {/* block 2: economy ladder + roster (or head-to-head when a player is
-          focused), each getting half the page width so both read full-size */}
+      {/* block 2: economy ladder + team gunfights (or head-to-head when a
+          player is focused). Pick a player/team from the toolbar above. */}
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-3">
         <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
         {focus != null ? (
           <HeadToHead meta={meta} rounds={rounds} view={view} />
         ) : (
-          <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="stat-label">Per-player weapons</h3>
-              <span className="text-[10px] text-faint">click to expand · scopes the player</span>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {roster.players.map((p) => (
-                <PlayerCard
-                  key={p.i}
-                  p={p}
-                  open={openPlayer === p.i}
-                  onToggle={() => {
-                    const next = openPlayer === p.i ? null : p.i;
-                    setOpenPlayer(next);
-                    view.setFocusPlayer(next);
-                  }}
-                />
-              ))}
-            </div>
-          </div>
+          <TeamCompare ct={teamCT} t={teamT} openings={openings} />
         )}
       </div>
 
