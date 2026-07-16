@@ -459,8 +459,8 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
       </p>
       <div className="scroll-slim overflow-x-auto">
         <div
-          className="inline-grid gap-1 text-xs"
-          style={{ gridTemplateColumns: `2.4rem repeat(${BUY_KEYS.length}, minmax(2.6rem, 1fr)) 2.9rem` }}
+          className="grid w-full gap-1 text-xs"
+          style={{ gridTemplateColumns: `2.4rem repeat(${BUY_KEYS.length}, minmax(2.4rem, 1fr)) 2.8rem` }}
         >
           {/* header row: victim buy tiers + Σ */}
           <div className="flex items-end justify-end pr-1 text-[9px] uppercase tracking-wider text-faint">K\V</div>
@@ -855,7 +855,7 @@ function DuelMap({
         )}
       </div>
 
-      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-140">
+      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-none">
         {calibrated ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={radarImage(meta.map)} alt={`${meta.map} radar`} className="absolute inset-0 h-full w-full object-cover opacity-90" draggable={false} />
@@ -972,7 +972,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
       {duels.length === 0 ? (
         <div className="py-6 text-center text-xs text-muted">No duels in this scope.</div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="grid gap-x-6 gap-y-1.5 lg:grid-cols-2">
           {duels.map((d) => {
             const tot = d.for + d.against || 1;
             const col = teamColor(d.opp.team);
@@ -1166,10 +1166,10 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   ].filter(Boolean);
 
   return (
-    // Natural-height, page-scrolling layout (the lens pane scrolls) — so the map
-    // and per-player panels get real size instead of being squeezed into one
-    // viewport. Two blocks: Arsenal + big map on top, economy + roster below.
-    <section className="space-y-4 lg:space-y-3">
+    // Natural-height, page-scrolling layout (the lens pane scrolls). Capped +
+    // centred on very wide panes so the two columns stay evenly proportioned
+    // instead of stretching edge-to-edge. Two balanced columns fill the height.
+    <section className="space-y-4 lg:space-y-3 xl:mx-auto xl:max-w-330">
       {/* header */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand/15 text-brand">
@@ -1221,27 +1221,30 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           conversion, the pro's first scan of a match */}
       <RoundHighlights meta={meta} rounds={rounds} view={view} />
 
-      {/* main analysis — three lg columns: Arsenal · the map (hero, widest) ·
-          economy + roster/head-to-head. Plain vertical stack below lg. The
-          weapon selection cross-links the Arsenal list to the map. */}
-      {/* block 1: Arsenal + the map (the hero — big, so hotspots read clearly) */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)] lg:items-start lg:gap-3">
-        {/* arsenal — kills/deaths lens; click a weapon → plot it on the map */}
-        <Arsenal
-          offense={offense}
-          defense={defense}
-          unscoped={unscoped}
-          scopeLabel={scopeLabel}
-          lens={lens}
-          onLens={(l) => {
-            setLens(l);
-            setWeaponSel(null);
-          }}
-          selectedWeapon={weaponSel && weaponSel.mode === lens ? weaponSel.key : null}
-          onSelectWeapon={(k) => pickWeapon(k, lens)}
-        />
+      {/* main analysis — two evenly-matched columns: LEFT stacks the two
+          compact panels (Arsenal + economy ladder ≈ the map's height), RIGHT is
+          the map (hero). The team / head-to-head summary spans full width below,
+          so no column is left with dangling whitespace. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        {/* left: arsenal → economy (stacked to match the map's height) */}
+        <div className="space-y-4">
+          <Arsenal
+            offense={offense}
+            defense={defense}
+            unscoped={unscoped}
+            scopeLabel={scopeLabel}
+            lens={lens}
+            onLens={(l) => {
+              setLens(l);
+              setWeaponSel(null);
+            }}
+            selectedWeapon={weaponSel && weaponSel.mode === lens ? weaponSel.key : null}
+            onSelectWeapon={(k) => pickWeapon(k, lens)}
+          />
+          <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
+        </div>
 
-        {/* kill / death map — driven by the shared weapon selection */}
+        {/* right: the map (hero), driven by the shared weapon selection */}
         <DuelMap
           meta={meta}
           rounds={rounds}
@@ -1255,16 +1258,13 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
         />
       </div>
 
-      {/* block 2: economy ladder + team gunfights (or head-to-head when a
-          player is focused). Pick a player/team from the toolbar above. */}
-      <div className="grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-3">
-        <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
-        {focus != null ? (
-          <HeadToHead meta={meta} rounds={rounds} view={view} />
-        ) : (
-          <TeamCompare ct={teamCT} t={teamT} openings={openings} />
-        )}
-      </div>
+      {/* full-width summary: CT-vs-T gunfights, or the focused player's
+          head-to-head. Spanning both columns keeps the bottom edge even. */}
+      {focus != null ? (
+        <HeadToHead meta={meta} rounds={rounds} view={view} />
+      ) : (
+        <TeamCompare ct={teamCT} t={teamT} openings={openings} />
+      )}
 
       <p className="text-[10px] leading-relaxed text-faint">
         Derived from kill events (killer · weapon · headshot · positions) plus per-round buy values. A kill
