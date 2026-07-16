@@ -210,8 +210,8 @@ function Arsenal({
   const unit = showDeaths ? "D" : "K";
   const max = data.weapons[0]?.kills ?? 1;
   return (
-    <div className="card-2 px-5 py-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
+    <div className="card-2 px-5 py-4 lg:flex lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="stat-label">Arsenal</h3>
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
           <button
@@ -234,19 +234,19 @@ function Arsenal({
           </button>
         </div>
       </div>
-      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-faint lg:shrink-0">
+      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-faint">
         <span className="truncate">
           {showDeaths ? `what kills ${scopeLabel}` : `${scopeLabel} kills by weapon`}
         </span>
         <span className="shrink-0 text-brand/70">click a weapon → map</span>
       </div>
       {data.weapons.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted lg:my-auto">
+        <div className="py-6 text-center text-xs text-muted">
           No {showDeaths ? "deaths" : "kills"} in this scope.
         </div>
       ) : (
         <>
-          <div className="scroll-slim space-y-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+          <div className="space-y-1">
             {data.weapons.slice(0, 9).map((w) => (
               <WeaponRow
                 key={w.key}
@@ -258,7 +258,7 @@ function Arsenal({
               />
             ))}
           </div>
-          <div className="mt-3 border-t border-line pt-3 lg:shrink-0">
+          <div className="mt-3 border-t border-line pt-3">
             <div className="mb-2 flex items-center justify-between">
               <div className="stat-label">Class mix</div>
               <span className="text-[9px] text-faint">bar: bright = headshots</span>
@@ -447,16 +447,16 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
   const upsetPct = m.total ? (m.upset / m.total) * 100 : 0;
 
   return (
-    <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 lg:shrink-0">
+    <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h3 className="stat-label">Economy ladder · killer buy vs victim buy</h3>
         <span className="text-[10px] text-faint">cell = kills · green ring = punching up</span>
       </div>
-      <p className="mb-3 text-xs text-muted lg:mb-2 lg:shrink-0">
+      <p className="mb-3 text-xs text-muted lg:mb-2">
         <span className="font-bold text-good">{m.upset}</span> upset frags ({upsetPct.toFixed(0)}%) — killing an
         equal-or-richer enemy while on the weaker buy.
       </p>
-      <div className="scroll-slim overflow-x-auto lg:min-h-0 lg:overflow-y-auto">
+      <div className="scroll-slim overflow-x-auto">
         <div
           className="inline-grid gap-1 text-[11px]"
           style={{ gridTemplateColumns: `auto repeat(${BUY_KEYS.length}, 2.4rem)` }}
@@ -472,7 +472,7 @@ function BuyMatrixCard({ meta, rounds, view }: { meta: ReplayMeta; rounds: Repla
           ))}
         </div>
       </div>
-      <div className="mt-2 text-[10px] text-faint lg:shrink-0">
+      <div className="mt-2 text-[10px] text-faint">
         Rows = killer&apos;s buy, columns = victim&apos;s buy. Cells above the diagonal = the killer was on a
         cheaper buy than who they killed.
       </div>
@@ -518,7 +518,7 @@ function BuyRow({
   );
 }
 
-// --- kill / death map (toggle + weapon-class filter + angle line) -----------
+// --- kill / death map (marks/heat · weapon-class · phase + HS filters) -------
 
 const CLASS_CHIPS: { key: WeaponClass | "all"; label: string; color: string }[] = [
   { key: "all", label: "All", color: "var(--color-muted)" },
@@ -527,6 +527,13 @@ const CLASS_CHIPS: { key: WeaponClass | "all"; label: string; color: string }[] 
   { key: "smg", label: "SMGs", color: "#8a7dff" },
   { key: "pistol", label: "Pistols", color: "#f5b942" },
   { key: "heavy", label: "Heavy", color: "#9bb0c8" },
+];
+
+type MapPhase = "any" | "opening" | "postplant";
+const PHASES: { key: MapPhase; label: string; title: string }[] = [
+  { key: "any", label: "Any time", title: "Every kill in the scope" },
+  { key: "opening", label: "Opening", title: "Only the round's first duel (the opening pick)" },
+  { key: "postplant", label: "Post-plant", title: "Only kills after the bomb was planted" },
 ];
 
 function DuelMap({
@@ -547,6 +554,9 @@ function DuelMap({
   const [mode, setMode] = useState<"kills" | "deaths">("kills");
   const [cls, setCls] = useState<WeaponClass | "all">("all");
   const [angle, setAngle] = useState(false);
+  const [render, setRender] = useState<"marks" | "heat">("marks");
+  const [phase, setPhase] = useState<MapPhase>("any");
+  const [hsOnly, setHsOnly] = useState(false);
 
   // a weapon picked from the kill/death panels drives the map (its own mode);
   // otherwise the map uses its local mode + class-chip filter.
@@ -556,7 +566,16 @@ function DuelMap({
     const scoped = view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
     const out: { vx: number; vy: number; kx: number | null; ky: number | null; color: string }[] = [];
     for (const r of scoped) {
-      for (const k of r.kills ?? []) {
+      const kills = r.kills ?? [];
+      // opening kill = earliest enemy kill of the round (first blood)
+      let openT = Infinity;
+      for (const k of kills) {
+        if (k.k < 0 || k.v < 0) continue;
+        const ks = sideOf(r, k.k, meta);
+        if (ks && ks !== sideOf(r, k.v, meta) && k.t < openT) openT = k.t;
+      }
+      const plantT = (r.bomb ?? []).find((b) => b.k === "plant")?.t ?? null;
+      for (const k of kills) {
         if (k.k < 0) continue;
         const subj = activeMode === "kills" ? k.k : k.v;
         if (subj < 0) continue;
@@ -566,6 +585,9 @@ function DuelMap({
         if (weaponSel) {
           if (wm.key !== weaponSel.key) continue;
         } else if (cls !== "all" && wm.cls !== cls) continue;
+        if (hsOnly && !k.hs) continue;
+        if (phase === "opening" && k.t !== openT) continue;
+        if (phase === "postplant" && (plantT == null || k.t < plantT)) continue;
         const v = proj.project(k.vx, k.vy);
         if (!v) continue;
         const kp = proj.project(k.kx, k.ky);
@@ -573,14 +595,17 @@ function DuelMap({
       }
     }
     return out;
-  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel]);
+  }, [meta, rounds, proj, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, hsOnly]);
 
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
+  const heatColor =
+    weaponSel?.color ?? (cls !== "all" ? CLASS_CHIPS.find((c) => c.key === cls)?.color ?? "#ff7a45" : "#ff7a45");
+  const filterNote = [phase !== "any" ? PHASES.find((p) => p.key === phase)?.label.toLowerCase() : null, hsOnly ? "HS" : null].filter(Boolean).join(" · ");
 
   return (
-    // at lg+ the card is a size container: the square radar below takes
-    // min(width, height − controls/footnote) so the whole card fits the pane
-    <div className="card-2 p-3 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:@container-size">
+    // natural height — the map is a big fixed square so hotspots read clearly;
+    // the page scrolls rather than squeezing the radar into the viewport
+    <div className="card-2 p-3 lg:flex lg:min-w-0 lg:flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2 lg:shrink-0">
         <span className="stat-label">{activeMode === "kills" ? "Kill positions" : "Death positions"}</span>
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
@@ -601,17 +626,35 @@ function DuelMap({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setAngle((a) => !a)}
-          aria-pressed={angle}
-          title="Show the shot angle line on each marker"
-          className={`rounded-md border px-2 py-0.5 text-[11px] transition ${
-            angle ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
-          }`}
-        >
-          angle line
-        </button>
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
+          {(["marks", "heat"] as const).map((rr) => (
+            <button
+              key={rr}
+              type="button"
+              onClick={() => setRender(rr)}
+              aria-pressed={render === rr}
+              title={rr === "heat" ? "Density heatmap — brighter = more kills here" : "Individual ✕ markers"}
+              className={`rounded-md px-2 py-0.5 font-medium capitalize transition ${
+                render === rr ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+              }`}
+            >
+              {rr}
+            </button>
+          ))}
+        </div>
+        {render === "marks" && (
+          <button
+            type="button"
+            onClick={() => setAngle((a) => !a)}
+            aria-pressed={angle}
+            title="Show the shot angle line on each marker"
+            className={`rounded-md border px-2 py-0.5 text-[11px] transition ${
+              angle ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
+            }`}
+          >
+            angle line
+          </button>
+        )}
         <span className="ml-auto text-[10px] text-faint">
           {marks.length} {activeMode} · {focusName ? focusName : view.side !== "all" ? `${view.side} side` : "match"}
         </span>
@@ -653,7 +696,38 @@ function DuelMap({
         </div>
       )}
 
-      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:my-auto lg:w-[min(100cqw,calc(100cqh-150px))] lg:max-w-none lg:shrink-0">
+      {/* phase + headshot filters — compose with everything above */}
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 lg:shrink-0">
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[10px]">
+          {PHASES.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setPhase(p.key)}
+              aria-pressed={phase === p.key}
+              title={p.title}
+              className={`rounded-md px-1.5 py-0.5 font-medium transition ${
+                phase === p.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setHsOnly((h) => !h)}
+          aria-pressed={hsOnly}
+          title="Headshot kills only"
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+            hsOnly ? "border-bad/50 bg-bad/15 text-bad" : "border-line text-muted hover:text-ink"
+          }`}
+        >
+          HS only
+        </button>
+      </div>
+
+      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-140">
         {calibrated ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={radarImage(meta.map)} alt={`${meta.map} radar`} className="absolute inset-0 h-full w-full object-cover opacity-90" draggable={false} />
@@ -661,22 +735,38 @@ function DuelMap({
           <div className="absolute inset-0 bg-[#0a1020]" />
         )}
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-          {angle &&
-            marks.map((mk, i) =>
-              mk.kx != null && mk.ky != null ? (
-                <line key={`l${i}`} x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.25} opacity={0.4} />
-              ) : null,
-            )}
-          {marks.map((mk, i) => (
-            <g key={i} stroke={mk.color} strokeWidth={0.55} strokeLinecap="round">
-              <line x1={mk.vx - 1.2} y1={mk.vy - 1.2} x2={mk.vx + 1.2} y2={mk.vy + 1.2} />
-              <line x1={mk.vx + 1.2} y1={mk.vy - 1.2} x2={mk.vx - 1.2} y2={mk.vy + 1.2} />
+          <defs>
+            <filter id="wxHeatBlur" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="2.3" />
+            </filter>
+          </defs>
+          {render === "heat" ? (
+            // overlapping blurred blobs, screen-blended so hotspots glow brighter
+            <g filter="url(#wxHeatBlur)" style={{ mixBlendMode: "screen" }}>
+              {marks.map((mk, i) => (
+                <circle key={i} cx={mk.vx} cy={mk.vy} r={3.4} fill={heatColor} opacity={0.32} />
+              ))}
             </g>
-          ))}
+          ) : (
+            <>
+              {angle &&
+                marks.map((mk, i) =>
+                  mk.kx != null && mk.ky != null ? (
+                    <line key={`l${i}`} x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.25} opacity={0.4} />
+                  ) : null,
+                )}
+              {marks.map((mk, i) => (
+                <g key={i} stroke={mk.color} strokeWidth={0.55} strokeLinecap="round">
+                  <line x1={mk.vx - 1.2} y1={mk.vy - 1.2} x2={mk.vx + 1.2} y2={mk.vy + 1.2} />
+                  <line x1={mk.vx + 1.2} y1={mk.vy - 1.2} x2={mk.vx - 1.2} y2={mk.vy + 1.2} />
+                </g>
+              ))}
+            </>
+          )}
         </svg>
         {marks.length === 0 && (
           <div className="absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted">
-            No {activeMode} for the current filter.
+            No {activeMode} for the current filter{filterNote ? ` (${filterNote})` : ""}.
           </div>
         )}
         {!calibrated && (
@@ -686,7 +776,10 @@ function DuelMap({
         )}
       </div>
       <div className="mt-2 text-[10px] text-faint lg:shrink-0">
-        ✕ at the victim&apos;s spot, coloured by weapon. {activeMode === "deaths" ? "Where the scoped player/side dies" : "Where the scoped player/side gets kills"} — toggle the angle line for the shot direction. Click a weapon in the kills/deaths lists to isolate it.
+        {render === "heat"
+          ? `Density heatmap — brighter clusters = more ${activeMode} here${weaponSel ? ` with the ${weaponSel.label}` : ""}. `
+          : `✕ at the victim's spot, coloured by weapon. `}
+        Filter by phase (opening pick / post-plant) or headshots, and click a weapon in the Arsenal to isolate it.
       </div>
     </div>
   );
@@ -763,15 +856,15 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
   if (focus == null) return null;
 
   return (
-    <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
-      <div className="mb-2 flex items-center justify-between gap-2 lg:shrink-0">
+    <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="stat-label">Head-to-head · {focusName}</h3>
         <span className="text-[10px] text-faint">click to switch player</span>
       </div>
       {duels.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted lg:my-auto">No duels in this scope.</div>
+        <div className="py-6 text-center text-xs text-muted">No duels in this scope.</div>
       ) : (
-        <div className="scroll-slim space-y-1.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+        <div className="space-y-1.5">
           {duels.map((d) => {
             const tot = d.for + d.against || 1;
             const col = teamColor(d.opp.team);
@@ -805,7 +898,7 @@ function HeadToHead({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRo
           })}
         </div>
       )}
-      <div className="mt-2 text-[10px] text-faint lg:shrink-0">
+      <div className="mt-2 text-[10px] text-faint">
         <span className="text-good">green</span> = {focusName}&apos;s kills, <span className="text-bad">red</span> = deaths to them. Spans the whole match (duels cross sides).
       </div>
     </div>
@@ -873,9 +966,12 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   ].filter(Boolean);
 
   return (
-    <section className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-3 lg:space-y-0">
+    // Natural-height, page-scrolling layout (the lens pane scrolls) — so the map
+    // and per-player panels get real size instead of being squeezed into one
+    // viewport. Two blocks: Arsenal + big map on top, economy + roster below.
+    <section className="space-y-4 lg:space-y-3">
       {/* header */}
-      <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand/15 text-brand">
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <circle cx="12" cy="12" r="8" />
@@ -891,7 +987,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       </div>
 
       {/* dual headline strip: offense + threat */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:shrink-0 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills · ${offense.topWeapon.hsPct.toFixed(0)}% HS` : undefined} hex={offense.topWeapon?.color} weapon={offense.topWeapon} />
         <StatPill tone="offense" label="Headshot rate" value={`${offense.overallHsPct.toFixed(0)}%`} hint={`${offense.totalHeadshots}/${offense.totalKills} kills`} hex={hsColor(offense.overallHsPct)} />
         <StatPill
@@ -928,7 +1024,8 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       {/* main analysis — three lg columns: Arsenal · the map (hero, widest) ·
           economy + roster/head-to-head. Plain vertical stack below lg. The
           weapon selection cross-links the Arsenal list to the map. */}
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(240px,0.92fr)_minmax(0,1.6fr)_minmax(300px,1.05fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3">
+      {/* block 1: Arsenal + the map (the hero — big, so hotspots read clearly) */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)] lg:items-start lg:gap-3">
         {/* arsenal — kills/deaths lens; click a weapon → plot it on the map */}
         <Arsenal
           offense={offense}
@@ -944,7 +1041,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           onSelectWeapon={(k) => pickWeapon(k, lens)}
         />
 
-        {/* kill / death map — the hero. Driven by the shared weapon selection */}
+        {/* kill / death map — driven by the shared weapon selection */}
         <DuelMap
           meta={meta}
           rounds={rounds}
@@ -956,38 +1053,39 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           }
           onClearWeapon={() => setWeaponSel(null)}
         />
-
-        {/* economy ladder (natural height) + roster or head-to-head (fills, scrolls) */}
-        <div className="grid gap-4 lg:flex lg:h-full lg:min-h-0 lg:min-w-0 lg:flex-col lg:gap-3">
-          <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
-          {focus != null ? (
-            <HeadToHead meta={meta} rounds={rounds} view={view} />
-          ) : (
-            <div className="card-2 px-5 py-4 lg:flex lg:min-h-0 lg:min-w-0 lg:flex-1 lg:flex-col lg:px-4 lg:py-3">
-              <div className="mb-2 flex items-center justify-between lg:shrink-0">
-                <h3 className="stat-label">Per-player weapons</h3>
-                <span className="text-[10px] text-faint">click to expand · scopes the player</span>
-              </div>
-              <div className="scroll-slim grid gap-2 lg:min-h-0 lg:flex-1 lg:content-start lg:overflow-y-auto lg:pr-1">
-                {roster.players.map((p) => (
-                  <PlayerCard
-                    key={p.i}
-                    p={p}
-                    open={openPlayer === p.i}
-                    onToggle={() => {
-                      const next = openPlayer === p.i ? null : p.i;
-                      setOpenPlayer(next);
-                      view.setFocusPlayer(next);
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
-      <p className="text-[10px] leading-relaxed text-faint lg:shrink-0">
+      {/* block 2: economy ladder + roster (or head-to-head when a player is
+          focused), each getting half the page width so both read full-size */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-3">
+        <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
+        {focus != null ? (
+          <HeadToHead meta={meta} rounds={rounds} view={view} />
+        ) : (
+          <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="stat-label">Per-player weapons</h3>
+              <span className="text-[10px] text-faint">click to expand · scopes the player</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {roster.players.map((p) => (
+                <PlayerCard
+                  key={p.i}
+                  p={p}
+                  open={openPlayer === p.i}
+                  onToggle={() => {
+                    const next = openPlayer === p.i ? null : p.i;
+                    setOpenPlayer(next);
+                    view.setFocusPlayer(next);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-[10px] leading-relaxed text-faint">
         Derived from kill events (killer · weapon · headshot · positions) plus per-round buy values. A kill
         records only the killer&apos;s weapon, so the Deaths lens means what killed a player, never their own gun.
         Click any weapon to plot exactly those kills on the map. The economy ladder needs per-round buy data
