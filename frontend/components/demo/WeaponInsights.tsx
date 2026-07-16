@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
@@ -666,6 +666,90 @@ function DuelMap({
     setTradedOnly(false);
     onClearWeapon();
   };
+
+  // --- pan / zoom / fullscreen -----------------------------------------------
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [full, setFull] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  zoomRef.current = zoom;
+  panRef.current = pan;
+
+  const clampZoom = (z: number) => Math.min(6, Math.max(1, z));
+  // keep the (origin-top-left, scaled) content covering the box so panning never
+  // reveals dead space: x/y ∈ [-(z-1)*size, 0].
+  const clampPan = (p: { x: number; y: number }, z: number, s: number) => {
+    const min = -(z - 1) * s;
+    return { x: Math.max(min, Math.min(0, p.x)), y: Math.max(min, Math.min(0, p.y)) };
+  };
+  const zoomBy = (factor: number) => {
+    const s = boxRef.current?.getBoundingClientRect().width ?? 0;
+    const nz = clampZoom(zoom * factor);
+    const k = nz / zoom;
+    const c = s / 2; // zoom toward the centre for the buttons
+    setPan(clampPan({ x: c - (c - pan.x) * k, y: c - (c - pan.y) * k }, nz, s));
+    setZoom(nz);
+  };
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+  const onDown = (e: React.PointerEvent) => {
+    if (zoom <= 1) return;
+    dragRef.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const s = boxRef.current?.getBoundingClientRect().width ?? 0;
+    setPan(clampPan({ x: dragRef.current.px + (e.clientX - dragRef.current.x), y: dragRef.current.py + (e.clientY - dragRef.current.y) }, zoom, s));
+  };
+  const onUp = () => {
+    dragRef.current = null;
+  };
+
+  // wheel zoom toward the cursor (native, non-passive so we can preventDefault)
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // inline, only zoom on Ctrl/⌘+scroll so the page can still scroll past the
+      // map; fullscreen zooms on any scroll.
+      if (!full && !e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const box = el.getBoundingClientRect();
+      const cx = e.clientX - box.left;
+      const cy = e.clientY - box.top;
+      const z = zoomRef.current;
+      const p = panRef.current;
+      const nz = clampZoom(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+      if (nz === z) return;
+      const k = nz / z;
+      setPan(clampPan({ x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }, nz, box.width));
+      setZoom(nz);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [full]);
+
+  // Escape exits fullscreen; lock body scroll while fullscreen
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [full]);
+
   const focusName = view.focusPlayer != null ? meta.players[view.focusPlayer]?.name : null;
   const heatColor =
     weaponSel?.color ?? (cls !== "all" ? CLASS_CHIPS.find((c) => c.key === cls)?.color ?? "#ff7a45" : "#ff7a45");
@@ -678,9 +762,16 @@ function DuelMap({
   ].filter(Boolean).join(" · ");
 
   return (
-    // natural height — the map is a big fixed square so hotspots read clearly;
-    // the page scrolls rather than squeezing the radar into the viewport
-    <div className="card-2 p-3 lg:flex lg:min-w-0 lg:flex-col">
+    // Inline: a natural-height card. Fullscreen: a fixed overlay filling the
+    // viewport, with the same controls and a height-filled square map. Scroll to
+    // zoom (toward the cursor), drag to pan, double-click to toggle zoom.
+    <div
+      className={
+        full
+          ? "fixed inset-0 z-50 flex flex-col gap-2 bg-bg/95 p-3 backdrop-blur-sm sm:p-4"
+          : "card-2 p-3 lg:flex lg:min-w-0 lg:flex-col"
+      }
+    >
       <div className="mb-2 flex flex-wrap items-center gap-2 lg:shrink-0">
         <span className="stat-label">{activeMode === "kills" ? "Kill positions" : "Death positions"}</span>
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[11px]">
@@ -855,56 +946,101 @@ function DuelMap({
         )}
       </div>
 
-      <div className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel2 lg:max-w-none">
-        {calibrated ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={radarImage(meta.map)} alt={`${meta.map} radar`} className="absolute inset-0 h-full w-full object-cover opacity-90" draggable={false} />
-        ) : (
-          <div className="absolute inset-0 bg-[#0a1020]" />
-        )}
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-          <defs>
-            <filter id="wxHeatBlur" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="2.3" />
-            </filter>
-          </defs>
-          {render === "heat" ? (
-            // overlapping blurred blobs, screen-blended so hotspots glow brighter
-            <g filter="url(#wxHeatBlur)" style={{ mixBlendMode: "screen" }}>
-              {marks.map((mk, i) => (
-                <circle key={i} cx={mk.vx} cy={mk.vy} r={3.4} fill={heatColor} opacity={0.32} />
-              ))}
-            </g>
+      <div className={full ? "flex min-h-0 flex-1 items-center justify-center" : "contents"}>
+      <div
+        ref={boxRef}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerLeave={onUp}
+        onDoubleClick={() => (zoom > 1 ? resetView() : zoomBy(1.8))}
+        className={`relative select-none touch-none overflow-hidden rounded-xl border border-line bg-panel2 ${
+          zoom > 1 ? (dragRef.current ? "cursor-grabbing" : "cursor-grab") : ""
+        } ${full ? "mx-auto aspect-square h-full max-h-full w-auto max-w-full" : "mx-auto aspect-square w-full max-w-xl lg:max-w-none"}`}
+      >
+        {/* pan/zoom transform layer — radar + marks move & scale together */}
+        <div className="absolute inset-0 origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+          {calibrated ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={radarImage(meta.map)} alt={`${meta.map} radar`} className="absolute inset-0 h-full w-full object-cover opacity-90" draggable={false} />
           ) : (
-            <>
-              {angle &&
-                marks.map((mk, i) =>
-                  mk.kx != null && mk.ky != null ? (
-                    // engagement line: shooter dot (•) → victim (✕). The dot marks
-                    // WHERE the shot came from so the direction is unambiguous.
-                    <g key={`l${i}`}>
-                      <line x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.28} opacity={0.5} />
-                      <circle cx={mk.kx} cy={mk.ky} r={0.75} fill={mk.color} opacity={0.85} />
-                    </g>
-                  ) : null,
-                )}
-              {marks.map((mk, i) => (
-                <g key={i} stroke={mk.color} strokeWidth={0.55} strokeLinecap="round">
-                  <line x1={mk.vx - 1.2} y1={mk.vy - 1.2} x2={mk.vx + 1.2} y2={mk.vy + 1.2} />
-                  <line x1={mk.vx + 1.2} y1={mk.vy - 1.2} x2={mk.vx - 1.2} y2={mk.vy + 1.2} />
-                </g>
-              ))}
-            </>
+            <div className="absolute inset-0 bg-[#0a1020]" />
           )}
-        </svg>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+            <defs>
+              <filter id="wxHeatBlur" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="2.3" />
+              </filter>
+            </defs>
+            {render === "heat" ? (
+              // overlapping blurred blobs, screen-blended so hotspots glow brighter
+              <g filter="url(#wxHeatBlur)" style={{ mixBlendMode: "screen" }}>
+                {marks.map((mk, i) => (
+                  <circle key={i} cx={mk.vx} cy={mk.vy} r={3.4} fill={heatColor} opacity={0.32} />
+                ))}
+              </g>
+            ) : (
+              <>
+                {angle &&
+                  marks.map((mk, i) =>
+                    mk.kx != null && mk.ky != null ? (
+                      // engagement line: shooter dot (•) → victim (✕). The dot marks
+                      // WHERE the shot came from so the direction is unambiguous.
+                      <g key={`l${i}`}>
+                        <line x1={mk.kx} y1={mk.ky} x2={mk.vx} y2={mk.vy} stroke={mk.color} strokeWidth={0.28} opacity={0.5} />
+                        <circle cx={mk.kx} cy={mk.ky} r={0.75} fill={mk.color} opacity={0.85} />
+                      </g>
+                    ) : null,
+                  )}
+                {marks.map((mk, i) => (
+                  <g key={i} stroke={mk.color} strokeWidth={0.55} strokeLinecap="round">
+                    <line x1={mk.vx - 1.2} y1={mk.vy - 1.2} x2={mk.vx + 1.2} y2={mk.vy + 1.2} />
+                    <line x1={mk.vx + 1.2} y1={mk.vy - 1.2} x2={mk.vx - 1.2} y2={mk.vy + 1.2} />
+                  </g>
+                ))}
+              </>
+            )}
+          </svg>
+        </div>
+
+        {/* zoom / fullscreen controls — pinned to the corner, never transformed.
+            stopPropagation so a button press never starts a map pan/zoom drag
+            (which would capture the pointer and swallow the click). */}
+        <div
+          className="absolute right-2 top-2 z-10 flex flex-col gap-1"
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onClick={() => zoomBy(1.35)} title={full ? "Zoom in (scroll)" : "Zoom in (Ctrl+scroll)"} aria-label="Zoom in" className="grid h-7 w-7 place-items-center rounded-md bg-black/55 text-base leading-none text-ink backdrop-blur transition hover:bg-black/75">+</button>
+          <button type="button" onClick={() => zoomBy(1 / 1.35)} title={full ? "Zoom out (scroll)" : "Zoom out (Ctrl+scroll)"} aria-label="Zoom out" className="grid h-7 w-7 place-items-center rounded-md bg-black/55 text-base leading-none text-ink backdrop-blur transition hover:bg-black/75">−</button>
+          {(zoom > 1 || pan.x !== 0 || pan.y !== 0) && (
+            <button type="button" onClick={resetView} title="Reset zoom" aria-label="Reset zoom" className="grid h-7 w-7 place-items-center rounded-md bg-black/55 text-xs leading-none text-ink backdrop-blur transition hover:bg-black/75">⟲</button>
+          )}
+          <button
+            type="button"
+            onClick={() => setFull((f) => !f)}
+            title={full ? "Exit fullscreen (Esc)" : "Fullscreen"}
+            aria-label={full ? "Exit fullscreen" : "Fullscreen"}
+            className="grid h-7 w-7 place-items-center rounded-md bg-black/55 text-xs leading-none text-ink backdrop-blur transition hover:bg-black/75"
+          >
+            {full ? "✕" : "⛶"}
+          </button>
+        </div>
+
+        {zoom > 1 && (
+          <div className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] tabular-nums text-ink backdrop-blur">
+            {zoom.toFixed(1)}× · drag to pan
+          </div>
+        )}
+
         {marks.length === 0 && (
-          <div className="absolute inset-0 grid place-items-center gap-2 px-4 text-center text-xs text-muted">
+          <div className="pointer-events-none absolute inset-0 grid place-items-center gap-2 px-4 text-center text-xs text-muted">
             <span>No {activeMode} for the current filter{filterNote ? ` (${filterNote})` : ""}.</span>
             {(anyFilter || weaponSel) && (
               <button
                 type="button"
                 onClick={resetFilters}
-                className="rounded-full border border-brand/50 bg-brand/10 px-3 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
+                className="pointer-events-auto rounded-full border border-brand/50 bg-brand/10 px-3 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
               >
                 ⟲ Clear filters
               </button>
@@ -916,6 +1052,7 @@ function DuelMap({
             {meta.map} uncalibrated — auto-scaled
           </div>
         )}
+      </div>
       </div>
 
       {/* top named callouts for the current filtered set — where these
@@ -940,6 +1077,7 @@ function DuelMap({
           ? `Density heatmap — brighter clusters = more ${activeMode} here${weaponSel ? ` with the ${weaponSel.label}` : ""}. `
           : `✕ = the victim's spot, coloured by weapon${angle ? "; the angle line runs from the shooter (•) to the victim" : " — toggle the angle line for the shot direction"}. `}
         Filter by phase (opening / post-plant), buy tier, range, headshots, or trades, and click a weapon in the Arsenal to isolate it.
+        {" "}Zoom with +/− (or Ctrl+scroll), drag to pan, ⛶ for fullscreen.
       </div>
     </div>
   );
