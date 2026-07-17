@@ -16,3 +16,8 @@ export const GOVERNING_LAW = "the United States";
 
 // Shown as "Last updated" on both legal pages.
 export const LEGAL_LAST_UPDATED = "June 25, 2026";
+
+// Google AdSense publisher ID (public — it ships in every page + /ads.txt). The
+// loader is added to <head> in prod; ad cookies are gated by Google Consent Mode
+// (default denied) until the visitor picks "Accept all". Empty = no ad code.
+export const ADSENSE_CLIENT = "ca-pub-3939177354565750";
