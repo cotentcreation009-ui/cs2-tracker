@@ -16,8 +16,21 @@ import {
   CookieConsent,
   CookieSettingsButton,
 } from "@/components/CookieConsent";
+import { ConsentModeSync } from "@/components/ConsentModeSync";
+import { ADSENSE_CLIENT } from "@/lib/site";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+
+// Google AdSense loads in production only (keeps dev + the seeded-browser tests
+// clean). Ad cookies stay off until "Accept all" via Consent Mode — see below.
+const adsenseClient = process.env.NODE_ENV === "production" ? ADSENSE_CLIENT : "";
+
+// Consent Mode v2 defaults: deny every ad/analytics signal until the visitor
+// opts in (ConsentModeSync flips them). Must run before the AdSense loader.
+const consentDefaultJs =
+  "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}" +
+  "gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied'," +
+  "ad_personalization:'denied',analytics_storage:'denied',wait_for_update:500});";
 
 // Cloudflare Web Analytics beacon token. Set CF_BEACON_TOKEN in .env (from the
 // Cloudflare dashboard → Web Analytics). Read at runtime like SITE_URL, so a
@@ -44,7 +57,22 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        {adsenseClient ? (
+          <>
+            {/* Consent Mode defaults (denied) — runs before the AdSense loader */}
+            <script dangerouslySetInnerHTML={{ __html: consentDefaultJs }} />
+            {/* AdSense loader — required in <head> for verification + serving */}
+            <script
+              async
+              src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
+              crossOrigin="anonymous"
+            />
+          </>
+        ) : null}
+      </head>
       <body className="min-h-screen overflow-x-clip">
+        <ConsentModeSync />
         <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
           <div className="mx-auto flex max-w-[1800px] items-center gap-3 px-4 py-2.5 sm:gap-6 lg:px-8">
             <Link
