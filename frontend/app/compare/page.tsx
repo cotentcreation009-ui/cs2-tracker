@@ -35,13 +35,25 @@ export async function generateMetadata({
   searchParams: Promise<SP>;
 }): Promise<Metadata> {
   const ids = parseIds(await searchParams);
+  // Every variant canonicalises to the clean /compare URL: the ?ids= permutations
+  // are user-built combinations with no search value, and letting Google index
+  // them would bloat the index with near-duplicates.
+  const alternates = { canonical: "/compare" };
   if (ids.length >= 2) {
     const title = `Compare ${ids.length} players — StatRun`;
     const description =
       "Side-by-side CS2 comparison: Leetify rating, ranks, win rate, aim, utility and more.";
-    return { title, description, openGraph: { title, description }, twitter: { card: "summary" } };
+    return { title, description, alternates, openGraph: { title, description }, twitter: { card: "summary" } };
   }
-  return { title: "Compare players — StatRun" };
+  const title = "Compare CS2 players side by side — StatRun";
+  const description =
+    "Compare up to 6 Counter-Strike 2 players at once: Leetify rating, FACEIT level & ELO, Premier rank, win rate, aim, opening duels and utility — all side by side.";
+  return {
+    title,
+    description,
+    alternates,
+    openGraph: { title, description, url: "/compare", type: "website" },
+  };
 }
 
 export default async function ComparePage({
