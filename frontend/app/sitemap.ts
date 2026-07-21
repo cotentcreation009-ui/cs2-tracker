@@ -17,6 +17,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     { url: `${siteUrl}/`, changeFrequency: "daily" as const, priority: 1 },
+    // The demo analyser landing — a flagship tool page, so it ranks just under
+    // the homepage. (Its /demos/* sub-routes are per-visitor local views and are
+    // noindex, so only this entry belongs in the sitemap.)
+    { url: `${siteUrl}/demos`, changeFrequency: "weekly" as const, priority: 0.9 },
     { url: `${siteUrl}/about`, changeFrequency: "monthly" as const, priority: 0.6 },
     { url: `${siteUrl}/guides`, changeFrequency: "weekly" as const, priority: 0.6 },
     ...GUIDES.map((g) => ({
