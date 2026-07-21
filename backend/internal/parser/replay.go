@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/golang/geo/r3"
 	dem "github.com/markus-wa/demoinfocs-golang/v5/pkg/demoinfocs"
@@ -66,7 +67,17 @@ type ReplayRound struct {
 	Kills     []ReplayKill       `json:"kills"`
 	Nades     []ReplayNade       `json:"nades"`
 	Bomb      []ReplayBomb       `json:"bomb"`
+	Chat      []ReplayChat       `json:"chat,omitempty"` // in-game chat sent during the round
 	Stats     []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
+}
+
+// ReplayChat is one in-game chat message. GOTV demos generally record only
+// all-chat; team chat is usually absent from the demo itself.
+type ReplayChat struct {
+	T    float64 `json:"t"`
+	By   int     `json:"by"` // player index, -1 if unknown
+	Text string  `json:"x"`
+	All  bool    `json:"all,omitempty"` // said to everyone (vs team chat, when present)
 }
 
 // ReplayPlayerStat carries the per-player, per-round aggregates that need event
@@ -224,6 +235,7 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onPlayerHurt)
 	p.RegisterEventHandler(rc.onPlayerFlashed)
 	p.RegisterEventHandler(rc.onWeaponFire)
+	p.RegisterEventHandler(rc.onChat)
 	p.RegisterEventHandler(rc.onItemDrop)
 	p.RegisterEventHandler(rc.onItemPickup)
 
@@ -1131,6 +1143,27 @@ func buyType(equip, roundNum int) string {
 	default:
 		return "full"
 	}
+}
+
+// onChat records in-game chat messages into the current round's timeline.
+func (rc *replayCollector) onChat(e events.ChatMessage) {
+	if rc.cur == nil {
+		return
+	}
+	txt := strings.TrimSpace(e.Text)
+	if txt == "" {
+		return
+	}
+	// guard runaway strings (pasted walls, exploit spam) — chat lines are short
+	if len(txt) > 200 {
+		txt = txt[:200]
+	}
+	rc.cur.Chat = append(rc.cur.Chat, ReplayChat{
+		T:    round2(rc.rt()),
+		By:   rc.playerIndex(e.Sender),
+		Text: txt,
+		All:  e.IsChatAll,
+	})
 }
 
 func i32(v float64) int32 { return int32(math.Round(v)) }

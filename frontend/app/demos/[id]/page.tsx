@@ -169,6 +169,82 @@ function CopyTickButton({ tick, killer }: { tick: number; killer: string }) {
   );
 }
 
+// Full-match chat log — every in-game message, grouped by round; clicking a
+// row jumps the replay there. GOTV demos generally record only all-chat.
+function ChatLog({
+  rounds,
+  meta,
+  onJump,
+  onClose,
+}: {
+  rounds: ReplayRound[];
+  meta: ReplayMeta;
+  onJump: (roundIndex: number, t: number, player: number | null) => void;
+  onClose: () => void;
+}) {
+  const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
+  const total = rounds.reduce((s, r) => s + (r.chat?.length ?? 0), 0);
+  return (
+    <div
+      className="modal-backdrop-in fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="In-game chat"
+        onMouseDown={(e) => e.stopPropagation()}
+        className="modal-pop flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-line bg-bg shadow-2xl"
+      >
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel/50 px-4 py-3">
+          <span className="text-sm font-semibold uppercase tracking-wider text-muted">
+            💬 In-game chat <span className="normal-case text-faint">· {total} message{total === 1 ? "" : "s"} · click one to jump there</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-panel2 text-muted transition hover:border-brand/60 hover:text-ink"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="scroll-slim overflow-y-auto p-3 sm:p-4">
+          {rounds.map((r, ri) =>
+            r.chat?.length ? (
+              <div key={ri} className="mb-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-faint">Round {r.n}</div>
+                <div className="space-y-0.5">
+                  {r.chat.map((c, i) => {
+                    const side = r.ct?.includes(c.by) ? "CT" : r.t?.includes(c.by) ? "T" : "";
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => onJump(ri, c.t, c.by >= 0 ? c.by : null)}
+                        title={`Jump to R${r.n} ${mmss(c.t)}`}
+                        className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs transition hover:bg-panel/60"
+                      >
+                        <span className="w-8 shrink-0 tabular-nums text-[10px] text-faint">{mmss(c.t)}</span>
+                        <span className="shrink-0 font-semibold" style={{ color: side === "T" ? T : side === "CT" ? CT : "#8a93a5" }}>
+                          {c.by >= 0 ? name(c.by) : "?"}
+                        </span>
+                        {!c.all && <span className="shrink-0 rounded bg-panel px-1 text-[9px] text-faint" title="team chat">team</span>}
+                        <span className="min-w-0 break-words text-ink">{c.x}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null,
+          )}
+          {total === 0 && <div className="text-sm text-muted">No chat was recorded in this demo.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Live feed for the replay: utility currently active at the playhead + the kill
 // log up to now + bomb status — all synced to the scrubber time.
 function EventFeed({
@@ -177,12 +253,16 @@ function EventFeed({
   meta,
   zones,
   onSeek,
+  hasChat,
+  onOpenChat,
 }: {
   round: ReplayRound;
   time: number;
   meta: ReplayMeta;
   zones: Zone[];
   onSeek: (t: number) => void;
+  hasChat?: boolean; // any round in the match carries chat (new parses)
+  onOpenChat?: () => void;
 }) {
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const sideOf = (i: number) => (round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "");
@@ -215,9 +295,21 @@ function EventFeed({
     // At lg+ the feed flexes to fill the rail and the kill log scrolls inside
     // it (min-h keeps it readable when a player card takes the rail's space).
     <div className="card px-4 py-3 lg:flex lg:min-h-56 lg:flex-1 lg:flex-col lg:overflow-hidden">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <span className="stat-label">Live feed</span>
-        <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
+        <span className="flex items-center gap-2">
+          {hasChat && onOpenChat && (
+            <button
+              type="button"
+              onClick={onOpenChat}
+              title="Every in-game chat message of the match — click one to jump there"
+              className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-muted transition hover:border-brand/50 hover:text-ink"
+            >
+              💬 All comms
+            </button>
+          )}
+          <span className="text-xs tabular-nums text-faint">{mmss(time)}</span>
+        </span>
       </div>
 
       {/* alive bar: counts + one life dot per player (dim = dead). The dots are
@@ -287,6 +379,39 @@ function EventFeed({
           </div>
         )}
       </div>
+
+      {(round.chat?.length ?? 0) > 0 && (() => {
+        const said = (round.chat ?? []).filter((c) => c.t <= time);
+        return (
+          <div className="mb-2">
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Chat</div>
+            {said.length === 0 ? (
+              <div className="text-xs text-faint">Nothing said yet.</div>
+            ) : (
+              <div className="scroll-slim max-h-24 space-y-0.5 overflow-y-auto pr-1">
+                {said
+                  .slice()
+                  .sort((a, b) => b.t - a.t)
+                  .map((c, i) => (
+                    <div key={i} className="flex items-baseline gap-1.5 text-xs leading-snug">
+                      <span className="shrink-0 tabular-nums text-[10px] text-faint">{mmss(c.t)}</span>
+                      <span
+                        className="shrink-0 font-semibold"
+                        style={{ color: sideOf(c.by) === "T" ? T : sideOf(c.by) === "CT" ? CT : "#8a93a5" }}
+                      >
+                        {c.by >= 0 ? name(c.by) : "?"}
+                      </span>
+                      {!c.all && (
+                        <span className="shrink-0 rounded bg-panel px-1 text-[9px] text-faint" title="team chat">team</span>
+                      )}
+                      <span className="min-w-0 break-words text-ink">{c.x}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Kills ({kills.length})</div>
@@ -535,6 +660,7 @@ export default function ReplayPage() {
   // a "watch this moment" request from another tab (Cheat/AI evidence): switch
   // to the replay, scope the round, then seek to the kill once it's loaded.
   const [jump, setJump] = useState<{ round: number; time: number } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focusRef = useRef<number | null>(null);
@@ -1527,6 +1653,8 @@ export default function ReplayPage() {
               time={time}
               meta={meta}
               zones={zones}
+              hasChat={rounds.some((r) => r.chat?.length)}
+              onOpenChat={() => setChatOpen(true)}
               // pause on jump — reviewing a kill at 4x speed is useless, and
               // every other seek path (scrub, evidence jumps) pauses too
               onSeek={(t) => {
@@ -1606,6 +1734,17 @@ export default function ReplayPage() {
         </div>
       )}
       </div>
+      {chatOpen && (
+        <ChatLog
+          rounds={rounds}
+          meta={meta}
+          onJump={(ri, t, pl) => {
+            setChatOpen(false);
+            jumpToReplay(ri, t, pl);
+          }}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </div>
   );
 }

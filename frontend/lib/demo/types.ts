@@ -93,6 +93,15 @@ export interface ReplayWeaponAcc {
   h?: number; // bullets that dealt damage to an enemy
 }
 
+// One in-game chat message. GOTV demos generally record only all-chat; team
+// chat is usually absent from the demo itself. Absent on older parses.
+export interface ReplayChat {
+  t: number;
+  by: number; // player index, -1 if unknown
+  x: string; // the message
+  all?: boolean; // said to everyone (vs team chat, when present)
+}
+
 export interface ReplayBomb {
   t: number;
   k: "plant_start" | "plant" | "defuse_start" | "defuse" | "explode" | string;
@@ -116,6 +125,7 @@ export interface ReplayRound {
   kills: ReplayKill[];
   nades: ReplayNade[];
   bomb: ReplayBomb[];
+  chat?: ReplayChat[]; // in-game chat sent during the round (older parses lack this)
   stats?: ReplayPlayerStat[]; // per-player aggregates (older parses lack this)
 }
 
