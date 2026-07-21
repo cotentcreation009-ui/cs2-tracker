@@ -277,7 +277,7 @@ export function CheatMeter({
   generatedOn?: string;
   // Pre-rendered section nodes shown in the StatsPeek modal (built in ProfileView
   // so the server components render server-side); a missing slot hides its button.
-  panels?: { matches?: ReactNode; split?: ReactNode; leetify?: ReactNode; counter?: ReactNode; matchstats?: ReactNode };
+  panels?: { matches?: ReactNode; split?: ReactNode; leetify?: ReactNode; counter?: ReactNode; matchstats?: ReactNode; friends?: ReactNode };
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras);
   if (!sus || !sus.hasEnough) return null;
@@ -464,6 +464,7 @@ export function CheatMeter({
             leetify={panels?.leetify}
             counter={panels?.counter}
             matchstats={panels?.matchstats}
+            friends={panels?.friends}
           />
         </div>
         <div className="flex items-center gap-2 lg:justify-end">

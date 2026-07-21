@@ -131,6 +131,9 @@ type Profile struct {
 	KD           float64 `json:"kd,omitempty"`
 	AvgPartySize float64 `json:"avg_party_size,omitempty"`
 	PeakPremier  int     `json:"peak_premier,omitempty"`
+	// RecentTeammates passes through v3's frequent-teammates list (≤5 ids the
+	// player queued with most in the recent window; legacy endpoint lacks it).
+	RecentTeammates []RecentTeammate `json:"recent_teammates,omitempty"`
 	// RecentMatches is capped on read to keep the payload small.
 	RecentMatches []RecentMatch `json:"recent_matches"`
 	// FaceitMatches is EVERY FACEIT match (not just the recent window), so the
@@ -142,6 +145,12 @@ type Profile struct {
 	// player's Premier games fall out of the v3 window just the same, so the
 	// split needs the dedicated list for BOTH sides.
 	PremierMatches []RecentMatch `json:"premier_matches,omitempty"`
+}
+
+// RecentTeammate is one entry of v3's recent_teammates list.
+type RecentTeammate struct {
+	Steam64ID          string `json:"steam64_id"`
+	RecentMatchesCount int    `json:"recent_matches_count"`
 }
 
 // maxFaceitMatches caps the dedicated FACEIT list (plenty for the split).

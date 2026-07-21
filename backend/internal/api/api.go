@@ -172,6 +172,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/weapons", s.handleWeapons)
 				r.Get("/maps", s.handleMaps)
 				r.Get("/leetify", s.handleLeetify)
+				r.Get("/teammates", s.handleLeetifyTeammates)
 				r.Get("/faceit", s.handleFaceit)
 				r.Get("/steam-stats", s.handleSteamStats)
 				r.Get("/steam-extras", s.handleSteamExtras)
@@ -519,6 +520,82 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 	}
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, prof)
+}
+
+// handleLeetifyTeammates resolves the player's frequent recent teammates
+// (Leetify v3's recent_teammates, <=5 ids) into ranked rows: name, winrate,
+// average Leetify rating over their recent matches, and K/D when the legacy
+// enrichment provides it. Every per-friend profile fetch rides the same cache
+// as the profile page, so a warm view costs zero upstream calls.
+func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) {
+	id, ok := steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return
+	}
+	if s.leetify == nil {
+		writeError(w, http.StatusServiceUnavailable, "leetify integration not configured")
+		return
+	}
+	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
+		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
+	if notFound || err != nil || prof == nil {
+		if err != nil && !notFound {
+			s.serverError(w, "leetify profile", err)
+			return
+		}
+		setEdgeCache(w, s.cfg.ExternalCacheTTL)
+		writeJSON(w, http.StatusOK, map[string]any{"teammates": []any{}})
+		return
+	}
+
+	type row struct {
+		Steam64ID       string  `json:"steam64_id"`
+		Name            string  `json:"name"`
+		MatchesTogether int     `json:"matches_together"`
+		Winrate         float64 `json:"winrate"`
+		Rating          float64 `json:"rating"`
+		KD              float64 `json:"kd,omitempty"`
+		TotalMatches    int     `json:"total_matches"`
+	}
+	rows := make([]*row, len(prof.RecentTeammates))
+	var wg sync.WaitGroup
+	for i, tm := range prof.RecentTeammates {
+		fid, perr := strconv.ParseUint(tm.Steam64ID, 10, 64)
+		if perr != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, tm leetify.RecentTeammate, fid uint64) {
+			defer wg.Done()
+			fr := &row{Steam64ID: tm.Steam64ID, MatchesTogether: tm.RecentMatchesCount}
+			fp, fnf, ferr := cachedExternal(s, r.Context(), cache.LeetifyKey(fid),
+				func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), fid) })
+			if ferr == nil && !fnf && fp != nil {
+				fr.Name = fp.Name
+				fr.Winrate = fp.Winrate
+				fr.KD = fp.KD
+				fr.TotalMatches = fp.TotalMatches
+				if n := len(fp.RecentMatches); n > 0 {
+					sum := 0.0
+					for _, m := range fp.RecentMatches {
+						sum += m.LeetifyRating
+					}
+					fr.Rating = sum / float64(n)
+				}
+			}
+			rows[i] = fr
+		}(i, tm, fid)
+	}
+	wg.Wait()
+	out := make([]*row, 0, len(rows))
+	for _, fr := range rows {
+		if fr != nil {
+			out = append(out, fr)
+		}
+	}
+	setEdgeCache(w, s.cfg.ExternalCacheTTL)
+	writeJSON(w, http.StatusOK, map[string]any{"teammates": out})
 }
 
 // handleFaceit fetches a player's live FACEIT profile (CS2 skill level, elo and

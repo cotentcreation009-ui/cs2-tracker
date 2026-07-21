@@ -19,6 +19,7 @@ import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
+import { FriendsPanel } from "@/components/FriendsPanel";
 import { FaceitPanel } from "@/components/FaceitPanel";
 import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
@@ -239,6 +240,8 @@ export function ProfileView({
       />
     ) : null,
     matchstats: richMatchStats ? matchStatsPanel : null,
+    // Friends — Leetify's frequent teammates, resolved+ranked lazily on open
+    friends: leetify ? <FriendsPanel steamId={player.steamId64} /> : null,
   };
 
   return (

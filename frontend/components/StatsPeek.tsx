@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 // rendered nodes (server components from ProfileView), so this stays a thin
 // client shell that just toggles which one is visible.
 
-type PeekKey = "matches" | "split" | "leetify" | "counter" | "matchstats";
+type PeekKey = "matches" | "split" | "leetify" | "counter" | "matchstats" | "friends";
 
 const META: Record<PeekKey, { label: string; hex: string; path: string }> = {
   matches: { label: "Matches", hex: "#38d6ff", path: "M12 8v4l2.5 1.5M12 3a9 9 0 1 0 9 9M17 3h4v4" },
@@ -24,8 +24,9 @@ const META: Record<PeekKey, { label: string; hex: string; path: string }> = {
   leetify: { label: "Leetify stats", hex: "#5b9dff", path: "M4 20V10M10 20V4M16 20v-7M20 20H3" },
   counter: { label: "Counter report", hex: "#f5694a", path: "M12 3 5 6v5c0 4 3 7 7 8 4-1 7-4 7-8V6z" },
   matchstats: { label: "Match stats", hex: "#46d369", path: "M3 5h18M3 12h18M3 19h11" },
+  friends: { label: "Friends", hex: "#c792ff", path: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M15 3.1a4 4 0 0 1 0 7.8" },
 };
-const ORDER: PeekKey[] = ["matches", "split", "leetify", "counter", "matchstats"];
+const ORDER: PeekKey[] = ["matches", "split", "leetify", "counter", "matchstats", "friends"];
 
 function Glyph({ path, hex, className = "h-4 w-4" }: { path: string; hex: string; className?: string }) {
   return (
@@ -41,6 +42,7 @@ export function StatsPeek({
   leetify,
   counter,
   matchstats,
+  friends,
   className = "",
 }: {
   matches?: ReactNode;
@@ -48,9 +50,10 @@ export function StatsPeek({
   leetify?: ReactNode;
   counter?: ReactNode;
   matchstats?: ReactNode;
+  friends?: ReactNode;
   className?: string;
 }) {
-  const nodes: Record<PeekKey, ReactNode> = { matches, split, leetify, counter, matchstats };
+  const nodes: Record<PeekKey, ReactNode> = { matches, split, leetify, counter, matchstats, friends };
   const items = ORDER.filter((k) => nodes[k]);
   const [open, setOpen] = useState<PeekKey | null>(null);
   const [mounted, setMounted] = useState(false);
