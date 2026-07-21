@@ -543,9 +543,9 @@ function UtilityCard({
       {(execJoin?.eligible ?? 0) > 0 && (
         <div
           className="mt-2 text-[10px] tabular-nums text-muted"
-          title="team executes = 3+ grenades from their side within 10s; joined = they threw at least one grenade inside it"
+          title="team util rounds = their side threw 3+ grenades that round; joined = this player contributed at least one of them"
         >
-          <span className="text-faint">Team executes</span> · joined {execJoin!.joined}/{execJoin!.eligible}
+          <span className="text-faint">Team util rounds</span> · joined {execJoin!.joined}/{execJoin!.eligible}
           {n > 0 && <> · {execJoin!.inExec} of {n} nades thrown inside them</>}
         </div>
       )}
@@ -849,15 +849,22 @@ export default function UtilityBreakdown({
     return rel < 25 ? "early" : rel < 55 ? "mid" : "late";
   };
 
-  // team executes: 3+ grenades from one side detonating within a 10s window —
-  // the coordinated package, with plant correlation and round outcome
+  // Team util, ROUND-scoped: one package per (round, side) covering ALL the
+  // grenades that side threw that round — the full coordinated picture, not
+  // window fragments (a 10s-window splitter used to chop one round's execute
+  // into 2-3 disconnected "executes" and glue unrelated pokes together).
+  // Coordination is a PROPERTY of the round instead: the tightest burst of
+  // 3+ detonations. Tight burst = a real execute; no burst = spread poking.
   const executes = useMemo(() => {
     const out: {
       rn: number;
       ri: number; // index into `rounds` for scoping
       side: "CT" | "T";
       kinds: Record<string, number>;
-      zone: string | null;
+      /** tightest span (s) containing 3+ detonations, null when < 3 nades */
+      burst: number | null;
+      /** throw indices (into `throws`) inside that tightest burst */
+      burstIdx: Set<number>;
       plantDelay: number | null;
       won: boolean;
       bys: number[];
@@ -870,41 +877,56 @@ export default function UtilityBreakdown({
         const nades = (r.nades ?? [])
           .filter((nd) => roster.has(nd.by) && nd.k !== "decoy")
           .sort((a, b) => a.t - b.t);
-        // greedy windows: start at each unconsumed nade, absorb all within 10s
-        let s = 0;
-        while (s < nades.length) {
-          let e = s;
-          while (e + 1 < nades.length && nades[e + 1].t - nades[s].t <= 10) e++;
-          if (e - s + 1 >= 3) {
-            const group = nades.slice(s, e + 1);
-            const kinds: Record<string, number> = {};
-            for (const nd of group) {
-              const k = normKind(nd.k);
-              kinds[k] = (kinds[k] ?? 0) + 1;
-            }
-            const plant = (r.bomb ?? []).find((b) => b.k === "plant" && b.t >= group[0].t);
-            out.push({
-              rn: r.n,
-              ri,
-              side,
-              kinds,
-              zone: null, // classified below once zones load
-              plantDelay: plant ? Math.max(0, Math.round(plant.t - group[group.length - 1].t)) : null,
-              won: r.winner === side,
-              bys: group.map((nd) => nd.by),
-              throws: group.map((nd) => {
-                const o = throwOrigin(r, nd);
-                return {
-                  kind: normKind(nd.k), x: nd.x, y: nd.y, round: r.n, t: nd.t,
-                  ox: o?.x ?? nd.ox ?? nd.x, oy: o?.y ?? nd.oy ?? nd.y,
-                };
-              }),
-            });
-            s = e + 1;
-          } else {
-            s++;
+        if (nades.length < 3) continue; // 1-2 nades isn't a team story
+        const kinds: Record<string, number> = {};
+        for (const nd of nades) {
+          const k = normKind(nd.k);
+          kinds[k] = (kinds[k] ?? 0) + 1;
+        }
+        // tightest 3-detonation burst — the execute signal
+        let burst: number | null = null;
+        let burstStart = 0;
+        for (let i = 0; i + 2 < nades.length; i++) {
+          const span = nades[i + 2].t - nades[i].t;
+          if (burst == null || span < burst) {
+            burst = span;
+            burstStart = i;
           }
         }
+        const burstIdx = new Set<number>();
+        if (burst != null) {
+          // absorb every nade inside the winning window's span
+          const t0 = nades[burstStart].t;
+          const t1 = nades[burstStart + 2].t;
+          nades.forEach((nd, i) => {
+            if (nd.t >= t0 && nd.t <= t1) burstIdx.add(i);
+          });
+        }
+        // plant delay: time from the last grenade at/before the plant
+        const plant = (r.bomb ?? []).find((b) => b.k === "plant");
+        let plantDelay: number | null = null;
+        if (plant) {
+          const before = nades.filter((nd) => nd.t <= plant.t).pop();
+          if (before) plantDelay = Math.max(0, Math.round(plant.t - before.t));
+        }
+        out.push({
+          rn: r.n,
+          ri,
+          side,
+          kinds,
+          burst: burst != null ? Math.round(burst) : null,
+          burstIdx,
+          plantDelay,
+          won: r.winner === side,
+          bys: nades.map((nd) => nd.by),
+          throws: nades.map((nd) => {
+            const o = throwOrigin(r, nd);
+            return {
+              kind: normKind(nd.k), x: nd.x, y: nd.y, round: r.n, t: nd.t,
+              ox: o?.x ?? nd.ox ?? nd.x, oy: o?.y ?? nd.oy ?? nd.y,
+            };
+          }),
+        });
       }
     }
     return out;
@@ -978,14 +1000,17 @@ export default function UtilityBreakdown({
   const mapThrows = pinnedExec ? pinnedExec.throws : soloThrow ? [soloThrow] : selThrows;
   const zoneOf = (x: number, y: number) =>
     classifyPosition(meta.map, x, y, zones)?.name ?? null;
-  // name an execute by the callout most of its grenades landed in
+  // name a round package by the top 1-2 callouts its grenades landed in
   const execZone = (ex: (typeof executes)[number]): string | null => {
     const counts = new Map<string, number>();
     for (const tw of ex.throws) {
       const z = zoneOf(tw.x, tw.y);
       if (z) counts.set(z, (counts.get(z) ?? 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
+    if (!top.length) return null;
+    // only show the runner-up when it actually matters (2+ nades there)
+    return top[1] && top[1][1] >= 2 ? `${top[0][0]} + ${top[1][0]}` : top[0][0];
   };
   const stepThrow = (d: number) => {
     setHoverIdx(null);
@@ -1013,48 +1038,39 @@ export default function UtilityBreakdown({
 
   return (
     <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+      {/* awards — one slim band, not a row of floating cards */}
       {awards.length > 0 && (
-        <div className="flex flex-wrap gap-2 lg:shrink-0">
-          {awards.map((a) => {
+        <div className="card-2 flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 lg:shrink-0">
+          {awards.map((a, ai) => {
             const hex = sideHex(a.p.team);
             const on = focusI === a.p.i;
             return (
-              <button
-                key={a.label}
-                type="button"
-                onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
-                aria-pressed={on}
-                title={`Focus ${a.p.name}`}
-                className={`flex items-center gap-2.5 rounded-xl border py-1.5 pl-1.5 pr-3 text-left transition ${
-                  on ? "border-brand/50 bg-brand/10" : "border-line bg-panel/50 hover:border-brand/40 hover:bg-panel"
-                }`}
-              >
-                <span
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg"
-                  style={{ background: `${hex}1f`, color: hex }}
+              <span key={a.label} className="flex min-w-0 items-center">
+                {ai > 0 && <span className="mx-1.5 hidden h-3 w-px bg-line sm:block" />}
+                <button
+                  type="button"
+                  onClick={() => view.setFocusPlayer(view.focusPlayer === a.p.i ? null : a.p.i)}
+                  aria-pressed={on}
+                  title={`Focus ${a.p.name}`}
+                  className={`flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition ${
+                    on ? "bg-brand/10" : "hover:bg-panel"
+                  }`}
                 >
-                  <AwardIcon kind={a.icon} className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[9px] font-bold uppercase leading-tight tracking-wider text-faint">
-                    {a.label}
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md" style={{ background: `${hex}1f`, color: hex }}>
+                    <AwardIcon kind={a.icon} className="h-3 w-3" />
                   </span>
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="max-w-32 truncate text-sm font-bold leading-tight" style={{ color: hex }}>
-                      {a.p.name}
+                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider text-faint">{a.label}</span>
+                  <span className="max-w-28 truncate text-xs font-bold" style={{ color: hex }}>
+                    {a.p.name}
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted">{a.val}</span>
+                  {a.warn && (
+                    <span className="shrink-0 text-[10px] tabular-nums text-bad" title="teammates flashed — counted against this ranking">
+                      ⚠ {a.warn}
                     </span>
-                    <span className="text-[11px] tabular-nums leading-tight text-muted">{a.val}</span>
-                    {a.warn && (
-                      <span
-                        className="text-[10px] tabular-nums leading-tight text-bad"
-                        title="teammates flashed — counted against this ranking"
-                      >
-                        · ⚠ {a.warn}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </button>
+                  )}
+                </button>
+              </span>
             );
           })}
         </div>
@@ -1154,7 +1170,7 @@ export default function UtilityBreakdown({
                   {pinnedExec ? (
                     <span>
                       <span className="font-semibold" style={{ color: pinnedExec.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
-                        R{pinnedExec.rn} {pinnedExec.side} execute
+                        R{pinnedExec.rn} {pinnedExec.side} team util
                       </span>
                       <span className="text-faint">
                         {" "}· {pinnedExec.throws.length} nades over {Math.round(pinnedExec.throws[pinnedExec.throws.length - 1].t - pinnedExec.throws[0].t)}s
@@ -1195,7 +1211,7 @@ export default function UtilityBreakdown({
                   )}
                 </div>
                 {pinnedExec ? (
-                  <button type="button" onClick={() => setTeamPin(null)} title="Back to the focused player's throws" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">✕ execute</button>
+                  <button type="button" onClick={() => setTeamPin(null)} title="Back to the focused player's throws" className="btn btn-ghost shrink-0 px-2 py-1 text-[10px]">✕ team util</button>
                 ) : (
                   <>
                     {soloThrow && (
@@ -1220,54 +1236,6 @@ export default function UtilityBreakdown({
         {/* right: utility-ranked roster → the focused player's utility detail.
             The column scrolls internally; the map never gives up space. */}
         <div className="scroll-slim space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
-          {executes.length > 0 && (
-            <div className="card-2 px-3 py-2.5 lg:shrink-0">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="stat-label">Team executes</span>
-                <span className="text-[10px] tabular-nums text-faint">
-                  {executes.length} detected · won {executes.filter((e) => e.won).length}
-                </span>
-              </div>
-              <div className="scroll-slim max-h-40 space-y-1 overflow-y-auto pr-1">
-                {executes.map((ex, i) => {
-                  const z = execZone(ex);
-                  const kindStr = Object.entries(ex.kinds)
-                    .map(([k, c]) => `${c} ${KIND_LABEL[k]?.toLowerCase() ?? k}`)
-                    .join(" + ");
-                  const active = teamPin === i;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setTeamPin(active ? null : i)}
-                      aria-pressed={active}
-                      title="Play this execute's grenades together on the map"
-                      className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
-                        active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
-                      }`}
-                    >
-                      <span className="flex min-w-0 items-center gap-2 text-xs">
-                        <span className="shrink-0 font-semibold" style={{ color: ex.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
-                          R{ex.rn} {ex.side}
-                        </span>
-                        <span className="truncate text-faint">
-                          {z ? `${z} · ` : ""}{kindStr}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums">
-                        {ex.plantDelay != null && <span className="text-mid" title="bomb planted this long after the last grenade">plant +{ex.plantDelay}s</span>}
-                        <span className={ex.won ? "text-good" : "text-bad"}>{ex.won ? "won" : "lost"}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mt-1.5 text-[9px] text-faint">
-                3+ grenades from one side detonating within 10s — click to replay the package on the map
-              </div>
-            </div>
-          )}
-
           <div className="card-2 px-3 py-2.5 lg:shrink-0">
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
               <span className="stat-label">Players</span>
@@ -1410,6 +1378,85 @@ export default function UtilityBreakdown({
               scope={view.scopeRound}
               onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
             />
+          )}
+
+          {executes.length > 0 && (
+            <div className="card-2 px-3 py-2.5 lg:shrink-0">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="stat-label">Team util by round</span>
+                <span className="text-[10px] tabular-nums text-faint">
+                  {executes.length} rounds · won {executes.filter((e) => e.won).length}
+                </span>
+              </div>
+              <div className="scroll-slim max-h-56 space-y-1 overflow-y-auto pr-1">
+                {executes.map((ex, i) => {
+                  const z = execZone(ex);
+                  const active = teamPin === i;
+                  // tight burst of 3+ detonations = a real execute; otherwise
+                  // the util was spread through the round
+                  const tight = ex.burst != null && ex.burst <= 12;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setTeamPin(active ? null : i)}
+                      aria-pressed={active}
+                      title="Replay ALL of this side's grenades for the round on the map"
+                      className={`w-full rounded-lg border px-3 py-1.5 text-left transition ${
+                        active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-2 text-xs">
+                          <span className="shrink-0 font-semibold" style={{ color: ex.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
+                            R{ex.rn} {ex.side}
+                          </span>
+                          {tight ? (
+                            <span
+                              className="shrink-0 rounded-full bg-brand/10 px-1.5 text-[9px] font-bold tracking-wide text-brand"
+                              title={`Execute — 3+ grenades detonated within ${ex.burst}s of each other`}
+                            >
+                              EXECUTE {ex.burst}s
+                            </span>
+                          ) : (
+                            <span
+                              className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-bold tracking-wide text-faint"
+                              title={
+                                ex.burst != null
+                                  ? `Spread — the tightest 3 detonations span ${ex.burst}s`
+                                  : "Spread through the round"
+                              }
+                            >
+                              SPREAD
+                            </span>
+                          )}
+                          {z && <span className="truncate text-muted">{z}</span>}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums">
+                          {ex.plantDelay != null && (
+                            <span className="text-mid" title="bomb planted this long after their last grenade before it">
+                              plant +{ex.plantDelay}s
+                            </span>
+                          )}
+                          <span className={ex.won ? "text-good" : "text-bad"}>{ex.won ? "won" : "lost"}</span>
+                        </span>
+                      </span>
+                      <span className="mt-0.5 flex items-center gap-2 text-[10px] text-faint">
+                        {UTIL_KINDS.filter((k) => ex.kinds[k]).map((k) => (
+                          <span key={k} className="flex items-center gap-1 tabular-nums">
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: KIND_COLOR[k] ?? "#8a7dff" }} />
+                            {ex.kinds[k]} {KIND_LABEL[k]?.toLowerCase() ?? k}
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-[9px] text-faint">
+                Every grenade a side threw that round (3+ only) — EXECUTE = a tight 3-nade burst · click to replay it all on the map
+              </div>
+            </div>
           )}
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] text-faint lg:shrink-0">
