@@ -12,6 +12,7 @@ export interface ReplayPos {
   i: number; // index into ReplayMeta.players
   x: number;
   y: number;
+  z?: number; // height (game units) — enables level-aware radars (older parses lack this)
   d: number; // look direction, degrees
   h: number; // health
   b?: boolean; // carrying the bomb
@@ -28,11 +29,18 @@ export interface ReplayKill {
   v: number; // victim player index
   kx: number;
   ky: number;
+  kz?: number; // killer height (game units)
   vx: number;
   vy: number;
+  vz?: number; // victim height (game units)
   w: string;
   hs?: boolean;
   a?: number; // assisting player index + 1 (0/undefined = none)
+  fa?: boolean; // the assist was a flash assist (assister blinded the victim)
+  wb?: boolean; // wallbang — bullet penetrated at least one object
+  ts?: boolean; // through smoke
+  bl?: boolean; // attacker was flashed
+  ns?: boolean; // noscope — scoped weapon fired unscoped
   rct?: number; // reaction ms for THIS kill (victim became visible → kill); absent = not measurable
 }
 
@@ -41,11 +49,14 @@ export interface ReplayNade {
   k: "smoke" | "molotov" | "flash" | "he" | "decoy" | string;
   x: number; // landing / detonation
   y: number;
+  z?: number; // landing / detonation height (game units)
   ox?: number; // throw origin (where the thrower released it)
   oy?: number;
+  oz?: number; // throw-origin height (game units)
   dur: number;
   by: number; // thrower player index, -1 if unknown
   dmg?: Record<string, number>; // damage this grenade dealt, by victim index (HE/molotov)
+  vic?: Record<string, number>; // blind seconds this flash inflicted, by victim index — ALL victims (enemies, teammates, self)
 }
 
 // Per-player, per-round aggregates (economy, damage, flashes). Fields are
@@ -70,6 +81,16 @@ export interface ReplayPlayerStat {
   shots?: number; // firearm bullets fired
   hits?: number; // firearm bullets that dealt damage
   hsHits?: number; // of hits, headshots
+  tf?: number; // teammates flashed (self excluded)
+  tfDur?: number; // total teammate blind seconds dealt (rounded to 0.1s)
+  tDmg?: number; // team damage dealt (self-damage excluded)
+  wacc?: Record<string, ReplayWeaponAcc>; // per-weapon accuracy, by weapon display name (same firearm gate as shots/hits)
+}
+
+// One weapon's shots/hits tally inside ReplayPlayerStat.wacc.
+export interface ReplayWeaponAcc {
+  s?: number; // shots fired
+  h?: number; // bullets that dealt damage to an enemy
 }
 
 export interface ReplayBomb {
@@ -77,12 +98,17 @@ export interface ReplayBomb {
   k: "plant_start" | "plant" | "defuse_start" | "defuse" | "explode" | string;
   x: number;
   y: number;
+  z?: number; // height (game units)
+  p?: number; // acting player index + 1 (0/undefined = unknown), same trick as ReplayKill.a
+  site?: "A" | "B" | string; // bombsite, when the event carries one
+  kit?: boolean; // defuse events: defuser has a kit
 }
 
 export interface ReplayRound {
   n: number;
   winner: "CT" | "T" | "";
   reason: string;
+  st?: number; // in-game tick at round start (ties round times back to demo ticks; older parses lack this)
   freezeEnd?: number; // seconds since round start when buy time ends (older parses lack this)
   ct: number[]; // player indices on CT this round
   t: number[]; // player indices on T this round

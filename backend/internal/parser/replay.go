@@ -58,6 +58,7 @@ type ReplayRound struct {
 	Number    int                `json:"n"`
 	Winner    string             `json:"winner"`
 	Reason    string             `json:"reason"`
+	StartTick int                `json:"st,omitempty"`        // in-game tick at round start (ties round times back to demo ticks)
 	FreezeEnd float64            `json:"freezeEnd,omitempty"` // seconds since round start when buy time ends
 	CT        []int              `json:"ct"`                  // player indices on CT this round
 	T         []int              `json:"t"`                   // player indices on T this round
@@ -99,6 +100,20 @@ type ReplayPlayerStat struct {
 	Shots  int `json:"shots,omitempty"`
 	Hits   int `json:"hits,omitempty"`
 	HsHits int `json:"hsHits,omitempty"`
+	// Team-inflicted (same-team victims, self excluded): flashes that blinded a
+	// teammate, total teammate blind seconds, and damage dealt to teammates.
+	TeamFlashed  int     `json:"tf,omitempty"`
+	TeamFlashDur float64 `json:"tfDur,omitempty"` // rounded to 0.1s
+	TeamDmg      int     `json:"tDmg,omitempty"`
+	// Per-weapon accuracy (same firearm gate as Shots/Hits): weapon display name
+	// -> shots fired / bullets that dealt enemy damage.
+	Wacc map[string]*ReplayWeaponAcc `json:"wacc,omitempty"`
+}
+
+// ReplayWeaponAcc is one weapon's shots/hits tally inside ReplayPlayerStat.Wacc.
+type ReplayWeaponAcc struct {
+	S int `json:"s,omitempty"` // shots fired
+	H int `json:"h,omitempty"` // bullets that dealt damage to an enemy
 }
 
 // ReplayFrame is one downsampled snapshot. T is seconds since round start.
@@ -112,6 +127,7 @@ type ReplayPos struct {
 	I   int   `json:"i"`
 	X   int32 `json:"x"`
 	Y   int32 `json:"y"`
+	Z   int32 `json:"z,omitempty"` // height (game units) — enables level-aware radars
 	Yaw int16 `json:"d"`           // look direction, degrees
 	Hp  int   `json:"h"`           // health
 	B   bool  `json:"b,omitempty"` // carrying the bomb
@@ -123,11 +139,19 @@ type ReplayKill struct {
 	Victim   int     `json:"v"`
 	Kx       int32   `json:"kx"`
 	Ky       int32   `json:"ky"`
+	Kz       int32   `json:"kz,omitempty"` // killer height (game units)
 	Vx       int32   `json:"vx"`
 	Vy       int32   `json:"vy"`
+	Vz       int32   `json:"vz,omitempty"` // victim height (game units)
 	Weapon   string  `json:"w"`
 	Headshot bool    `json:"hs,omitempty"`
-	Assister int     `json:"a,omitempty"` // assisting player index + 1 (0 = none), enemy of victim only
+	Assister int     `json:"a,omitempty"`  // assisting player index + 1 (0 = none), enemy of victim only
+	FlashAst bool    `json:"fa,omitempty"` // the assist was a flash assist (Assister blinded the victim)
+	// Kill-context flags.
+	Wallbang bool `json:"wb,omitempty"` // bullet penetrated at least one object
+	ThruSmk  bool `json:"ts,omitempty"` // through smoke
+	Blind    bool `json:"bl,omitempty"` // attacker was flashed
+	Noscope  bool `json:"ns,omitempty"` // scoped weapon fired unscoped
 	// Reaction ms for THIS kill: time from the victim becoming visible to the
 	// killer until the kill. Only set for "sighted" kills (a tracked visibility
 	// rising edge within a 0–3s window); 0/omitted = not measurable for this kill.
@@ -136,21 +160,30 @@ type ReplayKill struct {
 
 type ReplayNade struct {
 	T    float64     `json:"t"`
-	Kind string      `json:"k"`  // smoke | molotov | flash | he | decoy
-	X    int32       `json:"x"`  // landing / detonation X
-	Y    int32       `json:"y"`  // landing / detonation Y
-	Ox   int32       `json:"ox"` // throw-origin X (where the thrower released it)
-	Oy   int32       `json:"oy"` // throw-origin Y
+	Kind string      `json:"k"`            // smoke | molotov | flash | he | decoy
+	X    int32       `json:"x"`            // landing / detonation X
+	Y    int32       `json:"y"`            // landing / detonation Y
+	Z    int32       `json:"z,omitempty"`  // landing / detonation height (game units)
+	Ox   int32       `json:"ox"`           // throw-origin X (where the thrower released it)
+	Oy   int32       `json:"oy"`           // throw-origin Y
+	Oz   int32       `json:"oz,omitempty"` // throw-origin height (game units)
 	Dur  float64     `json:"dur"`
 	By   int         `json:"by"`            // thrower player index, -1 if unknown
 	Dmg  map[int]int `json:"dmg,omitempty"` // damage this grenade dealt, by victim index (HE/molotov)
+	// Blind seconds this flash inflicted, by victim index — ALL victims (enemies,
+	// teammates and self); cross-reference the round's ct/t lists to tell them apart.
+	Vic map[int]float64 `json:"vic,omitempty"`
 }
 
 type ReplayBomb struct {
-	T    float64 `json:"t"`
+	T    float64 `json:"t"` // seconds since round start
 	Kind string  `json:"k"` // plant_start | plant | defuse_start | defuse | explode
 	X    int32   `json:"x"`
 	Y    int32   `json:"y"`
+	Z    int32   `json:"z,omitempty"`    // height (game units)
+	P    int     `json:"p,omitempty"`    // acting player index + 1 (0 = unknown), same trick as ReplayKill.Assister
+	Site string  `json:"site,omitempty"` // "A" | "B" when the event carries a bombsite
+	Kit  bool    `json:"kit,omitempty"`  // defuse events: defuser has a kit
 }
 
 // --- entry points -----------------------------------------------------------
@@ -283,10 +316,10 @@ type replayCollector struct {
 }
 
 type throwOrigin struct {
-	x, y int32
-	by   int
-	kind string
-	t    float64
+	x, y, z int32
+	by      int
+	kind    string
+	t       float64
 }
 
 // stats returns the per-round accumulator for a player index, creating it lazily.
@@ -368,14 +401,15 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	// Initialise slices so empty categories marshal as [] (not null) — the §5
 	// contract is arrays, and null would break array consumers on the frontend.
 	rc.cur = &ReplayRound{
-		Number: rc.roundCount + 1,
-		CT:     []int{},
-		T:      []int{},
-		Frames: []ReplayFrame{},
-		Kills:  []ReplayKill{},
-		Nades:  []ReplayNade{},
-		Bomb:   []ReplayBomb{},
-		Stats:  []ReplayPlayerStat{},
+		Number:    rc.roundCount + 1,
+		StartTick: rc.p.GameState().IngameTick(),
+		CT:        []int{},
+		T:         []int{},
+		Frames:    []ReplayFrame{},
+		Kills:     []ReplayKill{},
+		Nades:     []ReplayNade{},
+		Bomb:      []ReplayBomb{},
+		Stats:     []ReplayPlayerStat{},
 	}
 	rc.stat = map[int]*ReplayPlayerStat{}
 	rc.spotted = map[uint64]map[uint64]bool{}
@@ -467,6 +501,7 @@ func (rc *replayCollector) onFrameDone(events.FrameDone) {
 			I:   i,
 			X:   int32(math.Round(pos.X)),
 			Y:   int32(math.Round(pos.Y)),
+			Z:   zi(pos.Z),
 			Yaw: int16(math.Round(float64(pl.ViewDirectionX()))),
 			Hp:  pl.Health(),
 			B:   pl.SteamID64 == carrier,
@@ -557,17 +592,22 @@ func (rc *replayCollector) onKill(e events.Kill) {
 		Victim:   rc.playerIndex(e.Victim),
 		Weapon:   weapon,
 		Headshot: e.IsHeadshot,
+		Wallbang: e.PenetratedObjects > 0,
+		ThruSmk:  e.ThroughSmoke,
+		Blind:    e.AttackerBlind,
+		Noscope:  e.NoScope,
 	}
 	vp := e.Victim.Position()
-	k.Vx, k.Vy = i32(vp.X), i32(vp.Y)
+	k.Vx, k.Vy, k.Vz = i32(vp.X), i32(vp.Y), zi(vp.Z)
 	if e.Killer != nil {
 		kp := e.Killer.Position()
-		k.Kx, k.Ky = i32(kp.X), i32(kp.Y)
+		k.Kx, k.Ky, k.Kz = i32(kp.X), i32(kp.Y), zi(kp.Z)
 	}
 	// real assist (enemy of the victim), stored +1 so 0 = none survives omitempty
 	if e.Assister != nil && e.Victim != nil && e.Assister.Team != e.Victim.Team {
 		if ai := rc.playerIndex(e.Assister); ai >= 0 {
 			k.Assister = ai + 1
+			k.FlashAst = e.AssistedFlash // assist credit came from blinding the victim
 		}
 	}
 	// Aim tells for the killer: if the victim had become visible to them, how
@@ -602,42 +642,54 @@ func (rc *replayCollector) onKill(e events.Kill) {
 	rc.cur.Kills = append(rc.cur.Kills, k)
 }
 
-func (rc *replayCollector) bombXY() (int32, int32) {
+func (rc *replayCollector) bombXYZ() (int32, int32, int32) {
 	if b := rc.p.GameState().Bomb(); b != nil {
 		p := b.Position()
-		return i32(p.X), i32(p.Y)
+		return i32(p.X), i32(p.Y), zi(p.Z)
 	}
-	return 0, 0
+	return 0, 0, 0
 }
 
-func (rc *replayCollector) addBomb(kind string, x, y int32) {
+// addBomb appends a bomb-timeline row. pl/site/kit enrich it when the event
+// carries them (nil player / BomsiteUnknown / false are simply omitted).
+func (rc *replayCollector) addBomb(kind string, x, y, z int32, pl *common.Player, site events.Bombsite, kit bool) {
 	if rc.cur == nil {
 		return
 	}
-	rc.cur.Bomb = append(rc.cur.Bomb, ReplayBomb{T: round2(rc.rt()), Kind: kind, X: x, Y: y})
+	b := ReplayBomb{T: round2(rc.rt()), Kind: kind, X: x, Y: y, Z: z, Kit: kit}
+	// acting player stored +1 so index 0 survives omitempty (same as Assister)
+	if i := rc.playerIndex(pl); i >= 0 {
+		b.P = i + 1
+	}
+	if site == events.BombsiteA || site == events.BombsiteB {
+		b.Site = string(rune(site))
+	}
+	rc.cur.Bomb = append(rc.cur.Bomb, b)
 }
 
 func (rc *replayCollector) onBombPlantBegin(e events.BombPlantBegin) {
 	if e.Player != nil {
 		p := e.Player.Position()
-		rc.addBomb("plant_start", i32(p.X), i32(p.Y))
+		rc.addBomb("plant_start", i32(p.X), i32(p.Y), zi(p.Z), e.Player, e.Site, false)
 	}
 }
-func (rc *replayCollector) onBombPlanted(events.BombPlanted) {
-	x, y := rc.bombXY()
-	rc.addBomb("plant", x, y)
+func (rc *replayCollector) onBombPlanted(e events.BombPlanted) {
+	x, y, z := rc.bombXYZ()
+	rc.addBomb("plant", x, y, z, e.Player, e.Site, false)
 }
-func (rc *replayCollector) onBombDefuseStart(events.BombDefuseStart) {
-	x, y := rc.bombXY()
-	rc.addBomb("defuse_start", x, y)
+func (rc *replayCollector) onBombDefuseStart(e events.BombDefuseStart) {
+	x, y, z := rc.bombXYZ()
+	rc.addBomb("defuse_start", x, y, z, e.Player, events.BomsiteUnknown, e.HasKit)
 }
-func (rc *replayCollector) onBombDefused(events.BombDefused) {
-	x, y := rc.bombXY()
-	rc.addBomb("defuse", x, y)
+func (rc *replayCollector) onBombDefused(e events.BombDefused) {
+	x, y, z := rc.bombXYZ()
+	// BombDefused carries no HasKit — read it off the defuser at this instant.
+	kit := e.Player != nil && e.Player.HasDefuseKit()
+	rc.addBomb("defuse", x, y, z, e.Player, e.Site, kit)
 }
-func (rc *replayCollector) onBombExplode(events.BombExplode) {
-	x, y := rc.bombXY()
-	rc.addBomb("explode", x, y)
+func (rc *replayCollector) onBombExplode(e events.BombExplode) {
+	x, y, z := rc.bombXYZ()
+	rc.addBomb("explode", x, y, z, e.Player, e.Site, false)
 }
 
 // onProjectileThrow records where each grenade was released, so the detonation
@@ -655,7 +707,7 @@ func (rc *replayCollector) onProjectileThrow(e events.GrenadeProjectileThrow) {
 	if len(proj.Trajectory) > 0 {
 		op = proj.Trajectory[0].Position // the launch point, appended at throw
 	}
-	o := throwOrigin{x: i32(op.X), y: i32(op.Y), by: rc.playerIndex(proj.Thrower), kind: kind, t: round2(rc.rt())}
+	o := throwOrigin{x: i32(op.X), y: i32(op.Y), z: zi(op.Z), by: rc.playerIndex(proj.Thrower), kind: kind, t: round2(rc.rt())}
 	rc.nadeOrigins[proj.Entity.ID()] = o
 	if kind == "molotov" {
 		rc.moloOrigins = append(rc.moloOrigins, o)
@@ -678,7 +730,7 @@ func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *
 		}
 		rc.nadeSeen[entID] = rc.rt()
 	}
-	n := ReplayNade{T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Dur: dur, By: rc.playerIndex(by)}
+	n := ReplayNade{T: round2(rc.rt()), Kind: kind, X: i32(pos.X), Y: i32(pos.Y), Z: zi(pos.Z), Dur: dur, By: rc.playerIndex(by)}
 	o, ok := throwOrigin{}, false
 	if entID >= 0 {
 		o, ok = rc.nadeOrigins[entID]
@@ -687,12 +739,12 @@ func (rc *replayCollector) addNade(kind string, pos r3.Vector, dur float64, by *
 		o, ok = rc.popMolo(n.By)
 	}
 	if ok {
-		n.Ox, n.Oy = o.x, o.y
+		n.Ox, n.Oy, n.Oz = o.x, o.y, o.z
 		if n.By < 0 {
 			n.By = o.by
 		}
 	} else {
-		n.Ox, n.Oy = n.X, n.Y
+		n.Ox, n.Oy, n.Oz = n.X, n.Y, n.Z
 	}
 	rc.cur.Nades = append(rc.cur.Nades, n)
 }
@@ -922,9 +974,19 @@ func (rc *replayCollector) onItemPickup(e events.ItemPickup) {
 	}
 }
 
-// onPlayerHurt accumulates enemy damage dealt (and the grenade/fire share of it).
+// onPlayerHurt accumulates enemy damage dealt (and the grenade/fire share of it),
+// plus team damage when the victim is a teammate.
 func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
-	if rc.cur == nil || e.Attacker == nil || e.Player == nil || e.Attacker.Team == e.Player.Team {
+	if rc.cur == nil || e.Attacker == nil || e.Player == nil {
+		return
+	}
+	if e.Attacker.Team == e.Player.Team {
+		// team damage (self-damage — own HE/molly — is not "team" damage)
+		if e.Attacker != e.Player {
+			if s := rc.stats(rc.playerIndex(e.Attacker)); s != nil {
+				s.TeamDmg += e.HealthDamageTaken
+			}
+		}
 		return
 	}
 	s := rc.stats(rc.playerIndex(e.Attacker))
@@ -950,6 +1012,7 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 	}
 	if isFirearm(e.Weapon) {
 		s.Hits++
+		s.wacc(e.Weapon.String()).H++
 		if e.HitGroup == events.HitGroupHead {
 			s.HsHits++
 		}
@@ -964,7 +1027,22 @@ func (rc *replayCollector) onWeaponFire(e events.WeaponFire) {
 	}
 	if s := rc.stats(rc.playerIndex(e.Shooter)); s != nil {
 		s.Shots++
+		s.wacc(e.Weapon.String()).S++
 	}
+}
+
+// wacc returns the per-weapon accuracy bucket for a weapon name, creating the
+// map/bucket lazily (mirrors how DmgTo is grown).
+func (s *ReplayPlayerStat) wacc(w string) *ReplayWeaponAcc {
+	if s.Wacc == nil {
+		s.Wacc = map[string]*ReplayWeaponAcc{}
+	}
+	a := s.Wacc[w]
+	if a == nil {
+		a = &ReplayWeaponAcc{}
+		s.Wacc[w] = a
+	}
+	return a
 }
 
 // isFirearm reports whether a weapon counts toward shot accuracy. Pump/auto
@@ -987,17 +1065,54 @@ func isFirearm(w *common.Equipment) bool {
 	}
 }
 
-// onPlayerFlashed credits the flasher with enemies blinded + blind-seconds.
+// onPlayerFlashed credits the flasher with enemies blinded + blind-seconds,
+// tallies teammate flashes separately, and attaches every victim to the
+// flashbang's nade row.
 func (rc *replayCollector) onPlayerFlashed(e events.PlayerFlashed) {
-	if rc.cur == nil || e.Attacker == nil || e.Player == nil || e.Attacker.Team == e.Player.Team {
+	if rc.cur == nil || e.Attacker == nil || e.Player == nil {
 		return
+	}
+	dur := e.FlashDuration().Seconds()
+	rc.addFlashVictim(rc.playerIndex(e.Attacker), rc.playerIndex(e.Player), dur)
+	if e.Attacker == e.Player {
+		return // self-flash: on the nade row, but neither an enemy nor a team flash
 	}
 	s := rc.stats(rc.playerIndex(e.Attacker))
 	if s == nil {
 		return
 	}
+	if e.Attacker.Team == e.Player.Team {
+		s.TeamFlashed++
+		s.TeamFlashDur = round1(s.TeamFlashDur + dur)
+		return
+	}
 	s.Flashed++
-	s.FlashDur += round2(e.FlashDuration().Seconds())
+	s.FlashDur += round2(dur)
+}
+
+// addFlashVictim attributes a blind to the most recent flash by the same
+// thrower (the addNadeDamage pattern). Safe ordering-wise: FlashExplode
+// dispatches immediately while player_blind is a delayed game event, so the
+// nade row always exists by the time the blinds arrive.
+func (rc *replayCollector) addFlashVictim(by, victim int, dur float64) {
+	if rc.cur == nil || by < 0 || victim < 0 {
+		return
+	}
+	now := rc.rt()
+	for i := len(rc.cur.Nades) - 1; i >= 0; i-- {
+		n := &rc.cur.Nades[i]
+		if n.By != by || n.Kind != "flash" {
+			continue
+		}
+		if now-n.T > 2 {
+			return // most recent flash by this thrower is too old — leave unattributed
+		}
+		if n.Vic == nil {
+			n.Vic = map[int]float64{}
+		}
+		n.Vic[victim] = round1(n.Vic[victim] + dur)
+		return
+	}
 }
 
 // buyType is a coarse economy bucket from equipment value (MR12 pistol rounds).
@@ -1018,5 +1133,17 @@ func buyType(equip, roundNum int) string {
 	}
 }
 
-func i32(v float64) int32      { return int32(math.Round(v)) }
+func i32(v float64) int32 { return int32(math.Round(v)) }
+
+// zi converts a height like i32 but stores an exact 0 as 1 (a game unit is
+// ~2 cm — invisible) so omitempty can't swallow a real height: absent z means
+// "old parse without height data", never "height happened to be zero".
+func zi(v float64) int32 {
+	z := int32(math.Round(v))
+	if z == 0 {
+		z = 1
+	}
+	return z
+}
+func round1(v float64) float64 { return math.Round(v*10) / 10 }
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
