@@ -18,6 +18,7 @@ import { LiveTrendChart } from "@/components/LiveTrendChart";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
+import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { FaceitPanel } from "@/components/FaceitPanel";
 import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
@@ -192,6 +193,15 @@ export function ProfileView({
     ) : null;
 
   const panels = {
+    // Recent matches with one-click demo analysis — previously buried at the
+    // bottom of the Leetify panel; now a first-class button of its own.
+    matches:
+      splitMatches.length > 0 ? (
+        <LeetifyRecentMatches
+          matches={splitMatches}
+          steamId={player.steamId64}
+        />
+      ) : null,
     split:
       splitMatches.length > 0 || faceit ? (
         <div className="space-y-4">
