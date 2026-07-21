@@ -677,12 +677,13 @@ function TimingBars({ label, data, hex }: { label: string; data: [number, number
 }
 
 export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta; rounds: ReplayRound[]; view: DemoView }) {
-  const scopedRounds = useMemo(
-    () => (view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds),
-    [rounds, view.scopeRound],
-  );
-  const insights = useMemo(() => computeInsights(meta, scopedRounds), [meta, scopedRounds]);
-  const tendencies = useMemo(() => computeTendencies(meta, scopedRounds), [meta, scopedRounds]);
+  // The dossier is ALWAYS match-wide: a habit read needs the whole demo, and
+  // clicking a playbook evidence chip (which scopes the workspace to one round)
+  // must not regenerate the dossier from a 1-round sample — the tip being
+  // verified would vanish. The round scope only narrows the positions map.
+  const scopeRn = view.scopeRound != null ? rounds[view.scopeRound]?.n ?? null : null;
+  const insights = useMemo(() => computeInsights(meta, rounds), [meta, rounds]);
+  const tendencies = useMemo(() => computeTendencies(meta, rounds), [meta, rounds]);
 
   const focus = view.focusPlayer;
   const [phase, setPhase] = useState<Phase>("opening");
@@ -706,15 +707,15 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   const player = focus != null ? insights.players.find((p) => p.i === focus) ?? null : null;
   const tend = player ? tendencies.get(player.steamId) : undefined;
   const scout = useMemo(
-    () => (focus != null ? computeScout(meta, scopedRounds, focus) : null),
-    [meta, scopedRounds, focus],
+    () => (focus != null ? computeScout(meta, rounds, focus) : null),
+    [meta, rounds, focus],
   );
 
   // lobby medians for context under the stat tiles — one cheap pass over kills
   const lobby = useMemo(() => {
     const distSum = new Map<number, { s: number; n: number }>();
     const duel = new Map<number, { w: number; n: number }>();
-    for (const rd of scopedRounds) {
+    for (const rd of rounds) {
       let first: { t: number; k: number; v: number } | null = null;
       for (const k of rd.kills ?? []) {
         if (k.k >= 0 && k.v >= 0 && k.k !== k.v && rd.ct?.includes(k.k) !== rd.ct?.includes(k.v)) {
@@ -745,7 +746,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
       killDist: median([...distSum.values()].filter((e) => e.n >= 3).map((e) => e.s / e.n)),
       duelWinPct: median([...duel.values()].filter((e) => e.n >= 2).map((e) => (e.w / e.n) * 100)),
     };
-  }, [scopedRounds]);
+  }, [rounds]);
 
   // round number -> index for the clickable evidence chips
   const roundIndexOf = useMemo(() => new Map(rounds.map((r, i) => [r.n, i])), [rounds]);
@@ -761,7 +762,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             disabled={ri == null}
             onClick={() => ri != null && view.setScopeRound(active ? null : ri)}
             aria-pressed={active}
-            title={`Scope the whole workspace to round ${n} — check it in Routes or Replay`}
+            title={`Scope the workspace to round ${n} — the map, Routes and Replay follow; the dossier stays match-wide`}
             className={`rounded px-1 text-[9px] font-semibold tabular-nums leading-4 transition ${
               active ? "bg-brand/25 text-brand" : "bg-panel text-muted hover:bg-brand/15 hover:text-brand"
             }`}
@@ -856,8 +857,10 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
         : eLens === "plant"
           ? new Set(scout.plantRounds)
           : null;
+  // the workspace round scope narrows the MAP only — the dossier stays match-wide
   const shownPts = scout.pts.filter(
     (p) =>
+      (scopeRn == null || p.rn === scopeRn) &&
       (eLens === "plant"
         ? p.post
         : eLens !== "all"
@@ -866,11 +869,17 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
       (sideView === "both" || p.side === sideView),
   );
   const shownDeaths = scout.deaths.filter(
-    (d) => (sideView === "both" || d.side === sideView) && (lensRounds == null || lensRounds.has(d.rn)),
+    (d) =>
+      (scopeRn == null || d.rn === scopeRn) &&
+      (sideView === "both" || d.side === sideView) &&
+      (lensRounds == null || lensRounds.has(d.rn)),
   );
   const shownKills = showKills
     ? scout.killPts.filter(
-        (k) => (sideView === "both" || k.side === sideView) && (lensRounds == null || lensRounds.has(k.rn)),
+        (k) =>
+          (scopeRn == null || k.rn === scopeRn) &&
+          (sideView === "both" || k.side === sideView) &&
+          (lensRounds == null || lensRounds.has(k.rn)),
       )
     : [];
   const pickLens = (l: Lens) => {
@@ -914,6 +923,16 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
           {player.kills}K / {player.deaths}D · ADR {player.adr.toFixed(0)}
           {player.favoriteWeapons[0] ? ` · ${weaponLabel(player.favoriteWeapons[0].weapon)}` : ""}
         </span>
+        {scopeRn != null && (
+          <button
+            type="button"
+            onClick={() => view.setScopeRound(null)}
+            title="The dossier always reads the whole demo — the round scope only narrows the positions map. Click to clear it."
+            className="pill shrink-0 whitespace-nowrap bg-brand/15 text-brand"
+          >
+            Dossier is match-wide · map scoped to R{scopeRn} ✕
+          </button>
+        )}
         <button
           type="button"
           onClick={() => view.setFocusPlayer(null)}
@@ -1074,7 +1093,8 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             {shownPts.length === 0 && shownDeaths.length === 0 && shownKills.length === 0 && (
               <div className="pointer-events-none absolute inset-0 grid place-items-center">
                 <div className="rounded-lg bg-black/55 px-3 py-1.5 text-center text-[11px] text-muted backdrop-blur-sm">
-                  No samples for this view — widen the side / phase / lens filters.
+                  No samples for this view — widen the side / phase / lens filters
+                  {scopeRn != null ? ` or clear the R${scopeRn} round scope` : ""}.
                 </div>
               </div>
             )}
@@ -1290,7 +1310,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
             ))}
           </ol>
           <p className="mt-auto border-t border-line pt-2 text-[10px] leading-relaxed text-faint">
-            Built from this demo only ({scopedRounds.length} round{scopedRounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Round chips scope the whole workspace — verify any claim in Routes or Replay. Positions sample at 1 Hz after freeze; &quot;stationary&quot; means under ~1.3 m/s between samples; grenade timing uses detonation time.
+            Built from this demo only ({rounds.length} round{rounds.length === 1 ? "" : "s"}) — habits can differ across maps and lobbies. Round chips scope the rest of the workspace (map, Routes, Replay) — the dossier itself always stays match-wide. Positions sample at 1 Hz after freeze; &quot;stationary&quot; means under ~1.3 m/s between samples; grenade timing uses detonation time.
           </p>
         </div>
       </div>

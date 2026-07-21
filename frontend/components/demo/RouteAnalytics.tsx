@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
-import { analyzeRoutes, type PlayerPath, type RouteCluster, type Side } from "@/lib/demo/routes";
+import { analyzeRoutes, averagePath, type PlayerPath, type RouteCluster, type RoutePoint, type Side } from "@/lib/demo/routes";
+import { killContext } from "@/lib/demo/killContext";
 import { radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
@@ -131,7 +132,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const clusters = useMemo(() => analysis.clusters
     .map((c) => ({ ...c, paths: c.paths.filter(matchPath) }))
     .filter((c) => c.paths.length > 0).map(recomputeCluster)
-    .sort((a, b) => b.usage - a.usage),
+    // "Uncommon routes" always renders last, however big the bucket is
+    .sort((a, b) => (a.uncommon ? 1 : 0) - (b.uncommon ? 1 : 0) || b.usage - a.usage),
     [analysis.clusters, sideFilter, playerFilter, roundFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const individualPaths = useMemo(() => analysis.paths.filter(matchPath),
@@ -149,6 +151,22 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   // cluster markers (non-scoped view)
   const clusterKills = selectedCluster?.killPositions ?? [];
   const clusterDeaths = selectedCluster?.deathPositions ?? [];
+
+  // timing ticks along the SELECTED cluster's centroid: a dot + mm:ss label
+  // every ~10s, interpolated between the centroid waypoints by time
+  const timingTicks = useMemo(() => {
+    const cen = selectedCluster && !selectedCluster.uncommon ? selectedCluster.centroid : [];
+    if (cen.length < 2) return [];
+    const out: { t: number; x: number; y: number }[] = [];
+    for (let tt = Math.ceil(cen[0].t / 10) * 10; tt <= cen[cen.length - 1].t; tt += 10) {
+      let j = 0;
+      while (j < cen.length - 2 && cen[j + 1].t < tt) j++;
+      const a = cen[j], b = cen[j + 1];
+      const f = b.t > a.t ? clamp((tt - a.t) / (b.t - a.t), 0, 1) : 0;
+      out.push({ t: tt, x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+    }
+    return out;
+  }, [selectedCluster]);
 
   const summary = useMemo(() => {
     const ps = individualPaths;
@@ -233,6 +251,33 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : meta.players[i]?.team === "T" ? "T" : "CT";
   const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
 
+  // bomb-plant time of the scoped round — path segments after it draw dashed
+  // so post-plant movement (rotations) reads visually distinct
+  const plantT = scopedRound ? ((scopedRound.bomb ?? []).find((b) => b.k === "plant")?.t ?? null) : null;
+
+  // route labels from the zone set: classify the cluster's first/last waypoint
+  // → "T Spawn → B Site"; fall back to the compass label when uncalibrated or
+  // no zone matches. The uncommon bucket keeps its own name.
+  const routeEnds = (c: RouteCluster): { a: RoutePoint; b: RoutePoint } | null => {
+    const src = c.centroid.length >= 2 ? c.centroid : (c.paths[0]?.points ?? []);
+    return src.length >= 2 ? { a: src[0], b: src[src.length - 1] } : null;
+  };
+  const clusterLabel = (c: RouteCluster): string => {
+    if (!c.uncommon && calibrated && zones.length) {
+      const ep = routeEnds(c);
+      const za = ep && zoneOf(ep.a.x, ep.a.y);
+      const zb = ep && zoneOf(ep.b.x, ep.b.y);
+      if (za && zb) return za === zb ? za : `${za} → ${zb}`;
+    }
+    return c.label;
+  };
+  const reachLabel = (c: RouteCluster): string | null => {
+    if (c.uncommon || !calibrated || !zones.length) return null;
+    const ep = routeEnds(c);
+    const z = ep && zoneOf(ep.b.x, ep.b.y);
+    return ep && z ? `reaches ${z} ~${mmss(ep.b.t)}` : null;
+  };
+
   // dim helper: when something is active, fade the unrelated
   const dim = (related: boolean) => (active && !related ? 0.18 : 1);
 
@@ -253,6 +298,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
       <Legend swatch={KIND_COLOR.he} label="HE" shape="b" />
       <Legend swatch={KIND_COLOR.molotov} label="molly" shape="b" />
       {scopedRound && focused && <Legend swatch="#46d369" label="fight" shape="d" />}
+      {plantT != null && <span>╌ post-plant</span>}
       {scopedRound && <span className="ml-auto">util: ○ thrown from --→ ✸ landed · scroll to zoom</span>}
     </>
   );
@@ -316,14 +362,18 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
               {/* call-out zones are drawn only in the Zones tab; here their
                   names still label positions/throws via classifyPosition */}
 
-              {/* routes */}
+              {/* routes — post-plant movement draws dashed */}
               {drawnPaths.map(({ path, winRate, emphasis }) => {
-                const d = pathD(path, pt); if (!d) return null;
+                const [pre, post] = splitPoints(path.points, plantT);
+                const dPre = pathD(pre, pt); const dPost = pathD(post, pt);
+                if (!dPre && !dPost) return null;
                 const related = !active || (active.kind === "player" && path.playerIndex === active.id);
+                const stroke = winColor(winRate, emphasis ? 0.9 : 0.4);
+                const w = (emphasis ? 0.8 : 0.32) * s;
                 return (
-                  <g key={path.key} opacity={dim(related)}>
-                    <path d={d} fill="none" stroke={winColor(winRate, emphasis ? 0.9 : 0.4)}
-                      strokeWidth={(emphasis ? 0.8 : 0.32) * s} strokeLinecap="round" strokeLinejoin="round" />
+                  <g key={path.key} opacity={dim(related)} className="transition-opacity duration-150">
+                    {dPre && <path d={dPre} fill="none" stroke={stroke} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />}
+                    {dPost && <path d={dPost} fill="none" stroke={stroke} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={`${1.1 * s} ${0.9 * s}`} />}
                     <StartEnd path={path} winRate={winRate} pt={pt} scale={s} />
                   </g>
                 );
@@ -342,19 +392,13 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                     (pp) => pp.round === scopedRound.n && pp.playerIndex === active.id,
                   );
                   if (!p) return null;
-                  const dd = pathD(p, pt);
-                  if (!dd) return null;
+                  const [pre, post] = splitPoints(p.points, plantT);
+                  const dPre = pathD(pre, pt); const dPost = pathD(post, pt);
+                  if (!dPre && !dPost) return null;
                   return (
-                    <g>
-                      <path
-                        d={dd}
-                        fill="none"
-                        stroke={sideHex(p.side)}
-                        strokeWidth={0.8 * s}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        opacity={0.95}
-                      />
+                    <g opacity={0.95}>
+                      {dPre && <path d={dPre} fill="none" stroke={sideHex(p.side)} strokeWidth={0.8 * s} strokeLinecap="round" strokeLinejoin="round" />}
+                      {dPost && <path d={dPost} fill="none" stroke={sideHex(p.side)} strokeWidth={0.8 * s} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={`${1.1 * s} ${0.9 * s}`} />}
                       <StartEnd path={p} winRate={p.won ? 1 : 0} pt={pt} scale={s} />
                     </g>
                   );
@@ -390,6 +434,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       <g
                         key={`n${i}`}
                         opacity={dim(related)}
+                        className="transition-opacity duration-150"
                         style={{ cursor: "pointer" }}
                         onMouseEnter={() => onHover({ kind: "util", id: i })}
                         onMouseLeave={() => onHover(null)}
@@ -454,6 +499,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                         <g
                           key={`dm${m.o}`}
                           opacity={dim(related)}
+                          className="transition-opacity duration-150"
                           style={{ cursor: "pointer" }}
                           onMouseEnter={() => onHover({ kind: "duel", id: hoverId })}
                           onMouseLeave={() => onHover(null)}
@@ -493,6 +539,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       <g
                         key={`k${i}`}
                         opacity={dim(related)}
+                        className="transition-opacity duration-150"
                         style={{ cursor: "pointer" }}
                         onMouseEnter={() => onHover({ kind: "kill", id: i })}
                         onMouseLeave={() => onHover(null)}
@@ -574,10 +621,33 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       );
                     })()}
 
-                  {/* bomb plant */}
-                  {(scopedRound.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => {
+                  {/* bomb phases: plant_start pulse ring · plant C4 · defuse_start
+                      blue ring · defuse DEF · explode burst */}
+                  {(scopedRound.bomb ?? []).map((b, i) => {
                     const c = pt(b.x, b.y); if (!c) return null;
-                    return <g key={`b${i}`}><circle cx={c.x} cy={c.y} r={1.4 * s} fill="#f5694a" /><text x={c.x} y={c.y - 2 * s} fill="#fff" fontSize={2.6 * s} textAnchor="middle" fontWeight="bold">C4</text></g>;
+                    const key = `b${i}`;
+                    switch (b.k) {
+                      case "plant_start":
+                        return <g key={key} className="animate-pulse"><circle cx={c.x} cy={c.y} r={1.9 * s} fill="none" stroke="#f5694a" strokeWidth={0.35 * s} /></g>;
+                      case "plant":
+                        return <g key={key}><circle cx={c.x} cy={c.y} r={1.4 * s} fill="#f5694a" /><text x={c.x} y={c.y - 2 * s} fill="#fff" fontSize={2.6 * s} textAnchor="middle" fontWeight="bold">C4</text></g>;
+                      case "defuse_start":
+                        return <g key={key}><circle cx={c.x} cy={c.y} r={1.9 * s} fill="none" stroke={CT} strokeWidth={0.35 * s} /></g>;
+                      case "defuse":
+                        return <g key={key}><circle cx={c.x} cy={c.y} r={1.4 * s} fill={CT} /><text x={c.x} y={c.y + 3.8 * s} fill={CT_SOFT} fontSize={2.6 * s} textAnchor="middle" fontWeight="bold">DEF</text></g>;
+                      case "explode":
+                        return (
+                          <g key={key} stroke="#ff8c3b" strokeWidth={0.4 * s} strokeLinecap="round">
+                            <circle cx={c.x} cy={c.y} r={1.1 * s} fill="#ff8c3b" stroke="none" />
+                            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+                              const rad = (deg * Math.PI) / 180;
+                              return <line key={deg} x1={c.x + Math.cos(rad) * 1.7 * s} y1={c.y + Math.sin(rad) * 1.7 * s} x2={c.x + Math.cos(rad) * 2.8 * s} y2={c.y + Math.sin(rad) * 2.8 * s} />;
+                            })}
+                          </g>
+                        );
+                      default:
+                        return null;
+                    }
                   })}
                 </>
               ) : (
@@ -591,6 +661,16 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                     return <g key={`cd${i}`} stroke="#f5694a" strokeWidth={0.45 * s} strokeLinecap="round">
                       <line x1={c.x - 0.9 * s} y1={c.y - 0.9 * s} x2={c.x + 0.9 * s} y2={c.y + 0.9 * s} />
                       <line x1={c.x + 0.9 * s} y1={c.y - 0.9 * s} x2={c.x - 0.9 * s} y2={c.y + 0.9 * s} /></g>; })}
+                  {/* timing ticks every ~10s along the selected cluster's centroid */}
+                  {timingTicks.map((tk) => {
+                    const c = pt(tk.x, tk.y); if (!c) return null;
+                    return (
+                      <g key={`tt${tk.t}`}>
+                        <circle cx={c.x} cy={c.y} r={0.55 * s} fill="#38d6ff" stroke="#04060e" strokeWidth={0.2 * s} />
+                        <text x={c.x} y={c.y - 1.2 * s} fill="#38d6ff" fontSize={1.9 * s} textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.5 * s} strokeLinejoin="round">{mmss(tk.t)}</text>
+                      </g>
+                    );
+                  })}
                 </>
               )}
             </svg>
@@ -732,7 +812,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                   No routes match the current player / round / side filter — clear it in the toolbar above.
                 </div>
               ) : mode === "common" ? (
-                clusters.map((c) => <RouteRow key={c.id} cluster={c} active={c.id === selected} onClick={() => setSelected(c.id === selected ? null : c.id)} />)
+                clusters.map((c) => <RouteRow key={c.id} cluster={c} label={clusterLabel(c)} reach={reachLabel(c)} active={c.id === selected} onClick={() => setSelected(c.id === selected ? null : c.id)} />)
               ) : (
                 individualPaths.slice().sort((a, b) => a.round - b.round).map((p) => <PathRow key={p.key} path={p} />)
               )}
@@ -770,6 +850,7 @@ function RoundDetail({
   zoneOf: (x: number, y: number) => string | null;
 }) {
   const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
+  const kctx = useMemo(() => killContext(round), [round]);
 
   // keep original indices so hover/pin line up with the map markers. When a
   // player is selected, the util + kill feeds show only their own actions.
@@ -884,6 +965,26 @@ function RoundDetail({
           </div>
         )}
 
+        {/* bomb timeline */}
+        {(round.bomb ?? []).length > 0 && (
+          <div>
+            <div className="stat-label mb-1.5">Bomb</div>
+            <div className="space-y-0.5">
+              {(round.bomb ?? []).slice().sort((a, b) => a.t - b.t).map((b, i) => {
+                const zone = zoneOf(b.x, b.y);
+                return (
+                  <div key={i} className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5">
+                    <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(b.t)}</span>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: BOMB_HEX[b.k] ?? "#8a7dff" }} />
+                    <span className="text-[11px] text-muted">{BOMB_LABEL[b.k] ?? b.k.replace(/_/g, " ")}</span>
+                    {zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* kill feed */}
         <div>
           <div className="stat-label mb-1.5">Kills ({killsReal.length})</div>
@@ -897,7 +998,16 @@ function RoundDetail({
                   <button key={i} type="button" {...rowProps({ kind: "kill", id: i }, on)}>
                     <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(k.t)}</span>
                     <span className="max-w-26 truncate text-[11px] font-semibold" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
+                    {k.a != null && k.a > 0 && (
+                      <span className="max-w-16 shrink-0 truncate text-[10px] text-faint">+ {name(k.a - 1)}</span>
+                    )}
                     <span className="shrink-0 text-[10px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
+                    {i === kctx.firstIdx && (
+                      <span className="shrink-0 rounded-full bg-[#38d6ff]/10 px-1.5 text-[9px] font-bold tracking-wide text-[#38d6ff]" title="Opening kill of the round">FIRST</span>
+                    )}
+                    {kctx.tradeIdxs.has(i) && (
+                      <span className="shrink-0 rounded-full bg-[#8a7dff]/10 px-1.5 text-[9px] font-bold tracking-wide text-[#8a7dff]" title="Avenged a teammate killed moments before">TRADE</span>
+                    )}
                     {k.rct != null && k.rct > 0 && (
                       <span
                         className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-semibold tabular-nums text-muted"
@@ -921,19 +1031,40 @@ function RoundDetail({
 
 // --- helpers ----------------------------------------------------------------
 
+const BOMB_LABEL: Record<string, string> = {
+  plant_start: "plant started", plant: "bomb planted", defuse_start: "defuse started",
+  defuse: "bomb defused", explode: "bomb exploded",
+};
+const BOMB_HEX: Record<string, string> = {
+  plant_start: "#f5694a", plant: "#f5694a", defuse_start: CT, defuse: CT, explode: "#ff8c3b",
+};
+
 function recomputeCluster(c: RouteCluster): RouteCluster {
   const members = c.paths; const wins = members.filter((m) => m.won).length;
   return { ...c, usage: members.length, winRate: members.length ? wins / members.length : 0,
     avgLifetime: members.length ? members.reduce((s, m) => s + m.lifetime, 0) / members.length : 0,
     kills: members.reduce((s, m) => s + m.kills.length, 0), deaths: members.filter((m) => m.died).length,
-    killPositions: members.flatMap((m) => m.kills), deathPositions: members.flatMap((m) => (m.death ? [m.death] : [])) };
+    killPositions: members.flatMap((m) => m.kills), deathPositions: members.flatMap((m) => (m.death ? [m.death] : [])),
+    // re-average the centroid too — zone labels, "reaches" times and timing
+    // ticks must describe the paths actually SHOWN, not the unfiltered set
+    centroid: c.uncommon || !members.length ? [] : averagePath(members) };
 }
 
 type PtFn = (x: number, y: number) => { x: number; y: number } | null;
-function pathD(p: PlayerPath, pt: PtFn): string | null {
-  const pts = p.points.map((s) => pt(s.x, s.y)).filter(Boolean) as { x: number; y: number }[];
+function pathD(points: RoutePoint[], pt: PtFn): string | null {
+  const pts = points.map((s) => pt(s.x, s.y)).filter(Boolean) as { x: number; y: number }[];
   if (pts.length < 2) return null;
   return pts.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`).join(" ");
+}
+// split a path at the bomb-plant time: [before, after]. The boundary point is
+// shared so the solid and dashed segments stay continuous.
+function splitPoints(points: RoutePoint[], plantT: number | null): [RoutePoint[], RoutePoint[]] {
+  if (plantT == null || !points.length || points[points.length - 1].t <= plantT) return [points, []];
+  if (points[0].t >= plantT) return [[], points];
+  const pre = points.filter((p) => p.t <= plantT);
+  const post = points.filter((p) => p.t > plantT);
+  if (pre.length) post.unshift(pre[pre.length - 1]);
+  return [pre, post];
 }
 function StartEnd({ path, winRate, pt, scale }: { path: PlayerPath; winRate: number; pt: PtFn; scale: number }) {
   const a = path.points[0]; const b = path.points[path.points.length - 1];
@@ -971,16 +1102,17 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <div className="mt-0.5 text-sm font-semibold tabular-nums" style={color ? { color } : undefined}>{value}</div></div>;
 }
 const sideClass = (s: Side) => (s === "T" ? "text-[#f0cd78]" : "text-[#9cc1ff]");
-function RouteRow({ cluster, active, onClick }: { cluster: RouteCluster; active: boolean; onClick: () => void }) {
+function RouteRow({ cluster, label, reach, active, onClick }: { cluster: RouteCluster; label?: string; reach?: string | null; active: boolean; onClick: () => void }) {
   const wc = winColor(cluster.winRate);
   return <button type="button" onClick={onClick} aria-pressed={active}
     className={`w-full rounded-lg border px-3 py-2 text-left transition ${active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"}`}>
     <div className="flex items-center justify-between gap-2">
-      <span className={`text-xs font-bold uppercase tracking-wide ${sideClass(cluster.side)}`}>{cluster.side} · {cluster.label}</span>
+      <span className={`text-xs font-bold uppercase tracking-wide ${cluster.uncommon ? "text-muted" : sideClass(cluster.side)}`}>{cluster.side} · {label ?? cluster.label}</span>
       <span className="rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums" style={{ color: wc, background: winColor(cluster.winRate, 0.15) }}>{Math.round(cluster.winRate * 100)}% W</span></div>
-    <div className="mt-1 flex items-center gap-3 text-[10px] text-faint">
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-faint">
       <span>{cluster.usage} uses</span><span>{Math.round(cluster.share * 100)}% of side</span>
-      <span className="text-good">{cluster.kills} K</span><span className="text-bad">{cluster.deaths} D</span><span>{cluster.avgLifetime.toFixed(1)}s</span></div></button>;
+      <span className="text-good">{cluster.kills} K</span><span className="text-bad">{cluster.deaths} D</span><span>{cluster.avgLifetime.toFixed(1)}s</span>
+      {reach && <span className="tabular-nums text-brand/80">{reach}</span>}</div></button>;
 }
 function PathRow({ path }: { path: PlayerPath }) {
   return <div className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-1.5">
