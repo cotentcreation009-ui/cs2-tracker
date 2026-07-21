@@ -498,7 +498,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                         onMouseLeave={() => onHover(null)}
                         onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onPin({ kind: "kill", id: i }); }}
                       >
-                        <title>{`${name(k.k)} ${weaponLabel(k.w)}${k.hs ? " (hs)" : ""} → ${name(k.v)} · ${mmss(k.t)}`}</title>
+                        <title>{`${name(k.k)} ${weaponLabel(k.w)}${k.hs ? " (hs)" : ""} → ${name(k.v)} · ${mmss(k.t)}${k.rct ? ` · ${k.rct}ms react` : ""}`}</title>
                         {kc && on && <line x1={kc.x} y1={kc.y} x2={vc.x} y2={vc.y} stroke="#f5694a" strokeWidth={0.4 * s} opacity={0.8} />}
                         {kc && <g stroke="#46d369" strokeWidth={0.5 * s}>
                           <line x1={kc.x - (on ? 1.4 : 1) * s} y1={kc.y - (on ? 1.4 : 1) * s} x2={kc.x + (on ? 1.4 : 1) * s} y2={kc.y + (on ? 1.4 : 1) * s} />
@@ -898,6 +898,14 @@ function RoundDetail({
                     <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(k.t)}</span>
                     <span className="max-w-26 truncate text-[11px] font-semibold" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
                     <span className="shrink-0 text-[10px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
+                    {k.rct != null && k.rct > 0 && (
+                      <span
+                        className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-semibold tabular-nums text-muted"
+                        title={`Reaction on this kill: ${k.rct}ms from ${name(k.v)} becoming visible to the kill`}
+                      >
+                        {k.rct}ms
+                      </span>
+                    )}
                     <span className="shrink-0 text-faint">▸</span>
                     <span className="ml-auto max-w-26 truncate text-[11px] font-medium" style={{ color: sideHex(sideOfIdx(k.v)) }}>{name(k.v)}</span>
                   </button>
