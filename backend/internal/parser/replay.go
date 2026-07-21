@@ -128,6 +128,10 @@ type ReplayKill struct {
 	Weapon   string  `json:"w"`
 	Headshot bool    `json:"hs,omitempty"`
 	Assister int     `json:"a,omitempty"` // assisting player index + 1 (0 = none), enemy of victim only
+	// Reaction ms for THIS kill: time from the victim becoming visible to the
+	// killer until the kill. Only set for "sighted" kills (a tracked visibility
+	// rising edge within a 0–3s window); 0/omitted = not measurable for this kill.
+	Rct int32 `json:"rct,omitempty"`
 }
 
 type ReplayNade struct {
@@ -566,16 +570,18 @@ func (rc *replayCollector) onKill(e events.Kill) {
 			k.Assister = ai + 1
 		}
 	}
-	rc.cur.Kills = append(rc.cur.Kills, k)
-
 	// Aim tells for the killer: if the victim had become visible to them, how
 	// fast they killed after the victim appeared + how close the crosshair
-	// already was when the victim appeared.
+	// already was when the victim appeared. The per-kill reaction is ALSO kept
+	// on the kill event itself (k.Rct) so the UI can show it per kill.
 	if e.Killer != nil && k.Killer >= 0 && rc.spotT[e.Victim.SteamID64] != nil {
 		vID, kID := e.Victim.SteamID64, e.Killer.SteamID64
 		if st, ok := rc.spotT[vID][kID]; ok {
 			rctMs := (rc.rt() - st) * 1000
 			if rctMs >= 0 && rctMs <= 3000 { // genuine react-and-kill window
+				if k.Rct = i32(rctMs); k.Rct <= 0 {
+					k.Rct = 1 // same-tick spot+kill — keep it visible past omitempty
+				}
 				if s := rc.stats(k.Killer); s != nil {
 					preaim := rc.spotAim[vID][kID]
 					s.AimN++
@@ -593,6 +599,7 @@ func (rc *replayCollector) onKill(e events.Kill) {
 			}
 		}
 	}
+	rc.cur.Kills = append(rc.cur.Kills, k)
 }
 
 func (rc *replayCollector) bombXY() (int32, int32) {

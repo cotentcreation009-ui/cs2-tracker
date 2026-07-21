@@ -33,6 +33,7 @@ export interface ReplayKill {
   w: string;
   hs?: boolean;
   a?: number; // assisting player index + 1 (0/undefined = none)
+  rct?: number; // reaction ms for THIS kill (victim became visible → kill); absent = not measurable
 }
 
 export interface ReplayNade {
