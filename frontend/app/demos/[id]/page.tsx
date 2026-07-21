@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getMatch, renameMatch } from "@/lib/demo/store";
-import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
+import type { ReplayKill, ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { mapLabel } from "@/lib/format";
@@ -108,6 +108,65 @@ function reasonLabel(reason: string, winner: string): string {
   if (k.includes("elim") || k.includes("won") || k.includes("win") || k.includes("kill"))
     return `${winner === "CT" ? "CTs" : "Terrorists"} eliminated`;
   return reason ? reason.replace(/_/g, " ") : "Round ended";
+}
+
+// Kill flag pills (wallbang / smoke / blind / noscope) — same idiom as the
+// FIRST/TRADE pills. Flags are optional parser fields; absent on old parses.
+// same hexes as the Routes feed's FlagPill so the two feeds read identically
+const KILL_FLAGS = [
+  { key: "wb", label: "WALLBANG", hex: "#e09a5a", tip: "Wallbang — the bullet penetrated a wall or object" },
+  { key: "ts", label: "SMOKE", hex: "#cfd6e4", tip: "Kill through smoke" },
+  { key: "bl", label: "BLIND", hex: "#ffd54a", tip: "Attacker was flashed when they got the kill" },
+  { key: "ns", label: "NOSCOPE", hex: "#ff7ab8", tip: "Noscope — scoped weapon fired unscoped" },
+] as const;
+
+function KillFlagPills({ k }: { k: ReplayKill }) {
+  return (
+    <>
+      {KILL_FLAGS.filter((f) => k[f.key]).map((f) => (
+        <span
+          key={f.key}
+          style={{ color: f.hex, background: `${f.hex}1a` }}
+          className="shrink-0 rounded-full px-1.5 text-[9px] font-bold tracking-wide"
+          title={f.tip}
+        >
+          {f.label}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// "Watch in CS2" — copies a console command that jumps in-game demo playback to
+// this kill and spectates the killer. Kill rows are already <button>s that seek,
+// so this renders as a span (no nested button) and stops propagation.
+function CopyTickButton({ tick, killer }: { tick: number; killer: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const onCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
+    navigator.clipboard
+      .writeText(`demo_gototick ${tick}; spec_player "${killer}"`)
+      .then(() => {
+        setCopied(true);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
+  };
+  return (
+    <span
+      role="button"
+      aria-label="Copy CS2 console command to watch this kill"
+      onClick={onCopy}
+      title={`Watch in CS2 — copy console command (demo_gototick ${tick})`}
+      className={`shrink-0 px-0.5 text-[10px] leading-none transition-colors ${copied ? "font-medium text-good" : "text-faint hover:text-brand"}`}
+    >
+      {copied ? "copied" : "⧉"}
+    </span>
+  );
 }
 
 // Live feed for the replay: utility currently active at the playhead + the kill
@@ -248,8 +307,11 @@ function EventFeed({
                   <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(k.t)}</span>
                   <span className="truncate font-medium" style={{ color: sideOf(k.k) === "T" ? T : CT }}>{name(k.k)}</span>
                   {(k.a ?? 0) > 0 && (
-                    <span className="truncate text-[10px] text-faint" title={`Assist: ${name((k.a ?? 1) - 1)}`}>
-                      + {name((k.a ?? 1) - 1)}
+                    <span
+                      className="truncate text-[10px] text-faint"
+                      title={k.fa ? `Flash assist: ${name((k.a ?? 1) - 1)}` : `Assist: ${name((k.a ?? 1) - 1)}`}
+                    >
+                      + {k.fa ? "⚡" : ""}{name((k.a ?? 1) - 1)}
                     </span>
                   )}
                   {idx === ctx.firstIdx && (
@@ -268,8 +330,12 @@ function EventFeed({
                       TRADE
                     </span>
                   )}
+                  <KillFlagPills k={k} />
                   <span className="shrink-0 text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
                   <span className="ml-auto truncate text-muted">{name(k.v)}</span>
+                  {round.st != null && (
+                    <CopyTickButton tick={round.st + Math.round(k.t * meta.tickRate)} killer={name(k.k)} />
+                  )}
                 </button>
               );
             })}

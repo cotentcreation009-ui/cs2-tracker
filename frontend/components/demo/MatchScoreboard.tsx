@@ -23,10 +23,15 @@ type SortKey =
   | "name" | "k" | "d" | "a" | "diff" | "kd" | "adr" | "kast"
   | "hs" | "ok" | "od" | "trd" | "mk" | "cl" | "ud";
 
+// The A column's title depends on the assist source (per-demo): real demo
+// credits when the parse carries kill.a, else the trade-based proxy.
+const A_TITLE_REAL = "Assists (from the demo)";
+const A_TITLE_PROXY = "Assists — trade-based proxy (the demo doesn't credit every assist)";
+
 const COLS: { key: SortKey; label: string; title: string }[] = [
   { key: "k", label: "K", title: "Kills" },
   { key: "d", label: "D", title: "Deaths" },
-  { key: "a", label: "A", title: "Assists — trade-based proxy (the demo doesn't credit every assist)" },
+  { key: "a", label: "A", title: A_TITLE_PROXY },
   { key: "diff", label: "+/−", title: "Kill − death difference" },
   { key: "kd", label: "K/D", title: "Kills per death" },
   { key: "adr", label: "ADR", title: "Average damage per round" },
@@ -40,12 +45,12 @@ const COLS: { key: SortKey; label: string; title: string }[] = [
   { key: "ud", label: "UD", title: "Utility damage (HE / molotov)" },
 ];
 
-function sortVal(p: PlayerInsight, key: SortKey): number | string {
+function sortVal(p: PlayerInsight, key: SortKey, realAssists: boolean): number | string {
   switch (key) {
     case "name": return p.name.toLowerCase();
     case "k": return p.kills;
     case "d": return p.deaths;
-    case "a": return p.assistsApprox;
+    case "a": return realAssists ? p.assists : p.assistsApprox;
     case "diff": return p.kills - p.deaths;
     case "kd": return p.kd;
     case "adr": return p.adr;
@@ -79,10 +84,10 @@ export function MatchScoreboard({
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "k", dir: -1 });
 
-  const { groups, scopeLabel, roundCount } = useMemo(() => {
+  const { groups, scopeLabel, roundCount, hasRealAssists } = useMemo(() => {
     const r = view.scopeRound != null ? rounds[view.scopeRound] : undefined;
     const scoped = r ? [r] : rounds;
-    const { players } = computeInsights(meta, scoped);
+    const { players, hasRealAssists } = computeInsights(meta, scoped);
     const teamA = teamAStarters(rounds);
 
     // Stable team membership for the whole-match view. The round-1 snapshot
@@ -132,8 +137,8 @@ export function MatchScoreboard({
     }
 
     const cmp = (a: PlayerInsight, b: PlayerInsight) => {
-      const va = sortVal(a, sort.key);
-      const vb = sortVal(b, sort.key);
+      const va = sortVal(a, sort.key, hasRealAssists);
+      const vb = sortVal(b, sort.key, hasRealAssists);
       const d = typeof va === "string" || typeof vb === "string"
         ? String(va).localeCompare(String(vb))
         : va - (vb as number);
@@ -151,7 +156,7 @@ export function MatchScoreboard({
       { key: "other", label: "Unassigned", hex: OTHER, wins: 0, players: bySide("") },
     ].filter((g) => g.players.length > 0);
 
-    return { groups, scopeLabel: r ? `Round ${r.n}` : "Whole match", roundCount: scoped.length };
+    return { groups, scopeLabel: r ? `Round ${r.n}` : "Whole match", roundCount: scoped.length, hasRealAssists };
   }, [meta, rounds, view.scopeRound, view.side, sort]);
 
   const onSort = (key: SortKey) =>
@@ -201,7 +206,7 @@ export function MatchScoreboard({
                   tabIndex={0}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSort(c.key); } }}
                   aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
-                  title={`${c.title} — click to sort`}
+                  title={`${c.key === "a" && hasRealAssists ? A_TITLE_REAL : c.title} — click to sort`}
                   className={`${thBase} px-2 text-right`}
                 >
                   {c.label}
@@ -212,7 +217,7 @@ export function MatchScoreboard({
           </thead>
           <tbody>
             {groups.map((g) => (
-              <FragmentRows key={g.key} group={g} view={view} />
+              <FragmentRows key={g.key} group={g} view={view} realAssists={hasRealAssists} />
             ))}
             {groups.length === 0 && (
               <tr>
@@ -226,9 +231,11 @@ export function MatchScoreboard({
       </div>
 
       <div className="border-t border-line px-4 py-2 text-[10px] text-faint">
-        Click a column to sort · click a row to focus that player across every tab. A is a
-        trade-based proxy (the demo doesn&apos;t credit every assist); OK/OD are the round&apos;s
-        opening duel.
+        Click a column to sort · click a row to focus that player across every tab.{" "}
+        {hasRealAssists
+          ? "A is the demo's own assist credit (flash assists included)"
+          : "A is a trade-based proxy (the demo doesn't credit every assist)"}
+        ; OK/OD are the round&apos;s opening duel.
       </div>
     </div>
   );
@@ -236,7 +243,7 @@ export function MatchScoreboard({
 
 // One team's header row + its player rows (kept together so the table stays a
 // single element — required for aligned columns and the sticky header).
-function FragmentRows({ group, view }: { group: Group; view: DemoView }) {
+function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoView; realAssists: boolean }) {
   const soft = SOFT[group.hex] ?? "var(--color-ink)";
   return (
     <>
@@ -276,7 +283,12 @@ function FragmentRows({ group, view }: { group: Group; view: DemoView }) {
             </td>
             <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{p.kills}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.deaths}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.assistsApprox}</td>
+            <td
+              className="px-2 py-1.5 text-right tabular-nums text-muted"
+              title={realAssists && p.flashAssists > 0 ? `incl. ${p.flashAssists} flash` : undefined}
+            >
+              {realAssists ? p.assists : p.assistsApprox}
+            </td>
             <td
               className={`px-2 py-1.5 text-right tabular-nums ${
                 diff > 0 ? "text-good" : diff < 0 ? "text-bad" : "text-muted"

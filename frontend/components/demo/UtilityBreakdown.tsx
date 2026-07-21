@@ -7,7 +7,7 @@
 // team share), their repeated lineups, and a per-round utility timeline.
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeInsights,
@@ -41,6 +41,24 @@ const nadePrice = (name: string) => NADE_PRICE.find(([re]) => re.test(name))?.[1
 // normalize a raw round-data nade kind to the insights kind vocabulary
 const normKind = (k: string) =>
   k === "inferno" || k === "incgrenade" ? "molotov" : k;
+
+// Victim split for one flash throw, classified against that round's rosters.
+// Built from ReplayNade.vic — absent on old parses, so callers degrade to null.
+interface FlashVic {
+  e: number; // enemies blinded
+  tm: number; // teammates blinded (self excluded)
+  self: number;
+  eDur: number; // blind seconds
+  tmDur: number;
+  selfDur: number;
+}
+const vicTitle = (v: FlashVic) => {
+  const parts: string[] = [];
+  if (v.e) parts.push(`${v.e} enem${v.e === 1 ? "y" : "ies"} (${v.eDur.toFixed(1)}s)`);
+  if (v.tm) parts.push(`${v.tm} teammate${v.tm === 1 ? "" : "s"} (${v.tmDur.toFixed(1)}s)`);
+  if (v.self) parts.push(`self (${v.selfDur.toFixed(1)}s)`);
+  return parts.length ? `blinded ${parts.join(" · ")}` : "detonated without blinding anyone";
+};
 
 const CT = "#5b9dff";
 const T = "#e7b53c";
@@ -105,12 +123,12 @@ function AwardIcon({ kind, className }: { kind: AwardKind; className?: string })
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({ label, value, sub, title }: { label: string; value: ReactNode; sub?: ReactNode; title?: string }) {
   return (
-    <div className="rounded-lg bg-panel/50 px-2.5 py-2">
+    <div className="rounded-lg bg-panel/50 px-2.5 py-2" title={title}>
       <div className="stat-label">{label}</div>
       <div className="mt-0.5 text-base font-bold tabular-nums text-ink">{value}</div>
-      {sub && <div className="text-[10px] text-faint">{sub}</div>}
+      {sub != null && sub !== "" && <div className="text-[10px] text-faint">{sub}</div>}
     </div>
   );
 }
@@ -157,6 +175,7 @@ function ThrowRow({
   timing,
   active,
   showKind,
+  vic,
   onClick,
   onEnter,
   onLeave,
@@ -166,6 +185,7 @@ function ThrowRow({
   timing: Timing;
   active: boolean;
   showKind?: boolean;
+  vic?: FlashVic | null; // flash throws on new parses only
   onClick: () => void;
   onEnter?: () => void;
   onLeave?: () => void;
@@ -200,6 +220,18 @@ function ThrowRow({
           ) : (
             <span className="pill bg-panel text-faint" title="detonated without damaging anyone">
               dud
+            </span>
+          ))}
+        {tw.kind === "flash" &&
+          vic &&
+          (vic.e + vic.tm + vic.self > 0 ? (
+            <span className="pill bg-panel tabular-nums text-muted" title={vicTitle(vic)}>
+              {vic.e}E
+              {vic.tm > 0 && <span className="text-bad"> · {vic.tm}T ⚠</span>}
+            </span>
+          ) : (
+            <span className="pill bg-panel text-faint" title="detonated without blinding anyone">
+              blank
             </span>
           ))}
         <TimingBadge timing={timing} />
@@ -293,7 +325,12 @@ function UtilTimeline({
   );
 }
 
-interface RosterStat { display: string; frac: number; color: string }
+interface RosterStat {
+  display: string;
+  frac: number;
+  color: string;
+  warn?: { n: number; title: string }; // team-flash flag on flash sorts
+}
 
 function RosterRow({
   p,
@@ -336,6 +373,11 @@ function RosterRow({
         </span>
         <span className="w-14 shrink-0 text-right">
           <span className="block text-[11px] font-bold leading-tight tabular-nums" style={{ color: stat.color }}>
+            {stat.warn && (
+              <span className="mr-1 text-[9px] font-semibold text-bad" title={stat.warn.title}>
+                ⚠{stat.warn.n}
+              </span>
+            )}
             {stat.display}
           </span>
           <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-panel">
@@ -360,6 +402,9 @@ export interface UtilExtras {
   tThrows: number;
   utilTaken: number; // HP absorbed from ENEMY grenades
   nadeDeaths: number; // deaths where the kill weapon was a grenade/molotov
+  tf: number; // teammates flashed (new parses only — 0 on old parses)
+  tfDur: number; // teammate blind seconds dealt
+  fa: number; // flash assists — kills where a teammate finished an enemy they blinded
   // grenade output by buy tier (per this player's buy bucket that round)
   tier: Record<string, { rds: number; nades: number; low: number }>; // low = rounds with <=1 nade
 }
@@ -372,6 +417,8 @@ function UtilityCard({
   activeKind,
   extras,
   execJoin,
+  hasTf,
+  hasFa,
   onUtil,
 }: {
   p: PlayerInsight;
@@ -380,6 +427,8 @@ function UtilityCard({
   activeKind: string | null;
   extras: UtilExtras;
   execJoin: { joined: number; eligible: number; inExec: number } | null;
+  hasTf: boolean; // this parse tracks teammates flashed
+  hasFa: boolean; // this parse tracks flash assists
   onUtil: (player: PlayerInsight, kind: string) => void;
 }) {
   const hex = sideHex(p.team);
@@ -430,12 +479,36 @@ function UtilityCard({
         <Stat
           label="Enemies flashed"
           value={`${p.enemiesFlashed}`}
-          sub={
-            extras.flashThrows > 0
-              ? `${perFlash.toFixed(1)}/flash · ${extras.blankFlashRounds} blank rd${extras.blankFlashRounds === 1 ? "" : "s"}`
+          title={
+            hasTf
+              ? `enemies: ${p.enemiesFlashed} blinded, ${p.flashDuration.toFixed(1)}s · teammates: ${extras.tf} blinded, ${extras.tfDur.toFixed(1)}s`
               : undefined
           }
+          sub={
+            extras.flashThrows > 0 || hasTf ? (
+              <>
+                {extras.flashThrows > 0 &&
+                  `${perFlash.toFixed(1)}/flash · ${extras.blankFlashRounds} blank rd${extras.blankFlashRounds === 1 ? "" : "s"}`}
+                {hasTf && (
+                  <>
+                    {extras.flashThrows > 0 && " · "}
+                    <span className={extras.tf > 0 ? "text-bad" : undefined}>
+                      {extras.tf} teammate{extras.tf === 1 ? "" : "s"}
+                      {extras.tf > 0 ? " ⚠" : ""}
+                    </span>
+                  </>
+                )}
+              </>
+            ) : undefined
+          }
         />
+        {hasFa && (
+          <Stat
+            label="Flash assists"
+            value={`${extras.fa}`}
+            sub="teammate kills off their flashes"
+          />
+        )}
         <Stat
           label="Util damage"
           value={`${p.utilDamage}`}
@@ -562,7 +635,7 @@ export default function UtilityBreakdown({
     const get = (i: number) => {
       let v = m.get(i);
       if (!v) {
-        v = { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tier: {} };
+        v = { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tf: 0, tfDur: 0, fa: 0, tier: {} };
         m.set(i, v);
       }
       return v;
@@ -590,12 +663,17 @@ export default function UtilityBreakdown({
       }
       for (const k of r.kills ?? []) {
         if (k.v >= 0 && /he.?grenade|molotov|inferno|incendiar/i.test(k.w)) get(k.v).nadeDeaths++;
+        // flash assists (new parses): credit the assister when the assist was a flash
+        if (k.fa && (k.a ?? 0) > 0) get(k.a! - 1).fa++;
       }
       // grenade output by the thrower's own buy tier that round
       for (const st of r.stats ?? []) {
+        const e = get(st.i);
+        // team-flash discipline (new parses — fields absent on old parses)
+        e.tf += st.tf ?? 0;
+        e.tfDur += st.tfDur ?? 0;
         const buy = st.buy ?? (st.equip != null ? classifyBuy(st.equip, r.n).key : null);
         if (!buy) continue;
-        const e = get(st.i);
         const t = (e.tier[buy] ??= { rds: 0, nades: 0, low: 0 });
         t.rds++;
         const thrown = thrownBy.get(st.i) ?? 0;
@@ -624,8 +702,52 @@ export default function UtilityBreakdown({
       }
     }
     return (i: number): UtilExtras =>
-      m.get(i) ?? { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tier: {} };
+      m.get(i) ?? { blankFlashRounds: 0, flashThrows: 0, diedWithUtilRounds: [], wastedDollars: 0, ctThrows: 0, tThrows: 0, utilTaken: 0, nadeDeaths: 0, tf: 0, tfDur: 0, fa: 0, tier: {} };
   }, [scopedRounds]);
+
+  // capability probes — the new parser fields are omitted when zero, so "present
+  // anywhere in the demo" is the best available signal. When absent everywhere
+  // (old parse, or nothing to report) every surface degrades to the old view.
+  const hasTf = useMemo(
+    () => rounds.some((r) => (r.stats ?? []).some((s) => (s.tf ?? 0) > 0 || (s.tfDur ?? 0) > 0)),
+    [rounds],
+  );
+  const hasFa = useMemo(
+    () => rounds.some((r) => (r.kills ?? []).some((k) => k.fa && (k.a ?? 0) > 0)),
+    [rounds],
+  );
+
+  // per-flash victim splits from ReplayNade.vic (new parses), keyed so a
+  // UtilThrow (round n + time + thrower) can find its raw nade again
+  const flashVics = useMemo(() => {
+    const m = new Map<string, FlashVic>();
+    for (const r of rounds) {
+      for (const nd of r.nades ?? []) {
+        if (nd.k !== "flash" || !nd.vic || nd.by < 0) continue;
+        const byCT = r.ct?.includes(nd.by);
+        const byT = r.t?.includes(nd.by);
+        if (!byCT && !byT) continue; // no roster — can't classify victims
+        const fv: FlashVic = { e: 0, tm: 0, self: 0, eDur: 0, tmDur: 0, selfDur: 0 };
+        for (const [vi, dur] of Object.entries(nd.vic)) {
+          const v = Number(vi);
+          if (v === nd.by) {
+            fv.self++;
+            fv.selfDur += dur;
+          } else if (byCT ? r.ct?.includes(v) : r.t?.includes(v)) {
+            fv.tm++;
+            fv.tmDur += dur;
+          } else if (byCT ? r.t?.includes(v) : r.ct?.includes(v)) {
+            fv.e++;
+            fv.eDur += dur;
+          }
+        }
+        m.set(`${r.n}:${nd.t}:${nd.by}`, fv);
+      }
+    }
+    return m;
+  }, [rounds]);
+  const flashVicOf = (tw: { round: number; t: number }, by: number): FlashVic | null =>
+    flashVics.get(`${tw.round}:${tw.t}:${by}`) ?? null;
 
   const sortVal = (p: PlayerInsight) =>
     sortKey === "taken" ? extrasOf(p.i).utilTaken : sortValue(p, sortKey);
@@ -645,7 +767,13 @@ export default function UtilityBreakdown({
     const frac = v <= 0 ? 0 : Math.min(1, Math.max(0.04, v / statMax));
     const display =
       sortKey === "blind" ? `${v.toFixed(1)}s` : sortKey === "thrown" ? `${p.utilNades.length}` : `${Math.round(v)}`;
-    return { display, frac, color: "var(--color-brand)" };
+    // on flash rankings, flag team-flashers (new parses only)
+    const ex = hasTf && (sortKey === "flashed" || sortKey === "blind") ? extrasOf(p.i) : null;
+    const warn =
+      ex && ex.tf > 0
+        ? { n: ex.tf, title: `also flashed ${ex.tf} teammate${ex.tf === 1 ? "" : "s"} for ${ex.tfDur.toFixed(1)}s` }
+        : undefined;
+    return { display, frac, color: "var(--color-brand)", warn };
   };
 
   // utility awards — quick scan + click to focus
@@ -653,18 +781,22 @@ export default function UtilityBreakdown({
     if (!players.length) return [];
     const top = (fn: (p: PlayerInsight) => number) =>
       players.reduce((b, p) => (fn(p) > fn(b) ? p : b), players[0]);
-    const out: { label: string; p: PlayerInsight; val: string; icon: AwardKind }[] = [];
+    const out: { label: string; p: PlayerInsight; val: string; warn?: string; icon: AwardKind }[] = [];
     const util = top((p) => p.utilNades.length);
     if (util.utilNades.length > 0)
       out.push({ label: "Most utility", p: util, val: `${util.utilNades.length} nades`, icon: "util" });
-    const flash = top((p) => p.enemiesFlashed);
-    if (flash.enemiesFlashed > 0)
+    // rank by NET flashes (enemies − teammates) when the parse tracks team-flashes
+    const flash = top((p) => p.enemiesFlashed - (hasTf ? extrasOf(p.i).tf : 0));
+    if (flash.enemiesFlashed > 0) {
+      const tf = hasTf ? extrasOf(flash.i).tf : 0;
       out.push({
         label: "Flash king",
         p: flash,
         val: `${flash.enemiesFlashed} blinded · ${flash.flashDuration.toFixed(0)}s`,
+        warn: tf > 0 ? `${tf} tm` : undefined,
         icon: "flash",
       });
+    }
     const burn = top((p) => p.utilDamage);
     if (burn.utilDamage > 0)
       out.push({ label: "Util damage", p: burn, val: `${burn.utilDamage} dmg`, icon: "burn" });
@@ -688,7 +820,7 @@ export default function UtilityBreakdown({
         icon: "clock",
       });
     return out;
-  }, [players, proj]);
+  }, [players, proj, hasTf, extrasOf]);
 
   const fallback = useMemo(() => {
     let best: PlayerInsight | null = null;
@@ -912,6 +1044,14 @@ export default function UtilityBreakdown({
                       {a.p.name}
                     </span>
                     <span className="text-[11px] tabular-nums leading-tight text-muted">{a.val}</span>
+                    {a.warn && (
+                      <span
+                        className="text-[10px] tabular-nums leading-tight text-bad"
+                        title="teammates flashed — counted against this ranking"
+                      >
+                        · ⚠ {a.warn}
+                      </span>
+                    )}
                   </span>
                 </span>
               </button>
@@ -951,6 +1091,14 @@ export default function UtilityBreakdown({
               <span className="ml-auto hidden min-w-0 truncate text-[10px] tabular-nums text-faint xl:inline">
                 {selPlayer.enemiesFlashed > 0 &&
                   `${selPlayer.enemiesFlashed} flashed · ${selPlayer.flashDuration.toFixed(0)}s blind`}
+                {selPlayer.enemiesFlashed > 0 && hasTf && extrasOf(selPlayer.i).tf > 0 && (
+                  <span
+                    className="text-bad"
+                    title={`flashed ${extrasOf(selPlayer.i).tf} teammates for ${extrasOf(selPlayer.i).tfDur.toFixed(1)}s`}
+                  >
+                    {" "}· {extrasOf(selPlayer.i).tf} tm ⚠
+                  </span>
+                )}
                 {selPlayer.enemiesFlashed > 0 && selPlayer.utilDamage > 0 && " · "}
                 {selPlayer.utilDamage > 0 && `${selPlayer.utilDamage} util dmg`}
               </span>
@@ -1025,6 +1173,20 @@ export default function UtilityBreakdown({
                           {" "}· {soloThrow.dmg ? `${soloThrow.dmg} dmg` : "dud"}
                         </span>
                       )}
+                      {soloThrow.kind === "flash" &&
+                        selPlayer &&
+                        (() => {
+                          const fv = flashVicOf(soloThrow, selPlayer.i);
+                          if (!fv) return null;
+                          return fv.e + fv.tm + fv.self > 0 ? (
+                            <span title={vicTitle(fv)}>
+                              {" "}· <span className="text-ink">{fv.e}E</span>
+                              {fv.tm > 0 && <span className="text-bad"> · {fv.tm}T ⚠</span>}
+                            </span>
+                          ) : (
+                            <span className="text-faint"> · blank</span>
+                          );
+                        })()}
                     </span>
                   ) : (
                     <span className="text-muted">
@@ -1167,6 +1329,8 @@ export default function UtilityBreakdown({
                 timingOf={timingOf}
                 activeKind={activeKind}
                 extras={extrasOf(selPlayer.i)}
+                hasTf={hasTf}
+                hasFa={hasFa}
                 execJoin={(() => {
                   const mine = executes.filter((ex) => {
                     const r = rounds[ex.ri];
@@ -1204,6 +1368,7 @@ export default function UtilityBreakdown({
                     timing={timingOf(tw)}
                     active={shownIdx === i}
                     showKind={showAll}
+                    vic={tw.kind === "flash" ? flashVicOf(tw, selPlayer.i) : null}
                     onClick={() => setThrowIdx(throwIdx === i ? null : i)}
                     onEnter={() => setHoverIdx(i)}
                     onLeave={() => setHoverIdx(null)}
@@ -1257,8 +1422,11 @@ export default function UtilityBreakdown({
 
           <p className="px-1 text-[10px] leading-relaxed text-faint lg:shrink-0">
             <span className="font-semibold text-muted">Data notes:</span> Flash stats are enemies
-            blinded + blind-seconds dealt, not flash-assists (we don&apos;t tie a flash to a
-            teammate&apos;s kill). Molotov/HE damage is enemy HP dealt by that grenade. Timing buckets use detonation time relative to each round's freeze end: early = first 25s, mid = 25–55s, late = later.
+            blinded + blind-seconds dealt.{" "}
+            {hasFa
+              ? "Flash assists (a teammate killing an enemy this player blinded) are counted from the kill feed."
+              : "No flash assists recorded — parses made before flash-assist tracking don't capture them; re-parse older demos to add them."}{" "}
+            Molotov/HE damage is enemy HP dealt by that grenade. Timing buckets use detonation time relative to each round's freeze end: early = first 25s, mid = 25–55s, late = later.
           </p>
 
           <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-faint lg:shrink-0">

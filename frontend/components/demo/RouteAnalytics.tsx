@@ -852,6 +852,48 @@ function RoundDetail({
   const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
   const kctx = useMemo(() => killContext(round), [round]);
 
+  // "watch in CS2" copy buttons — need the parser's round-start tick (round.st,
+  // absent on old parses) AND the clipboard API (absent on plain http). canCopy
+  // flips post-mount so SSR and first client render agree.
+  const [canCopy, setCanCopy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && !!navigator.clipboard?.writeText) setCanCopy(true);
+    return () => { if (copyTimer.current) clearTimeout(copyTimer.current); };
+  }, []);
+  // t (seconds since round start) → absolute demo tick, per round.st + tickRate
+  const copyBtn = (id: string, t: number, specName?: string) => {
+    if (!canCopy || round.st == null || !meta.tickRate) return null;
+    const tick = round.st + Math.round(t * meta.tickRate);
+    const cmd = `demo_gototick ${tick}${specName ? `; spec_player "${specName}"` : ""}`;
+    const doCopy = () => {
+      if (!navigator.clipboard?.writeText) return;
+      navigator.clipboard.writeText(cmd).then(
+        () => {
+          setCopiedId(id);
+          if (copyTimer.current) clearTimeout(copyTimer.current);
+          copyTimer.current = setTimeout(() => setCopiedId(null), 1200);
+        },
+        () => {},
+      );
+    };
+    const copied = copiedId === id;
+    // span, not <button> — kill rows are themselves buttons (no nesting)
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        title="Copy console command — open the demo in CS2, then paste in console"
+        onClick={(e) => { e.stopPropagation(); doCopy(); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); doCopy(); } }}
+        className={`shrink-0 cursor-pointer rounded px-1 text-[10px] leading-4 transition ${copied ? "font-semibold text-good" : "text-faint hover:text-brand"}`}
+      >
+        {copied ? "copied" : "⧉"}
+      </span>
+    );
+  };
+
   // keep original indices so hover/pin line up with the map markers. When a
   // player is selected, the util + kill feeds show only their own actions.
   const nadesAll = (round.nades ?? []).map((n, i) => ({ n, i })).sort((a, b) => a.n.t - b.n.t);
@@ -972,12 +1014,29 @@ function RoundDetail({
             <div className="space-y-0.5">
               {(round.bomb ?? []).slice().sort((a, b) => a.t - b.t).map((b, i) => {
                 const zone = zoneOf(b.x, b.y);
+                // b.p = acting player index + 1 (0/absent = unknown, old parses)
+                const actor = b.p != null && b.p > 0 ? b.p - 1 : null;
+                // with an actor named, the verb form reads better ("X planted A")
+                const base = (actor != null ? BOMB_VERB[b.k] : undefined) ?? BOMB_LABEL[b.k] ?? b.k.replace(/_/g, " ");
+                const label = b.site ? `${base} ${b.site}` : base;
+                // kit=true means defused WITH kit — flag only real defuses where
+                // we know the defuser (p present ⇒ new parse, kit is meaningful)
+                const noKit = b.k === "defuse" && actor != null && !b.kit;
+                const cb = copyBtn(`bomb-${i}`, b.t, actor != null ? name(actor) : undefined);
                 return (
                   <div key={i} className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5">
                     <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(b.t)}</span>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: BOMB_HEX[b.k] ?? "#8a7dff" }} />
-                    <span className="text-[11px] text-muted">{BOMB_LABEL[b.k] ?? b.k.replace(/_/g, " ")}</span>
-                    {zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
+                    {actor != null && (
+                      <span className="max-w-26 truncate text-[11px] font-semibold" style={{ color: sideHex(sideOfIdx(actor)) }}>{name(actor)}</span>
+                    )}
+                    <span className="text-[11px] text-muted">{label}</span>
+                    {noKit && (
+                      <span className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-semibold text-muted" title="Defused barehanded — no defuse kit (10s instead of 5s)">no kit</span>
+                    )}
+                    {/* zone stays as the location fallback when the event carries no site */}
+                    {!b.site && zone && <span className="ml-auto truncate text-[11px] text-faint">{zone}</span>}
+                    {cb && <span className={!b.site && zone ? "shrink-0" : "ml-auto shrink-0"}>{cb}</span>}
                   </div>
                 );
               })}
@@ -999,7 +1058,12 @@ function RoundDetail({
                     <span className="w-8 shrink-0 text-[11px] tabular-nums text-faint">{mmss(k.t)}</span>
                     <span className="max-w-26 truncate text-[11px] font-semibold" style={{ color: sideHex(sideOfIdx(k.k)) }}>{name(k.k)}</span>
                     {k.a != null && k.a > 0 && (
-                      <span className="max-w-16 shrink-0 truncate text-[10px] text-faint">+ {name(k.a - 1)}</span>
+                      <span
+                        className="max-w-16 shrink-0 truncate text-[10px] text-faint"
+                        title={k.fa ? "flash assist — blinded the victim" : undefined}
+                      >
+                        + {k.fa && <span style={{ color: KIND_COLOR.flash }}>⚡</span>}{name(k.a - 1)}
+                      </span>
                     )}
                     <span className="shrink-0 text-[10px] text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
                     {i === kctx.firstIdx && (
@@ -1008,6 +1072,10 @@ function RoundDetail({
                     {kctx.tradeIdxs.has(i) && (
                       <span className="shrink-0 rounded-full bg-[#8a7dff]/10 px-1.5 text-[9px] font-bold tracking-wide text-[#8a7dff]" title="Avenged a teammate killed moments before">TRADE</span>
                     )}
+                    {k.wb && <FlagPill hex="#e09a5a" label="WALLBANG" tip="Shot through a wall" />}
+                    {k.ts && <FlagPill hex={KIND_COLOR.smoke} label="SMOKE" tip="Killed through smoke" />}
+                    {k.bl && <FlagPill hex={KIND_COLOR.flash} label="BLIND" tip="Killer was flashed" />}
+                    {k.ns && <FlagPill hex="#ff7ab8" label="NOSCOPE" tip="AWP/scout kill without scoping" />}
                     {k.rct != null && k.rct > 0 && (
                       <span
                         className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-semibold tabular-nums text-muted"
@@ -1018,6 +1086,7 @@ function RoundDetail({
                     )}
                     <span className="shrink-0 text-faint">▸</span>
                     <span className="ml-auto max-w-26 truncate text-[11px] font-medium" style={{ color: sideHex(sideOfIdx(k.v)) }}>{name(k.v)}</span>
+                    {copyBtn(`kill-${i}`, k.t, name(k.k))}
                   </button>
                 );
               })}
@@ -1035,6 +1104,23 @@ const BOMB_LABEL: Record<string, string> = {
   plant_start: "plant started", plant: "bomb planted", defuse_start: "defuse started",
   defuse: "bomb defused", explode: "bomb exploded",
 };
+// verb forms used when the acting player's name prefixes the row ("X planted A")
+const BOMB_VERB: Record<string, string> = {
+  plant_start: "started planting", plant: "planted", defuse_start: "started defusing", defuse: "defused",
+};
+// compact kill-flag pill (WALLBANG / SMOKE / BLIND / NOSCOPE) — same shape as
+// the FIRST/TRADE pills, tinted per flag
+function FlagPill({ hex, label, tip }: { hex: string; label: string; tip: string }) {
+  return (
+    <span
+      className="shrink-0 rounded-full px-1.5 text-[9px] font-bold tracking-wide"
+      style={{ color: hex, background: `${hex}1a` }}
+      title={tip}
+    >
+      {label}
+    </span>
+  );
+}
 const BOMB_HEX: Record<string, string> = {
   plant_start: "#f5694a", plant: "#f5694a", defuse_start: CT, defuse: CT, explode: "#ff8c3b",
 };

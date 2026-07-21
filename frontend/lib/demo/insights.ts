@@ -4,9 +4,10 @@
 // util_damage, flash_blind, economy and a hand-authored map-zone database. We
 // have NONE of that. Everything below is reconstructed from the three streams we
 // actually capture per round: kills, 1 Hz positions (frames), and grenade lands
-// (nades). Known gaps (proxy assists, no flash-assists, bucketed economy) are
-// surfaced in the consuming tabs' data notes so numbers are never silently
-// fabricated.
+// (nades). Newer parses credit real assists (ReplayKill.a, flash assists via
+// .fa); older demos fall back to a trade-based proxy. Remaining gaps (bucketed
+// economy) are surfaced in the consuming tabs' data notes so numbers are never
+// silently fabricated.
 
 import type { ReplayMeta, ReplayNade, ReplayRound } from "@/lib/demo/types";
 import { classifyBuy, type BuyKey } from "@/lib/demo/economy";
@@ -22,6 +23,8 @@ export interface FavoriteWeapon { weapon: string; kills: number; }
 export interface PlayerInsight {
   i: number; steamId: string; name: string; team: "CT" | "T" | ""; roundsPlayed: number;
   kills: number; deaths: number; assistsApprox: number; kd: number; kpr: number;
+  assists: number; // real assists credited by the demo (kill.a) — 0 on old parses
+  flashAssists: number; // of assists, flash assists (kill.fa)
   headshots: number; hsPct: number;
   openingKills: number; openingDeaths: number; openingAttempts: number; openingWinPct: number;
   tradeKills: number; tradedDeaths: number; tradeKillPct: number;
@@ -75,6 +78,10 @@ export interface TeamUtil {
 
 export interface InsightsResult {
   players: PlayerInsight[]; util: TeamUtil; siteAnchor: SiteAnchor; totalRounds: number; map: string;
+  // true when any kill in the scoped rounds carries a real assist credit
+  // (kill.a) — consumers should show PlayerInsight.assists then, and fall back
+  // to assistsApprox (the trade proxy) otherwise.
+  hasRealAssists: boolean;
 }
 
 const TRADE_WINDOW = 5; // seconds
@@ -218,6 +225,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
 
   interface Acc {
     rounds: number; kills: number; deaths: number; hs: number; assists: number;
+    realA: number; flashA: number;
     openK: number; openD: number; tradeK: number; tradedD: number;
     kastRounds: number; clutchWon: number; clutchTotal: number; clutchBest: number;
     clutchBySize: Map<number, { w: number; t: number }>;
@@ -234,7 +242,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
   const get = (i: number): Acc => {
     let a = acc.get(i);
     if (!a) {
-      a = { rounds: 0, kills: 0, deaths: 0, hs: 0, assists: 0, openK: 0, openD: 0,
+      a = { rounds: 0, kills: 0, deaths: 0, hs: 0, assists: 0, realA: 0, flashA: 0, openK: 0, openD: 0,
         tradeK: 0, tradedD: 0, kastRounds: 0, clutchWon: 0, clutchTotal: 0, clutchBest: 0,
         clutchBySize: new Map(),
         mk: { k2: 0, k3: 0, k4: 0, k5: 0 }, mkRounds: 0,
@@ -248,6 +256,9 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     }
     return a;
   };
+
+  // Does this parse credit real assists? (kill.a is absent on older demos.)
+  const hasRealAssists = rounds.some((r) => (r.kills ?? []).some((k) => (k.a ?? 0) > 0));
 
   for (const r of rounds) {
     // who played this round (on a side)
@@ -280,6 +291,11 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
         perRoundKills.set(k.k, (perRoundKills.get(k.k) ?? 0) + 1);
       }
       if (k.v >= 0) get(k.v).deaths++;
+      if (k.a && k.a > 0) {
+        const aa = get(k.a - 1);
+        aa.realA++;
+        if (k.fa) aa.flashA++;
+      }
     }
     for (const [i, n] of perRoundKills) {
       const a = get(i);
@@ -291,6 +307,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     }
 
     // trades: a kill avenging a teammate killed by the same victim within window
+    const proxyAssistThisRound = new Set<number>();
     for (const k of kills) {
       if (k.k < 0 || k.v < 0) continue;
       const killerSide = sideOf(r, k.k, meta);
@@ -301,6 +318,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       if (avenged) {
         get(k.k).tradeK++;
         get(k.k).assists++; // proximity proxy
+        proxyAssistThisRound.add(k.k);
       }
     }
     const tradedThisRound = new Set<number>();
@@ -317,12 +335,18 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       }
     }
 
-    // KAST: a round "counts" for a player if they got a Kill, an Assist (real
-    // assister, if the demo recorded one), Survived to round end, or were Traded.
+    // KAST: a round "counts" for a player if they got a Kill, an Assist,
+    // Survived to round end, or were Traded. Assists prefer the demo's real
+    // credits (kill.a) when this parse carries them; otherwise fall back to the
+    // trade-based proxy assist above.
     const diedThisRound = new Set<number>();
     for (const k of kills) if (k.v >= 0) diedThisRound.add(k.v);
     const assistThisRound = new Set<number>();
-    for (const k of kills) if (k.a && k.a > 0) assistThisRound.add(k.a - 1);
+    if (hasRealAssists) {
+      for (const k of kills) if (k.a && k.a > 0) assistThisRound.add(k.a - 1);
+    } else {
+      for (const i of proxyAssistThisRound) assistThisRound.add(i);
+    }
     // "Survived" = alive in the final 1 Hz frame and not killed — frames only
     // snapshot alive players, so this mirrors the backend's IsAlive() survivor
     // set and excludes mid-round disconnects (no death event, no final frame).
@@ -450,6 +474,7 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
     players.push({
       i, steamId: pl.steamId, name: pl.name || `Player ${i}`, team: pl.team,
       roundsPlayed: a.rounds, kills: a.kills, deaths: a.deaths, assistsApprox: a.assists,
+      assists: a.realA, flashAssists: a.flashA,
       kd: a.deaths ? a.kills / a.deaths : a.kills, kpr: a.rounds ? a.kills / a.rounds : 0,
       headshots: a.hs, hsPct: a.kills ? (a.hs / a.kills) * 100 : 0,
       openingKills: a.openK, openingDeaths: a.openD, openingAttempts: a.openK + a.openD,
@@ -482,5 +507,5 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
   }
   players.sort((x, y) => y.kills - x.kills);
 
-  return { players, util, siteAnchor: anchor, totalRounds: rounds.length, map: meta.map };
+  return { players, util, siteAnchor: anchor, totalRounds: rounds.length, map: meta.map, hasRealAssists };
 }

@@ -96,12 +96,14 @@ function WeaponRow({
   unit = "K",
   selected = false,
   onSelect,
+  acc,
 }: {
   w: WeaponStat;
   max: number;
   unit?: string;
   selected?: boolean;
   onSelect?: () => void;
+  acc?: { s: number; h: number } | null; // per-weapon shots/hits (absent on old parses → no sub-stat)
 }) {
   const pct = max ? (w.kills / max) * 100 : 0;
   const enough = w.kills >= 3;
@@ -131,6 +133,11 @@ function WeaponRow({
           )
         )}
         <span className="ml-auto flex shrink-0 items-baseline gap-2 tabular-nums">
+          {acc != null && acc.s > 0 && (
+            <span className="text-[10px] font-semibold text-faint" title={`${acc.h} of ${acc.s} bullets hit`}>
+              {Math.round((acc.h / acc.s) * 100)}% acc
+            </span>
+          )}
           <span className="text-sm font-bold text-ink">
             {w.kills}
             <span className="ml-0.5 text-[10px] font-normal text-faint">{unit}</span>
@@ -197,6 +204,7 @@ function Arsenal({
   onLens,
   selectedWeapon,
   onSelectWeapon,
+  weaponAcc,
 }: {
   offense: WeaponInsightsData;
   defense: WeaponInsightsData;
@@ -206,6 +214,7 @@ function Arsenal({
   onLens: (l: "kills" | "deaths") => void;
   selectedWeapon: string | null;
   onSelectWeapon: (key: string) => void;
+  weaponAcc?: Map<string, { s: number; h: number }>; // scoped per-weapon shots/hits (kills lens only)
 }) {
   const showDeaths = lens === "deaths" && !unscoped;
   const data = showDeaths ? defense : offense;
@@ -257,6 +266,9 @@ function Arsenal({
                 unit={unit}
                 selected={selectedWeapon === w.key}
                 onSelect={() => onSelectWeapon(w.key)}
+                // deaths list the killers' weapons — the scoped subject's own
+                // accuracy with them would be the wrong number, so kills only
+                acc={showDeaths ? null : weaponAcc?.get(w.key) ?? null}
               />
             ))}
           </div>
@@ -347,6 +359,37 @@ function accuracyOf(
 }
 
 const pctOr = (num: number, den: number) => (den ? `${((num / den) * 100).toFixed(0)}%` : "—");
+
+// --- per-weapon accuracy (stats.wacc) ----------------------------------------
+// wacc is keyed by the parser's weapon strings — the very same strings kill
+// events carry — so normalising each key through weaponMeta() lands it on the
+// WeaponStat.key the Arsenal rows use. Absent on older parses → empty map →
+// the "% acc" sub-stat simply never renders.
+
+function weaponAccOf(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  roundFilter: ((r: ReplayRound, idx: number) => boolean) | undefined,
+  side: "all" | "CT" | "T",
+  focus: number | null,
+): Map<string, { s: number; h: number }> {
+  const out = new Map<string, { s: number; h: number }>();
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    for (const st of r.stats ?? []) {
+      if (focus != null && st.i !== focus) continue;
+      if (side !== "all" && sideOf(r, st.i, meta) !== side) continue;
+      for (const [raw, a] of Object.entries(st.wacc ?? {})) {
+        const key = weaponMeta(raw).key;
+        const e = out.get(key) ?? { s: 0, h: 0 };
+        e.s += a.s ?? 0;
+        e.h += a.h ?? 0;
+        out.set(key, e);
+      }
+    }
+  });
+  return out;
+}
 
 // --- round highlights (multi-kills + opener conversion) ---------------------
 // The pro's first scan of a match: who dropped the 3K/4K/ACE rounds, and how
@@ -601,6 +644,18 @@ const DISTS: { key: DistBand; label: string; test: (m: number) => boolean; title
   { key: "long", label: "Long", test: (m) => m >= 22, title: "Over ~22m — long range" },
 ];
 
+// special-kill flag filters (wallbang / through smoke / attacker blind /
+// noscope). Absent on old parses — the chips hide entirely when the scoped
+// kills carry none of these flags, rather than showing dead toggles.
+type SpecialFlag = "wb" | "ts" | "bl" | "ns";
+const SPECIALS: { key: SpecialFlag; label: string; title: string }[] = [
+  { key: "wb", label: "Wallbang", title: "Only wallbang kills — the bullet penetrated an object" },
+  { key: "ts", label: "Smoke", title: "Only kills through smoke" },
+  { key: "bl", label: "Blind", title: "Only kills landed while the attacker was flashed" },
+  { key: "ns", label: "Noscope", title: "Only noscope kills — a scoped weapon fired unscoped" },
+];
+const NO_SPECIALS: Record<SpecialFlag, boolean> = { wb: false, ts: false, bl: false, ns: false };
+
 const TRADE_WINDOW = 5; // seconds — a kill is "traded" if the killer dies within this
 
 function DuelMap({
@@ -628,6 +683,14 @@ function DuelMap({
   const [dist, setDist] = useState<DistBand>("any");
   const [hsOnly, setHsOnly] = useState(false);
   const [tradedOnly, setTradedOnly] = useState(false);
+  const [specials, setSpecials] = useState<Record<SpecialFlag, boolean>>(NO_SPECIALS);
+
+  // whether the scoped kills carry ANY special-kill flags (old parses lack
+  // them) — when none exist we hide the four chips and never apply the filter.
+  const hasSpecials = useMemo(() => {
+    const scoped = view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
+    return scoped.some((r) => (r.kills ?? []).some((k) => k.wb || k.ts || k.bl || k.ns));
+  }, [rounds, view.scopeRound]);
 
   // a weapon picked from the kill/death panels drives the map (its own mode);
   // otherwise the map uses its local mode + class-chip filter.
@@ -660,6 +723,7 @@ function DuelMap({
           if (wm.key !== weaponSel.key) continue;
         } else if (cls !== "all" && wm.cls !== cls) continue;
         if (hsOnly && !k.hs) continue;
+        if (hasSpecials && SPECIALS.some((s) => specials[s.key] && !k[s.key])) continue;
         if (phase === "opening" && k.t !== openT) continue;
         if (phase === "postplant" && (plantT == null || k.t < plantT)) continue;
         if (buy !== "any") {
@@ -701,10 +765,11 @@ function DuelMap({
     }
     const callouts = [...spots.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
     return { pts: out, callouts };
-  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly]);
+  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly, specials, hasSpecials]);
 
   const marks = plot.pts;
-  const anyFilter = cls !== "all" || phase !== "any" || buy !== "any" || dist !== "any" || hsOnly || tradedOnly;
+  const specialOn = hasSpecials && SPECIALS.some((s) => specials[s.key]);
+  const anyFilter = cls !== "all" || phase !== "any" || buy !== "any" || dist !== "any" || hsOnly || tradedOnly || specialOn;
   const resetFilters = () => {
     setCls("all");
     setPhase("any");
@@ -712,6 +777,7 @@ function DuelMap({
     setDist("any");
     setHsOnly(false);
     setTradedOnly(false);
+    setSpecials(NO_SPECIALS);
     onClearWeapon();
   };
 
@@ -807,6 +873,7 @@ function DuelMap({
     dist !== "any" ? `${dist} range` : null,
     hsOnly ? "HS" : null,
     tradedOnly ? "traded" : null,
+    ...SPECIALS.filter((s) => hasSpecials && specials[s.key]).map((s) => s.label.toLowerCase()),
   ].filter(Boolean).join(" · ");
 
   return (
@@ -982,6 +1049,21 @@ function DuelMap({
         >
           Traded
         </button>
+        {hasSpecials &&
+          SPECIALS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setSpecials((prev) => ({ ...prev, [s.key]: !prev[s.key] }))}
+              aria-pressed={specials[s.key]}
+              title={s.title}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+                specials[s.key] ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
         {(anyFilter || weaponSel) && (
           <button
             type="button"
@@ -1322,6 +1404,10 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   // scoped exactly like the weapon computations above (round · side · focus).
   const acc = useMemo(() => accuracyOf(meta, rounds, roundFilter, view.side, focus), [meta, rounds, roundFilter, view.side, focus]);
 
+  // per-weapon shots/hits (stats.wacc) under the same scope as the offense
+  // list — feeds the "% acc" sub-stat on the Arsenal rows (kills lens).
+  const weaponAcc = useMemo(() => weaponAccOf(meta, rounds, roundFilter, view.side, focus), [meta, rounds, roundFilter, view.side, focus]);
+
   // team gunfights — each side's fragging aggregated over the whole match
   // (both halves), independent of the side filter so it stays a real comparison.
   const teamCT = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, "CT", { by: "killer" }), [meta, rounds, roundFilter]);
@@ -1464,6 +1550,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
             }}
             selectedWeapon={weaponSel && weaponSel.mode === lens ? weaponSel.key : null}
             onSelectWeapon={(k) => pickWeapon(k, lens)}
+            weaponAcc={weaponAcc}
           />
           <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
         </div>
