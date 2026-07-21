@@ -274,7 +274,7 @@ function UtilTimeline({
           <span className="text-muted">click a round to scope every tab to it</span>
         </span>
       </div>
-      <div className="scroll-slim flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0.5">
+      <div className="scroll-slim flex flex-wrap justify-center gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0.5">
         {rounds.map((r, ri) => {
           const side = r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
           const won = !!side && r.winner === side;
@@ -296,7 +296,7 @@ function UtilTimeline({
                   ? `Round ${r.n} · did not play`
                   : `Round ${r.n} · ${won ? "won" : "lost"}${nades.length ? ` · ${kindStr}` : " · no utility"}`
               }
-              className={`flex h-11 w-8 flex-col items-center justify-center gap-0.5 rounded border leading-none transition lg:w-auto lg:min-w-8 lg:max-w-12 lg:flex-1 ${active ? "ring-2 ring-brand" : ""} ${
+              className={`flex h-11 w-8 shrink-0 flex-col items-center justify-center gap-0.5 rounded border leading-none transition ${active ? "ring-2 ring-brand" : ""} ${
                 side == null
                   ? "border-line bg-panel/40 opacity-40"
                   : won
