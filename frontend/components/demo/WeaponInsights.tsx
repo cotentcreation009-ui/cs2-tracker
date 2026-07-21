@@ -54,6 +54,7 @@ function StatPill({
   hex,
   tone,
   weapon,
+  title,
 }: {
   label: string;
   value: string;
@@ -61,9 +62,10 @@ function StatPill({
   hex?: string;
   tone?: "offense" | "threat";
   weapon?: Pick<WeaponStat, "label" | "color"> | null; // when set, shows a weapon badge beside the value
+  title?: string; // hover tooltip explaining the measurement
 }) {
   return (
-    <div className="card px-4 py-3 lg:px-3 lg:py-2">
+    <div className="card px-4 py-3 lg:px-3 lg:py-2" title={title}>
       <div className="flex items-center gap-1.5">
         {tone && (
           <span
@@ -311,6 +313,40 @@ function longestKillOf(
   });
   return best;
 }
+
+// --- bullet accuracy (shots / hits / headshot hits) --------------------------
+// Summed from the per-round player stats (older parses lack them → all zeros,
+// rendered as "—"). Same scoping rules as the weapon computations: optional
+// round filter, side (by the side the player was on THAT round), and focus.
+
+interface BulletAcc {
+  shots: number;
+  hits: number;
+  hsHits: number;
+}
+
+function accuracyOf(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  roundFilter: ((r: ReplayRound, idx: number) => boolean) | undefined,
+  side: "all" | "CT" | "T",
+  focus: number | null,
+): BulletAcc {
+  const acc: BulletAcc = { shots: 0, hits: 0, hsHits: 0 };
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    for (const s of r.stats ?? []) {
+      if (focus != null && s.i !== focus) continue;
+      if (side !== "all" && sideOf(r, s.i, meta) !== side) continue;
+      acc.shots += s.shots ?? 0;
+      acc.hits += s.hits ?? 0;
+      acc.hsHits += s.hsHits ?? 0;
+    }
+  });
+  return acc;
+}
+
+const pctOr = (num: number, den: number) => (den ? `${((num / den) * 100).toFixed(0)}%` : "—");
 
 // --- round highlights (multi-kills + opener conversion) ---------------------
 // The pro's first scan of a match: who dropped the 3K/4K/ACE rounds, and how
@@ -637,8 +673,20 @@ function DuelMap({
           if (!distTest(m)) continue;
         }
         if (tradedOnly) {
-          // the kill was traded if its killer dies within the trade window after
-          const traded = kills.some((k2) => k2.k >= 0 && k2.v === k.k && k2.t > k.t && k2.t - k.t <= TRADE_WINDOW);
+          // The kill was traded if its killer dies to an ENEMY within the trade
+          // window (inclusive — same-tick mutual frags count). This tags the
+          // kill that GOT traded; the feeds' TRADE pill tags the avenging kill
+          // of the same pair (see lib/demo/killContext.ts).
+          const traded = kills.some(
+            (k2) =>
+              k2 !== k &&
+              k2.k >= 0 &&
+              k2.v === k.k &&
+              sideOf(r, k2.k, meta) !== "" &&
+              sideOf(r, k2.k, meta) !== sideOf(r, k2.v, meta) &&
+              k2.t >= k.t &&
+              k2.t - k.t <= TRADE_WINDOW,
+          );
           if (!traded) continue;
         }
         const v = proj.project(k.vx, k.vy);
@@ -1157,12 +1205,14 @@ function TeamCompare({
   ct,
   t,
   openings,
+  acc,
 }: {
   ct: WeaponInsightsData;
   t: WeaponInsightsData;
   openings: { ctOpen: number; ctWon: number; tOpen: number; tWon: number };
+  acc: { ct: BulletAcc; t: BulletAcc };
 }) {
-  const side = (data: WeaponInsightsData, s: "CT" | "T", open: number, won: number) => {
+  const side = (data: WeaponInsightsData, s: "CT" | "T", open: number, won: number, a: BulletAcc) => {
     const hex = s === "T" ? T : CT;
     const soft = s === "T" ? "#f0cd78" : "#9cc1ff";
     return (
@@ -1184,7 +1234,21 @@ function TeamCompare({
               {data.overallHsPct.toFixed(0)}%
             </div>
           </div>
-          <div className="rounded-lg bg-panel/50 px-2 py-1.5" title="the round's first duel, won = the side went on to win the round">
+          <div
+            className="rounded-lg bg-panel/50 px-2 py-1.5"
+            title={
+              a.shots
+                ? `bullets that dealt damage ÷ bullets fired by ${s} players: ${a.hits}/${a.shots}`
+                : "no shot data for this scope (re-parse the demo)"
+            }
+          >
+            <div className="text-[9px] uppercase tracking-wider text-faint">Accuracy</div>
+            <div className="text-sm font-bold tabular-nums text-ink">{pctOr(a.hits, a.shots)}</div>
+          </div>
+          <div
+            className="col-span-2 rounded-lg bg-panel/50 px-2 py-1.5"
+            title="the round's first duel, won = the side went on to win the round"
+          >
             <div className="text-[9px] uppercase tracking-wider text-faint">Opening picks</div>
             <div className="text-sm font-bold tabular-nums text-ink">
               {open ? `${won}/${open}` : "—"}
@@ -1214,8 +1278,8 @@ function TeamCompare({
         <span className="text-[10px] text-faint">who&apos;s winning the guns</span>
       </div>
       <div className="grid grid-cols-2 gap-4 lg:gap-5">
-        <div className="border-r border-line pr-4 lg:pr-5">{side(ct, "CT", openings.ctOpen, openings.ctWon)}</div>
-        <div>{side(t, "T", openings.tOpen, openings.tWon)}</div>
+        <div className="border-r border-line pr-4 lg:pr-5">{side(ct, "CT", openings.ctOpen, openings.ctWon, acc.ct)}</div>
+        <div>{side(t, "T", openings.tOpen, openings.tWon, acc.t)}</div>
       </div>
       <div className="mt-3 border-t border-line pt-2 text-[10px] text-faint">
         Aggregated by the side each player was on that round (both halves). Opening picks = the round&apos;s first duel;
@@ -1254,10 +1318,18 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   const defense = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, view.side, { by: "victim", focus }), [meta, rounds, roundFilter, view.side, focus]);
   const nemesis = useMemo(() => (focus != null ? computeNemesis(meta, rounds, focus, roundFilter) : null), [meta, rounds, focus, roundFilter]);
 
+  // bullet accuracy — shots/hits/headshot-hits summed from the per-round stats,
+  // scoped exactly like the weapon computations above (round · side · focus).
+  const acc = useMemo(() => accuracyOf(meta, rounds, roundFilter, view.side, focus), [meta, rounds, roundFilter, view.side, focus]);
+
   // team gunfights — each side's fragging aggregated over the whole match
   // (both halves), independent of the side filter so it stays a real comparison.
   const teamCT = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, "CT", { by: "killer" }), [meta, rounds, roundFilter]);
   const teamT = useMemo(() => computeWeaponInsights(meta, rounds, roundFilter, "T", { by: "killer" }), [meta, rounds, roundFilter]);
+  const teamAcc = useMemo(
+    () => ({ ct: accuracyOf(meta, rounds, roundFilter, "CT", null), t: accuracyOf(meta, rounds, roundFilter, "T", null) }),
+    [meta, rounds, roundFilter],
+  );
   const openings = useMemo(() => {
     let ctOpen = 0, ctWon = 0, tOpen = 0, tWon = 0;
     rounds.forEach((r, idx) => {
@@ -1325,9 +1397,23 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       </div>
 
       {/* dual headline strip: offense + threat */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatPill tone="offense" label="Top weapon" value={offense.topWeapon ? offense.topWeapon.label : "—"} hint={offense.topWeapon ? `${offense.topWeapon.kills} kills · ${offense.topWeapon.hsPct.toFixed(0)}% HS` : undefined} hex={offense.topWeapon?.color} weapon={offense.topWeapon} />
         <StatPill tone="offense" label="Headshot rate" value={`${offense.overallHsPct.toFixed(0)}%`} hint={`${offense.totalHeadshots}/${offense.totalKills} kills`} hex={hsColor(offense.overallHsPct)} />
+        <StatPill
+          tone="offense"
+          label="Accuracy"
+          value={pctOr(acc.hits, acc.shots)}
+          hint={acc.shots ? `${acc.hits}/${acc.shots} bullets hit` : "no shot data (re-parse)"}
+          title={`Bullet accuracy — bullets that dealt damage ÷ bullets fired (firearms only) by ${scopeLabel} over the scoped rounds`}
+        />
+        <StatPill
+          tone="offense"
+          label="HS hits"
+          value={pctOr(acc.hsHits, acc.hits)}
+          hint={acc.hits ? `${acc.hsHits}/${acc.hits} hits to the head` : "no hit data (re-parse)"}
+          title={`Headshot precision — headshot hits ÷ all connecting bullets by ${scopeLabel} (every hit counts, not just the kill shots)`}
+        />
         <StatPill
           tone="offense"
           label="Longest kill"
@@ -1401,7 +1487,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
       {focus != null ? (
         <HeadToHead meta={meta} rounds={rounds} view={view} />
       ) : (
-        <TeamCompare ct={teamCT} t={teamT} openings={openings} />
+        <TeamCompare ct={teamCT} t={teamT} openings={openings} acc={teamAcc} />
       )}
 
       <p className="text-[10px] leading-relaxed text-faint">

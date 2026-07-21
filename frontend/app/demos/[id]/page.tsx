@@ -18,12 +18,15 @@ import { MatchToolbar, type DemoView, type SideFilter } from "@/components/demo/
 import { ZoneEditor } from "@/components/demo/ZoneEditor";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
+import { killContext, TRADE_WINDOW } from "@/lib/demo/killContext";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
+import { MatchScoreboard } from "@/components/demo/MatchScoreboard";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { teamScore } from "@/lib/demo/score";
 
 const TABS = [
   { k: "replay", label: "Replay" },
+  { k: "scoreboard", label: "Scoreboard" },
   { k: "routes", label: "Routes" },
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Utility" },
@@ -42,6 +45,8 @@ const SPEEDS = [1, 2, 4, 8];
 // One small glyph per lens for the tab nav. viewBox 24, currentColor.
 const TAB_ICON: Record<Tab, string> = {
   replay: "M8 5v14l11-7z",
+  scoreboard: "M3 5h18v14H3zM3 10h18M9 10v9M15 10v9", // stats table
+
   routes: "M4 18h5a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h5M17 3l3 3-3 3M4 15l-3 3 3 3", // rough path
   weapons: "M12 2v4M12 18v4M2 12h4M18 12h4M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // crosshair
   insights: "M12 3c4 4.5 6.5 7.5 6.5 11a6.5 6.5 0 1 1-13 0C5.5 10.5 8 7.5 12 3zM10 5.5L7 2.5M14 5.5l3-3", // grenade bloom
@@ -112,24 +117,31 @@ function EventFeed({
   time,
   meta,
   zones,
+  onSeek,
 }: {
   round: ReplayRound;
   time: number;
   meta: ReplayMeta;
   zones: Zone[];
+  onSeek: (t: number) => void;
 }) {
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const sideOf = (i: number) => (round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "");
   const lifeOf = (n: { k: string; dur: number }) => Math.max(n.dur || 0, UTIL_LIFE[n.k] ?? 1);
   const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
 
+  // FIRST/TRADE tags — shared definition, so the pills agree with every other
+  // feed. Indexed by position in round.kills, so keep original indices around.
+  const ctx = useMemo(() => killContext(round), [round]);
+
   const active = (round.nades ?? [])
     .filter((n) => time >= n.t && time <= n.t + lifeOf(n))
     .map((n) => ({ n, rem: n.t + lifeOf(n) - time }))
     .sort((a, b) => a.rem - b.rem);
   const kills = (round.kills ?? [])
-    .filter((k) => k.k >= 0 && k.t <= time)
-    .sort((a, b) => b.t - a.t);
+    .map((k, idx) => ({ k, idx }))
+    .filter(({ k }) => k.k >= 0 && k.t <= time)
+    .sort((a, b) => b.k.t - a.k.t);
 
   const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= time);
   const ended = (round.bomb ?? []).find((b) => (b.k === "defuse" || b.k === "explode") && b.t <= time);
@@ -223,20 +235,214 @@ function EventFeed({
           <div className="text-xs text-faint">No kills yet.</div>
         ) : (
           <div className="scroll-slim max-h-44 space-y-0.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
-            {kills.map((k, i) => {
+            {kills.map(({ k, idx }) => {
               const recent = time - k.t < 4;
               return (
-                <div key={i} className={`flex items-center gap-1.5 text-xs ${recent ? "" : "opacity-55"}`}>
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => onSeek(k.t)}
+                  title={`Jump the replay to ${mmss(k.t)}`}
+                  className={`-mx-1 flex w-[calc(100%+0.5rem)] cursor-pointer items-center gap-1.5 rounded px-1 py-px text-left text-xs transition hover:bg-panel/70 ${recent ? "" : "opacity-55"}`}
+                >
                   <span className="w-8 shrink-0 tabular-nums text-faint">{mmss(k.t)}</span>
                   <span className="truncate font-medium" style={{ color: sideOf(k.k) === "T" ? T : CT }}>{name(k.k)}</span>
+                  {(k.a ?? 0) > 0 && (
+                    <span className="truncate text-[10px] text-faint" title={`Assist: ${name((k.a ?? 1) - 1)}`}>
+                      + {name((k.a ?? 1) - 1)}
+                    </span>
+                  )}
+                  {idx === ctx.firstIdx && (
+                    <span
+                      className="shrink-0 rounded-full bg-brand/15 px-1.5 text-[9px] font-bold tracking-wide text-brand"
+                      title="Opening kill of the round"
+                    >
+                      FIRST
+                    </span>
+                  )}
+                  {ctx.tradeIdxs.has(idx) && (
+                    <span
+                      className="shrink-0 rounded-full bg-good/15 px-1.5 text-[9px] font-bold tracking-wide text-good"
+                      title={`Trade — avenged a teammate killed within ${TRADE_WINDOW}s`}
+                    >
+                      TRADE
+                    </span>
+                  )}
                   <span className="shrink-0 text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
                   <span className="ml-auto truncate text-muted">{name(k.v)}</span>
-                </div>
+                </button>
               );
             })}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Custom scrubber: rounded track + played fill + event ticks (kills coloured by
+// the killer's side, bomb plant in white, util dimmed along the bottom edge).
+// Renders every frame during playback, so all tick geometry is memoized per
+// round; only the fill width / thumb position / hover tooltip change per frame.
+function ScrubBar({
+  round,
+  duration,
+  time,
+  sideOf,
+  onScrub,
+}: {
+  round: ReplayRound;
+  duration: number;
+  time: number;
+  sideOf: (i: number) => "CT" | "T";
+  onScrub: (t: number) => void;
+}) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const [hover, setHover] = useState<number | null>(null); // fraction 0..1
+
+  // tick geometry — per round, not per frame
+  const ticks = useMemo(() => {
+    if (!(duration > 0)) return { kills: [], nades: [], plants: [] } as {
+      kills: { left: number; hex: string; label: string }[];
+      nades: { left: number; hex: string; label: string }[];
+      plants: { left: number; label: string }[];
+    };
+    return {
+      kills: (round.kills ?? [])
+        .filter((k) => k.k >= 0)
+        .map((k) => ({
+          left: (k.t / duration) * 100,
+          hex: sideOf(k.k) === "T" ? T : CT,
+          label: `Kill · ${mmss(k.t)}`,
+        })),
+      nades: (round.nades ?? []).map((n) => ({
+        left: (n.t / duration) * 100,
+        hex: KIND_COLOR[n.k] ?? "#8a7dff",
+        label: `${n.k} · ${mmss(n.t)}`,
+      })),
+      plants: (round.bomb ?? [])
+        .filter((b) => b.k === "plant")
+        .map((b) => ({ left: (b.t / duration) * 100, label: `Bomb plant · ${mmss(b.t)}` })),
+    };
+  }, [round, duration, sideOf]);
+
+  const fracAt = (clientX: number) => {
+    const rect = barRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return 0;
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
+  };
+  const pct = duration > 0 ? clamp(time / duration, 0, 1) * 100 : 0;
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    let d = 0;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") d = e.shiftKey ? -5 : -1;
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") d = e.shiftKey ? 5 : 1;
+    else if (e.key === "PageDown") d = -10;
+    else if (e.key === "PageUp") d = 10;
+    else if (e.key === "Home") {
+      e.preventDefault();
+      onScrub(0);
+      return;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      onScrub(duration);
+      return;
+    } else return;
+    e.preventDefault();
+    onScrub(clamp(time + d, 0, duration));
+  };
+
+  return (
+    <div
+      ref={barRef}
+      role="slider"
+      tabIndex={0}
+      aria-label="Playback position"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration * 10) / 10}
+      aria-valuenow={Math.round(time * 10) / 10}
+      aria-valuetext={`${mmss(time)} of ${mmss(duration)}`}
+      onKeyDown={onKeyDown}
+      onPointerDown={(e) => {
+        // primary button only — a right/ctrl-click must not seek, and its
+        // pointerup can be swallowed by the context menu, sticking the drag
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragging.current = true;
+        onScrub(fracAt(e.clientX) * duration);
+      }}
+      onPointerMove={(e) => {
+        const f = fracAt(e.clientX);
+        setHover(f);
+        if (dragging.current) onScrub(f * duration);
+      }}
+      onPointerUp={(e) => {
+        dragging.current = false;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      // OS-cancelled touches (edge swipe, notification shade) fire neither
+      // pointerup nor leave — clear the drag + tooltip so they can't stick
+      onPointerCancel={() => {
+        dragging.current = false;
+        setHover(null);
+      }}
+      onLostPointerCapture={() => {
+        dragging.current = false;
+      }}
+      onPointerLeave={() => {
+        if (!dragging.current) setHover(null);
+      }}
+      className="group relative mt-2.5 flex h-5 w-full cursor-pointer touch-none select-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-brand/60 lg:mt-1"
+    >
+      {/* track + played fill */}
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-panel2 ring-1 ring-inset ring-line/70">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-brand/60" style={{ width: `${pct}%` }} />
+      </div>
+
+      {/* util ticks — dimmed, along the bottom edge */}
+      {ticks.nades.map((n, i) => (
+        <span
+          key={`n${i}`}
+          title={n.label}
+          className="pointer-events-none absolute bottom-0 h-1 w-0.5 -translate-x-1/2 rounded-full opacity-70"
+          style={{ left: `${n.left}%`, background: n.hex }}
+        />
+      ))}
+      {/* kill ticks — CT/T coloured */}
+      {ticks.kills.map((k, i) => (
+        <span
+          key={`k${i}`}
+          title={k.label}
+          className="pointer-events-none absolute top-1/2 h-2.5 w-0.75 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{ left: `${k.left}%`, background: k.hex, boxShadow: "0 0 0 1px rgba(4,6,14,0.7)" }}
+        />
+      ))}
+      {/* bomb plant */}
+      {ticks.plants.map((b, i) => (
+        <span
+          key={`b${i}`}
+          title={b.label}
+          className="pointer-events-none absolute top-0 h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-white"
+          style={{ left: `${b.left}%`, boxShadow: "0 0 4px rgba(255,255,255,0.7)" }}
+        />
+      ))}
+
+      {/* thumb */}
+      <span
+        className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand shadow-[0_0_6px_rgba(56,214,255,0.8)] transition-transform group-hover:scale-110"
+        style={{ left: `${pct}%` }}
+      />
+
+      {/* hover time tooltip */}
+      {hover != null && duration > 0 && (
+        <span
+          className="pointer-events-none absolute -top-5.5 -translate-x-1/2 rounded border border-line2 bg-bg/90 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-ink"
+          style={{ left: `${hover * 100}%` }}
+        >
+          {mmss(hover * duration)}
+        </span>
+      )}
     </div>
   );
 }
@@ -657,9 +863,13 @@ export default function ReplayPage() {
     [round, duration, toPx, posAt, sideOf, meta, nadeOrigins],
   );
 
-  // animation loop
+  // animation loop — only while the Replay tab is showing. Other tabs don't
+  // draw the canvas, and letting the rAF run there re-renders the workspace
+  // every frame for nothing. Resetting lastTs on (re)start gives the first
+  // tick a zero dt, so returning to the tab resumes without a time jump.
   useEffect(() => {
-    if (!round) return;
+    if (!round || tab !== "replay") return;
+    lastTs.current = 0;
     const tick = (ts: number) => {
       const dt = lastTs.current ? (ts - lastTs.current) / 1000 : 0;
       lastTs.current = ts;
@@ -676,7 +886,7 @@ export default function ReplayPage() {
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [round, duration, draw]);
+  }, [round, duration, draw, tab]);
 
   const seek = (t: number) => {
     tRef.current = clamp(t, 0, duration);
@@ -815,8 +1025,25 @@ export default function ReplayPage() {
     setSide,
   };
 
-  // round navigation (drives scopeRound → the sync effect updates the replay)
-  const goRound = (i: number) => setScopeRound(clamp(i, 0, rounds.length - 1));
+  // Round navigation from the replay transport. Coupling to the workspace-wide
+  // round scope is OPT-IN: when the user has scoped a round (toolbar chip /
+  // evidence jump) stepping moves that scope too, but plain browsing through a
+  // demo must not silently re-scope every other tab — so unscoped stepping
+  // drives only the replay's local round.
+  const goRound = (i: number) => {
+    const n = clamp(i, 0, rounds.length - 1);
+    if (scopeRound != null) {
+      setScopeRound(n); // scoped mode: the sync effect updates the replay
+      return;
+    }
+    setRoundIdx(n);
+    roundRef.current = n;
+    tRef.current = 0;
+    setTime(0);
+    playRef.current = false;
+    setPlaying(false);
+    setViewport({ scale: 1, ox: 0, oy: 0 });
+  };
   const atFirst = roundIdx <= 0;
   const atLast = roundIdx >= rounds.length - 1;
   const finished = duration > 0 && time >= duration - 0.05;
@@ -1015,6 +1242,7 @@ export default function ReplayPage() {
       {/* lens pane: at lg+ this is the rest of the viewport — lenses fill it
           and scroll internally; the pane (never the page) absorbs overflow */}
       <div className="scroll-slim lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+      {tab === "scoreboard" && <MatchScoreboard meta={meta} rounds={rounds} view={view} />}
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <UtilityBreakdown meta={meta} rounds={rounds} view={view} />}
@@ -1207,49 +1435,17 @@ export default function ReplayPage() {
               {mmss(time)} / {mmss(duration)}
             </span>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={Math.max(duration, 0.1)}
-            step={0.1}
-            value={time}
-            onChange={(e) => {
+          <ScrubBar
+            round={round}
+            duration={duration}
+            time={time}
+            sideOf={sideOf}
+            onScrub={(t) => {
               playRef.current = false;
               setPlaying(false);
-              seek(parseFloat(e.target.value));
+              seek(t);
             }}
-            className="mt-2.5 w-full accent-brand lg:mt-1"
           />
-          {duration > 0 && (
-            <div className="relative mt-1 h-2">
-              {(round.nades ?? []).map((n, i) => (
-                <span
-                  key={`n${i}`}
-                  title={`${n.k} · ${mmss(n.t)}`}
-                  className="absolute top-0.5 h-1 w-0.5 -translate-x-1/2 rounded-full"
-                  style={{ left: `${(n.t / duration) * 100}%`, background: KIND_COLOR[n.k] ?? "#8a7dff" }}
-                />
-              ))}
-              {(round.kills ?? []).filter((k) => k.k >= 0).map((k, i) => (
-                <button
-                  key={`k${i}`}
-                  type="button"
-                  title={`Kill · ${mmss(k.t)} — jump`}
-                  onClick={() => { playRef.current = false; setPlaying(false); seek(k.t); }}
-                  className="absolute top-0 h-2 w-1 -translate-x-1/2 rounded-full transition-transform hover:scale-150"
-                  style={{ left: `${(k.t / duration) * 100}%`, background: "#f5694a" }}
-                />
-              ))}
-              {(round.bomb ?? []).filter((b) => b.k === "plant").map((b, i) => (
-                <span
-                  key={`b${i}`}
-                  title={`Bomb plant · ${mmss(b.t)}`}
-                  className="absolute -top-0.5 h-2.5 w-0.5 -translate-x-1/2"
-                  style={{ left: `${(b.t / duration) * 100}%`, background: "#fff" }}
-                />
-              ))}
-            </div>
-          )}
         </div>
           </div>
 
@@ -1260,7 +1456,19 @@ export default function ReplayPage() {
               live feed | detail stack — so wide screens show everything. */}
           <div className="scroll-slim space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:overflow-y-auto 2xl:contents">
           <div className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col 2xl:h-full 2xl:min-h-0">
-            <EventFeed round={round} time={time} meta={meta} zones={zones} />
+            <EventFeed
+              round={round}
+              time={time}
+              meta={meta}
+              zones={zones}
+              // pause on jump — reviewing a kill at 4x speed is useless, and
+              // every other seek path (scrub, evidence jumps) pauses too
+              onSeek={(t) => {
+                playRef.current = false;
+                setPlaying(false);
+                seek(t);
+              }}
+            />
           </div>
 
           <div className="scroll-slim space-y-3 lg:contents lg:space-y-0 2xl:flex 2xl:h-full 2xl:min-h-0 2xl:flex-col 2xl:gap-2.5 2xl:overflow-y-auto">

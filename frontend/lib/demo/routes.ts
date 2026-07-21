@@ -28,6 +28,8 @@ export interface RouteCluster {
   centroid: RoutePoint[];
   killPositions: { x: number; y: number; z?: number }[];
   deathPositions: { x: number; y: number; z?: number }[];
+  /** catch-all bucket of one-off paths, rendered last — not a real route */
+  uncommon?: boolean;
 }
 
 export interface RouteAnalysis {
@@ -108,7 +110,9 @@ function signaturize(points: RoutePoint[], b: Bounds): string {
   return resample(points, WAYPOINTS).map((p) => cell(p.x, p.y, b)).join("|");
 }
 
-function averagePath(paths: PlayerPath[]): RoutePoint[] {
+// exported: RouteAnalytics re-averages after player/side filtering so labels,
+// "reaches" times and timing ticks describe the paths actually shown
+export function averagePath(paths: PlayerPath[]): RoutePoint[] {
   const resampled = paths.map((p) => resample(p.points, WAYPOINTS));
   const n = Math.max(...resampled.map((r) => r.length));
   const out: RoutePoint[] = [];
@@ -123,6 +127,49 @@ function averagePath(paths: PlayerPath[]): RoutePoint[] {
   return out;
 }
 
+const parseSig = (sig: string): [number, number][] =>
+  sig.split("|").map((c) => c.split(",").map(Number) as [number, number]);
+
+// Two signatures describe "the same route" when they END in the same or an
+// adjacent grid cell (the destination is what defines a route) AND either at
+// most 1 of the remaining waypoint cells differ OR every waypoint pair sits
+// within one grid cell (adjacent centroids). Byte-identical grouping alone
+// shatters routes into 1× singletons with degenerate 0%/100% win rates, while
+// destination-blind merging would fold an A-site push into a B-site push.
+function sigsMergeable(a: [number, number][], b: [number, number][]): boolean {
+  const la = a[a.length - 1];
+  const lb = b[b.length - 1];
+  if (Math.abs(la[0] - lb[0]) > 1 || Math.abs(la[1] - lb[1]) > 1) return false;
+  const n = Math.max(a.length, b.length);
+  let diff = 0;
+  let near = true;
+  for (let i = 0; i < n - 1; i++) {
+    const pa = a[Math.min(i, a.length - 1)];
+    const pb = b[Math.min(i, b.length - 1)];
+    if (pa[0] !== pb[0] || pa[1] !== pb[1]) diff++;
+    if (Math.abs(pa[0] - pb[0]) > 1 || Math.abs(pa[1] - pb[1]) > 1) near = false;
+  }
+  return diff <= 1 || near;
+}
+
+function makeCluster(
+  side: Side, id: string, label: string, members: PlayerPath[], total: number, uncommon = false,
+): RouteCluster {
+  const wins = members.filter((m) => m.won).length;
+  return {
+    id, side, label, paths: members, usage: members.length, share: members.length / total,
+    winRate: wins / members.length,
+    avgLifetime: members.reduce((s, m) => s + m.lifetime, 0) / members.length,
+    kills: members.reduce((s, m) => s + m.kills.length, 0),
+    deaths: members.filter((m) => m.died).length,
+    // an average of unrelated one-offs is meaningless — the bucket gets none
+    centroid: uncommon ? [] : averagePath(members),
+    killPositions: members.flatMap((m) => m.kills),
+    deathPositions: members.flatMap((m) => (m.death ? [m.death] : [])),
+    ...(uncommon ? { uncommon: true } : {}),
+  };
+}
+
 function clusterSide(paths: PlayerPath[], side: Side): RouteCluster[] {
   const sidePaths = paths.filter((p) => p.side === side);
   const total = sidePaths.length || 1;
@@ -131,30 +178,36 @@ function clusterSide(paths: PlayerPath[], side: Side): RouteCluster[] {
     const arr = groups.get(p.signature);
     if (arr) arr.push(p); else groups.set(p.signature, [p]);
   }
-  const clusters: RouteCluster[] = [];
-  let idx = 0;
-  for (const [sig, members] of groups) {
-    const wins = members.filter((m) => m.won).length;
-    clusters.push({
-      id: `${side}-${idx++}`, side, label: routeLabel(side, members.length, sig),
-      paths: members, usage: members.length, share: members.length / total,
-      winRate: wins / members.length,
-      avgLifetime: members.reduce((s, m) => s + m.lifetime, 0) / members.length,
-      kills: members.reduce((s, m) => s + m.kills.length, 0),
-      deaths: members.filter((m) => m.died).length,
-      centroid: averagePath(members),
-      killPositions: members.flatMap((m) => m.kills),
-      deathPositions: members.flatMap((m) => (m.death ? [m.death] : [])),
-    });
+  // merge near-identical signature groups — biggest first so it anchors
+  const merged: { sig: [number, number][]; members: PlayerPath[] }[] = [];
+  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  for (const [sig, members] of ordered) {
+    const cells = parseSig(sig);
+    const home = merged.find((m) => sigsMergeable(m.sig, cells));
+    if (home) home.members.push(...members);
+    else merged.push({ sig: cells, members: [...members] });
   }
-  return clusters.sort((a, b) => b.usage - a.usage);
+  const clusters: RouteCluster[] = [];
+  const loners: PlayerPath[] = [];
+  let idx = 0;
+  for (const m of merged) {
+    if (m.members.length === 1) { loners.push(...m.members); continue; }
+    const sigStr = m.sig.map((c) => c.join(",")).join("|");
+    clusters.push(makeCluster(side, `${side}-${idx++}`, routeLabel(side, m.members.length, sigStr), m.members, total));
+  }
+  clusters.sort((a, b) => b.usage - a.usage);
+  if (loners.length)
+    clusters.push(makeCluster(side, `${side}-uncommon`, "Uncommon routes", loners, total, true));
+  return clusters;
 }
 
 function routeLabel(side: Side, usage: number, sig: string): string {
   const cells = sig.split("|");
   const [gx, gy] = cells[cells.length - 1].split(",").map(Number);
   const h = gx < GRID / 3 ? "West" : gx > (2 * GRID) / 3 ? "East" : "Center";
-  const v = gy < GRID / 3 ? "North" : gy > (2 * GRID) / 3 ? "South" : "Mid";
+  // world y grows northward, so HIGH gy (near maxY) is North — the old check
+  // was inverted relative to the radar
+  const v = gy > (2 * GRID) / 3 ? "North" : gy < GRID / 3 ? "South" : "Mid";
   const region = v === "Mid" && h === "Center" ? "Mid" : `${v} ${h}`;
   return `${region} (${usage}×)`;
 }

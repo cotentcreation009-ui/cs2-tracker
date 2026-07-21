@@ -256,11 +256,17 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
 
     const kills = [...(r.kills ?? [])].sort((x, y) => x.t - y.t);
 
-    // opening duel = first real kill of the round
-    const opener = kills.find((k) => k.k >= 0 && k.v >= 0);
+    // opening duel = first real ENEMY kill of the round — a round-opening
+    // teamkill or self-kill is not a duel (matches the feeds' FIRST pill and
+    // the Weapons tab's "Opening picks")
+    const opener = kills.find((k) => {
+      if (k.k < 0 || k.v < 0) return false;
+      const ks = sideOf(r, k.k, meta);
+      return ks !== "" && ks !== sideOf(r, k.v, meta);
+    });
     if (opener) {
-      if (opener.k >= 0) get(opener.k).openK++;
-      if (opener.v >= 0) get(opener.v).openD++;
+      get(opener.k).openK++;
+      get(opener.v).openD++;
     }
 
     // per-round kill tallies (for multikills + weapons + hs)
