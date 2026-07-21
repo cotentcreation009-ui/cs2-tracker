@@ -2,9 +2,10 @@
 
 // Utility — the grenade lens. This tab specializes in one thing: how this
 // lobby uses utility. A full-height throw explorer (animated lineups on the
-// radar) is the centerpiece; around it, a utility-ranked roster, the focused
-// player's utility card (kinds, victims blinded, burn damage, execute timing,
-// team share), their repeated lineups, and a per-round utility timeline.
+// radar) is the centerpiece; players are picked via the toolbar chips, and
+// the rail carries the focused player's utility card (kinds, victims blinded,
+// burn damage, execute timing, team share), their repeated lineups, and the
+// per-side team packages ("Team util by round").
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -71,22 +72,6 @@ const mmss = (t: number) => {
 };
 
 // ---------------------------------------------------------------- sorting ---
-type SortKey = "thrown" | "flashed" | "blind" | "utildmg" | "taken";
-const SORTS: { key: SortKey; label: string; title: string }[] = [
-  { key: "thrown", label: "Thrown", title: "grenades thrown" },
-  { key: "flashed", label: "Flashed", title: "enemies blinded" },
-  { key: "blind", label: "Blind time", title: "total enemy blind seconds dealt" },
-  { key: "utildmg", label: "Util dmg", title: "grenade damage dealt to enemies" },
-  { key: "taken", label: "Taken", title: "grenade damage absorbed from enemies" },
-];
-function sortValue(p: PlayerInsight, key: SortKey): number {
-  switch (key) {
-    case "flashed": return p.enemiesFlashed;
-    case "blind": return p.flashDuration;
-    case "utildmg": return p.utilDamage;
-    default: return p.utilNades.length;
-  }
-}
 
 const TIMING_STYLE: Record<Timing, { label: string; cls: string }> = {
   early: { label: "early", cls: "bg-good/15 text-good" },
@@ -330,73 +315,6 @@ function UtilTimeline({
   );
 }
 
-interface RosterStat {
-  display: string;
-  frac: number;
-  color: string;
-  warn?: { n: number; title: string }; // team-flash flag on flash sorts
-}
-
-function RosterRow({
-  p,
-  rank,
-  focused,
-  stat,
-  onFocus,
-}: {
-  p: PlayerInsight;
-  rank: number;
-  focused: boolean;
-  stat: RosterStat;
-  onFocus: () => void;
-}) {
-  const hex = sideHex(p.team);
-  const perRound = p.roundsPlayed ? p.utilNades.length / p.roundsPlayed : 0;
-  return (
-    <div
-      className={`relative flex items-center gap-1.5 overflow-hidden rounded-lg border px-2 py-1 transition ${
-        focused ? "border-brand/50 bg-brand/10" : "border-transparent hover:bg-panel/60"
-      }`}
-    >
-      <span
-        className="absolute inset-y-1 left-0 w-0.5 rounded-full"
-        style={{ background: hex, opacity: focused ? 1 : 0.45 }}
-      />
-      <button
-        type="button"
-        onClick={onFocus}
-        className="flex min-w-0 flex-1 items-center gap-1.5 pl-1 text-left"
-        title={`Break down ${p.name}'s utility`}
-      >
-        <span className="w-4 shrink-0 text-right text-[10px] font-bold tabular-nums text-faint">{rank}</span>
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hex }} />
-        <span className={`min-w-0 flex-1 truncate text-xs font-semibold ${focused ? "text-brand" : "text-ink"}`}>
-          {p.name}
-        </span>
-        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted" title="grenades per round">
-          {perRound.toFixed(1)}/rd
-        </span>
-        <span className="w-14 shrink-0 text-right">
-          <span className="block text-[11px] font-bold leading-tight tabular-nums" style={{ color: stat.color }}>
-            {stat.warn && (
-              <span className="mr-1 text-[9px] font-semibold text-bad" title={stat.warn.title}>
-                ⚠{stat.warn.n}
-              </span>
-            )}
-            {stat.display}
-          </span>
-          <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-panel">
-            <span
-              className="block h-full rounded-full transition-all"
-              style={{ width: `${Math.round(stat.frac * 100)}%`, background: stat.color, opacity: 0.85 }}
-            />
-          </span>
-        </span>
-      </button>
-    </div>
-  );
-}
-
 // Extra per-player reads joined from the raw rounds (waste + effectiveness).
 export interface UtilExtras {
   blankFlashRounds: number; // rounds with 1+ flash thrown and zero enemies blinded
@@ -414,7 +332,6 @@ export interface UtilExtras {
   tier: Record<string, { rds: number; nades: number; low: number }>; // low = rounds with <=1 nade
 }
 
-// The focused player's utility card — everything we know about their grenades.
 function UtilityCard({
   p,
   teamTotal,
@@ -616,8 +533,6 @@ export default function UtilityBreakdown({
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [teamPin, setTeamPin] = useState<number | null>(null); // index into executes
   const [zones, setZones] = useState<Zone[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey>("thrown");
-  const cardRefs = useRef(new Map<number, HTMLDivElement>());
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
 
@@ -765,32 +680,6 @@ export default function UtilityBreakdown({
   const flashVicOf = (tw: { round: number; t: number }, by: number): FlashVic | null =>
     flashVics.get(`${tw.round}:${tw.t}:${by}`) ?? null;
 
-  const sortVal = (p: PlayerInsight) =>
-    sortKey === "taken" ? extrasOf(p.i).utilTaken : sortValue(p, sortKey);
-  const sortedPlayers = useMemo(
-    () => [...players].sort((a, b) => sortVal(b) - sortVal(a)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [players, sortKey, extrasOf],
-  );
-
-  const statMax = useMemo(
-    () => Math.max(0.0001, ...players.map((p) => sortVal(p))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [players, sortKey, extrasOf],
-  );
-  const statFor = (p: PlayerInsight): RosterStat => {
-    const v = sortVal(p);
-    const frac = v <= 0 ? 0 : Math.min(1, Math.max(0.04, v / statMax));
-    const display =
-      sortKey === "blind" ? `${v.toFixed(1)}s` : sortKey === "thrown" ? `${p.utilNades.length}` : `${Math.round(v)}`;
-    // on flash rankings, flag team-flashers (new parses only)
-    const ex = hasTf && (sortKey === "flashed" || sortKey === "blind") ? extrasOf(p.i) : null;
-    const warn =
-      ex && ex.tf > 0
-        ? { n: ex.tf, title: `also flashed ${ex.tf} teammate${ex.tf === 1 ? "" : "s"} for ${ex.tfDur.toFixed(1)}s` }
-        : undefined;
-    return { display, frac, color: "var(--color-brand)", warn };
-  };
 
   // utility awards — quick scan + click to focus
   const awards = useMemo(() => {
@@ -966,10 +855,6 @@ export default function UtilityBreakdown({
     setHoverIdx(null);
     setTeamPin(null);
   }, [focusI]);
-  useEffect(() => {
-    if (view.focusPlayer != null)
-      cardRefs.current.get(view.focusPlayer)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [view.focusPlayer]);
 
   if (!players.length) {
     const lbl =
@@ -1299,62 +1184,10 @@ export default function UtilityBreakdown({
           )}
         </div>
 
-        {/* right: utility-ranked roster → the focused player's utility detail.
-            The column scrolls internally; the map never gives up space. */}
+        {/* right: the focused player's utility detail (players are picked via
+            the toolbar chips). The column scrolls internally; the map never
+            gives up space. */}
         <div className="scroll-slim space-y-3 self-start lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-2.5 lg:space-y-0 lg:self-stretch lg:overflow-y-auto">
-          <div className="card-2 px-3 py-2.5 lg:shrink-0">
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
-              <span className="stat-label">Players</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[9px] uppercase tracking-wider text-faint">Sort</span>
-                <div className="flex flex-wrap rounded-lg border border-line bg-panel p-0.5">
-                  {SORTS.map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => setSortKey(s.key)}
-                      aria-pressed={sortKey === s.key}
-                      title={s.title}
-                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium transition ${
-                        sortKey === s.key ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="mb-0.5 flex items-center gap-1.5 px-2 pl-3 text-[9px] uppercase tracking-wider text-faint">
-              <span className="w-4" />
-              <span className="w-2" />
-              <span className="min-w-0 flex-1">Player</span>
-              <span className="w-12 text-right">Nades/rd</span>
-              <span className="w-14 truncate whitespace-nowrap text-right text-brand/80">
-                {SORTS.find((s) => s.key === sortKey)?.label ?? "Thrown"}
-              </span>
-            </div>
-            <div className="space-y-0.5">
-              {sortedPlayers.map((p, idx) => (
-                <div
-                  key={p.i}
-                  ref={(el) => {
-                    if (el) cardRefs.current.set(p.i, el);
-                    else cardRefs.current.delete(p.i);
-                  }}
-                >
-                  <RosterRow
-                    p={p}
-                    rank={idx + 1}
-                    focused={focusI === p.i}
-                    stat={statFor(p)}
-                    onFocus={() => view.setFocusPlayer(view.focusPlayer === p.i ? null : p.i)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
           {selPlayer && (
             <div className="insight-card-in lg:shrink-0">
               <UtilityCard
