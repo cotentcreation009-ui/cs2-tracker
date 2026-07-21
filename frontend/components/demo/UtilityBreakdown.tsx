@@ -610,6 +610,8 @@ export default function UtilityBreakdown({
   view: DemoView;
 }) {
   const [kindSel, setKindSel] = useState<{ i: number; kind: string } | null>(null);
+  // CT/T filter for the focused player's throws (halftime-aware, match view)
+  const [nadeSide, setNadeSide] = useState<"all" | "CT" | "T">("all");
   const [throwIdx, setThrowIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [teamPin, setTeamPin] = useState<number | null>(null); // index into executes
@@ -629,10 +631,19 @@ export default function UtilityBreakdown({
   );
   const data = useMemo(() => computeInsights(meta, scopedRounds), [meta, scopedRounds]);
 
-  const players = useMemo(
-    () => data.players.filter((p) => view.side === "all" || p.team === view.side),
-    [data, view.side],
-  );
+  // Halftime-aware roster: PlayerInsight.team is the match-START side, but
+  // teams switch at half — when a round is scoped, resolve each player's side
+  // from THAT round's roster (same semantics as the Scoreboard), so the side
+  // filter matches what's on screen instead of silently dropping the player.
+  const players = useMemo(() => {
+    const scopedR = view.scopeRound != null ? rounds[view.scopeRound] : null;
+    const resolved = data.players.map((p) => {
+      if (!scopedR) return p;
+      const side = scopedR.ct?.includes(p.i) ? "CT" : scopedR.t?.includes(p.i) ? "T" : p.team;
+      return side === p.team ? p : { ...p, team: side as PlayerInsight["team"] };
+    });
+    return resolved.filter((p) => view.side === "all" || p.team === view.side);
+  }, [data, view.side, view.scopeRound, rounds]);
 
   // per-player waste/effectiveness reads joined from the raw rounds
   const extrasOf = useMemo(() => {
@@ -879,10 +890,11 @@ export default function UtilityBreakdown({
       const ri = rounds.indexOf(r);
       for (const side of ["CT", "T"] as const) {
         const roster = new Set(side === "CT" ? r.ct ?? [] : r.t ?? []);
+        // EVERY grenade the side threw — decoys included, nothing left out
         const nades = (r.nades ?? [])
-          .filter((nd) => roster.has(nd.by) && nd.k !== "decoy")
+          .filter((nd) => roster.has(nd.by))
           .sort((a, b) => a.t - b.t);
-        if (nades.length < 3) continue; // 1-2 nades isn't a team story
+        if (!nades.length) continue;
         const kinds: Record<string, number> = {};
         for (const nd of nades) {
           const k = normKind(nd.k);
@@ -949,6 +961,7 @@ export default function UtilityBreakdown({
     setTeamPin(null);
   }, [view.scopeRound, view.side]);
   useEffect(() => {
+    setNadeSide("all");
     setThrowIdx(null);
     setHoverIdx(null);
     setTeamPin(null);
@@ -977,8 +990,27 @@ export default function UtilityBreakdown({
       ? `round ${rounds[view.scopeRound].n}`
       : "match";
   const selPlayer = focusI != null ? players.find((p) => p.i === focusI) ?? null : null;
+  // Which side was the thrower on when a given nade left their hand? Teams
+  // switch at half, so this reads the THROW's round roster — powering the
+  // CT/T nade filter next to the map.
+  const roundByN = useMemo(() => {
+    const m = new Map<number, ReplayRound>();
+    for (const r of rounds) m.set(r.n, r);
+    return m;
+  }, [rounds]);
+  const throwSide = (tw: UtilThrow, pi: number): "CT" | "T" | null => {
+    const r = roundByN.get(tw.round);
+    return r?.ct?.includes(pi) ? "CT" : r?.t?.includes(pi) ? "T" : null;
+  };
+  // side filter for the focused player's throws (match view only — a scoped
+  // round is single-sided already); resets when the focus changes
+  const sideNades = selPlayer
+    ? selPlayer.utilNades.filter(
+        (n) => view.scopeRound != null || nadeSide === "all" || throwSide(n, selPlayer.i) === nadeSide,
+      )
+    : [];
   const selKinds: string[] = selPlayer
-    ? UTIL_KINDS.filter((k) => selPlayer.utilNades.some((n) => n.kind === k))
+    ? UTIL_KINDS.filter((k) => sideNades.some((n) => n.kind === k))
     : [];
   const pickedKind =
     kindSel && kindSel.i === focusI && (kindSel.kind === "all" || selKinds.includes(kindSel.kind))
@@ -992,7 +1024,7 @@ export default function UtilityBreakdown({
   const showAll = activeKind === "all";
   const selThrows =
     selPlayer && activeKind
-      ? selPlayer.utilNades
+      ? sideNades
           .filter((n) => showAll || n.kind === activeKind)
           .slice()
           .sort((a, b) => a.round - b.round || a.t - b.t)
@@ -1147,11 +1179,29 @@ export default function UtilityBreakdown({
                     showAll ? "bg-brand/15 text-brand" : "bg-panel text-muted hover:text-ink"
                   }`}
                 >
-                  ✦ All {selPlayer.utilNades.length}
+                  ✦ All {sideNades.length}
                 </button>
               )}
+              {view.scopeRound == null && (
+                <span className="ml-auto flex shrink-0 rounded-lg border border-line bg-panel p-0.5" title="Only their grenades thrown while playing this side — teams switch at half, so this follows the round rosters">
+                  {(["all", "CT", "T"] as const).map((sd) => (
+                    <button
+                      key={sd}
+                      type="button"
+                      onClick={() => setNadeSide(sd)}
+                      aria-pressed={nadeSide === sd}
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition ${
+                        nadeSide === sd ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                      }`}
+                      style={nadeSide === sd && sd !== "all" ? { color: sd === "T" ? T_SOFT_HEX : CT_SOFT_HEX } : undefined}
+                    >
+                      {sd === "all" ? "Both" : sd}
+                    </button>
+                  ))}
+                </span>
+              )}
               {selKinds.map((k) => {
-                const n = selPlayer.utilNades.filter((x) => x.kind === k).length;
+                const n = sideNades.filter((x) => x.kind === k).length;
                 return (
                   <button
                     key={k}
@@ -1176,7 +1226,7 @@ export default function UtilityBreakdown({
 
           {pinnedExec || (selPlayer && activeKind && selThrows.length > 0) ? (
             <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-72px))] lg:max-w-none">
-              <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} className="w-full" />
+              <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} timeline={!!pinnedExec} className="w-full" />
 
               <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
                 {!pinnedExec && (
@@ -1402,6 +1452,7 @@ export default function UtilityBreakdown({
                   // tight burst of 3+ detonations = a real execute; otherwise
                   // the util was spread through the round
                   const tight = ex.burst != null && ex.burst <= 12;
+                  const showBadge = ex.throws.length >= 3;
                   return (
                     <button
                       key={i}
@@ -1418,7 +1469,7 @@ export default function UtilityBreakdown({
                           <span className="shrink-0 font-semibold" style={{ color: ex.side === "T" ? T_SOFT_HEX : CT_SOFT_HEX }}>
                             R{ex.rn} {ex.side}
                           </span>
-                          {tight ? (
+                          {showBadge && (tight ? (
                             <span
                               className="shrink-0 rounded-full bg-brand/10 px-1.5 text-[9px] font-bold tracking-wide text-brand"
                               title={`Execute — 3+ grenades detonated within ${ex.burst}s of each other`}
@@ -1436,7 +1487,7 @@ export default function UtilityBreakdown({
                             >
                               SPREAD
                             </span>
-                          )}
+                          ))}
                           {z && <span className="truncate text-muted">{z}</span>}
                         </span>
                         <span className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums">
@@ -1461,7 +1512,7 @@ export default function UtilityBreakdown({
                 })}
               </div>
               <div className="mt-1.5 text-[9px] text-faint">
-                Every grenade a side threw that round (3+ only) — EXECUTE = a tight 3-nade burst · click to replay it all on the map
+                Every grenade a side threw that round — EXECUTE = a tight 3-nade burst · replay animates in true throw order
               </div>
             </div>
           )}
