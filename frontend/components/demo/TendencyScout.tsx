@@ -124,7 +124,13 @@ interface ScoutData {
   };
 }
 
-const OPENING_WINDOW = 20; // seconds after freeze that define "opening setup"
+const OPENING_WINDOW = 20; // seconds after freeze shown by the map's "First 20s" phase
+// Setup read: within the first SETUP_WINDOW s after freeze, a callout only
+// counts as the round's setup if the player DWELLED there — at least
+// SETUP_MIN_DWELL consecutive 1 Hz samples (≈ seconds). Transit zones on the
+// way out of spawn get 1-2 samples each and can never win.
+const SETUP_WINDOW = 30;
+const SETUP_MIN_DWELL = 3;
 
 function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): ScoutData {
   const proj = buildProjection(meta.map, rounds);
@@ -197,7 +203,11 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
     let carriedBomb = false;
     let sawPostPlant = false;
 
-    const roundZone = new Map<string, number>();
+    // ordered zone sequence over the setup window — the setup read is DWELL
+    // based: the longest consecutive stay in one callout, so the spawn-exit
+    // transit (1-2 samples per zone passed through) can never win. Spawn zones
+    // are excluded outright: idling in spawn isn't a setup.
+    const setupSeq: (string | null)[] = [];
     let prev: { x: number; y: number; t: number } | null = null;
     for (const f of rd.frames ?? []) {
       if (f.t < freeze) continue;
@@ -218,8 +228,10 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
       pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still, dir: p.d, post });
       if (!proj.calibrated) continue;
       const z = classifyPosition(meta.map, p.x, p.y, zones);
+      if (f.t <= freeze + SETUP_WINDOW) {
+        setupSeq.push(z?.name && !/spawn/i.test(z.name) ? z.name : null);
+      }
       if (!z?.name) continue;
-      if (opening) roundZone.set(z.name, (roundZone.get(z.name) ?? 0) + 1);
       if (hasSniper && still) {
         const c = holdCount.get(z.name) ?? { samples: 0, rounds: new Set() };
         c.samples++;
@@ -233,12 +245,21 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         ecoCount.set(z.name, c);
       }
     }
-    // the round's setup = the callout they spent most of the opening window in
-    const dom = [...roundZone.entries()].sort((a, b) => b[1] - a[1])[0];
-    if (dom && dom[1] >= 2) {
-      const arr = zoneRounds[side].get(dom[0]) ?? [];
-      arr.push(rd.n);
-      zoneRounds[side].set(dom[0], arr);
+    // the round's setup = the longest consecutive dwell (≥ SETUP_MIN_DWELL
+    // samples ≈ seconds at 1 Hz) in one callout within the setup window
+    {
+      let best: { name: string; len: number } | null = null;
+      let run: { name: string; len: number } | null = null;
+      for (const name of setupSeq) {
+        if (name && run && run.name === name) run.len++;
+        else run = name ? { name, len: 1 } : null;
+        if (run && (!best || run.len > best.len)) best = { ...run };
+      }
+      if (best && best.len >= SETUP_MIN_DWELL) {
+        const arr = zoneRounds[side].get(best.name) ?? [];
+        arr.push(rd.n);
+        zoneRounds[side].set(best.name, arr);
+      }
     }
 
     // this player's grenades: kind counts, execute timing, repeated lineups
@@ -397,11 +418,13 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
 }
 
 // One playbook entry: the counter move, plus the demo evidence it rests on.
-// `rounds` (when present) renders as clickable chips that scope the workspace.
+// `rounds` (when present) renders as clickable chips that scope the workspace;
+// `zone` (when present) highlights that callout on the map while hovered.
 interface Tip {
   text: string;
   why: string;
   rounds?: number[];
+  zone?: string;
 }
 
 const fmtR = (ns: number[], cap = 6) =>
@@ -415,8 +438,9 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
     if (z && z.sideRounds >= 3 && z.rounds.length / z.sideRounds >= 0.5) {
       out.push({
         text: `On their ${side} side, pre-aim ${z.name} — it's their default setup.`,
-        why: `opened the round there in ${z.rounds.length} of ${z.sideRounds} ${side} rounds`,
+        why: `held ${z.name} for ${SETUP_MIN_DWELL}s+ early in ${z.rounds.length} of ${z.sideRounds} ${side} rounds`,
         rounds: z.rounds,
+        zone: z.name,
       });
     }
   };
@@ -428,6 +452,7 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
       text: `Their sniper lives at ${s.sniperHold.name} — smoke it off before crossing, or hit a different path entirely.`,
       why: `held ${s.sniperHold.name} stationary in ${s.sniperHold.rounds.length} of ${s.sniperRounds.length} sniper rounds`,
       rounds: s.sniperHold.rounds,
+      zone: s.sniperHold.name,
     });
   }
   if (s.ecoSpot && s.ecoRounds.length >= 2) {
@@ -435,6 +460,7 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
       text: `On save rounds, expect them at ${s.ecoSpot.name} with pistols — clear it with utility instead of walking in.`,
       why: `played ${s.ecoSpot.name} in ${s.ecoSpot.rounds.length} of ${s.ecoRounds.length} eco/light-buy rounds`,
       rounds: s.ecoSpot.rounds,
+      zone: s.ecoSpot.name,
     });
   }
 
@@ -444,6 +470,7 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
       text: `Same ${lineup.kind} every time — it lands ${lineup.name} like clockwork. The moment it blooms, you know the play; pre-position to punish it.`,
       why: `landed a ${lineup.kind} at ${lineup.name} ${lineup.count}× across ${lineup.rounds.length} round${lineup.rounds.length === 1 ? "" : "s"}, ~${lineup.avgAfterFreeze.toFixed(0)}s after freeze`,
       rounds: lineup.rounds,
+      zone: lineup.name ?? undefined,
     });
   }
   if (s.util.total >= 8 && s.util.early / s.util.total >= 0.65) {
@@ -508,6 +535,7 @@ function counterPlan(p: PlayerInsight, t: PlayerTendencies | undefined, s: Scout
       text: `They keep dying at ${s.deathSpot.name} — pre-set the crossfire there and let them walk into it.`,
       why: `${s.deathSpot.rounds.length} of ${s.totalDeaths} deaths in that same callout`,
       rounds: s.deathSpot.rounds,
+      zone: s.deathSpot.name,
     });
   }
   const pkN = s.postKill.reHold + s.postKill.move;
@@ -661,6 +689,14 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
   const [sideView, setSideView] = useState<SideView>("both");
   const [lens, setLens] = useState<Lens>("all");
   const [showKills, setShowKills] = useState(false);
+  // hovering any named callout (setup rows, lineups, chips, playbook tips)
+  // highlights that area on the positions map
+  const [hoverZone, setHoverZone] = useState<string | null>(null);
+  const zonePolys = useMemo(() => getActiveZones(meta.map), [meta.map]);
+  const zoneHover = (name: string | null | undefined) => ({
+    onMouseEnter: () => setHoverZone(name ?? null),
+    onMouseLeave: () => setHoverZone(null),
+  });
 
   // the toolbar's side filter drives the map's side view (still overridable)
   useEffect(() => {
@@ -846,11 +882,11 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
     zs.length > 0 && (
       <div>
         <div className="mb-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: sideSoft(side) }}>
-          {side}-side setups <span className="font-normal normal-case text-faint">· rounds opened there</span>
+          {side}-side setups <span className="font-normal normal-case text-faint">· held ≥{SETUP_MIN_DWELL}s early · hover → map</span>
         </div>
         <div className="space-y-1">
           {zs.map((z) => (
-            <div key={z.name} className="flex items-center gap-2 text-[11px]" title={fmtR(z.rounds, 10)}>
+            <div key={z.name} className="flex cursor-default items-center gap-2 rounded text-[11px] transition hover:bg-panel/50" title={fmtR(z.rounds, 10)} {...zoneHover(z.name)}>
               <span className="w-24 shrink-0 truncate text-muted" title={z.name}>{z.name}</span>
               <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
                 <span
@@ -967,6 +1003,33 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
               ) : (
                 <rect x={0} y={0} width={100} height={100} fill="#0a1020" />
               )}
+              {/* hovered-callout highlight — the named area lights up on the map */}
+              {hoverZone &&
+                scout.calibrated &&
+                zonePolys
+                  .filter((z) => z.name === hoverZone)
+                  .map((z, i) =>
+                    z.points.length >= 3 ? (
+                      <polygon
+                        key={`hz${i}`}
+                        points={z.points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                        fill="rgba(56,214,255,0.18)"
+                        stroke="#38d6ff"
+                        strokeWidth={0.45}
+                        strokeLinejoin="round"
+                      />
+                    ) : z.points[0] ? (
+                      <circle
+                        key={`hz${i}`}
+                        cx={z.points[0].x * 100}
+                        cy={z.points[0].y * 100}
+                        r={5}
+                        fill="rgba(56,214,255,0.15)"
+                        stroke="#38d6ff"
+                        strokeWidth={0.45}
+                      />
+                    ) : null,
+                  )}
               {eLens !== "all" &&
                 shownPts.map((p, i) => {
                   // facing cone on holds — which way they're actually aiming
@@ -1051,7 +1114,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                     </span>
                   )}
                   {scout.deathSpot && (
-                    <span className="rounded-full bg-bad/10 px-2 py-0.5 tabular-nums text-bad" title={fmtR(scout.deathSpot.rounds, 10)}>
+                    <span className="cursor-default rounded-full bg-bad/10 px-2 py-0.5 tabular-nums text-bad" title={fmtR(scout.deathSpot.rounds, 10)} {...zoneHover(scout.deathSpot.name)}>
                       ✕ dies at {scout.deathSpot.name} — {scout.deathSpot.rounds.length} of {scout.totalDeaths}
                     </span>
                   )}
@@ -1100,7 +1163,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                   {scout.util.spots
                     .filter((sp) => sp.name)
                     .map((sp, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[11px] text-muted" title={fmtR(sp.rounds, 10)}>
+                      <div key={i} className="flex cursor-default items-center gap-2 rounded text-[11px] text-muted transition hover:bg-panel/50" title={fmtR(sp.rounds, 10)} {...zoneHover(sp.name)}>
                         <span className="capitalize text-faint">{sp.kind}</span>
                         <span aria-hidden>→</span>
                         <span className="truncate font-medium text-ink">{sp.name}</span>
@@ -1214,7 +1277,7 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
           </div>
           <ol className="space-y-2">
             {plan.map((tip, i) => (
-              <li key={i} className="flex gap-2 rounded-lg bg-panel/50 px-3 py-2">
+              <li key={i} className={`flex gap-2 rounded-lg bg-panel/50 px-3 py-2 ${tip.zone ? "transition hover:bg-panel/80" : ""}`} {...(tip.zone ? zoneHover(tip.zone) : {})}>
                 <span className="shrink-0 font-black tabular-nums text-brand text-[12px]">{i + 1}.</span>
                 <span className="min-w-0">
                   <span className="block text-[12px] leading-snug text-ink">{tip.text}</span>
