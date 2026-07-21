@@ -258,14 +258,23 @@ function UtilTimeline({
 }) {
   if (rounds.length < 2) return null;
   return (
-    <div className="card-2 px-3 py-2.5 lg:shrink-0">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
+    // slim full-width band living right under the toolbar's round chips —
+    // header + legend share one line, the cells stretch across the width
+    <div className="card-2 px-3 py-2 lg:shrink-0">
+      <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
         <span className="stat-label">
           Utility per round · <span className="text-ink">{meta.players[i]?.name ?? "?"}</span>
         </span>
-        <span className="text-[10px] text-faint">click a round to scope every tab to it</span>
+        <span className="ml-auto flex flex-wrap items-center gap-x-3 text-[9px] text-faint">
+          <span>number = thrown (gold 3+)</span>
+          <span>dots = kinds</span>
+          <span>
+            <span className="text-good">green</span> / <span className="text-bad">red</span> = won / lost
+          </span>
+          <span className="text-muted">click a round to scope every tab to it</span>
+        </span>
       </div>
-      <div className="scroll-slim flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-1">
+      <div className="scroll-slim flex flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0.5">
         {rounds.map((r, ri) => {
           const side = r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
           const won = !!side && r.winner === side;
@@ -287,7 +296,7 @@ function UtilTimeline({
                   ? `Round ${r.n} · did not play`
                   : `Round ${r.n} · ${won ? "won" : "lost"}${nades.length ? ` · ${kindStr}` : " · no utility"}`
               }
-              className={`grid h-9 w-7 place-items-center rounded border leading-none transition lg:shrink-0 ${active ? "ring-2 ring-brand" : ""} ${
+              className={`flex h-11 w-8 flex-col items-center justify-center gap-0.5 rounded border leading-none transition lg:w-auto lg:min-w-8 lg:max-w-12 lg:flex-1 ${active ? "ring-2 ring-brand" : ""} ${
                 side == null
                   ? "border-line bg-panel/40 opacity-40"
                   : won
@@ -295,17 +304,18 @@ function UtilTimeline({
                     : "border-bad/30 bg-bad/10 hover:brightness-150"
               }`}
             >
+              <span className="text-[8px] tabular-nums leading-none text-faint">{r.n}</span>
               {side == null ? (
-                <span className="text-xs text-faint">–</span>
+                <span className="text-xs leading-none text-faint">–</span>
               ) : (
                 <>
                   <span
-                    className="text-xs font-bold tabular-nums"
+                    className="text-xs font-bold leading-none tabular-nums"
                     style={nades.length >= 3 ? { color: "#f5b942" } : nades.length === 0 ? { opacity: 0.35 } : undefined}
                   >
                     {nades.length}
                   </span>
-                  <span className="mt-0.5 flex gap-px">
+                  <span className="flex gap-px">
                     {nades.slice(0, 4).map((n, j) => (
                       <span key={j} className="h-1 w-1 rounded-full" style={{ background: KIND_COLOR[n.k] ?? "#888" }} />
                     ))}
@@ -315,11 +325,6 @@ function UtilTimeline({
             </button>
           );
         })}
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-faint">
-        <span>number = grenades thrown (gold = 3+)</span>
-        <span>dots = kinds</span>
-        <span>green / red = round won / lost</span>
       </div>
     </div>
   );
@@ -1038,6 +1043,17 @@ export default function UtilityBreakdown({
 
   return (
     <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+      {/* per-round utility strip — sits directly under the toolbar's round
+          chips so the round story reads top-down */}
+      {selPlayer && (
+        <UtilTimeline
+          rounds={rounds}
+          meta={meta}
+          i={selPlayer.i}
+          scope={view.scopeRound}
+          onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
+        />
+      )}
       {/* awards — one slim band, not a row of floating cards */}
       {awards.length > 0 && (
         <div className="card-2 flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 lg:shrink-0">
@@ -1370,15 +1386,6 @@ export default function UtilityBreakdown({
             </div>
           )}
 
-          {selPlayer && (
-            <UtilTimeline
-              rounds={rounds}
-              meta={meta}
-              i={selPlayer.i}
-              scope={view.scopeRound}
-              onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
-            />
-          )}
 
           {executes.length > 0 && (
             <div className="card-2 px-3 py-2.5 lg:shrink-0">
