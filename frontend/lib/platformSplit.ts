@@ -19,7 +19,9 @@ export interface PlatformStat {
   avgPreaim: number; // degrees, lower = tighter (0 = no data)
   avgReaction: number; // ms, lower = faster (0 = no data)
   avgHs: number; // head-accuracy %, 0 = no data
+  avgSpotted: number; // accuracy while an enemy was visible %, 0 = no data
   avgSpray: number; // spray-accuracy %, 0 = no data
+  avgMargin: number; // avg round margin per map (team − enemy); NaN = no scores
 }
 
 export type Verdict =
@@ -71,7 +73,14 @@ function statFor(
     avgPreaim: meanPos((m) => m.preaim),
     avgReaction: meanPos((m) => m.reaction_time_ms),
     avgHs: meanPos((m) => m.accuracy_head),
+    avgSpotted: meanPos((m) => m.accuracy_enemy_spotted),
     avgSpray: meanPos((m) => m.spray_accuracy),
+    avgMargin: (() => {
+      const sc = ms.filter((m) => m.score?.length === 2);
+      return sc.length
+        ? sc.reduce((a, m) => a + (m.score[0] - m.score[1]), 0) / sc.length
+        : NaN;
+    })(),
   };
 }
 

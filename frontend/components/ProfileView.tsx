@@ -192,6 +192,14 @@ export function ProfileView({
       </div>
     ) : null;
 
+  // With no parsed matches and no Steam lifetime stats, "Match stats" would be
+  // just the cross-source strip — too thin for its own button. Fold it into
+  // the Leetify panel instead and drop the button.
+  const richMatchStats = hasData || !!steamStats;
+  const crossNode = (
+    <CrossSource career={career} leetify={leetify} faceit={faceit} steamStats={steamStats} />
+  );
+
   const panels = {
     // Recent matches with one-click demo analysis — previously buried at the
     // bottom of the Leetify panel; now a first-class button of its own.
@@ -213,9 +221,15 @@ export function ProfileView({
             />
           )}
           {faceit && <FaceitPanel profile={faceit} />}
+          {!richMatchStats && !leetify && crossNode}
         </div>
       ) : null,
-    leetify: leetify ? <LeetifyPanel profile={leetify} /> : null,
+    leetify: leetify ? (
+      <div className="space-y-5">
+        <LeetifyPanel profile={leetify} />
+        {!richMatchStats && crossNode}
+      </div>
+    ) : null,
     counter: leetify ? (
       <CounterReport
         leetify={leetify}
@@ -224,7 +238,7 @@ export function ProfileView({
         name={player.personaName || "this player"}
       />
     ) : null,
-    matchstats: matchStatsPanel,
+    matchstats: richMatchStats ? matchStatsPanel : null,
   };
 
   return (

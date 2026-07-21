@@ -32,6 +32,14 @@ const METRICS: Metric[] = [
   },
   { label: "Win rate", get: (s) => s.winPct, fmt: (v) => `${v.toFixed(0)}%`, dir: "high", diverge: 15 },
   {
+    label: "Avg round diff",
+    hint: "rounds won − lost per map",
+    get: (s) => s.avgMargin,
+    fmt: (v) => (Number.isFinite(v) ? `${v >= 0 ? "+" : ""}${v.toFixed(1)}` : "—"),
+    dir: "high",
+    diverge: 4,
+  },
+  {
     label: "Crosshair placement",
     hint: "lower = tighter pre-aim",
     get: (s) => s.avgPreaim,
@@ -51,6 +59,7 @@ const METRICS: Metric[] = [
   },
   {
     label: "HS accuracy",
+    hint: "% of shots that hit heads",
     get: (s) => s.avgHs,
     fmt: (v) => (v > 0 ? `${v.toFixed(0)}%` : "—"),
     dir: "high",
@@ -58,7 +67,17 @@ const METRICS: Metric[] = [
     zeroMissing: true,
   },
   {
+    label: "Spotted accuracy",
+    hint: "shots on target while an enemy is visible",
+    get: (s) => s.avgSpotted,
+    fmt: (v) => (v > 0 ? `${v.toFixed(0)}%` : "—"),
+    dir: "high",
+    diverge: 8,
+    zeroMissing: true,
+  },
+  {
     label: "Spray accuracy",
+    hint: "recoil control on sprays",
     get: (s) => s.avgSpray,
     fmt: (v) => (v > 0 ? `${v.toFixed(0)}%` : "—"),
     dir: "high",
@@ -229,7 +248,7 @@ export function PlatformSplit({
           {METRICS.map((m) => {
             const cells = cols.map((c) => {
               const v = m.get(c);
-              const valid = m.zeroMissing ? v > 0 : true;
+              const valid = Number.isFinite(v) && (m.zeroMissing ? v > 0 : true);
               return { key: c.key, v, valid };
             });
             const goods = cells
