@@ -247,13 +247,13 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const legendItems = (
     <>
       <Legend swatch="#46d369" label="kill" shape="x" />
-      <Legend swatch="#f5694a" label="death" shape="o" />
-      <Legend swatch={KIND_COLOR.smoke} label="smoke" />
-      <Legend swatch={KIND_COLOR.flash} label="flash" />
-      <Legend swatch={KIND_COLOR.he} label="HE" />
-      <Legend swatch={KIND_COLOR.molotov} label="molly" />
+      <Legend swatch="#f5694a" label="death" shape="x" />
+      <Legend swatch={KIND_COLOR.smoke} label="smoke" shape="b" />
+      <Legend swatch={KIND_COLOR.flash} label="flash" shape="b" />
+      <Legend swatch={KIND_COLOR.he} label="HE" shape="b" />
+      <Legend swatch={KIND_COLOR.molotov} label="molly" shape="b" />
       {scopedRound && focused && <Legend swatch="#46d369" label="fight" shape="d" />}
-      {scopedRound && <span className="ml-auto">dashed = util throw → land · scroll to zoom</span>}
+      {scopedRound && <span className="ml-auto">util: ○ thrown from --→ ✸ landed · scroll to zoom</span>}
     </>
   );
   const statTiles = (
@@ -397,8 +397,24 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       >
                         <title>{`${n.k}${n.by >= 0 ? ` · ${name(n.by)}` : ""} · ${mmss(n.t)}${z ? ` · ${z}` : ""}`}</title>
                         {oc && <line x1={oc.x} y1={oc.y} x2={c.x} y2={c.y} stroke={col} strokeWidth={(on ? 0.7 : 0.4) * s} strokeDasharray={`${1.4 * s} ${1 * s}`} opacity={on ? 1 : 0.6} />}
-                        {oc && <circle cx={oc.x} cy={oc.y} r={0.7 * s} fill={col} opacity={0.85} />}
-                        <circle cx={c.x} cy={c.y} r={(on ? 1.7 : 1.1) * s} fill={`${col}dd`} stroke="#04060e" strokeWidth={0.25 * s} />
+                        {/* thrown-from = hollow ring (empty spot the nade left) */}
+                        {oc && <circle cx={oc.x} cy={oc.y} r={0.85 * s} fill="none" stroke={col} strokeWidth={0.4 * s} opacity={0.9} />}
+                        {/* landing = detonation burst: filled dot + four rays */}
+                        {(() => {
+                          const r = (on ? 1.5 : 1) * s;
+                          const ray = r + 0.9 * s;
+                          return (
+                            <g>
+                              <g stroke={col} strokeWidth={0.35 * s} strokeLinecap="round" opacity={0.95}>
+                                <line x1={c.x - ray} y1={c.y} x2={c.x - r} y2={c.y} />
+                                <line x1={c.x + r} y1={c.y} x2={c.x + ray} y2={c.y} />
+                                <line x1={c.x} y1={c.y - ray} x2={c.x} y2={c.y - r} />
+                                <line x1={c.x} y1={c.y + r} x2={c.x} y2={c.y + ray} />
+                              </g>
+                              <circle cx={c.x} cy={c.y} r={r} fill={`${col}dd`} stroke="#04060e" strokeWidth={0.25 * s} />
+                            </g>
+                          );
+                        })()}
                         <circle cx={c.x} cy={c.y} r={2.6 * s} fill="transparent" pointerEvents="all" />
                       </g>
                     );
@@ -488,7 +504,16 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                           <line x1={kc.x - (on ? 1.4 : 1) * s} y1={kc.y - (on ? 1.4 : 1) * s} x2={kc.x + (on ? 1.4 : 1) * s} y2={kc.y + (on ? 1.4 : 1) * s} />
                           <line x1={kc.x + (on ? 1.4 : 1) * s} y1={kc.y - (on ? 1.4 : 1) * s} x2={kc.x - (on ? 1.4 : 1) * s} y2={kc.y + (on ? 1.4 : 1) * s} />
                         </g>}
-                        <circle cx={vc.x} cy={vc.y} r={(on ? 1.3 : 0.9) * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />
+                        {/* victim spot = red ✕ (same convention as the Weapons map) */}
+                        {(() => {
+                          const r = (on ? 1.3 : 0.9) * s;
+                          return (
+                            <g stroke="#f5694a" strokeWidth={0.45 * s} strokeLinecap="round">
+                              <line x1={vc.x - r} y1={vc.y - r} x2={vc.x + r} y2={vc.y + r} />
+                              <line x1={vc.x + r} y1={vc.y - r} x2={vc.x - r} y2={vc.y + r} />
+                            </g>
+                          );
+                        })()}
                         <circle cx={vc.x} cy={vc.y} r={2.4 * s} fill="transparent" pointerEvents="all" />
                         {on && (
                           <g fontSize={2.9 * s} fontWeight="bold" textAnchor="middle" style={{ paintOrder: "stroke" }} stroke="#04060e" strokeWidth={0.8 * s} strokeLinejoin="round">
@@ -563,7 +588,9 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       <line x1={c.x - s} y1={c.y - s} x2={c.x + s} y2={c.y + s} />
                       <line x1={c.x + s} y1={c.y - s} x2={c.x - s} y2={c.y + s} /></g>; })}
                   {clusterDeaths.map((dp, i) => { const c = pt(dp.x, dp.y); if (!c) return null;
-                    return <circle key={`cd${i}`} cx={c.x} cy={c.y} r={0.9 * s} fill="none" stroke="#f5694a" strokeWidth={0.4 * s} />; })}
+                    return <g key={`cd${i}`} stroke="#f5694a" strokeWidth={0.45 * s} strokeLinecap="round">
+                      <line x1={c.x - 0.9 * s} y1={c.y - 0.9 * s} x2={c.x + 0.9 * s} y2={c.y + 0.9 * s} />
+                      <line x1={c.x + 0.9 * s} y1={c.y - 0.9 * s} x2={c.x - 0.9 * s} y2={c.y + 0.9 * s} /></g>; })}
                 </>
               )}
             </svg>
@@ -906,7 +933,7 @@ function StartEnd({ path, winRate, pt, scale }: { path: PlayerPath; winRate: num
   return <>{start && <circle cx={start.x} cy={start.y} r={0.55 * scale} fill={path.side === "T" ? T : CT} />}
     {end && <circle cx={end.x} cy={end.y} r={0.7 * scale} fill={winColor(winRate)} />}</>;
 }
-function Legend({ swatch, label, shape }: { swatch: string; label: string; shape?: "x" | "o" | "d" }) {
+function Legend({ swatch, label, shape }: { swatch: string; label: string; shape?: "x" | "o" | "d" | "b" }) {
   return (
     <span className="flex items-center gap-1">
       {shape === "x" ? (
@@ -915,6 +942,9 @@ function Legend({ swatch, label, shape }: { swatch: string; label: string; shape
         <span style={{ color: swatch }}>◯</span>
       ) : shape === "d" ? (
         <span className="h-2 w-2 rotate-45" style={{ background: swatch }} />
+      ) : shape === "b" ? (
+        // "burst" — the landed-grenade detonation glyph
+        <span style={{ color: swatch }} className="font-bold leading-none">✸</span>
       ) : (
         <span className="h-2 w-2 rounded-full" style={{ background: swatch }} />
       )}
