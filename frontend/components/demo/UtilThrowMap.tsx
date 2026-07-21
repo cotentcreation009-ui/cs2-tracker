@@ -83,11 +83,15 @@ export function UtilThrowMap({
   map,
   proj,
   throws,
+  timeline = false,
   className = "",
 }: {
   map: string;
   proj: Projection;
   throws: UtilThrow[];
+  /** stagger throws by their REAL round times (compressed to ≤ ~9s) instead of
+      a fixed interval — for team-package replays, where the rhythm matters */
+  timeline?: boolean;
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -207,6 +211,12 @@ export function UtilThrowMap({
     const STAGGER = solo ? 0 : throws.length > 12 ? 0.28 : 0.5;
     const TAIL = solo ? 2.2 : 2.8; // watch time after the last landing
     const FADE = 0.5; // global fade-out before the loop restarts
+    // timeline mode: starts come from the throws' real round times, compressed
+    // so the whole package plays in ≤ ~9s — a tight execute pops together, a
+    // spread round strings out, and the order is exactly the round's order
+    const t0 = timeline && throws.length ? Math.min(...throws.map((t) => t.t)) : 0;
+    const span = timeline && throws.length ? Math.max(...throws.map((t) => t.t)) - t0 : 0;
+    const SCALE = span > 9 ? 9 / span : 1;
 
     const place = (x: number, y: number) => {
       const r = proj.project(x, y);
@@ -224,7 +234,7 @@ export function UtilThrowMap({
         x: (o.x + l.x) / 2,
         y: (o.y + l.y) / 2 - Math.min(110, 30 + dist * 0.28), // arc apex height
       };
-      const start = i * STAGGER;
+      const start = timeline ? (t.t - t0) * SCALE : i * STAGGER;
       return {
         t,
         color: KIND_COLOR[t.kind] ?? "#5b9dff",
@@ -466,7 +476,7 @@ export function UtilThrowMap({
     rafRef.current = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proj, throwsSig, calibrated, map]);
+  }, [proj, throwsSig, timeline, calibrated, map]);
 
   return (
     <div className={`relative ${className}`}>
