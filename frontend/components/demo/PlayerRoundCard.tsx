@@ -164,9 +164,9 @@ function lossInfo(rounds: ReplayRound[], round: ReplayRound, i: number): { strea
   return { streak, bonus: 1400 + 500 * Math.min(streak, 4) };
 }
 
-function RStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function RStat({ label, value, sub, title }: { label: string; value: string; sub?: string; title?: string }) {
   return (
-    <div className="rounded-md border border-line bg-panel/50 px-1 py-1.5">
+    <div className="rounded-md border border-line bg-panel/50 px-1 py-1.5" title={title}>
       <div className="text-[9px] uppercase tracking-wider text-faint">{label}</div>
       <div className="text-sm font-bold tabular-nums">{value}</div>
       {sub ? <div className="text-[9px] text-faint">{sub}</div> : null}
@@ -208,6 +208,18 @@ export function PlayerRoundCard({
   const d = computePlayerRound(round, meta, i);
   const col = d.side === "T" ? T : CT;
   const loss = rounds ? lossInfo(rounds, round, i) : null;
+  // match-wide average reaction — the fallback when this round has no sighted-
+  // kill sample (aimN is sparse per round by nature)
+  const matchReaction = (() => {
+    if (!rounds) return null;
+    let ms = 0, n = 0;
+    for (const r of rounds) {
+      const s = r.stats?.find((st) => st.i === i);
+      ms += s?.rctMs ?? 0;
+      n += s?.aimN ?? 0;
+    }
+    return n ? ms / n : null;
+  })();
   // dedupe the loadout into "item ×N"
   const buyCounts = new Map<string, number>();
   for (const w of d.bought) buyCounts.set(w, (buyCounts.get(w) ?? 0) + 1);
@@ -295,7 +307,30 @@ export function PlayerRoundCard({
         <RStat label="Kills" value={`${d.kills}`} sub={d.hs ? `${d.hs} hs` : undefined} />
         <RStat label="Damage" value={`${d.dmg}`} sub={d.utilDmg ? `${d.utilDmg} util` : undefined} />
         <RStat label="Accuracy" value={d.acc != null ? `${d.acc.toFixed(0)}%` : "—"} sub={d.shots ? `${d.shots} shots` : undefined} />
-        <RStat label="Reaction" value={d.reaction != null ? `${d.reaction.toFixed(0)}ms` : "—"} />
+        {/* Reaction = time from an enemy becoming visible to the kill. A round
+            only has a value when one of its kills has such a "sighted" sample —
+            sparse by nature, so fall back to the player's match average. */}
+        {d.reaction != null ? (
+          <RStat
+            label="Reaction"
+            value={`${d.reaction.toFixed(0)}ms`}
+            sub="this round"
+            title="Average time from an enemy becoming visible to the kill, over this round's sighted kills."
+          />
+        ) : matchReaction != null ? (
+          <RStat
+            label="Reaction"
+            value={`~${matchReaction.toFixed(0)}ms`}
+            sub="match avg"
+            title="No sighted-kill sample this round (the enemy was already visible, or there were no kills) — showing this player's match-wide average reaction instead."
+          />
+        ) : (
+          <RStat
+            label="Reaction"
+            value="—"
+            title="Reaction needs a kill where the enemy became visible first. None recorded for this player — older demos need a re-parse to capture it."
+          />
+        )}
       </div>
 
       {d.topWeapon && (
