@@ -563,7 +563,33 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 		Aim             float64  `json:"aim,omitempty"`
 		Form            []string `json:"form,omitempty"` // recent outcomes, newest first: W/L/T
 		Banned          bool     `json:"banned,omitempty"`
-		Avatar          string   `json:"avatar,omitempty"` // Steam avatar (64px), when public
+		Avatar          string   `json:"avatar,omitempty"`         // Steam avatar (64px), when public
+		TogetherWins    int      `json:"together_wins,omitempty"`  // wins in matches these two shared
+		TogetherTotal   int      `json:"together_total,omitempty"` // shared matches found (win-rate denominator)
+	}
+
+	// Owner match id → won?, to intersect against each friend's recent matches:
+	// a match both players appear in is a game they queued together, and the
+	// outcome is shared (same team). This is what powers "win rate together".
+	ownerWon := make(map[string]bool, len(prof.RecentMatches))
+	ownerRecentW, ownerRecentN := 0, 0
+	for _, m := range prof.RecentMatches {
+		if m.ID == "" {
+			continue
+		}
+		win := m.Outcome == "win"
+		ownerWon[m.ID] = win
+		if m.Outcome == "win" || m.Outcome == "loss" {
+			ownerRecentN++
+			if win {
+				ownerRecentW++
+			}
+		}
+	}
+	var ownerRecentWinrate *float64
+	if ownerRecentN > 0 {
+		v := float64(ownerRecentW) / float64(ownerRecentN)
+		ownerRecentWinrate = &v
 	}
 	rankInt := func(m map[string]json.RawMessage, key string) int {
 		if raw, ok := m[key]; ok && string(raw) != "null" {
@@ -626,16 +652,22 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 				fr.Aim = fp.Rating.Aim
 				fr.Banned = len(fp.Bans) > 0
 				for _, m := range fp.RecentMatches { // recent_matches is newest-first
-					if len(fr.Form) >= 5 {
-						break
+					if len(fr.Form) < 5 {
+						switch m.Outcome {
+						case "win":
+							fr.Form = append(fr.Form, "W")
+						case "loss":
+							fr.Form = append(fr.Form, "L")
+						case "tie":
+							fr.Form = append(fr.Form, "T")
+						}
 					}
-					switch m.Outcome {
-					case "win":
-						fr.Form = append(fr.Form, "W")
-					case "loss":
-						fr.Form = append(fr.Form, "L")
-					case "tie":
-						fr.Form = append(fr.Form, "T")
+					// shared match → a game they queued together
+					if won, shared := ownerWon[m.ID]; shared && m.ID != "" {
+						fr.TogetherTotal++
+						if won {
+							fr.TogetherWins++
+						}
 					}
 				}
 			}
@@ -677,7 +709,10 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
-	writeJSON(w, http.StatusOK, map[string]any{"teammates": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"teammates":     out,
+		"owner_winrate": ownerRecentWinrate, // baseline for the "together vs solo" delta
+	})
 }
 
 // handleFaceit fetches a player's live FACEIT profile (CS2 skill level, elo and
