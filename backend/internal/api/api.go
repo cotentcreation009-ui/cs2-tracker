@@ -563,6 +563,7 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 		Aim             float64  `json:"aim,omitempty"`
 		Form            []string `json:"form,omitempty"` // recent outcomes, newest first: W/L/T
 		Banned          bool     `json:"banned,omitempty"`
+		Avatar          string   `json:"avatar,omitempty"` // Steam avatar (64px), when public
 	}
 	rankInt := func(m map[string]json.RawMessage, key string) int {
 		if raw, ok := m[key]; ok && string(raw) != "null" {
@@ -648,6 +649,33 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 			out = append(out, fr)
 		}
 	}
+
+	// One Steam call for ALL friends: real persona names (better than Leetify's,
+	// and a fallback when Leetify has none) + avatars. Best-effort — a Steam
+	// outage or missing key just leaves avatars empty and Leetify names stand.
+	if s.steam != nil && s.steam.HasKey() && len(out) > 0 {
+		ids := make([]uint64, 0, len(out))
+		for _, fr := range out {
+			if v, e := strconv.ParseUint(fr.Steam64ID, 10, 64); e == nil {
+				ids = append(ids, v)
+			}
+		}
+		if sums, serr := s.steam.GetPlayerSummaries(r.Context(), ids...); serr == nil {
+			byID := make(map[string]steam.PlayerSummary, len(sums))
+			for _, su := range sums {
+				byID[strconv.FormatUint(su.SteamID, 10)] = su
+			}
+			for _, fr := range out {
+				if su, ok := byID[fr.Steam64ID]; ok {
+					fr.Avatar = su.AvatarMedium
+					if su.PersonaName != "" {
+						fr.Name = su.PersonaName
+					}
+				}
+			}
+		}
+	}
+
 	setEdgeCache(w, s.cfg.ExternalCacheTTL)
 	writeJSON(w, http.StatusOK, map[string]any{"teammates": out})
 }
