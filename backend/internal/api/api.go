@@ -22,6 +22,7 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/faceit"
+	"github.com/cs2tracker/server/internal/grid"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
@@ -71,6 +72,10 @@ type Server struct {
 	blob    blob.Store // nil when direct (object-storage) upload is not configured
 	log     *slog.Logger
 	metrics *metrics
+	// proMatches is the GRID live pro-match board. Always non-nil, but its Store
+	// reports disabled (and Start is a no-op) when no GRID key/mock is configured,
+	// so the /api/pro-matches endpoint simply returns {"enabled":false,...}.
+	proMatches *grid.Poller
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
 	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
 	sf singleflight.Group
@@ -88,7 +93,22 @@ const staleCacheTTL = 24 * time.Hour
 // degrade gracefully); leetify/faceit clients may be nil or keyless (their
 // panels are simply hidden).
 func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leetifyClient *leetify.Client, faceitClient *faceit.Client, q *queue.Queue, c *cache.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}}
+	proMatches := grid.NewPoller(grid.Options{
+		APIKey:  cfg.GRIDAPIKey,
+		BaseURL: cfg.GRIDBaseURL,
+		Mock:    cfg.GRIDMock,
+		Logger:  log,
+	})
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches}
+}
+
+// StartProMatches launches the GRID poller's background loops (a no-op when the
+// feature is disabled). Call it once from the server's startup path with a
+// context whose cancellation should stop the loops.
+func (s *Server) StartProMatches(ctx context.Context) {
+	if s.proMatches != nil {
+		s.proMatches.Start(ctx)
+	}
 }
 
 // SetBlob attaches an object-storage backend, enabling browser-direct demo
@@ -164,6 +184,10 @@ func (s *Server) Router() http.Handler {
 			r.Get("/faceit/resolve", s.handleFaceitResolve)
 			r.Get("/leaderboard", s.handleLeaderboard)
 			r.Get("/search", s.handleSearch)
+
+			// GRID live pro-match board (gated on GRID_API_KEY / GRID_MOCK).
+			r.Get("/pro-matches", s.handleProMatches)
+			r.Get("/pro-matches/{seriesId}", s.handleProMatch)
 
 			r.Route("/players/{steamid}", func(r chi.Router) {
 				r.Get("/", s.handleProfile)

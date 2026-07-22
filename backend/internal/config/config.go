@@ -39,6 +39,14 @@ type Config struct {
 	FaceitBaseURL string
 	FaceitAPIKey  string
 
+	// GRID esports live-data API (pro-match board). The whole feature is gated on
+	// GRIDAPIKey: with no key (and GRIDMock off) the endpoint reports disabled and
+	// the poller never starts. GRIDMock serves a small set of realistic sample
+	// matches so the UI can be verified with no key/network.
+	GRIDAPIKey  string
+	GRIDBaseURL string
+	GRIDMock    bool
+
 	// AI interpretation. Preferred provider is Vertex AI (Gemini) — on GCE it
 	// uses the VM's service account (no key, billed to the GCP project). Anthropic
 	// is an optional fallback. When neither is configured the AI-read endpoint
@@ -101,6 +109,9 @@ func Load() (*Config, error) {
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
 		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
+		GRIDAPIKey:        getEnv("GRID_API_KEY", ""),
+		GRIDBaseURL:       getEnv("GRID_BASE_URL", "https://api-op.grid.gg"),
+		GRIDMock:          getEnv("GRID_MOCK", "") == "1",
 		VertexProject:     getEnv("VERTEX_PROJECT", getEnv("GCP_PROJECT", getEnv("GOOGLE_CLOUD_PROJECT", ""))),
 		VertexLocation:    getEnv("VERTEX_LOCATION", "us-central1"),
 		VertexModel:       getEnv("VERTEX_MODEL", "gemini-2.0-flash-001"),
