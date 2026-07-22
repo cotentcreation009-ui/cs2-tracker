@@ -87,6 +87,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </div>
             <nav className="flex shrink-0 items-center gap-4 sm:gap-5">
               <Link
+                href="/pro-matches"
+                className="link-muted flex shrink-0 items-center gap-1.5 text-sm font-medium"
+              >
+                <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ff4655] opacity-70 motion-reduce:hidden" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#ff4655]" />
+                </span>
+                Pro Matches
+              </Link>
+              <Link
                 href="/demos"
                 className="link-muted shrink-0 text-sm font-medium"
               >
