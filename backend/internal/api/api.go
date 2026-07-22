@@ -550,13 +550,28 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	type row struct {
-		Steam64ID       string  `json:"steam64_id"`
-		Name            string  `json:"name"`
+		Steam64ID       string   `json:"steam64_id"`
+		Name            string   `json:"name"`
 		MatchesTogether int      `json:"matches_together"`
 		Winrate         float64  `json:"winrate"`
 		Rating          *float64 `json:"rating"` // overall Leetify rating; null = unknown (can be negative)
 		KD              float64  `json:"kd,omitempty"`
 		TotalMatches    int      `json:"total_matches"`
+		FaceitLevel     int      `json:"faceit_level,omitempty"`
+		FaceitElo       int      `json:"faceit_elo,omitempty"`
+		Premier         int      `json:"premier,omitempty"`
+		Aim             float64  `json:"aim,omitempty"`
+		Form            []string `json:"form,omitempty"` // recent outcomes, newest first: W/L/T
+		Banned          bool     `json:"banned,omitempty"`
+	}
+	rankInt := func(m map[string]json.RawMessage, key string) int {
+		if raw, ok := m[key]; ok && string(raw) != "null" {
+			var v int
+			if json.Unmarshal(raw, &v) == nil {
+				return v
+			}
+		}
+		return 0
 	}
 	rows := make([]*row, len(prof.RecentTeammates))
 	var wg sync.WaitGroup
@@ -600,6 +615,26 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 						}
 						v := (sum / float64(n)) * 100
 						fr.Rating = &v
+					}
+				}
+				// rank badges + skill signal + recent form + ban flag — all from
+				// the friend profile we already fetched (no extra upstream calls)
+				fr.FaceitLevel = rankInt(rkm, "faceit")
+				fr.FaceitElo = rankInt(rkm, "faceit_elo")
+				fr.Premier = rankInt(rkm, "premier")
+				fr.Aim = fp.Rating.Aim
+				fr.Banned = len(fp.Bans) > 0
+				for _, m := range fp.RecentMatches { // recent_matches is newest-first
+					if len(fr.Form) >= 5 {
+						break
+					}
+					switch m.Outcome {
+					case "win":
+						fr.Form = append(fr.Form, "W")
+					case "loss":
+						fr.Form = append(fr.Form, "L")
+					case "tie":
+						fr.Form = append(fr.Form, "T")
 					}
 				}
 			}
