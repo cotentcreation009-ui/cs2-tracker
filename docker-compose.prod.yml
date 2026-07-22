@@ -50,6 +50,11 @@ services:
       FACEIT_API_KEY: ${FACEIT_API_KEY:-}
       FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
       LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
+      # GRID (live pro-matches board). Empty = feature disabled (nav still shows
+      # but the board reads "coming soon"). GRID_MOCK=1 serves sample data.
+      GRID_API_KEY: ${GRID_API_KEY:-}
+      GRID_BASE_URL: ${GRID_BASE_URL:-https://api-op.grid.gg}
+      GRID_MOCK: ${GRID_MOCK:-}
       # AI read (per-player verdict). Preferred: Vertex AI (Gemini), keyless via
       # the VM's service account — no separate bill, usage goes to the GCP
       # project. Needs the aiplatform.googleapis.com API enabled and the SA
