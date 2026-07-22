@@ -23,6 +23,8 @@ interface FriendRow {
   form?: string[]; // recent outcomes, newest first: "W" | "L" | "T"
   banned?: boolean;
   avatar?: string; // Steam avatar (64px), when public
+  together_wins?: number; // wins across the matches these two shared
+  together_total?: number; // shared matches found (win-rate denominator)
 }
 
 // Steam-avatar tile with an initials fallback for private/missing avatars.
@@ -89,6 +91,46 @@ function RankBadge({ r }: { r: FriendRow }) {
   return null;
 }
 
+// "Together" cell: win rate across the matches these two shared, coloured by
+// how it compares to the owner's solo/overall recent win rate, with the record
+// and sample size below. Falls back to the raw shared-match count.
+function TogetherCell({ r, ownerWin }: { r: FriendRow; ownerWin: number | null }) {
+  const n = r.together_total ?? 0;
+  if (n <= 0) {
+    return (
+      <span className="text-right text-xs tabular-nums text-muted" title="shared matches in the recent window">
+        {r.matches_together}×
+      </span>
+    );
+  }
+  const wins = r.together_wins ?? 0;
+  const pct = wins / n;
+  const delta = ownerWin != null ? pct - ownerWin : null;
+  const col = delta == null ? "text-ink" : delta >= 0.05 ? "text-good" : delta <= -0.05 ? "text-bad" : "text-ink";
+  const deltaLabel =
+    delta == null || Math.abs(delta) < 0.05
+      ? null
+      : `${delta > 0 ? "+" : "−"}${Math.abs(delta * 100).toFixed(0)}`;
+  return (
+    <span
+      className="block text-right"
+      title={
+        ownerWin != null
+          ? `${(pct * 100).toFixed(0)}% together (${wins}–${n - wins} in ${n}) vs ${(ownerWin * 100).toFixed(0)}% overall`
+          : `${(pct * 100).toFixed(0)}% together (${wins}–${n - wins} in ${n})`
+      }
+    >
+      <span className={`text-sm font-semibold tabular-nums ${col}`}>
+        {(pct * 100).toFixed(0)}%
+        {deltaLabel && <span className="ml-0.5 align-top text-[9px]">{deltaLabel}</span>}
+      </span>
+      <span className="block text-[9px] tabular-nums text-faint">
+        {wins}–{n - wins} · {n} together
+      </span>
+    </span>
+  );
+}
+
 function FormDots({ form }: { form: string[] }) {
   return (
     <span className="inline-flex gap-0.5" title={`Recent form (newest first): ${form.join(" ")}`}>
@@ -108,6 +150,7 @@ function FormDots({ form }: { form: string[] }) {
 
 export function FriendsPanel({ steamId }: { steamId: string }) {
   const [rows, setRows] = useState<FriendRow[] | null>(null);
+  const [ownerWin, setOwnerWin] = useState<number | null>(null); // owner's recent win rate (baseline)
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("rating");
 
@@ -117,8 +160,11 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
       try {
         const res = await fetch(`/api/profiles/${steamId}/teammates`);
         if (!res.ok) throw new Error(`status ${res.status}`);
-        const data = (await res.json()) as { teammates: FriendRow[] };
-        if (alive) setRows(data.teammates ?? []);
+        const data = (await res.json()) as { teammates: FriendRow[]; owner_winrate: number | null };
+        if (alive) {
+          setRows(data.teammates ?? []);
+          setOwnerWin(data.owner_winrate ?? null);
+        }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       }
@@ -154,7 +200,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
           ? r.matches_together
           : (r.kd ?? -1);
   const sorted = [...rows].sort((a, b) => val(b) - val(a));
-  const cols = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 4.5rem 3.5rem 2rem";
+  const cols = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 4.5rem 5rem 2rem";
 
   return (
     <div className="space-y-3">
@@ -195,7 +241,9 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
           <span className="text-right">Win %</span>
           <span className="text-right">K/D</span>
           <span className="text-center">Form</span>
-          <span className="text-right">Together</span>
+          <span className="text-right" title="Win rate in the matches you played together, vs this profile's overall recent win rate">
+            Together
+          </span>
           <span />
         </div>
         {sorted.map((r, i) => (
@@ -242,7 +290,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
             <span className="flex justify-center">
               {r.form && r.form.length ? <FormDots form={r.form} /> : <span className="text-faint">—</span>}
             </span>
-            <span className="text-right text-xs tabular-nums text-muted">{r.matches_together}×</span>
+            <TogetherCell r={r} ownerWin={ownerWin} />
             <Link
               href={`/compare?ids=${steamId},${r.steam64_id}`}
               title="Compare this player against the profile you're viewing"
@@ -259,9 +307,10 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
 
       <p className="text-[11px] leading-snug text-faint">
         Rating = their overall Leetify rating · rank badge = FACEIT level (+elo) or Premier rating ·
-        Form = last 5 results (newest left) · Together = shared matches in this player&apos;s recent
-        window. Hover a row and click <span className="text-muted">⇄</span> to compare that player
-        against this profile. K/D and Rating show &quot;—&quot; when Leetify doesn&apos;t expose them.
+        Form = last 5 results (newest left) · Together = <span className="text-good">green</span>/
+        <span className="text-bad">red</span> win rate in matches you played together vs this profile&apos;s
+        overall (the ± is the swing), with the record + count below. Hover a row and click{" "}
+        <span className="text-muted">⇄</span> to compare that player against this profile.
       </p>
     </div>
   );
