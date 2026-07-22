@@ -552,11 +552,11 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 	type row struct {
 		Steam64ID       string  `json:"steam64_id"`
 		Name            string  `json:"name"`
-		MatchesTogether int     `json:"matches_together"`
-		Winrate         float64 `json:"winrate"`
-		Rating          float64 `json:"rating"`
-		KD              float64 `json:"kd,omitempty"`
-		TotalMatches    int     `json:"total_matches"`
+		MatchesTogether int      `json:"matches_together"`
+		Winrate         float64  `json:"winrate"`
+		Rating          *float64 `json:"rating"` // overall Leetify rating; null = unknown (can be negative)
+		KD              float64  `json:"kd,omitempty"`
+		TotalMatches    int      `json:"total_matches"`
 	}
 	rows := make([]*row, len(prof.RecentTeammates))
 	var wg sync.WaitGroup
@@ -576,12 +576,31 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 				fr.Winrate = fp.Winrate
 				fr.KD = fp.KD
 				fr.TotalMatches = fp.TotalMatches
-				if n := len(fp.RecentMatches); n > 0 {
-					sum := 0.0
-					for _, m := range fp.RecentMatches {
-						sum += m.LeetifyRating
+				// Rating = the OVERALL Leetify rating (ranks.leetify — the same
+				// scale the profile page / CheatMeter show), not the per-match
+				// rating delta (which averages to a near-zero, unrecognizable
+				// number). ranks.leetify can be negative (below-average
+				// players), so key off PRESENCE, not sign. Fall back to the
+				// ×100 per-match average only when ranks.leetify is absent/null.
+				var rkm map[string]json.RawMessage
+				if len(fp.Ranks) > 0 {
+					_ = json.Unmarshal(fp.Ranks, &rkm)
+				}
+				if raw, ok := rkm["leetify"]; ok && string(raw) != "null" {
+					var v float64
+					if json.Unmarshal(raw, &v) == nil {
+						fr.Rating = &v
 					}
-					fr.Rating = sum / float64(n)
+				}
+				if fr.Rating == nil {
+					if n := len(fp.RecentMatches); n > 0 {
+						sum := 0.0
+						for _, m := range fp.RecentMatches {
+							sum += m.LeetifyRating
+						}
+						v := (sum / float64(n)) * 100
+						fr.Rating = &v
+					}
 				}
 			}
 			rows[i] = fr

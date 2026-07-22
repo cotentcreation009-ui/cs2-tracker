@@ -13,20 +13,23 @@ interface FriendRow {
   name: string;
   matches_together: number;
   winrate: number; // 0..1
-  rating: number; // avg Leetify rating over their recent matches
+  rating: number | null; // overall Leetify rating (ranks.leetify); null = unknown, can be negative
   kd?: number; // legacy-enriched accounts only
   total_matches: number;
 }
 
 type SortKey = "rating" | "win" | "kd";
 const SORTS: { key: SortKey; label: string; title: string }[] = [
-  { key: "rating", label: "Rating", title: "Average Leetify rating over their recent matches" },
+  { key: "rating", label: "Rating", title: "Overall Leetify rating (same value shown on their profile)" },
   { key: "win", label: "Win %", title: "Lifetime win rate" },
   { key: "kd", label: "K/D", title: "Kills per death (only for accounts with legacy match data — sorted last when unknown)" },
 ];
 
-const fmtRating = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
-const ratingColor = (v: number) => (v >= 0.05 ? "text-good" : v <= -0.05 ? "text-bad" : "text-ink");
+// Overall Leetify rating (can be negative for below-average players). Tiers
+// mirror the CheatMeter's read: ≥3 elite, ≥1.5 strong, ≥0 average, <0 below.
+const fmtRating = (v: number | null) => (v == null ? "—" : v.toFixed(2));
+const ratingColor = (v: number | null) =>
+  v == null ? "text-faint" : v >= 3 ? "text-good" : v >= 1.5 ? "text-mid" : v >= 0 ? "text-ink" : "text-bad";
 
 export function FriendsPanel({ steamId }: { steamId: string }) {
   const [rows, setRows] = useState<FriendRow[] | null>(null);
@@ -68,7 +71,11 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
     );
 
   const val = (r: FriendRow): number =>
-    sort === "rating" ? r.rating : sort === "win" ? r.winrate : (r.kd ?? -1);
+    sort === "rating"
+      ? (r.rating ?? -Infinity)
+      : sort === "win"
+        ? r.winrate
+        : (r.kd ?? -1);
   const sorted = [...rows].sort((a, b) => val(b) - val(a));
 
   return (
@@ -138,9 +145,9 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
       </div>
 
       <p className="text-[11px] leading-snug text-faint">
-        Rating = their average Leetify rating over recent matches · Win % = lifetime · K/D shows
-        &quot;—&quot; when Leetify&apos;s data doesn&apos;t expose it for that account. &quot;Together&quot; counts
-        shared matches in this player&apos;s recent window.
+        Rating = their overall Leetify rating (the same value on their profile) · Win % = lifetime ·
+        K/D and Rating show &quot;—&quot; when Leetify&apos;s data doesn&apos;t expose them for that account.
+        &quot;Together&quot; counts shared matches in this player&apos;s recent window.
       </p>
     </div>
   );
