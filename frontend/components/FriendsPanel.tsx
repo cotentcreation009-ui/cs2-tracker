@@ -47,13 +47,17 @@ function Avatar({ name, src }: { name: string; src?: string }) {
   );
 }
 
-type SortKey = "rating" | "win" | "kd" | "together";
+type SortKey = "rating" | "win" | "kd" | "aim" | "together";
 const SORTS: { key: SortKey; label: string; title: string }[] = [
   { key: "rating", label: "Rating", title: "Overall Leetify rating (same value shown on their profile)" },
   { key: "win", label: "Win %", title: "Lifetime win rate" },
   { key: "kd", label: "K/D", title: "Kills per death (only for accounts with legacy match data — sorted last when unknown)" },
+  { key: "aim", label: "Aim", title: "Leetify aim rating (0–100, higher = better)" },
   { key: "together", label: "Together", title: "Matches played together in this player's recent window" },
 ];
+
+// Leetify aim rating 0..100. Tiers: ≥90 elite, ≥75 strong.
+const aimColor = (v: number) => (v >= 90 ? "text-good" : v >= 75 ? "text-mid" : "text-ink");
 
 // Overall Leetify rating (can be negative for below-average players). Tiers
 // mirror the CheatMeter's read: ≥3 elite, ≥1.5 strong, ≥0 average, <0 below.
@@ -196,11 +200,13 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
       ? (r.rating ?? -Infinity)
       : sort === "win"
         ? r.winrate
-        : sort === "together"
-          ? r.matches_together
-          : (r.kd ?? -1);
+        : sort === "aim"
+          ? (r.aim ?? -1)
+          : sort === "together"
+            ? r.matches_together
+            : (r.kd ?? -1);
   const sorted = [...rows].sort((a, b) => val(b) - val(a));
-  const cols = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 4.5rem 5rem 2rem";
+  const cols = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 3rem 4.5rem 5rem 2rem";
 
   return (
     <div className="space-y-3">
@@ -240,6 +246,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
           <span className="text-right">Rating</span>
           <span className="text-right">Win %</span>
           <span className="text-right">K/D</span>
+          <span className="text-right" title="Leetify aim rating (0–100)">Aim</span>
           <span className="text-center">Form</span>
           <span className="text-right" title="Win rate in the matches you played together, vs this profile's overall recent win rate">
             Together
@@ -286,6 +293,9 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
             </span>
             <span className={`text-right tabular-nums ${r.kd ? kdColor(r.kd) : "text-faint"}`}>
               {r.kd ? r.kd.toFixed(2) : "—"}
+            </span>
+            <span className={`text-right tabular-nums ${r.aim ? aimColor(r.aim) : "text-faint"}`}>
+              {r.aim ? r.aim.toFixed(0) : "—"}
             </span>
             <span className="flex justify-center">
               {r.form && r.form.length ? <FormDots form={r.form} /> : <span className="text-faint">—</span>}
