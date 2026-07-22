@@ -59,6 +59,57 @@ const SORTS: { key: SortKey; label: string; title: string }[] = [
 // Leetify aim rating 0..100. Tiers: ≥90 elite, ≥75 strong.
 const aimColor = (v: number) => (v >= 90 ? "text-good" : v >= 75 ? "text-mid" : "text-ink");
 
+// Shared column template — one source of truth for the header, rows + skeleton.
+const COLS = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 3rem 4.5rem 5rem 2rem";
+
+// Loading skeleton — mirrors the real table shape (avatar + name/rank stack +
+// stat cells) so the layout doesn't jump when data lands.
+function FriendsSkeleton() {
+  const bar = "animate-pulse rounded bg-line/60";
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Loading friends">
+      <div className="flex items-center justify-between">
+        <span className={`h-3 w-56 ${bar}`} />
+        <span className={`h-6 w-40 ${bar}`} />
+      </div>
+      <div className="overflow-hidden rounded-xl border border-line">
+        <div className="grid items-center gap-2 border-b border-line bg-panel/40 px-3 py-2" style={{ gridTemplateColumns: COLS }}>
+          {["#", "Player", "Rating", "Win %", "K/D", "Aim", "Form", "Together", ""].map((h, i) => (
+            <span key={i} className="text-[10px] uppercase tracking-wider text-faint">{h}</span>
+          ))}
+        </div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="grid items-center gap-2 border-t border-line/60 px-3 py-2.5 first-of-type:border-t-0"
+            style={{ gridTemplateColumns: COLS }}
+          >
+            <span className={`h-3 w-3 ${bar}`} />
+            <span className="flex items-center gap-2.5">
+              <span className={`h-8 w-8 shrink-0 rounded-md ${bar}`} />
+              <span className="min-w-0 space-y-1.5">
+                <span className={`block h-3 w-24 ${bar}`} />
+                <span className={`block h-2.5 w-32 ${bar}`} />
+              </span>
+            </span>
+            <span className={`ml-auto h-4 w-9 ${bar}`} />
+            <span className={`ml-auto h-4 w-8 ${bar}`} />
+            <span className={`ml-auto h-4 w-7 ${bar}`} />
+            <span className={`ml-auto h-4 w-7 ${bar}`} />
+            <span className="flex justify-center gap-0.5">
+              {Array.from({ length: 5 }).map((_, j) => (
+                <span key={j} className={`h-3.5 w-3.5 ${bar}`} />
+              ))}
+            </span>
+            <span className={`ml-auto h-7 w-12 ${bar}`} />
+            <span />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Overall Leetify rating (can be negative for below-average players). Tiers
 // mirror the CheatMeter's read: ≥3 elite, ≥1.5 strong, ≥0 average, <0 below.
 const fmtRating = (v: number | null) => (v == null ? "—" : v.toFixed(2));
@@ -180,13 +231,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
 
   if (error)
     return <div className="card px-5 py-6 text-sm text-muted">Couldn&apos;t load friends ({error}).</div>;
-  if (rows == null)
-    return (
-      <div className="card px-5 py-6 text-sm text-muted">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line border-t-brand align-middle" />{" "}
-        Looking up who they queue with…
-      </div>
-    );
+  if (rows == null) return <FriendsSkeleton />;
   if (rows.length === 0)
     return (
       <div className="card px-5 py-6 text-sm text-muted">
@@ -206,7 +251,6 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
             ? r.matches_together
             : (r.kd ?? -1);
   const sorted = [...rows].sort((a, b) => val(b) - val(a));
-  const cols = "2rem minmax(0,1fr) 4.5rem 3.5rem 3rem 3rem 4.5rem 5rem 2rem";
 
   return (
     <div className="space-y-3">
@@ -239,7 +283,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
       <div className="overflow-hidden rounded-xl border border-line">
         <div
           className="grid items-center gap-2 border-b border-line bg-panel/40 px-3 py-2 text-[10px] uppercase tracking-wider text-faint"
-          style={{ gridTemplateColumns: cols }}
+          style={{ gridTemplateColumns: COLS }}
         >
           <span>#</span>
           <span>Player</span>
@@ -257,7 +301,7 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
           <div
             key={r.steam64_id}
             className="group relative grid items-center gap-2 border-t border-line/60 px-3 py-2.5 text-sm transition first-of-type:border-t-0 hover:bg-panel/50"
-            style={{ gridTemplateColumns: cols }}
+            style={{ gridTemplateColumns: COLS }}
           >
             {/* stretched link: the transparent overlay makes the WHOLE row a
                 click target to their profile; static cell text sits under it,
