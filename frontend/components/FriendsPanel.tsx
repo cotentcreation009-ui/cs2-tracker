@@ -22,6 +22,27 @@ interface FriendRow {
   aim?: number; // Leetify aim rating 0..100
   form?: string[]; // recent outcomes, newest first: "W" | "L" | "T"
   banned?: boolean;
+  avatar?: string; // Steam avatar (64px), when public
+}
+
+// Steam-avatar tile with an initials fallback for private/missing avatars.
+function Avatar({ name, src }: { name: string; src?: string }) {
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
+  return src ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={32}
+      height={32}
+      loading="lazy"
+      className="h-8 w-8 shrink-0 rounded-md border border-line object-cover"
+    />
+  ) : (
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-panel text-xs font-bold text-muted">
+      {initial}
+    </span>
+  );
 }
 
 type SortKey = "rating" | "win" | "kd" | "together";
@@ -74,7 +95,7 @@ function FormDots({ form }: { form: string[] }) {
       {form.map((o, i) => (
         <span
           key={i}
-          className={`h-3.5 w-3.5 rounded-[3px] text-center text-[8px] font-bold leading-[14px] ${
+          className={`h-3.5 w-3.5 rounded-[3px] text-center text-[8px] font-bold leading-3.5 ${
             o === "W" ? "bg-good/20 text-good" : o === "T" ? "bg-mid/20 text-mid" : "bg-bad/20 text-bad"
           }`}
         >
@@ -192,19 +213,22 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
               className="absolute inset-0 z-1"
             />
             <span className="font-bold tabular-nums text-faint">{i + 1}</span>
-            <span className="min-w-0">
-              <span className="flex items-center gap-1.5">
-                <span className="truncate font-semibold text-ink">
-                  {r.name || `Player ${r.steam64_id.slice(-5)}`}
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Avatar name={r.name} src={r.avatar} />
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate font-semibold text-ink">
+                    {r.name || `Player ${r.steam64_id.slice(-5)}`}
+                  </span>
+                  {r.banned && (
+                    <span className="shrink-0 rounded bg-bad/15 px-1 text-[9px] font-bold text-bad">⚠ BAN</span>
+                  )}
                 </span>
-                {r.banned && (
-                  <span className="shrink-0 rounded bg-bad/15 px-1 text-[9px] font-bold text-bad">⚠ BAN</span>
-                )}
-              </span>
-              <span className="mt-0.5 flex items-center gap-1.5">
-                <RankBadge r={r} />
-                <span className="text-[10px] text-faint">
-                  {r.total_matches > 0 ? `${r.total_matches.toLocaleString()} matches` : "not tracked"}
+                <span className="mt-0.5 flex items-center gap-1.5">
+                  <RankBadge r={r} />
+                  <span className="text-[10px] text-faint">
+                    {r.total_matches > 0 ? `${r.total_matches.toLocaleString()} matches` : "not tracked"}
+                  </span>
                 </span>
               </span>
             </span>
