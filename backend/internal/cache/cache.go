@@ -85,7 +85,12 @@ func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent:" + tea
 func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult2:" + seriesID }
 
 // ProTeamRosterKey caches a team's current player nicknames.
-func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster:" + teamID }
+func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID }
+
+// ProPlayerStatsKey caches a player's official GRID aggregates per window.
+func ProPlayerStatsKey(playerID, window string) string {
+	return "cs2:pro:pstats:" + playerID + ":" + window
+}
 func SteamExtrasKey(steamID uint64) string {
 	return fmt.Sprintf("cs2:steamextras:%d", steamID)
 }

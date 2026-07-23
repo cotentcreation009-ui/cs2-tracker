@@ -267,6 +267,7 @@ type Client struct {
 	http       *http.Client
 	centralURL string
 	seriesURL  string
+	statsURL   string
 	apiKey     string
 	log        *slog.Logger
 
@@ -277,6 +278,9 @@ type Client struct {
 	// schedule loop and the history endpoint, so concurrent detail views can't
 	// burst past the Open-Access ceiling.
 	centralLim *rate.Limiter
+	// Statistics-Feed limiter — the cap isn't documented for Open Access, so
+	// stay conservative (~40/min, burst 5); results cache for 12h anyway.
+	statsLim *rate.Limiter
 }
 
 // NewClient builds a Client. An empty baseURL falls back to the Open-Access host.
@@ -295,10 +299,12 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client, log *slog.Logger
 		http:       httpClient,
 		centralURL: base + "/central-data/graphql",
 		seriesURL:  base + "/live-data-feed/series-state/graphql",
+		statsURL:   base + "/statistics-feed/graphql",
 		apiKey:     strings.TrimSpace(apiKey),
 		log:        log,
 		titleID:    "28",
 		centralLim: rate.NewLimiter(rate.Every(time.Minute/18), 4),
+		statsLim:   rate.NewLimiter(rate.Every(1500*time.Millisecond), 5),
 	}
 }
 

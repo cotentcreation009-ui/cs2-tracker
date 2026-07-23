@@ -71,16 +71,23 @@ export interface ProH2HEntry {
   scoreByTeam: Record<string, number>;
 }
 
-// One roster player with recent-series stats (aggregated server-side).
+// One roster player row. src "grid" = official GRID Statistics-Feed
+// aggregates over the window; src "agg" = fallback computed from the team's
+// recent tracked series; "" = no data (new signing/sub).
 export interface ProRosterPlayer {
   nick: string;
-  maps: number; // series sampled
+  inRoster: boolean;
+  src: "grid" | "agg" | "";
+  series: number;
+  maps: number;
   kills: number;
   deaths: number;
-  assists: number;
+  assists?: number;
   kd: number;
-  kpr: number;
-  inRoster: boolean;
+  avgKills: number;
+  kpr?: number;
+  fkPct: number;
+  winPct: number;
 }
 
 export interface ProHistory {
@@ -100,16 +107,7 @@ export interface ProTeamResult {
   opponent: ProTeam;
 }
 
-export interface ProTeamPlayer {
-  nick: string;
-  series: number;
-  kills: number;
-  deaths: number;
-  assists: number;
-  kd: number;
-  kpr: number;
-  inRoster: boolean;
-}
+export type ProTeamPlayer = ProRosterPlayer;
 
 export interface ProTeamPage {
   enabled?: boolean;

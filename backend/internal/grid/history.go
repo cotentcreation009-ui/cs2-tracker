@@ -216,8 +216,15 @@ const rosterQuery = `query Roster($tid: ID) {
   }
 }`
 
-// TeamRoster returns a team's current player nicknames.
-func (c *Client) TeamRoster(ctx context.Context, teamID string) ([]string, error) {
+// RosterPlayer is one player on a team's current roster (Open Access exposes
+// id + nickname only).
+type RosterPlayer struct {
+	ID   string `json:"id"`
+	Nick string `json:"nick"`
+}
+
+// TeamRoster returns a team's current roster (player ids + nicknames).
+func (c *Client) TeamRoster(ctx context.Context, teamID string) ([]RosterPlayer, error) {
 	if err := c.centralLim.Wait(ctx); err != nil {
 		return nil, err
 	}
@@ -230,6 +237,7 @@ func (c *Client) TeamRoster(ctx context.Context, teamID string) ([]string, error
 			Players struct {
 				Edges []struct {
 					Node struct {
+						ID       string `json:"id"`
 						Nickname string `json:"nickname"`
 					} `json:"node"`
 				} `json:"edges"`
@@ -239,11 +247,109 @@ func (c *Client) TeamRoster(ctx context.Context, teamID string) ([]string, error
 	if err := decodeGQL(body, &resp); err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []RosterPlayer
 	for _, e := range resp.Data.Players.Edges {
-		if n := e.Node.Nickname; n != "" {
-			out = append(out, n)
+		if e.Node.Nickname != "" {
+			out = append(out, RosterPlayer{ID: e.Node.ID, Nick: e.Node.Nickname})
 		}
+	}
+	return out, nil
+}
+
+// PlayerStats is GRID's official aggregated statistics for one player over a
+// time window (Statistics Feed — verified available on Open Access).
+type PlayerStats struct {
+	SeriesCount  int     `json:"seriesCount"`
+	SeriesWinPct float64 `json:"seriesWinPct"`
+	Maps         int     `json:"maps"`
+	MapWinPct    float64 `json:"mapWinPct"`
+	Kills        int     `json:"kills"`
+	Deaths       int     `json:"deaths"`
+	AvgKills     float64 `json:"avgKills"` // per map
+	MaxKills     int     `json:"maxKills"`
+	KD           float64 `json:"kd"`
+	FirstKillPct float64 `json:"firstKillPct"` // % of maps with the first kill
+}
+
+const playerStatsQuery = `query PlayerStats($pid: ID!, $w: TimeRangeFilter!) {
+  playerStatistics(playerId: $pid, filter: { timeWindow: $w }) {
+    series { count won { value count percentage } }
+    game { count won { value count percentage } kills { sum avg max } deaths { sum avg }
+      firstKill { value count percentage } }
+  }
+}`
+
+// PlayerCareerStats fetches official aggregates for a player. window is a
+// TimeRangeFilter enum name (LAST_3_MONTHS, LAST_YEAR, …). Returns nil (no
+// error) when the player has no data in the window.
+func (c *Client) PlayerCareerStats(ctx context.Context, playerID, window string) (*PlayerStats, error) {
+	if err := c.statsLim.Wait(ctx); err != nil {
+		return nil, err
+	}
+	body, err := c.postGraphQL(ctx, c.statsURL, playerStatsQuery, map[string]any{"pid": playerID, "w": window})
+	if err != nil {
+		return nil, err
+	}
+	type bucket struct {
+		Value      bool    `json:"value"`
+		Count      int     `json:"count"`
+		Percentage float64 `json:"percentage"`
+	}
+	var resp struct {
+		Data struct {
+			PlayerStatistics *struct {
+				Series struct {
+					Count int      `json:"count"`
+					Won   []bucket `json:"won"`
+				} `json:"series"`
+				Game struct {
+					Count int      `json:"count"`
+					Won   []bucket `json:"won"`
+					Kills struct {
+						Sum int     `json:"sum"`
+						Avg float64 `json:"avg"`
+						Max int     `json:"max"`
+					} `json:"kills"`
+					Deaths struct {
+						Sum int     `json:"sum"`
+						Avg float64 `json:"avg"`
+					} `json:"deaths"`
+					FirstKill []bucket `json:"firstKill"`
+				} `json:"game"`
+			} `json:"playerStatistics"`
+		} `json:"data"`
+	}
+	if err := decodeGQL(body, &resp); err != nil {
+		return nil, err
+	}
+	ps := resp.Data.PlayerStatistics
+	if ps == nil || (ps.Game.Count == 0 && ps.Series.Count == 0) {
+		return nil, nil
+	}
+	// buckets are unordered — select the value==true entry explicitly
+	pct := func(bs []bucket) float64 {
+		for _, b := range bs {
+			if b.Value {
+				return b.Percentage
+			}
+		}
+		return 0
+	}
+	out := &PlayerStats{
+		SeriesCount:  ps.Series.Count,
+		SeriesWinPct: pct(ps.Series.Won),
+		Maps:         ps.Game.Count,
+		MapWinPct:    pct(ps.Game.Won),
+		Kills:        ps.Game.Kills.Sum,
+		Deaths:       ps.Game.Deaths.Sum,
+		AvgKills:     ps.Game.Kills.Avg,
+		MaxKills:     ps.Game.Kills.Max,
+		FirstKillPct: pct(ps.Game.FirstKill),
+	}
+	if out.Deaths > 0 {
+		out.KD = float64(out.Kills) / float64(out.Deaths)
+	} else {
+		out.KD = float64(out.Kills)
 	}
 	return out, nil
 }
