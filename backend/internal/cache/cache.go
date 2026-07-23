@@ -79,13 +79,17 @@ func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:%d", st
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
 
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).
-func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent:" + teamID }
+func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent2:" + teamID }
 
 // ProSeriesResultKey caches a series' outcome (maps won per team).
 func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult2:" + seriesID }
 
 // ProTeamRosterKey caches a team's current player nicknames.
 func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID }
+
+// ProSeriesDetailKey caches a full on-demand MatchState for a series that has
+// aged out of the live board (historical results).
+func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail:" + seriesID }
 
 // ProPlayerStatsKey caches a player's official GRID aggregates per window.
 func ProPlayerStatsKey(playerID, window string) string {

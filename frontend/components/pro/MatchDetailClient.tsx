@@ -122,6 +122,7 @@ export function MatchDetailClient({
           <span className="text-xs text-muted">
             {formatBlurb(m)}
             {isUpcoming && startAbs ? ` · starts ${startAbs}` : ""}
+            {isFinished && startAbs ? ` · played ${startAbs}` : ""}
           </span>
           {m.streamUrl ? <TwitchLink url={m.streamUrl} /> : null}
         </div>
@@ -140,6 +141,10 @@ export function MatchDetailClient({
       ) : isUpcoming ? (
         <div className="card px-5 py-8 text-center text-sm text-muted">
           Player stats and map scores appear here once the match goes live.
+        </div>
+      ) : isFinished ? (
+        <div className="card px-5 py-8 text-center text-sm text-muted">
+          Detailed per-map data isn&apos;t available for this series.
         </div>
       ) : null}
 

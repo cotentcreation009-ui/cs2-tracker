@@ -67,11 +67,13 @@ func (s *Server) handleProTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type resultRow struct {
-		SeriesID string    `json:"seriesId"`
-		Date     string    `json:"date"`
-		Won      bool      `json:"won"`
-		Score    [2]int    `json:"score"`
-		Opponent grid.Team `json:"opponent"`
+		SeriesID   string    `json:"seriesId"`
+		Date       string    `json:"date"`
+		Won        bool      `json:"won"`
+		Score      [2]int    `json:"score"`
+		Opponent   grid.Team `json:"opponent"`
+		Tournament string    `json:"tournament,omitempty"`
+		Format     string    `json:"format,omitempty"`
 	}
 	var results []resultRow
 	wins, losses := 0, 0
@@ -113,7 +115,7 @@ func (s *Server) handleProTeam(w http.ResponseWriter, r *http.Request) {
 				streakDone = true
 			}
 		}
-		results = append(results, resultRow{SeriesID: ps.ID, Date: ps.StartTime, Won: won, Score: [2]int{mine, theirs}, Opponent: opp})
+		results = append(results, resultRow{SeriesID: ps.ID, Date: ps.StartTime, Won: won, Score: [2]int{mine, theirs}, Opponent: opp, Tournament: ps.Tournament, Format: ps.FormatShort})
 	}
 
 	agg := aggregateTeamPlayers(recent, "", tid, resultOf)

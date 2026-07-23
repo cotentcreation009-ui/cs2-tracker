@@ -63,8 +63,24 @@ func (s *Server) handleProMatch(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "seriesId")
 	ms, ok := s.proMatches.Store().Get(id)
 	if !ok {
-		writeError(w, http.StatusNotFound, "series not found")
-		return
+		// Historical series that aged out of the live board (e.g. a result row
+		// on a team page): resolve on demand from GRID and cache hard once
+		// finished so repeat views cost nothing.
+		ctx := r.Context()
+		cl := s.proMatches.Client()
+		det, err := cachedTTL(s, ctx, cache.ProSeriesDetailKey(id), 15*time.Minute,
+			func() (msWrap, error) {
+				d, err := cl.FetchSeriesDetail(ctx, id)
+				return msWrap{M: d}, err
+			})
+		if err != nil || det.M == nil {
+			writeError(w, http.StatusNotFound, "series not found")
+			return
+		}
+		if det.M.Status == "finished" && s.cache != nil {
+			_ = s.cache.SetJSONTTL(ctx, cache.ProSeriesDetailKey(id), det, 24*time.Hour)
+		}
+		ms = *det.M
 	}
 	setEdgeCache(w, 5*time.Second)
 	writeJSON(w, http.StatusOK, ms)
@@ -264,6 +280,11 @@ func aggregateTeamPlayers(recent []grid.PastSeries, skipID, tid string, resultOf
 	return byNick
 }
 
+// msWrap makes a nil *MatchState cacheable through cachedTTL's generics.
+type msWrap struct {
+	M *grid.MatchState `json:"m"`
+}
+
 // psWrap makes a nil *PlayerStats cacheable through cachedTTL's generics.
 type psWrap struct {
 	S *grid.PlayerStats `json:"s"`
@@ -296,16 +317,17 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 			}
 		}
 		if row.Src == "" {
-			if a := agg[rp.Nick]; a != nil {
+			if a := agg[rp.Nick]; a != nil && a.k+a.d > 0 {
 				fillAggRow(&row, a)
 			}
 		}
 		rows = append(rows, row)
 		seen[rp.Nick] = true
 	}
-	// recent stand-ins who played 2+ of the team's recent series
+	// recent stand-ins who played 2+ of the team's recent series (with real
+	// data — coaches/observers appear in GRID player lists with 0K 0D)
 	for nick, a := range agg {
-		if seen[nick] || a.series < 2 {
+		if seen[nick] || a.series < 2 || a.k+a.d == 0 {
 			continue
 		}
 		row := proPlayerRow{Nick: nick, InRoster: false}

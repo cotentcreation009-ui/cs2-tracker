@@ -2,6 +2,7 @@ package grid
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -12,6 +13,7 @@ type PastSeries struct {
 	ID          string `json:"id"`
 	StartTime   string `json:"startTime"`
 	FormatShort string `json:"formatShort"`
+	Tournament  string `json:"tournament,omitempty"`
 	Teams       []Team `json:"teams"`
 }
 
@@ -49,6 +51,7 @@ func teamRecentQuery(titleID string) string {
     edges { node {
       id startTimeScheduled
       format { nameShortened }
+      tournament { name }
       teams { baseInfo { id name nameShortened logoUrl colorPrimary colorSecondary } }
     } }
   }
@@ -85,6 +88,9 @@ func (c *Client) RecentSeriesForTeam(ctx context.Context, teamID, gte, lte strin
 						Format             *struct {
 							NameShortened string `json:"nameShortened"`
 						} `json:"format"`
+						Tournament *struct {
+							Name string `json:"name"`
+						} `json:"tournament"`
 						Teams []struct {
 							BaseInfo *struct {
 								ID             string `json:"id"`
@@ -109,6 +115,9 @@ func (c *Client) RecentSeriesForTeam(ctx context.Context, teamID, gte, lte strin
 		ps := PastSeries{ID: n.ID, StartTime: n.StartTimeScheduled}
 		if n.Format != nil {
 			ps.FormatShort = n.Format.NameShortened
+		}
+		if n.Tournament != nil {
+			ps.Tournament = n.Tournament.Name
 		}
 		for _, t := range n.Teams {
 			if t.BaseInfo == nil {
@@ -206,6 +215,66 @@ func (c *Client) SeriesResult(ctx context.Context, id string) (*SeriesResult, er
 		res.Teams = append(res.Teams, rt)
 	}
 	return res, nil
+}
+
+// seriesMetaQuery resolves ONE series' identity from Central Data — used for
+// historical series that have aged out of the live board's window.
+const seriesMetaQuery = `query SeriesMeta($id: ID!) {
+  series(id: $id) {
+    id startTimeScheduled
+    format { name nameShortened }
+    tournament { id name nameShortened logoUrl }
+    teams { baseInfo { id name nameShortened logoUrl colorPrimary colorSecondary } }
+  }
+}`
+
+// FetchSeriesMeta fetches a single series' schedule identity (teams, format,
+// tournament). Returns nil when the series is unknown.
+func (c *Client) FetchSeriesMeta(ctx context.Context, id string) (*MatchState, error) {
+	if err := c.centralLim.Wait(ctx); err != nil {
+		return nil, err
+	}
+	body, err := c.postGraphQL(ctx, c.centralURL, seriesMetaQuery, map[string]any{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Series *centralNode `json:"series"`
+		} `json:"data"`
+	}
+	if err := decodeGQL(body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Data.Series == nil || resp.Data.Series.ID == "" {
+		return nil, nil
+	}
+	ms := normalizeSchedule(*resp.Data.Series)
+	return &ms, nil
+}
+
+// FetchSeriesDetail assembles a full MatchState for a series that isn't in the
+// live store (a historical result the user clicked into): Central identity +
+// Series State scoreboards. Returns nil when GRID doesn't know the series.
+func (c *Client) FetchSeriesDetail(ctx context.Context, id string) (*MatchState, error) {
+	ms, err := c.FetchSeriesMeta(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if ms == nil {
+		return nil, nil
+	}
+	ss, err := c.FetchSeriesState(ctx, id)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if ss != nil {
+		applySeriesState(ms, ss, time.Now())
+	} else if t, perr := time.Parse(time.RFC3339, ms.StartScheduled); perr == nil && time.Since(t) > 6*time.Hour {
+		// no live state and the series was scheduled hours ago — it's over
+		ms.Status = "finished"
+	}
+	return ms, nil
 }
 
 // rosterQuery lists a team's current players (Open Access permits id+nickname
