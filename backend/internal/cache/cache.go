@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -90,6 +91,9 @@ func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID
 // ProSeriesDetailKey caches a full on-demand MatchState for a series that has
 // aged out of the live board (historical results).
 func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail:" + seriesID }
+
+// ProPlayerImgKey caches a pro player's Liquipedia photo bytes by nickname.
+func ProPlayerImgKey(nick string) string { return "cs2:pro:pimg:" + strings.ToLower(nick) }
 
 // ProPlayerStatsKey caches a player's official GRID aggregates per window.
 func ProPlayerStatsKey(playerID, window string) string {

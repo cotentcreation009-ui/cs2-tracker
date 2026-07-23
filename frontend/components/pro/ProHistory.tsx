@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ProFormEntry, ProHistory, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
+import { PlayerAvatar } from "./PlayerAvatar";
 import { validHex } from "./format";
 
 // Recent form + head-to-head, loaded lazily (after the live scoreboard) from
@@ -148,11 +149,14 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
             const n = p.src === "grid" ? p.maps : p.series;
             return (
               <tr key={p.nick} className="border-t border-line/40">
-                <td className="max-w-0 truncate px-4 py-1.5">
-                  <span className="font-semibold text-ink">{p.nick}</span>
-                  {!p.inRoster ? (
-                    <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
-                  ) : null}
+                <td className="max-w-0 px-4 py-1.5">
+                  <span className="flex items-center gap-2">
+                    <PlayerAvatar nick={p.nick} hex={hex} size={22} />
+                    <span className="truncate font-semibold text-ink">{p.nick}</span>
+                    {!p.inRoster ? (
+                      <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
+                    ) : null}
+                  </span>
                 </td>
                 <td className="py-1.5 text-right tabular-nums text-muted">{has ? n : "—"}</td>
                 <td className={`py-1.5 text-right tabular-nums ${has ? kdColor(p.kd) : "text-faint"}`}>{has ? p.kd.toFixed(2) : "—"}</td>
@@ -163,7 +167,7 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
           })}
         </tbody>
       </table>
-      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Official GRID player statistics, last 3 months</p>
+      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Official GRID player statistics, last 3 months · photos: Liquipedia (CC BY-SA 3.0)</p>
     </div>
   );
 }
