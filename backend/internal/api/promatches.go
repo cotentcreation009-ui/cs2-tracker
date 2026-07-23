@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -245,7 +246,10 @@ type proPlayerRow struct {
 	WinPct   float64 `json:"winPct"`
 }
 
-type playerAgg struct{ series, k, d, a, rounds int }
+type playerAgg struct {
+	nick                    string // display casing as seen on scoreboards
+	series, k, d, a, rounds int
+}
 
 // aggregateTeamPlayers folds a team's cached recent series results into
 // per-player K/D/A + round totals (the fallback stats source).
@@ -264,10 +268,14 @@ func aggregateTeamPlayers(recent []grid.PastSeries, skipID, tid string, resultOf
 				continue
 			}
 			for _, pl := range rt.Players {
-				a := byNick[pl.Nick]
+				// scoreboard names and Central roster nicks disagree on casing
+				// ("Atarax1a" vs "atarax1a") — key case-insensitively so a
+				// roster player never doubles as their own stand-in
+				lk := strings.ToLower(pl.Nick)
+				a := byNick[lk]
 				if a == nil {
-					a = &playerAgg{}
-					byNick[pl.Nick] = a
+					a = &playerAgg{nick: pl.Nick}
+					byNick[lk] = a
 				}
 				a.series++
 				a.k += pl.Kills
@@ -319,20 +327,20 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 			}
 		}
 		if row.Src == "" {
-			if a := agg[rp.Nick]; a != nil && a.k+a.d > 0 {
+			if a := agg[strings.ToLower(rp.Nick)]; a != nil && a.k+a.d > 0 {
 				fillAggRow(&row, a)
 			}
 		}
 		rows = append(rows, row)
-		seen[rp.Nick] = true
+		seen[strings.ToLower(rp.Nick)] = true
 	}
 	// recent stand-ins who played 2+ of the team's recent series (with real
 	// data — coaches/observers appear in GRID player lists with 0K 0D)
-	for nick, a := range agg {
-		if seen[nick] || a.series < 2 || a.k+a.d == 0 {
+	for lk, a := range agg {
+		if seen[lk] || a.series < 2 || a.k+a.d == 0 {
 			continue
 		}
-		row := proPlayerRow{Nick: nick, InRoster: false}
+		row := proPlayerRow{Nick: a.nick, InRoster: false}
 		fillAggRow(&row, a)
 		rows = append(rows, row)
 	}
