@@ -303,7 +303,9 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 					st, err := cl.PlayerCareerStats(ctx, rp.ID, window)
 					return psWrap{S: st}, err
 				})
-			if err == nil && w.S != nil {
+			// official rows with zero kills AND deaths are data gaps on GRID's
+			// side (e.g. maps counted but no player lines) — fall through
+			if err == nil && w.S != nil && w.S.Kills+w.S.Deaths > 0 {
 				st := w.S
 				row.Src = "grid"
 				row.Series = st.SeriesCount
