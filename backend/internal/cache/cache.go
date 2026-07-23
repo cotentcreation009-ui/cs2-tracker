@@ -77,6 +77,12 @@ func ProfileKey(steamID uint64) string {
 // Cache keys for live third-party payloads (TTL-expired, not invalidated).
 func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:%d", steamID) }
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
+
+// ProTeamRecentKey caches a team's recent past-series list (schedule only).
+func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent:" + teamID }
+
+// ProSeriesResultKey caches a series' outcome (maps won per team).
+func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult:" + seriesID }
 func SteamExtrasKey(steamID uint64) string {
 	return fmt.Sprintf("cs2:steamextras:%d", steamID)
 }
