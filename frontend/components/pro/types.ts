@@ -105,6 +105,8 @@ export interface ProTeamResult {
   won: boolean;
   score: [number, number]; // [team, opponent]
   opponent: ProTeam;
+  tournament?: string;
+  format?: string; // "Bo1" | "Bo3" | ...
 }
 
 export type ProTeamPlayer = ProRosterPlayer;

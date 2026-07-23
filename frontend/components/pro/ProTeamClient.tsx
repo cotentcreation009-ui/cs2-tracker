@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProTeamPage } from "./types";
+import type { ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { validHex } from "./format";
 
-// HLTV-style team page: identity header (record + streak), the roster with
-// per-player stats aggregated over recent tracked series, and the results list.
+// HLTV-style team page: identity header with a record/form stat strip, the
+// roster with official per-player stats, and the results list (each result
+// links to the full match breakdown).
 export function ProTeamClient({ id }: { id: string }) {
   const [data, setData] = useState<ProTeamPage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -36,7 +37,7 @@ export function ProTeamClient({ id }: { id: string }) {
     return (
       <div className="space-y-4" aria-busy="true">
         <BackLink />
-        <div className="card-2 h-32 animate-pulse bg-line/20" />
+        <div className="card-2 h-36 animate-pulse bg-line/20" />
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="card h-64 animate-pulse bg-line/20" />
           <div className="card h-64 animate-pulse bg-line/20" />
@@ -64,38 +65,69 @@ export function ProTeamClient({ id }: { id: string }) {
   const rec = data.record;
   const players = data.players ?? [];
   const results = data.results ?? [];
-  const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  const total = rec ? rec.wins + rec.losses : 0;
+  const winPct = rec && total > 0 ? Math.round((rec.wins / total) * 100) : null;
+  const withStats = players.filter((p) => p.src !== "");
+  const noStats = players.filter((p) => p.src === "");
 
   return (
     <div className="space-y-5">
       <BackLink />
 
-      {/* identity header */}
+      {/* identity header + stat strip */}
       <div className="card-2 relative overflow-hidden p-6">
-        <span aria-hidden className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full opacity-[0.18] blur-3xl" style={{ background: hex }} />
+        <span aria-hidden className="pointer-events-none absolute -left-24 -top-28 h-72 w-72 rounded-full opacity-[0.18] blur-3xl" style={{ background: hex }} />
+        <span aria-hidden className="pointer-events-none absolute -right-20 -bottom-32 h-64 w-64 rounded-full opacity-[0.08] blur-3xl" style={{ background: hex }} />
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ backgroundImage: `linear-gradient(90deg, ${hex}, transparent 70%)` }} />
         <div className="relative flex flex-wrap items-center gap-4">
-          <TeamLogo name={t.shortName || t.name} src={t.logoUrl} color={t.colorPrimary} size={64} />
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-extrabold tracking-tight text-ink">{t.name || t.shortName || "Team"}</h1>
-            {rec && rec.wins + rec.losses > 0 ? (
-              <p className="mt-0.5 text-sm text-muted">
-                <span className="font-semibold text-good">{rec.wins}W</span>{" "}
-                <span className="font-semibold text-bad">{rec.losses}L</span>{" "}
-                <span className="text-faint">
-                  · {Math.round((rec.wins / (rec.wins + rec.losses)) * 100)}% over recent series
-                </span>
-                {rec.streak > 1 ? (
-                  <span className={`ml-1.5 ${rec.streakWon ? "text-good" : "text-bad"}`}>
-                    · {rec.streak} {rec.streakWon ? "wins" : "losses"} in a row
-                  </span>
-                ) : null}
-              </p>
-            ) : (
-              <p className="mt-0.5 text-sm text-faint">No recent tracked series.</p>
-            )}
+          <TeamLogo name={t.shortName || t.name} src={t.logoUrl} color={t.colorPrimary} size={72} />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">{t.name || t.shortName || "Team"}</h1>
+            <p className="mt-0.5 text-xs uppercase tracking-wider text-faint">
+              Counter-Strike 2 · pro team
+              {total > 0 ? <span className="ml-2 normal-case tracking-normal">last {total} series tracked</span> : null}
+            </p>
           </div>
         </div>
+
+        {total > 0 && rec ? (
+          <div className="relative mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <StatTile label="Record">
+              <span className="text-good">{rec.wins}</span>
+              <span className="mx-0.5 text-faint">–</span>
+              <span className="text-bad">{rec.losses}</span>
+            </StatTile>
+            <StatTile label="Win rate" sub={<WinBar pct={winPct ?? 0} hex={hex} />}>
+              <span className={winPct != null && winPct >= 55 ? "text-good" : winPct != null && winPct < 45 ? "text-bad" : "text-ink"}>
+                {winPct}%
+              </span>
+            </StatTile>
+            <StatTile label="Streak">
+              {rec.streak > 0 ? (
+                <span className={rec.streakWon ? "text-good" : "text-bad"}>
+                  {rec.streak}{rec.streakWon ? "W" : "L"}
+                </span>
+              ) : (
+                <span className="text-faint">—</span>
+              )}
+            </StatTile>
+            <StatTile label="Last 5" sub={undefined}>
+              <span className="inline-flex items-center gap-1">
+                {results.slice(0, 5).map((r) => (
+                  <span
+                    key={r.seriesId}
+                    title={`${r.won ? "Won" : "Lost"} ${r.score[0]}–${r.score[1]} vs ${r.opponent?.shortName || r.opponent?.name || "?"}`}
+                    className={`grid h-4.5 w-4.5 place-items-center rounded text-[8px] font-bold leading-none ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}
+                  >
+                    {r.won ? "W" : "L"}
+                  </span>
+                ))}
+              </span>
+            </StatTile>
+          </div>
+        ) : (
+          <p className="relative mt-4 text-sm text-faint">No recent tracked series.</p>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
@@ -108,42 +140,40 @@ export function ProTeamClient({ id }: { id: string }) {
           {players.length === 0 ? (
             <p className="px-4 py-6 text-sm text-faint">No roster on record for this team.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[9px] uppercase tracking-wider text-faint">
-                  <th className="px-4 py-2 text-left font-semibold">Player</th>
-                  <th className="w-13 py-2 text-right font-semibold" title="Maps played in the last year">Maps</th>
-                  <th className="w-20 py-2 text-right font-semibold" title="Total kills − deaths">K–D</th>
-                  <th className="w-13 py-2 text-right font-semibold" title="Kills / deaths">K/D</th>
-                  <th className="w-13 py-2 text-right font-semibold" title="Average kills per map">Avg K</th>
-                  <th className="w-13 py-2 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
-                  <th className="w-13 px-4 py-2 text-right font-semibold" title="Map win rate">Win%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((p) => {
-                  const has = p.src !== "";
-                  const grid = p.src === "grid";
-                  const n = grid ? p.maps : p.series;
-                  return (
-                    <tr key={p.nick} className="border-t border-line/40">
-                      <td className="max-w-0 truncate px-4 py-2">
-                        <span className="font-semibold text-ink">{p.nick}</span>
-                        {!p.inRoster ? (
-                          <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
-                        ) : null}
-                      </td>
-                      <td className="py-2 text-right tabular-nums text-muted">{has ? n : "—"}</td>
-                      <td className="py-2 text-right tabular-nums text-muted">{has ? `${p.kills}–${p.deaths}` : "—"}</td>
-                      <td className={`py-2 text-right tabular-nums ${has ? kdColor(p.kd) : "text-faint"}`}>{has ? p.kd.toFixed(2) : "—"}</td>
-                      <td className="py-2 text-right tabular-nums text-muted">{grid && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
-                      <td className="py-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
-                      <td className={`px-4 py-2 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
+            <>
+              {withStats.length > 0 ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[9px] uppercase tracking-wider text-faint">
+                      <th className="px-4 py-2 text-left font-semibold">Player</th>
+                      <th className="w-13 py-2 text-right font-semibold" title="Maps played in the last year">Maps</th>
+                      <th className="w-20 py-2 text-right font-semibold" title="Total kills − deaths">K–D</th>
+                      <th className="w-13 py-2 text-right font-semibold" title="Kills / deaths">K/D</th>
+                      <th className="w-13 py-2 text-right font-semibold" title="Average kills per map">Avg K</th>
+                      <th className="w-13 py-2 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
+                      <th className="w-13 px-4 py-2 text-right font-semibold" title="Map win rate">Win%</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {withStats.map((p, i) => (
+                      <RosterRow key={p.nick} p={p} rank={i + 1} />
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="px-4 py-6 text-sm text-faint">No tracked stats yet for this roster.</p>
+              )}
+              {noStats.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5 border-t border-line/40 px-4 py-2.5">
+                  <span className="text-[10px] uppercase tracking-wider text-faint">Also on the roster</span>
+                  {noStats.map((p) => (
+                    <span key={p.nick} className="rounded bg-panel px-1.5 py-0.5 text-xs font-medium text-muted" title="No tracked matches in GRID's data yet (new signing or inactive)">
+                      {p.nick}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </>
           )}
         </section>
 
@@ -158,24 +188,7 @@ export function ProTeamClient({ id }: { id: string }) {
           ) : (
             <div className="divide-y divide-line/40">
               {results.map((r) => (
-                <Link
-                  key={r.seriesId}
-                  href={`/pro-matches/${r.seriesId}`}
-                  className="flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-panel/50"
-                >
-                  <span className={`grid h-5 w-5 shrink-0 place-items-center rounded text-[9px] font-bold ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
-                    {r.won ? "W" : "L"}
-                  </span>
-                  <span className="w-14 shrink-0 tabular-nums text-xs text-faint">{fmtDate(r.date)}</span>
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="text-xs text-faint">vs</span>
-                    <TeamLogo name={r.opponent?.shortName || r.opponent?.name} src={r.opponent?.logoUrl} color={r.opponent?.colorPrimary} size={20} />
-                    <span className="truncate text-muted">{r.opponent?.shortName || r.opponent?.name || "TBD"}</span>
-                  </span>
-                  <span className={`shrink-0 tabular-nums text-sm font-semibold ${r.won ? "text-good" : "text-bad"}`}>
-                    {r.score[0]}–{r.score[1]}
-                  </span>
-                </Link>
+                <ResultRow key={r.seriesId} r={r} />
               ))}
             </div>
           )}
@@ -185,8 +198,78 @@ export function ProTeamClient({ id }: { id: string }) {
       <p className="text-[11px] leading-snug text-faint">
         Player stats are GRID&apos;s official aggregates over the last year of tracked pro play
         (players without official data fall back to recent-series aggregates). Click a result to
-        open that match.
+        open the full match breakdown with per-map scoreboards.
       </p>
+    </div>
+  );
+}
+
+function RosterRow({ p, rank }: { p: ProTeamPlayer; rank: number }) {
+  const grid = p.src === "grid";
+  const n = grid ? p.maps : p.series;
+  const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  return (
+    <tr className="border-t border-line/40 transition-colors hover:bg-panel/40">
+      <td className="max-w-0 truncate px-4 py-2">
+        <span className="mr-2 inline-block w-3 text-right text-[10px] tabular-nums text-faint">{rank}</span>
+        <span className="font-semibold text-ink">{p.nick}</span>
+        {!p.inRoster ? (
+          <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
+        ) : null}
+      </td>
+      <td className="py-2 text-right tabular-nums text-muted">{n}</td>
+      <td className="whitespace-nowrap py-2 text-right tabular-nums text-muted">{p.kills}–{p.deaths}</td>
+      <td className={`py-2 text-right font-semibold tabular-nums ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</td>
+      <td className="py-2 text-right tabular-nums text-muted">{grid && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
+      <td className="py-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
+      <td className={`px-4 py-2 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
+    </tr>
+  );
+}
+
+function ResultRow({ r }: { r: ProTeamResult }) {
+  const meta = [r.tournament, r.format, fmtDate(r.date)].filter(Boolean).join(" · ");
+  return (
+    <Link
+      href={`/pro-matches/${r.seriesId}`}
+      className="group flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-panel/50"
+      title="Open the full match breakdown"
+    >
+      <span className={`grid h-6 w-6 shrink-0 place-items-center rounded text-[10px] font-bold ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
+        {r.won ? "W" : "L"}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="text-xs text-faint">vs</span>
+          <TeamLogo name={r.opponent?.shortName || r.opponent?.name} src={r.opponent?.logoUrl} color={r.opponent?.colorPrimary} size={18} />
+          <span className="truncate font-medium text-muted">{r.opponent?.shortName || r.opponent?.name || "TBD"}</span>
+        </span>
+        <span className="mt-0.5 block truncate text-[10px] text-faint">{meta}</span>
+      </span>
+      <span className={`shrink-0 tabular-nums text-sm font-semibold ${r.won ? "text-good" : "text-bad"}`}>
+        {r.score[0]}–{r.score[1]}
+      </span>
+      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-faint opacity-0 transition group-hover:opacity-100" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+        <path d="M9 6l6 6-6 6" />
+      </svg>
+    </Link>
+  );
+}
+
+function StatTile({ label, sub, children }: { label: string; sub?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-line/50 bg-panel/40 px-3 py-2">
+      <p className="text-[9px] font-semibold uppercase tracking-wider text-faint">{label}</p>
+      <p className="mt-0.5 text-lg font-extrabold tabular-nums leading-tight text-ink">{children}</p>
+      {sub ? <div className="mt-1">{sub}</div> : null}
+    </div>
+  );
+}
+
+function WinBar({ pct, hex }: { pct: number; hex: string }) {
+  return (
+    <div className="h-1 w-full overflow-hidden rounded-full bg-line/50" role="presentation">
+      <div className="h-full rounded-full" style={{ width: `${Math.max(2, Math.min(100, pct))}%`, background: hex }} />
     </div>
   );
 }
