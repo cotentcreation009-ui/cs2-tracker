@@ -146,17 +146,17 @@ export function ProTeamClient({ id }: { id: string }) {
                   <thead>
                     <tr className="text-[9px] uppercase tracking-wider text-faint">
                       <th className="px-4 py-2 text-left font-semibold">Player</th>
-                      <th className="w-13 py-2 text-right font-semibold" title="Maps played in the last year">Maps</th>
-                      <th className="w-20 py-2 text-right font-semibold" title="Total kills − deaths">K–D</th>
-                      <th className="w-13 py-2 text-right font-semibold" title="Kills / deaths">K/D</th>
-                      <th className="w-13 py-2 text-right font-semibold" title="Average kills per map">Avg K</th>
-                      <th className="w-13 py-2 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
-                      <th className="w-13 px-4 py-2 text-right font-semibold" title="Map win rate">Win%</th>
+                      <th className="w-12 py-2 pl-2 text-right font-semibold" title="Maps played in the last year">Maps</th>
+                      <th className="w-13 py-2 pl-2 text-right font-semibold" title="Kills / deaths">K/D</th>
+                      <th className="w-14 py-2 pl-2 text-right font-semibold" title="Total kills − deaths over the window">+/−</th>
+                      <th className="w-13 py-2 pl-2 text-right font-semibold" title="Average kills per map">Avg K</th>
+                      <th className="w-13 py-2 pl-2 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
+                      <th className="w-14 py-2 pl-2 pr-4 text-right font-semibold" title="Map win rate">Win%</th>
                     </tr>
                   </thead>
                   <tbody>
                     {withStats.map((p, i) => (
-                      <RosterRow key={p.nick} p={p} rank={i + 1} />
+                      <RosterRow key={p.nick} p={p} rank={i + 1} hex={hex} />
                     ))}
                   </tbody>
                 </table>
@@ -204,25 +204,37 @@ export function ProTeamClient({ id }: { id: string }) {
   );
 }
 
-function RosterRow({ p, rank }: { p: ProTeamPlayer; rank: number }) {
+function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: string }) {
   const grid = p.src === "grid";
   const n = grid ? p.maps : p.series;
+  const diff = p.kills - p.deaths;
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
   return (
     <tr className="border-t border-line/40 transition-colors hover:bg-panel/40">
-      <td className="max-w-0 truncate px-4 py-2">
-        <span className="mr-2 inline-block w-3 text-right text-[10px] tabular-nums text-faint">{rank}</span>
-        <span className="font-semibold text-ink">{p.nick}</span>
-        {!p.inRoster ? (
-          <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
-        ) : null}
+      <td className="max-w-0 px-4 py-2">
+        <span className="flex items-center gap-2.5">
+          <span className="w-3 shrink-0 text-right text-[10px] tabular-nums text-faint">{rank}</span>
+          <span
+            aria-hidden
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-extrabold uppercase leading-none"
+            style={{ background: `${hex}1f`, color: hex, boxShadow: `inset 0 0 0 1px ${hex}40` }}
+          >
+            {p.nick.slice(0, 2)}
+          </span>
+          <span className="truncate font-semibold text-ink">{p.nick}</span>
+          {!p.inRoster ? (
+            <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
+          ) : null}
+        </span>
       </td>
-      <td className="py-2 text-right tabular-nums text-muted">{n}</td>
-      <td className="whitespace-nowrap py-2 text-right tabular-nums text-muted">{p.kills}–{p.deaths}</td>
-      <td className={`py-2 text-right font-semibold tabular-nums ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</td>
-      <td className="py-2 text-right tabular-nums text-muted">{grid && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
-      <td className="py-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
-      <td className={`px-4 py-2 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
+      <td className="py-2 pl-2 text-right tabular-nums text-muted">{n}</td>
+      <td className={`py-2 pl-2 text-right font-semibold tabular-nums ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</td>
+      <td className={`whitespace-nowrap py-2 pl-2 text-right tabular-nums ${diff > 0 ? "text-good" : diff < 0 ? "text-bad" : "text-faint"}`} title={`${p.kills} kills − ${p.deaths} deaths`}>
+        {diff > 0 ? `+${diff}` : diff}
+      </td>
+      <td className="py-2 pl-2 text-right tabular-nums text-muted">{grid && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
+      <td className="py-2 pl-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
+      <td className={`py-2 pl-2 pr-4 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
     </tr>
   );
 }
@@ -232,7 +244,7 @@ function ResultRow({ r }: { r: ProTeamResult }) {
   return (
     <Link
       href={`/pro-matches/${r.seriesId}`}
-      className="group flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-panel/50"
+      className="group flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-panel/50 active:bg-panel/80"
       title="Open the full match breakdown"
     >
       <span className={`grid h-6 w-6 shrink-0 place-items-center rounded text-[10px] font-bold ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
