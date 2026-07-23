@@ -126,6 +126,8 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
 function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
   const hex = validHex(team.colorPrimary) ?? "#8a93a5";
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  const withStats = players.filter((p) => p.src !== "");
+  const noStats = players.filter((p) => p.src === "");
   return (
     <div className="card-2 overflow-hidden p-0">
       <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2 border-b px-4 py-2.5 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
@@ -144,9 +146,9 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
           </tr>
         </thead>
         <tbody>
-          {players.map((p) => {
-            const has = p.src !== "";
+          {withStats.map((p) => {
             const n = p.src === "grid" ? p.maps : p.series;
+            const avg = p.src === "grid" ? p.avgKills : p.series > 0 ? p.kills / Math.max(1, p.series) : 0;
             return (
               <tr key={p.nick} className="border-t border-line/40">
                 <td className="max-w-0 px-4 py-1.5">
@@ -158,15 +160,30 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
                     ) : null}
                   </span>
                 </td>
-                <td className="py-1.5 text-right tabular-nums text-muted">{has ? n : "—"}</td>
-                <td className={`py-1.5 text-right tabular-nums ${has ? kdColor(p.kd) : "text-faint"}`}>{has ? p.kd.toFixed(2) : "—"}</td>
-                <td className="py-1.5 text-right tabular-nums text-muted">{has && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted">{n}</td>
+                <td className={`py-1.5 text-right tabular-nums ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted">{p.src === "grid" && avg > 0 ? avg.toFixed(1) : "—"}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums text-muted">{p.src === "grid" ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
               </tr>
             );
           })}
+          {withStats.length === 0 ? (
+            <tr className="border-t border-line/40">
+              <td colSpan={5} className="px-4 py-3 text-center text-[11px] text-faint">No tracked stats yet for this lineup.</td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
+      {noStats.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-line/40 px-4 py-2">
+          <span className="text-[9px] uppercase tracking-wider text-faint">Also on the roster</span>
+          {noStats.map((p) => (
+            <span key={p.nick} className="rounded bg-panel px-1.5 py-0.5 text-[11px] font-medium text-muted" title="No tracked matches in GRID's data yet">
+              {p.nick}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Official GRID player statistics, last 3 months · photos: Liquipedia (CC BY-SA 3.0)</p>
     </div>
   );
