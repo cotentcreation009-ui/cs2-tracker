@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProFormEntry, ProHistory, ProTeam } from "./types";
+import type { ProFormEntry, ProHistory, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { validHex } from "./format";
 
@@ -22,8 +22,9 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
         if (!alive) return;
         const anyForm = Object.values(d.form ?? {}).some((f) => f.length > 0);
         const anyH2H = (d.h2h ?? []).length > 0;
+        const anyRoster = Object.values(d.rosters ?? {}).some((r) => r.length > 0);
         setData(d);
-        setState(anyForm || anyH2H ? "ready" : "empty");
+        setState(anyForm || anyH2H || anyRoster ? "ready" : "empty");
       } catch {
         if (alive) setState("error");
       }
@@ -56,6 +57,15 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
   return (
     <section className="space-y-3">
       <SectionTitle />
+
+      {/* lineups: who's on each team + their recent-series stats */}
+      {(data.rosters?.[a?.gridId ?? ""]?.length || data.rosters?.[b?.gridId ?? ""]?.length) ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[a, b].map((t) =>
+            t ? <LineupCard key={t.gridId} team={t} players={data.rosters?.[t.gridId] ?? []} /> : null,
+          )}
+        </div>
+      ) : null}
 
       {/* head-to-head */}
       {h2h.length > 0 && a && b ? (
@@ -107,6 +117,48 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
         )}
       </div>
     </section>
+  );
+}
+
+// HLTV-style lineup: the team's current players with recent-series stats
+// (K/D + kills-per-round aggregated over their last tracked series).
+function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
+  const hex = validHex(team.colorPrimary) ?? "#8a93a5";
+  const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  return (
+    <div className="card-2 overflow-hidden p-0">
+      <div className="flex items-center gap-2 border-b px-4 py-2.5" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
+        <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={24} />
+        <span className="truncate text-sm font-bold text-ink">{team.shortName || team.name}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-wider text-faint">Lineup</span>
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] uppercase tracking-wider text-faint">
+            <th className="px-4 py-1.5 text-left font-semibold">Player</th>
+            <th className="w-12 py-1.5 text-right font-semibold" title="Series sampled (recent)">Series</th>
+            <th className="w-12 py-1.5 text-right font-semibold" title="Kills / deaths over those series">K/D</th>
+            <th className="w-12 px-4 py-1.5 text-right font-semibold" title="Kills per round over those series">KPR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((p) => (
+            <tr key={p.nick} className="border-t border-line/40">
+              <td className="max-w-0 truncate px-4 py-1.5">
+                <span className="font-semibold text-ink">{p.nick}</span>
+                {!p.inRoster ? (
+                  <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
+                ) : null}
+              </td>
+              <td className="py-1.5 text-right tabular-nums text-muted">{p.maps || "—"}</td>
+              <td className={`py-1.5 text-right tabular-nums ${p.maps ? kdColor(p.kd) : "text-faint"}`}>{p.maps ? p.kd.toFixed(2) : "—"}</td>
+              <td className="px-4 py-1.5 text-right tabular-nums text-muted">{p.maps && p.kpr > 0 ? p.kpr.toFixed(2) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Stats aggregated from their recent tracked series (~120 days)</p>
+    </div>
   );
 }
 
@@ -175,7 +227,7 @@ function FormCard({ team, entries }: { team: ProTeam; entries: ProFormEntry[] })
 }
 
 function SectionTitle() {
-  return <h2 className="text-sm font-bold uppercase tracking-wider text-ink">Form &amp; head-to-head</h2>;
+  return <h2 className="text-sm font-bold uppercase tracking-wider text-ink">Lineups, form &amp; head-to-head</h2>;
 }
 
 function fmtDate(iso?: string): string {

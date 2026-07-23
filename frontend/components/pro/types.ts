@@ -71,11 +71,24 @@ export interface ProH2HEntry {
   scoreByTeam: Record<string, number>;
 }
 
+// One roster player with recent-series stats (aggregated server-side).
+export interface ProRosterPlayer {
+  nick: string;
+  maps: number; // series sampled
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  kpr: number;
+  inRoster: boolean;
+}
+
 export interface ProHistory {
   enabled?: boolean;
   teams?: ProTeam[];
   form?: Record<string, ProFormEntry[]>; // by gridId
   h2h?: ProH2HEntry[];
+  rosters?: Record<string, ProRosterPlayer[]>; // by gridId
 }
 
 export interface MatchState {

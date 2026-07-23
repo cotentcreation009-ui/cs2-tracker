@@ -189,11 +189,98 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		h2h = h2h[:5]
 	}
 
+	// Lineups: current roster (Central players query, cached 6h) + per-player
+	// recent stats aggregated from the SAME cached series results the form
+	// uses — no extra upstream calls beyond the roster lookup.
+	type rosterPlayer struct {
+		Nick    string  `json:"nick"`
+		Maps    int     `json:"maps"` // series sampled, actually
+		Kills   int     `json:"kills"`
+		Deaths  int     `json:"deaths"`
+		Assists int     `json:"assists"`
+		KD      float64 `json:"kd"`
+		KPR     float64 `json:"kpr"`
+		InTeam  bool    `json:"inRoster"`
+	}
+	rosters := map[string][]rosterPlayer{}
+	for _, tid := range teamIDs {
+		names, _ := cachedTTL(s, ctx, cache.ProTeamRosterKey(tid), 6*time.Hour,
+			func() ([]string, error) { return cl.TeamRoster(ctx, tid) })
+		inRoster := map[string]bool{}
+		for _, n := range names {
+			inRoster[n] = true
+		}
+		type agg struct{ series, k, d, a, rounds int }
+		byNick := map[string]*agg{}
+		for _, ps := range recent[tid] {
+			if ps.ID == ms.SeriesID {
+				continue
+			}
+			res := resultOf(ps.ID)
+			if res == nil || !res.Finished {
+				continue
+			}
+			for _, rt := range res.Teams {
+				if rt.GridID != tid {
+					continue
+				}
+				for _, pl := range rt.Players {
+					a := byNick[pl.Nick]
+					if a == nil {
+						a = &agg{}
+						byNick[pl.Nick] = a
+					}
+					a.series++
+					a.k += pl.Kills
+					a.d += pl.Deaths
+					a.a += pl.Assists
+					a.rounds += res.Rounds
+				}
+			}
+		}
+		var rows []rosterPlayer
+		seen := map[string]bool{}
+		for nick, a := range byNick {
+			// keep stats rows for current-roster players and recent regulars
+			if !inRoster[nick] && a.series < 2 {
+				continue
+			}
+			rp := rosterPlayer{Nick: nick, Maps: a.series, Kills: a.k, Deaths: a.d, Assists: a.a, InTeam: inRoster[nick]}
+			if a.d > 0 {
+				rp.KD = float64(a.k) / float64(a.d)
+			} else {
+				rp.KD = float64(a.k)
+			}
+			if a.rounds > 0 {
+				rp.KPR = float64(a.k) / float64(a.rounds)
+			}
+			rows = append(rows, rp)
+			seen[nick] = true
+		}
+		// roster players with no sampled stats still get a row (subs/new signings)
+		for _, n := range names {
+			if !seen[n] {
+				rows = append(rows, rosterPlayer{Nick: n, InTeam: true})
+			}
+		}
+		sort.SliceStable(rows, func(i, j int) bool {
+			if rows[i].InTeam != rows[j].InTeam {
+				return rows[i].InTeam
+			}
+			return rows[i].Kills > rows[j].Kills
+		})
+		if len(rows) > 7 {
+			rows = rows[:7]
+		}
+		rosters[tid] = rows
+	}
+
 	setEdgeCache(w, 60*time.Second)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"teams": ms.Teams,
-		"form":  form,
-		"h2h":   h2h,
+		"teams":   ms.Teams,
+		"form":    form,
+		"h2h":     h2h,
+		"rosters": rosters,
 	})
 }
 
