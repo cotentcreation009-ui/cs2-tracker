@@ -189,90 +189,16 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		h2h = h2h[:5]
 	}
 
-	// Lineups: current roster (Central players query, cached 6h) + per-player
-	// recent stats aggregated from the SAME cached series results the form
-	// uses — no extra upstream calls beyond the roster lookup.
-	type rosterPlayer struct {
-		Nick    string  `json:"nick"`
-		Maps    int     `json:"maps"` // series sampled, actually
-		Kills   int     `json:"kills"`
-		Deaths  int     `json:"deaths"`
-		Assists int     `json:"assists"`
-		KD      float64 `json:"kd"`
-		KPR     float64 `json:"kpr"`
-		InTeam  bool    `json:"inRoster"`
-	}
-	rosters := map[string][]rosterPlayer{}
+	// Lineups: current roster (Central players query, cached 6h) with OFFICIAL
+	// per-player aggregates from GRID's Statistics Feed (verified available on
+	// Open Access; cached 12h). Falls back to stats aggregated from the same
+	// cached series results the form uses when a player has no official data.
+	rosters := map[string][]proPlayerRow{}
 	for _, tid := range teamIDs {
-		names, _ := cachedTTL(s, ctx, cache.ProTeamRosterKey(tid), 6*time.Hour,
-			func() ([]string, error) { return cl.TeamRoster(ctx, tid) })
-		inRoster := map[string]bool{}
-		for _, n := range names {
-			inRoster[n] = true
-		}
-		type agg struct{ series, k, d, a, rounds int }
-		byNick := map[string]*agg{}
-		for _, ps := range recent[tid] {
-			if ps.ID == ms.SeriesID {
-				continue
-			}
-			res := resultOf(ps.ID)
-			if res == nil || !res.Finished {
-				continue
-			}
-			for _, rt := range res.Teams {
-				if rt.GridID != tid {
-					continue
-				}
-				for _, pl := range rt.Players {
-					a := byNick[pl.Nick]
-					if a == nil {
-						a = &agg{}
-						byNick[pl.Nick] = a
-					}
-					a.series++
-					a.k += pl.Kills
-					a.d += pl.Deaths
-					a.a += pl.Assists
-					a.rounds += res.Rounds
-				}
-			}
-		}
-		var rows []rosterPlayer
-		seen := map[string]bool{}
-		for nick, a := range byNick {
-			// keep stats rows for current-roster players and recent regulars
-			if !inRoster[nick] && a.series < 2 {
-				continue
-			}
-			rp := rosterPlayer{Nick: nick, Maps: a.series, Kills: a.k, Deaths: a.d, Assists: a.a, InTeam: inRoster[nick]}
-			if a.d > 0 {
-				rp.KD = float64(a.k) / float64(a.d)
-			} else {
-				rp.KD = float64(a.k)
-			}
-			if a.rounds > 0 {
-				rp.KPR = float64(a.k) / float64(a.rounds)
-			}
-			rows = append(rows, rp)
-			seen[nick] = true
-		}
-		// roster players with no sampled stats still get a row (subs/new signings)
-		for _, n := range names {
-			if !seen[n] {
-				rows = append(rows, rosterPlayer{Nick: n, InTeam: true})
-			}
-		}
-		sort.SliceStable(rows, func(i, j int) bool {
-			if rows[i].InTeam != rows[j].InTeam {
-				return rows[i].InTeam
-			}
-			return rows[i].Kills > rows[j].Kills
-		})
-		if len(rows) > 7 {
-			rows = rows[:7]
-		}
-		rosters[tid] = rows
+		roster, _ := cachedTTL(s, ctx, cache.ProTeamRosterKey(tid), 6*time.Hour,
+			func() ([]grid.RosterPlayer, error) { return cl.TeamRoster(ctx, tid) })
+		agg := aggregateTeamPlayers(recent[tid], ms.SeriesID, tid, resultOf)
+		rosters[tid] = buildPlayerRows(s, ctx, cl, roster, agg, "LAST_3_MONTHS", 7)
 	}
 
 	setEdgeCache(w, 60*time.Second)
@@ -282,6 +208,137 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		"h2h":     h2h,
 		"rosters": rosters,
 	})
+}
+
+// proPlayerRow is one lineup/team-page player row: official GRID aggregates
+// (src "grid") or the recent-series fallback (src "agg"); recent stand-ins
+// not on the published roster carry inRoster=false.
+type proPlayerRow struct {
+	Nick     string  `json:"nick"`
+	InRoster bool    `json:"inRoster"`
+	Src      string  `json:"src"` // "grid" | "agg" | ""
+	Series   int     `json:"series"`
+	Maps     int     `json:"maps"`
+	Kills    int     `json:"kills"`
+	Deaths   int     `json:"deaths"`
+	Assists  int     `json:"assists,omitempty"`
+	KD       float64 `json:"kd"`
+	AvgKills float64 `json:"avgKills"`
+	KPR      float64 `json:"kpr,omitempty"`
+	FKPct    float64 `json:"fkPct"`
+	WinPct   float64 `json:"winPct"`
+}
+
+type playerAgg struct{ series, k, d, a, rounds int }
+
+// aggregateTeamPlayers folds a team's cached recent series results into
+// per-player K/D/A + round totals (the fallback stats source).
+func aggregateTeamPlayers(recent []grid.PastSeries, skipID, tid string, resultOf func(string) *grid.SeriesResult) map[string]*playerAgg {
+	byNick := map[string]*playerAgg{}
+	for _, ps := range recent {
+		if ps.ID == skipID {
+			continue
+		}
+		res := resultOf(ps.ID)
+		if res == nil || !res.Finished {
+			continue
+		}
+		for _, rt := range res.Teams {
+			if rt.GridID != tid {
+				continue
+			}
+			for _, pl := range rt.Players {
+				a := byNick[pl.Nick]
+				if a == nil {
+					a = &playerAgg{}
+					byNick[pl.Nick] = a
+				}
+				a.series++
+				a.k += pl.Kills
+				a.d += pl.Deaths
+				a.a += pl.Assists
+				a.rounds += res.Rounds
+			}
+		}
+	}
+	return byNick
+}
+
+// psWrap makes a nil *PlayerStats cacheable through cachedTTL's generics.
+type psWrap struct {
+	S *grid.PlayerStats `json:"s"`
+}
+
+// buildPlayerRows merges the roster with official stats (window = a GRID
+// TimeRangeFilter enum name), falling back to the recent-series aggregates.
+func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []grid.RosterPlayer, agg map[string]*playerAgg, window string, limit int) []proPlayerRow {
+	var rows []proPlayerRow
+	seen := map[string]bool{}
+	for _, rp := range roster {
+		row := proPlayerRow{Nick: rp.Nick, InRoster: true}
+		if rp.ID != "" {
+			w, err := cachedTTL(s, ctx, cache.ProPlayerStatsKey(rp.ID, window), 12*time.Hour,
+				func() (psWrap, error) {
+					st, err := cl.PlayerCareerStats(ctx, rp.ID, window)
+					return psWrap{S: st}, err
+				})
+			if err == nil && w.S != nil {
+				st := w.S
+				row.Src = "grid"
+				row.Series = st.SeriesCount
+				row.Maps = st.Maps
+				row.Kills = st.Kills
+				row.Deaths = st.Deaths
+				row.KD = st.KD
+				row.AvgKills = st.AvgKills
+				row.FKPct = st.FirstKillPct
+				row.WinPct = st.MapWinPct
+			}
+		}
+		if row.Src == "" {
+			if a := agg[rp.Nick]; a != nil {
+				fillAggRow(&row, a)
+			}
+		}
+		rows = append(rows, row)
+		seen[rp.Nick] = true
+	}
+	// recent stand-ins who played 2+ of the team's recent series
+	for nick, a := range agg {
+		if seen[nick] || a.series < 2 {
+			continue
+		}
+		row := proPlayerRow{Nick: nick, InRoster: false}
+		fillAggRow(&row, a)
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].InRoster != rows[j].InRoster {
+			return rows[i].InRoster
+		}
+		return rows[i].Kills > rows[j].Kills
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows
+}
+
+func fillAggRow(row *proPlayerRow, a *playerAgg) {
+	row.Src = "agg"
+	row.Series = a.series
+	row.Maps = 0
+	row.Kills = a.k
+	row.Deaths = a.d
+	row.Assists = a.a
+	if a.d > 0 {
+		row.KD = float64(a.k) / float64(a.d)
+	} else {
+		row.KD = float64(a.k)
+	}
+	if a.rounds > 0 {
+		row.KPR = float64(a.k) / float64(a.rounds)
+	}
 }
 
 // other returns the id in the pair that isn't tid.

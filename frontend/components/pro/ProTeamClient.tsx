@@ -103,7 +103,7 @@ export function ProTeamClient({ id }: { id: string }) {
         <section className="card-2 overflow-hidden p-0 self-start">
           <div className="flex items-center justify-between border-b border-line/70 px-4 py-2.5">
             <span className="text-sm font-bold uppercase tracking-wider text-ink">Roster &amp; stats</span>
-            <span className="text-[10px] text-faint">recent tracked series (~120 days)</span>
+            <span className="text-[10px] text-faint">official GRID statistics · last year</span>
           </div>
           {players.length === 0 ? (
             <p className="px-4 py-6 text-sm text-faint">No roster on record for this team.</p>
@@ -112,27 +112,36 @@ export function ProTeamClient({ id }: { id: string }) {
               <thead>
                 <tr className="text-[9px] uppercase tracking-wider text-faint">
                   <th className="px-4 py-2 text-left font-semibold">Player</th>
-                  <th className="w-14 py-2 text-right font-semibold" title="Series sampled">Series</th>
-                  <th className="w-14 py-2 text-right font-semibold" title="Total kills − deaths">K–D</th>
-                  <th className="w-14 py-2 text-right font-semibold" title="Kills / deaths">K/D</th>
-                  <th className="w-14 px-4 py-2 text-right font-semibold" title="Kills per round">KPR</th>
+                  <th className="w-13 py-2 text-right font-semibold" title="Maps played in the last year">Maps</th>
+                  <th className="w-20 py-2 text-right font-semibold" title="Total kills − deaths">K–D</th>
+                  <th className="w-13 py-2 text-right font-semibold" title="Kills / deaths">K/D</th>
+                  <th className="w-13 py-2 text-right font-semibold" title="Average kills per map">Avg K</th>
+                  <th className="w-13 py-2 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
+                  <th className="w-13 px-4 py-2 text-right font-semibold" title="Map win rate">Win%</th>
                 </tr>
               </thead>
               <tbody>
-                {players.map((p) => (
-                  <tr key={p.nick} className="border-t border-line/40">
-                    <td className="max-w-0 truncate px-4 py-2">
-                      <span className="font-semibold text-ink">{p.nick}</span>
-                      {!p.inRoster ? (
-                        <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
-                      ) : null}
-                    </td>
-                    <td className="py-2 text-right tabular-nums text-muted">{p.series || "—"}</td>
-                    <td className="py-2 text-right tabular-nums text-muted">{p.series ? `${p.kills}–${p.deaths}` : "—"}</td>
-                    <td className={`py-2 text-right tabular-nums ${p.series ? kdColor(p.kd) : "text-faint"}`}>{p.series ? p.kd.toFixed(2) : "—"}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-muted">{p.series && p.kpr > 0 ? p.kpr.toFixed(2) : "—"}</td>
-                  </tr>
-                ))}
+                {players.map((p) => {
+                  const has = p.src !== "";
+                  const grid = p.src === "grid";
+                  const n = grid ? p.maps : p.series;
+                  return (
+                    <tr key={p.nick} className="border-t border-line/40">
+                      <td className="max-w-0 truncate px-4 py-2">
+                        <span className="font-semibold text-ink">{p.nick}</span>
+                        {!p.inRoster ? (
+                          <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-muted">{has ? n : "—"}</td>
+                      <td className="py-2 text-right tabular-nums text-muted">{has ? `${p.kills}–${p.deaths}` : "—"}</td>
+                      <td className={`py-2 text-right tabular-nums ${has ? kdColor(p.kd) : "text-faint"}`}>{has ? p.kd.toFixed(2) : "—"}</td>
+                      <td className="py-2 text-right tabular-nums text-muted">{grid && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
+                      <td className="py-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
+                      <td className={`px-4 py-2 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -174,8 +183,9 @@ export function ProTeamClient({ id }: { id: string }) {
       </div>
 
       <p className="text-[11px] leading-snug text-faint">
-        Stats are aggregated from this team&apos;s tracked series over the last ~120 days on the pro
-        circuit feed — not lifetime career totals. Click a result to open that match.
+        Player stats are GRID&apos;s official aggregates over the last year of tracked pro play
+        (players without official data fall back to recent-series aggregates). Click a result to
+        open that match.
       </p>
     </div>
   );

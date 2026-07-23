@@ -136,28 +136,34 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
         <thead>
           <tr className="text-[9px] uppercase tracking-wider text-faint">
             <th className="px-4 py-1.5 text-left font-semibold">Player</th>
-            <th className="w-12 py-1.5 text-right font-semibold" title="Series sampled (recent)">Series</th>
-            <th className="w-12 py-1.5 text-right font-semibold" title="Kills / deaths over those series">K/D</th>
-            <th className="w-12 px-4 py-1.5 text-right font-semibold" title="Kills per round over those series">KPR</th>
+            <th className="w-11 py-1.5 text-right font-semibold" title="Maps played in the window">Maps</th>
+            <th className="w-11 py-1.5 text-right font-semibold" title="Kills / deaths">K/D</th>
+            <th className="w-11 py-1.5 text-right font-semibold" title="Average kills per map">Avg K</th>
+            <th className="w-11 px-4 py-1.5 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
           </tr>
         </thead>
         <tbody>
-          {players.map((p) => (
-            <tr key={p.nick} className="border-t border-line/40">
-              <td className="max-w-0 truncate px-4 py-1.5">
-                <span className="font-semibold text-ink">{p.nick}</span>
-                {!p.inRoster ? (
-                  <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
-                ) : null}
-              </td>
-              <td className="py-1.5 text-right tabular-nums text-muted">{p.maps || "—"}</td>
-              <td className={`py-1.5 text-right tabular-nums ${p.maps ? kdColor(p.kd) : "text-faint"}`}>{p.maps ? p.kd.toFixed(2) : "—"}</td>
-              <td className="px-4 py-1.5 text-right tabular-nums text-muted">{p.maps && p.kpr > 0 ? p.kpr.toFixed(2) : "—"}</td>
-            </tr>
-          ))}
+          {players.map((p) => {
+            const has = p.src !== "";
+            const n = p.src === "grid" ? p.maps : p.series;
+            return (
+              <tr key={p.nick} className="border-t border-line/40">
+                <td className="max-w-0 truncate px-4 py-1.5">
+                  <span className="font-semibold text-ink">{p.nick}</span>
+                  {!p.inRoster ? (
+                    <span className="ml-1.5 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
+                  ) : null}
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-muted">{has ? n : "—"}</td>
+                <td className={`py-1.5 text-right tabular-nums ${has ? kdColor(p.kd) : "text-faint"}`}>{has ? p.kd.toFixed(2) : "—"}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted">{has && p.avgKills > 0 ? p.avgKills.toFixed(1) : "—"}</td>
+                <td className="px-4 py-1.5 text-right tabular-nums text-muted">{p.src === "grid" ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Stats aggregated from their recent tracked series (~120 days)</p>
+      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Official GRID player statistics, last 3 months</p>
     </div>
   );
 }
