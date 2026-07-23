@@ -21,6 +21,18 @@ export function validHex(c?: string): string | null {
   return c && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c) ? c : null;
 }
 
+// Black or white — whichever stays legible on top of `hex` (for initials on a
+// team-colour badge). Uses perceived luminance.
+export function readableOn(hex: string): string {
+  const h = hex.replace("#", "");
+  const f = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(f.slice(0, 2), 16);
+  const g = parseInt(f.slice(2, 4), 16);
+  const b = parseInt(f.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? "#0a0e17" : "#ffffff";
+}
+
 /** mm:ss round clock. */
 export function clockLabel(seconds?: number): string {
   if (seconds == null || seconds < 0 || Number.isNaN(seconds)) return "";

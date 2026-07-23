@@ -217,7 +217,7 @@ function TeamSide({
         align === "right" ? "flex-row-reverse text-right" : ""
       }`}
     >
-      <TeamLogo name={fullName} src={logo} color={color} size={56} />
+      <TeamLogo name={name || fullName} src={logo} color={color} size={56} />
       <div className="min-w-0">
         <div className="truncate text-base font-bold text-ink sm:text-lg">
           {name || "TBD"}
