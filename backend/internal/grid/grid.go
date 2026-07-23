@@ -52,7 +52,7 @@ type MatchState struct {
 	TournamentLogoUrl string `json:"tournamentLogoUrl"`
 	Teams             []Team `json:"teams"`
 
-	SeriesScore  map[string]int `json:"seriesScore,omitempty"` // gridId -> maps won; omit when upcoming
+	SeriesScore  map[string]int `json:"seriesScore,omitempty"`  // gridId -> maps won; omit when upcoming
 	SeriesWinner string         `json:"seriesWinner,omitempty"` // omit until finished
 	Maps         []MapState     `json:"maps,omitempty"`
 	CurrentMap   int            `json:"currentMap,omitempty"` // sequence of the live map
@@ -80,12 +80,33 @@ type MapState struct {
 	MapName      string            `json:"mapName"`
 	Started      bool              `json:"started"`
 	Finished     bool              `json:"finished"`
-	ScoreByTeam  map[string]int    `json:"scoreByTeam,omitempty"`  // gridId -> rounds on this map
-	SideByTeam   map[string]string `json:"sideByTeam,omitempty"`   // gridId -> "CT" | "T"
+	ScoreByTeam  map[string]int    `json:"scoreByTeam,omitempty"` // gridId -> rounds on this map
+	SideByTeam   map[string]string `json:"sideByTeam,omitempty"`  // gridId -> "CT" | "T"
 	CurrentRound int               `json:"currentRound,omitempty"`
 	ClockSeconds int               `json:"clockSeconds,omitempty"`
 	Rounds       []Round           `json:"rounds,omitempty"`
 	WinnerTeam   string            `json:"winnerTeam"`
+	Teams        []MapTeam         `json:"teams,omitempty"` // per-team scoreboard for this map
+}
+
+// MapTeam is one team's line on a map: side, round score, and its players'
+// scoreboard (HLTV-style). Populated from Series State when available.
+type MapTeam struct {
+	GridID   string      `json:"gridId"`
+	Side     string      `json:"side,omitempty"` // "CT" | "T"
+	Score    int         `json:"score"`          // rounds won on this map
+	Won      bool        `json:"won,omitempty"`
+	NetWorth int         `json:"netWorth,omitempty"`
+	Players  []MapPlayer `json:"players,omitempty"`
+}
+
+// MapPlayer is one player's line on a map.
+type MapPlayer struct {
+	Name     string `json:"name"`
+	Kills    int    `json:"kills"`
+	Assists  int    `json:"assists"`
+	Deaths   int    `json:"deaths"`
+	NetWorth int    `json:"netWorth,omitempty"`
 }
 
 // Round is one round of a map.
@@ -193,13 +214,23 @@ type ssGame struct {
 }
 
 type ssGameTeam struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Side   string `json:"side"`
-	Score  int    `json:"score"` // ROUNDS on this map
-	Won    bool   `json:"won"`
-	Kills  int    `json:"kills"`
-	Deaths int    `json:"deaths"`
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Side     string     `json:"side"`
+	Score    int        `json:"score"` // ROUNDS on this map
+	Won      bool       `json:"won"`
+	Kills    int        `json:"kills"`
+	Deaths   int        `json:"deaths"`
+	NetWorth int        `json:"netWorth"`
+	Players  []ssPlayer `json:"players"`
+}
+
+type ssPlayer struct {
+	Name     string `json:"name"`
+	Kills    int    `json:"kills"`
+	Deaths   int    `json:"deaths"`
+	Assists  int    `json:"killAssistsReceived"`
+	NetWorth int    `json:"netWorth"`
 }
 
 type ssSegment struct {
@@ -286,7 +317,8 @@ const seriesStateQuery = `query SeriesState($id: ID!) {
     id valid updatedAt format started finished
     teams { id name score won }
     games { sequenceNumber map { name } started finished clock { currentSeconds }
-      teams { id name side score won kills deaths }
+      teams { id name side score won kills deaths money netWorth
+        players { name kills deaths killAssistsReceived netWorth } }
       segments { type sequenceNumber started finished teams { id name side won } } }
   }
 }`
@@ -499,7 +531,7 @@ func normalizeSchedule(n centralNode) MatchState {
 	if n.Tournament != nil {
 		ms.TournamentID = n.Tournament.ID
 		ms.TournamentName = n.Tournament.Name
-		ms.TournamentLogoUrl = n.Tournament.LogoUrl
+		ms.TournamentLogoUrl = realLogo(n.Tournament.LogoUrl)
 	}
 	for _, t := range n.Teams {
 		if t.BaseInfo == nil {
@@ -511,12 +543,22 @@ func normalizeSchedule(n centralNode) MatchState {
 			// GRID's nameShortened is empty/null for most teams (verified live),
 			// so fall back to the full name rather than render a blank.
 			ShortName:      shortOr(t.BaseInfo.NameShortened, t.BaseInfo.Name),
-			LogoUrl:        t.BaseInfo.LogoUrl,
+			LogoUrl:        realLogo(t.BaseInfo.LogoUrl),
 			ColorPrimary:   t.BaseInfo.ColorPrimary,
 			ColorSecondary: t.BaseInfo.ColorSecondary,
 		})
 	}
 	return ms
+}
+
+// realLogo drops GRID's generic placeholder logo URLs (…/generic) so the UI
+// falls back to a team-colour badge instead of rendering a blank shield.
+func realLogo(url string) string {
+	u := strings.TrimSpace(url)
+	if u == "" || strings.HasSuffix(strings.ToLower(u), "/generic") {
+		return ""
+	}
+	return u
 }
 
 // shortOr returns the trimmed short name, or the full name when it is blank.
@@ -571,10 +613,19 @@ func applySeriesState(ms *MatchState, ss *seriesStateNode, now time.Time) {
 	ms.LiveUpdatedAt = ss.UpdatedAt
 	ms.FetchedAt = now.UTC().Format(time.RFC3339)
 
+	anyGameLive := false
+	for _, g := range ss.Games {
+		if g.Started && !g.Finished {
+			anyGameLive = true
+			break
+		}
+	}
 	switch {
 	case ss.Finished:
 		ms.Status = "finished"
-	case ss.Started && ss.Valid:
+	case ss.Started || anyGameLive:
+		// a running map means live even if the series-level started flag or the
+		// valid flag momentarily lags (fixes "UPCOMING" shown over a live map)
 		ms.Status = "live"
 	default:
 		ms.Status = "upcoming"
@@ -650,6 +701,23 @@ func normalizeMaps(games []ssGame) []MapState {
 			}
 			if g.Finished {
 				m.WinnerTeam = winner
+			}
+			mts := make([]MapTeam, 0, len(g.Teams))
+			for _, t := range g.Teams {
+				if t.ID == "" {
+					continue
+				}
+				mt := MapTeam{GridID: t.ID, Side: normalizeSide(t.Side), Score: t.Score, Won: t.Won, NetWorth: t.NetWorth}
+				for _, pl := range t.Players {
+					if pl.Name == "" {
+						continue
+					}
+					mt.Players = append(mt.Players, MapPlayer{Name: pl.Name, Kills: pl.Kills, Assists: pl.Assists, Deaths: pl.Deaths, NetWorth: pl.NetWorth})
+				}
+				mts = append(mts, mt)
+			}
+			if len(mts) > 0 {
+				m.Teams = mts
 			}
 		}
 		rounds, maxSeq := normalizeRounds(g.Segments)

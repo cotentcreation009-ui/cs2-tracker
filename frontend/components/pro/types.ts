@@ -32,6 +32,25 @@ export interface ProMap {
   clockSeconds?: number;
   rounds?: ProRound[];
   winnerTeam?: string;
+  teams?: ProMapTeam[]; // per-team scoreboard for this map (from Series State)
+}
+
+// One team's line on a map: side, round score, and its players' scoreboard.
+export interface ProMapTeam {
+  gridId: string;
+  side?: string; // "CT" | "T"
+  score: number;
+  won?: boolean;
+  netWorth?: number;
+  players?: ProMapPlayer[];
+}
+
+export interface ProMapPlayer {
+  name: string;
+  kills: number;
+  assists: number;
+  deaths: number;
+  netWorth?: number;
 }
 
 export interface MatchState {

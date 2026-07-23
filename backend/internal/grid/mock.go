@@ -68,6 +68,22 @@ func sampleMatches(now time.Time) []MatchState {
 				CurrentRound: 16, ClockSeconds: 42,
 				Rounds:     rounds(15, navi.GridID, faze.GridID),
 				WinnerTeam: "",
+				Teams: []MapTeam{
+					{GridID: navi.GridID, Side: "CT", Score: 9, Players: []MapPlayer{
+						{Name: "w0nderful", Kills: 18, Assists: 3, Deaths: 11, NetWorth: 5700},
+						{Name: "Aleksib", Kills: 12, Assists: 7, Deaths: 12, NetWorth: 4200},
+						{Name: "b1t", Kills: 15, Assists: 4, Deaths: 13, NetWorth: 4800},
+						{Name: "iM", Kills: 14, Assists: 2, Deaths: 10, NetWorth: 5100},
+						{Name: "jL", Kills: 11, Assists: 5, Deaths: 14, NetWorth: 3400},
+					}},
+					{GridID: faze.GridID, Side: "T", Score: 6, Players: []MapPlayer{
+						{Name: "broky", Kills: 16, Assists: 2, Deaths: 14, NetWorth: 4600},
+						{Name: "ropz", Kills: 13, Assists: 6, Deaths: 15, NetWorth: 3900},
+						{Name: "karrigan", Kills: 9, Assists: 4, Deaths: 15, NetWorth: 2500},
+						{Name: "frozen", Kills: 14, Assists: 3, Deaths: 13, NetWorth: 4100},
+						{Name: "rain", Kills: 10, Assists: 1, Deaths: 14, NetWorth: 3000},
+					}},
+				},
 			},
 		},
 	}
