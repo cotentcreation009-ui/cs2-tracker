@@ -695,6 +695,17 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 					}
 				}
 			}
+			// CURRENT FACEIT rank from the FACEIT API (authoritative + live) —
+			// Leetify's ranks.faceit* is only as fresh as its last sync, so it can
+			// lag and read like a stale/peak value. Cached; falls back to the
+			// Leetify rank when FACEIT is unconfigured or the player isn't on it.
+			if s.faceit != nil && s.faceit.HasKey() {
+				if fpr, ffnf, ferr2 := cachedExternal(s, r.Context(), cache.FaceitKey(fid),
+					func() (*faceit.Profile, error) { return s.faceit.GetProfile(r.Context(), fid) }); ferr2 == nil && !ffnf && fpr != nil && fpr.SkillLevel > 0 {
+					fr.FaceitLevel = fpr.SkillLevel
+					fr.FaceitElo = fpr.Elo
+				}
+			}
 			rows[i] = fr
 		}(i, tm, fid)
 	}

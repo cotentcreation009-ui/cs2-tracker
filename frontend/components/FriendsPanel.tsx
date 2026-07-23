@@ -146,15 +146,28 @@ function RankBadge({ r }: { r: FriendRow }) {
   return null;
 }
 
-// "Together" cell: win rate across the matches these two shared, coloured by
-// how it compares to the owner's solo/overall recent win rate, with the record
-// and sample size below. Falls back to the raw shared-match count.
+// "Together" cell — everything here is RECENT-window only (the overlap of the
+// two players' last ~100 tracked matches), never lifetime. When we could score
+// the shared games it shows the win rate (coloured vs the owner's recent solo
+// rate) with the W–L record + "recent" caption; otherwise just the recent
+// count, clearly labelled so it never reads like a broken/lifetime stat.
 function TogetherCell({ r, ownerWin }: { r: FriendRow; ownerWin: number | null }) {
   const n = r.together_total ?? 0;
   if (n <= 0) {
-    return (
-      <span className="text-right text-xs tabular-nums text-muted" title="shared matches in the recent window">
-        {r.matches_together}×
+    // We know they queued together (Leetify's recent count) but not enough of
+    // those games overlap our scoreable window to compute a win rate.
+    const c = r.matches_together;
+    return c > 0 ? (
+      <span
+        className="block text-right leading-tight"
+        title={`Queued together ${c}× in the recent window — too few overlapping games to score a win rate`}
+      >
+        <span className="text-sm font-semibold tabular-nums text-ink">{c}×</span>
+        <span className="block text-[9px] text-faint">recent</span>
+      </span>
+    ) : (
+      <span className="text-right text-xs text-faint" title="no shared matches in the recent window">
+        —
       </span>
     );
   }
@@ -168,11 +181,11 @@ function TogetherCell({ r, ownerWin }: { r: FriendRow; ownerWin: number | null }
       : `${delta > 0 ? "+" : "−"}${Math.abs(delta * 100).toFixed(0)}`;
   return (
     <span
-      className="block text-right"
+      className="block text-right leading-tight"
       title={
         ownerWin != null
-          ? `${(pct * 100).toFixed(0)}% together (${wins}–${n - wins} in ${n}) vs ${(ownerWin * 100).toFixed(0)}% overall`
-          : `${(pct * 100).toFixed(0)}% together (${wins}–${n - wins} in ${n})`
+          ? `${(pct * 100).toFixed(0)}% win rate in the ${n} recent match${n === 1 ? "" : "es"} you both played (${wins}–${n - wins}), vs ${(ownerWin * 100).toFixed(0)}% across all their recent games`
+          : `${(pct * 100).toFixed(0)}% win rate in the ${n} recent match${n === 1 ? "" : "es"} you both played (${wins}–${n - wins})`
       }
     >
       <span className={`text-sm font-semibold tabular-nums ${col}`}>
@@ -180,7 +193,7 @@ function TogetherCell({ r, ownerWin }: { r: FriendRow; ownerWin: number | null }
         {deltaLabel && <span className="ml-0.5 align-top text-[9px]">{deltaLabel}</span>}
       </span>
       <span className="block text-[9px] tabular-nums text-faint">
-        {wins}–{n - wins} · {n} together
+        {wins}–{n - wins} · {n} recent
       </span>
     </span>
   );
@@ -292,8 +305,12 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
           <span className="text-right">K/D</span>
           <span className="text-right" title="Leetify aim rating (0–100)">Aim</span>
           <span className="text-center">Form</span>
-          <span className="text-right" title="Win rate in the matches you played together, vs this profile's overall recent win rate">
-            Together
+          <span
+            className="text-right normal-case"
+            title="Recent window only (not lifetime): win rate in the matches you both played, vs this profile's overall recent win rate"
+          >
+            <span className="uppercase">Together</span>{" "}
+            <span className="tracking-normal text-faint/80">· recent</span>
           </span>
           <span />
         </div>
@@ -360,10 +377,12 @@ export function FriendsPanel({ steamId }: { steamId: string }) {
       </div>
 
       <p className="text-[11px] leading-snug text-faint">
-        Rating = their overall Leetify rating · rank badge = FACEIT level (+elo) or Premier rating ·
-        Form = last 5 results (newest left) · Together = <span className="text-good">green</span>/
-        <span className="text-bad">red</span> win rate in matches you played together vs this profile&apos;s
-        overall (the ± is the swing), with the record + count below. Hover a row and click{" "}
+        Rating = their overall Leetify rating · rank badge = <span className="text-ink/80">current</span>{" "}
+        FACEIT level (+elo) or Premier rating · Form = last 5 results (newest left). <span className="text-ink/80">Together
+        is from recent matches, not lifetime</span> — the overlap of each player&apos;s last ~100 tracked games:{" "}
+        <span className="text-good">green</span>/<span className="text-bad">red</span> win rate when you played
+        together vs this profile&apos;s overall recent rate (± is the swing), or the recent times you queued together
+        when there aren&apos;t enough shared games to score. Hover a row and click{" "}
         <span className="text-muted">⇄</span> to compare that player against this profile.
       </p>
     </div>
