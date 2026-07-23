@@ -17,15 +17,27 @@ type PastSeries struct {
 
 // SeriesResultTeam is one team's final line in a series result.
 type SeriesResultTeam struct {
-	GridID string `json:"gridId"`
-	Name   string `json:"name"`
-	Score  int    `json:"score"`
-	Won    bool   `json:"won"`
+	GridID  string       `json:"gridId"`
+	Name    string       `json:"name"`
+	Score   int          `json:"score"`
+	Won     bool         `json:"won"`
+	Players []PlayerLine `json:"players,omitempty"` // aggregated across the series' maps
 }
 
-// SeriesResult is the outcome of a (finished) series — maps won per team.
+// PlayerLine is one player's aggregated K/A/D across a series (for recent-form
+// player stats on upcoming matches).
+type PlayerLine struct {
+	Nick    string `json:"nick"`
+	Kills   int    `json:"kills"`
+	Assists int    `json:"assists"`
+	Deaths  int    `json:"deaths"`
+}
+
+// SeriesResult is the outcome of a (finished) series — maps won per team,
+// plus per-player lines and the series' total round count (for KPR).
 type SeriesResult struct {
 	Finished bool               `json:"finished"`
+	Rounds   int                `json:"rounds"`
 	Teams    []SeriesResultTeam `json:"teams"`
 }
 
@@ -44,7 +56,12 @@ func teamRecentQuery(titleID string) string {
 }
 
 const seriesResultQuery = `query SeriesResult($id: ID!) {
-  seriesState(id: $id) { finished teams { id name score won } }
+  seriesState(id: $id) {
+    finished
+    teams { id name score won }
+    games { started finished
+      teams { id score players { name kills deaths killAssistsReceived } } }
+  }
 }`
 
 // RecentSeriesForTeam returns a team's most-recent past series (DESC) within
@@ -127,6 +144,20 @@ func (c *Client) SeriesResult(ctx context.Context, id string) (*SeriesResult, er
 					Score int    `json:"score"`
 					Won   bool   `json:"won"`
 				} `json:"teams"`
+				Games []struct {
+					Started  bool `json:"started"`
+					Finished bool `json:"finished"`
+					Teams    []struct {
+						ID      string `json:"id"`
+						Score   int    `json:"score"`
+						Players []struct {
+							Name    string `json:"name"`
+							Kills   int    `json:"kills"`
+							Deaths  int    `json:"deaths"`
+							Assists int    `json:"killAssistsReceived"`
+						} `json:"players"`
+					} `json:"teams"`
+				} `json:"games"`
 			} `json:"seriesState"`
 		} `json:"data"`
 	}
@@ -138,10 +169,83 @@ func (c *Client) SeriesResult(ctx context.Context, id string) (*SeriesResult, er
 		return &SeriesResult{}, nil
 	}
 	res := &SeriesResult{Finished: ss.Finished}
+	// per-player aggregation across the series' started maps + total rounds
+	type agg struct{ k, a, d int }
+	byTeam := map[string]map[string]*agg{}
+	for _, g := range ss.Games {
+		if !g.Started {
+			continue
+		}
+		for _, gt := range g.Teams {
+			res.Rounds += gt.Score
+			m := byTeam[gt.ID]
+			if m == nil {
+				m = map[string]*agg{}
+				byTeam[gt.ID] = m
+			}
+			for _, pl := range gt.Players {
+				if pl.Name == "" {
+					continue
+				}
+				a := m[pl.Name]
+				if a == nil {
+					a = &agg{}
+					m[pl.Name] = a
+				}
+				a.k += pl.Kills
+				a.a += pl.Assists
+				a.d += pl.Deaths
+			}
+		}
+	}
 	for _, t := range ss.Teams {
-		res.Teams = append(res.Teams, SeriesResultTeam{GridID: t.ID, Name: t.Name, Score: t.Score, Won: t.Won})
+		rt := SeriesResultTeam{GridID: t.ID, Name: t.Name, Score: t.Score, Won: t.Won}
+		for nick, a := range byTeam[t.ID] {
+			rt.Players = append(rt.Players, PlayerLine{Nick: nick, Kills: a.k, Assists: a.a, Deaths: a.d})
+		}
+		res.Teams = append(res.Teams, rt)
 	}
 	return res, nil
+}
+
+// rosterQuery lists a team's current players (Open Access permits id+nickname
+// only — image/nationality are PERMISSION_DENIED on this tier).
+const rosterQuery = `query Roster($tid: ID) {
+  players(first: 12, filter: { teamIdFilter: { id: $tid } }) {
+    edges { node { id nickname } }
+  }
+}`
+
+// TeamRoster returns a team's current player nicknames.
+func (c *Client) TeamRoster(ctx context.Context, teamID string) ([]string, error) {
+	if err := c.centralLim.Wait(ctx); err != nil {
+		return nil, err
+	}
+	body, err := c.postGraphQL(ctx, c.centralURL, rosterQuery, map[string]any{"tid": teamID})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Players struct {
+				Edges []struct {
+					Node struct {
+						Nickname string `json:"nickname"`
+					} `json:"node"`
+				} `json:"edges"`
+			} `json:"players"`
+		} `json:"data"`
+	}
+	if err := decodeGQL(body, &resp); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range resp.Data.Players.Edges {
+		if n := e.Node.Nickname; n != "" {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 // pastWindow returns the [gte, lte] RFC3339 strings for "recent history": the
