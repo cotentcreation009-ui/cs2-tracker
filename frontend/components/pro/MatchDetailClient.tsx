@@ -105,7 +105,7 @@ export function MatchDetailClient({
 
         {/* teams + series score */}
         <div className="relative mt-6 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-          <TeamSide name={a?.shortName || a?.name} logo={a?.logoUrl} color={a?.colorPrimary} winner={!!aWinner} align="left" />
+          <TeamSide gridId={a?.gridId} name={a?.shortName || a?.name} logo={a?.logoUrl} color={a?.colorPrimary} winner={!!aWinner} align="left" />
           <div className="flex flex-col items-center px-1">
             <div className="flex items-baseline gap-2 text-4xl font-extrabold tabular-nums sm:text-5xl">
               <span className={aWon >= bWon ? "text-ink" : "text-faint"}>{aWon}</span>
@@ -114,7 +114,7 @@ export function MatchDetailClient({
             </div>
             <span className="mt-1 text-[10px] uppercase tracking-wider text-faint">maps</span>
           </div>
-          <TeamSide name={b?.shortName || b?.name} logo={b?.logoUrl} color={b?.colorPrimary} winner={!!bWinner} align="right" />
+          <TeamSide gridId={b?.gridId} name={b?.shortName || b?.name} logo={b?.logoUrl} color={b?.colorPrimary} winner={!!bWinner} align="right" />
         </div>
 
         {/* format + schedule + stream */}
@@ -150,26 +150,37 @@ export function MatchDetailClient({
 }
 
 function TeamSide({
+  gridId,
   name,
   logo,
   color,
   winner,
   align,
 }: {
+  gridId?: string;
   name?: string;
   logo?: string;
   color?: string;
   winner: boolean;
   align: "left" | "right";
 }) {
-  return (
-    <div className={`flex min-w-0 items-center gap-3 ${align === "right" ? "flex-row-reverse text-right" : ""}`}>
+  const inner = (
+    <>
       <TeamLogo name={name} src={logo} color={color} size={56} />
       <div className="min-w-0">
         <div className="truncate text-base font-bold text-ink sm:text-lg">{name || "TBD"}</div>
         {winner ? <div className="text-[11px] font-semibold uppercase tracking-wider text-good">Winner</div> : null}
       </div>
-    </div>
+    </>
+  );
+  const cls = `flex min-w-0 items-center gap-3 ${align === "right" ? "flex-row-reverse text-right" : ""}`;
+  // team names click through to the team page (roster + stats + results)
+  return gridId ? (
+    <Link href={`/pro-matches/team/${gridId}`} title={`${name || "Team"} — roster, stats & results`} className={`${cls} group/team rounded-lg transition hover:bg-panel/40`}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={cls}>{inner}</div>
   );
 }
 
@@ -281,9 +292,15 @@ function TeamScoreboard({
       <div className="flex items-center justify-between gap-2 border-b border-line/70 bg-panel/50 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <TeamLogo name={team?.shortName || team?.name} src={team?.logoUrl} color={team?.colorPrimary} size={20} />
-          <span className="truncate text-xs font-bold text-ink" style={{ color: won ? "var(--color-good)" : hex }}>
-            {team?.shortName || team?.name || "TBD"}
-          </span>
+          {team?.gridId ? (
+            <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="truncate text-xs font-bold hover:underline" style={{ color: won ? "var(--color-good)" : hex }}>
+              {team.shortName || team.name || "TBD"}
+            </Link>
+          ) : (
+            <span className="truncate text-xs font-bold text-ink" style={{ color: won ? "var(--color-good)" : hex }}>
+              {team?.shortName || team?.name || "TBD"}
+            </span>
+          )}
           {sHex ? (
             <span className="rounded border px-1 text-[9px] font-bold" style={{ color: sHex, borderColor: `${sHex}55` }}>{s}</span>
           ) : null}

@@ -91,6 +91,34 @@ export interface ProHistory {
   rosters?: Record<string, ProRosterPlayer[]>; // by gridId
 }
 
+// The pro-team page (/pro-matches/team/[id]).
+export interface ProTeamResult {
+  seriesId: string;
+  date: string;
+  won: boolean;
+  score: [number, number]; // [team, opponent]
+  opponent: ProTeam;
+}
+
+export interface ProTeamPlayer {
+  nick: string;
+  series: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  kpr: number;
+  inRoster: boolean;
+}
+
+export interface ProTeamPage {
+  enabled?: boolean;
+  team?: ProTeam;
+  record?: { wins: number; losses: number; streak: number; streakWon: boolean };
+  players?: ProTeamPlayer[];
+  results?: ProTeamResult[];
+}
+
 export interface MatchState {
   seriesId: string;
   status: ProStatus;

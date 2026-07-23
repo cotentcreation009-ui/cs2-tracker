@@ -189,6 +189,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/pro-matches", s.handleProMatches)
 			r.Get("/pro-matches/{seriesId}", s.handleProMatch)
 			r.Get("/pro-matches/{seriesId}/history", s.handleProMatchHistory)
+			r.Get("/pro-matches/team/{teamId}", s.handleProTeam)
 
 			r.Route("/players/{steamid}", func(r chi.Router) {
 				r.Get("/", s.handleProfile)

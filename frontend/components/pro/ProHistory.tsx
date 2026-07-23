@@ -127,11 +127,11 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
   return (
     <div className="card-2 overflow-hidden p-0">
-      <div className="flex items-center gap-2 border-b px-4 py-2.5" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
+      <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2 border-b px-4 py-2.5 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
         <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={24} />
         <span className="truncate text-sm font-bold text-ink">{team.shortName || team.name}</span>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-faint">Lineup</span>
-      </div>
+        <span className="ml-auto text-[10px] uppercase tracking-wider text-faint">Lineup →</span>
+      </Link>
       <table className="w-full text-xs">
         <thead>
           <tr className="text-[9px] uppercase tracking-wider text-faint">
@@ -168,10 +168,10 @@ function FormCard({ team, entries }: { team: ProTeam; entries: ProFormEntry[] })
   return (
     <div className="card-2 p-4">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+        <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex min-w-0 items-center gap-2 hover:underline">
           <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={22} />
           <span className="truncate text-sm font-bold text-ink">{team.shortName || team.name}</span>
-        </div>
+        </Link>
         {entries.length > 0 ? (
           <div className="flex shrink-0 items-center gap-2">
             <span className="flex gap-0.5">
