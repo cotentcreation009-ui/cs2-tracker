@@ -24,6 +24,7 @@ import (
 	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/grid"
 	"github.com/cs2tracker/server/internal/leetify"
+	"github.com/cs2tracker/server/internal/liquipedia"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
@@ -76,6 +77,8 @@ type Server struct {
 	// reports disabled (and Start is a no-op) when no GRID key/mock is configured,
 	// so the /api/pro-matches endpoint simply returns {"enabled":false,...}.
 	proMatches *grid.Poller
+	// lp resolves pro-player photos from Liquipedia (rate-limited, cache-heavy).
+	lp *liquipedia.Client
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
 	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
 	sf singleflight.Group
@@ -99,7 +102,7 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches}
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log)}
 }
 
 // StartProMatches launches the GRID poller's background loops (a no-op when the
@@ -190,6 +193,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/pro-matches/{seriesId}", s.handleProMatch)
 			r.Get("/pro-matches/{seriesId}/history", s.handleProMatchHistory)
 			r.Get("/pro-matches/team/{teamId}", s.handleProTeam)
+			r.Get("/pro-matches/player-image/{nick}", s.handleProPlayerImage)
 
 			r.Route("/players/{steamid}", func(r chi.Router) {
 				r.Get("/", s.handleProfile)

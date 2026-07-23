@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
 import { TeamLogo } from "./TeamLogo";
+import { PlayerAvatar } from "./PlayerAvatar";
 import { validHex } from "./format";
 
 // HLTV-style team page: identity header with a record/form stat strip, the
@@ -198,7 +199,9 @@ export function ProTeamClient({ id }: { id: string }) {
       <p className="text-[11px] leading-snug text-faint">
         Player stats are GRID&apos;s official aggregates over the last year of tracked pro play
         (players without official data fall back to recent-series aggregates). Click a result to
-        open the full match breakdown with per-map scoreboards.
+        open the full match breakdown with per-map scoreboards. Player photos from{" "}
+        <a href="https://liquipedia.net/counterstrike/" target="_blank" rel="noopener noreferrer" className="underline hover:text-muted">Liquipedia</a>{" "}
+        (CC&nbsp;BY-SA&nbsp;3.0).
       </p>
     </div>
   );
@@ -214,13 +217,7 @@ function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: stri
       <td className="max-w-0 px-4 py-2">
         <span className="flex items-center gap-2.5">
           <span className="w-3 shrink-0 text-right text-[10px] tabular-nums text-faint">{rank}</span>
-          <span
-            aria-hidden
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-extrabold uppercase leading-none"
-            style={{ background: `${hex}1f`, color: hex, boxShadow: `inset 0 0 0 1px ${hex}40` }}
-          >
-            {p.nick.slice(0, 2)}
-          </span>
+          <PlayerAvatar nick={p.nick} hex={hex} size={28} />
           <span className="truncate font-semibold text-ink">{p.nick}</span>
           {!p.inRoster ? (
             <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
