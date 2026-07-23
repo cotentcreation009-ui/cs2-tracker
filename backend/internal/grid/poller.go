@@ -277,6 +277,9 @@ func NewPoller(o Options) *Poller {
 // Store exposes the in-memory board for the HTTP handlers.
 func (p *Poller) Store() *Store { return p.store }
 
+// Client exposes the GRID client for on-demand fetches (history endpoint).
+func (p *Poller) Client() *Client { return p.client }
+
 // Start launches the background loops. It returns immediately; the loops stop
 // when ctx is cancelled. Safe to call when disabled (does nothing).
 func (p *Poller) Start(ctx context.Context) {

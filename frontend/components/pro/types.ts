@@ -53,6 +53,31 @@ export interface ProMapPlayer {
   netWorth?: number;
 }
 
+// Recent-form + head-to-head (lazy /history endpoint).
+export interface ProFormEntry {
+  seriesId: string;
+  date: string;
+  won: boolean;
+  score: [number, number]; // [team, opponent]
+  opponentId: string;
+  opponentName: string;
+  opponentLogo?: string;
+}
+
+export interface ProH2HEntry {
+  seriesId: string;
+  date: string;
+  winnerId?: string;
+  scoreByTeam: Record<string, number>;
+}
+
+export interface ProHistory {
+  enabled?: boolean;
+  teams?: ProTeam[];
+  form?: Record<string, ProFormEntry[]>; // by gridId
+  h2h?: ProH2HEntry[];
+}
+
 export interface MatchState {
   seriesId: string;
   status: ProStatus;

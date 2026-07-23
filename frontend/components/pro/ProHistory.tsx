@@ -1,0 +1,186 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import type { ProFormEntry, ProHistory, ProTeam } from "./types";
+import { TeamLogo } from "./TeamLogo";
+import { validHex } from "./format";
+
+// Recent form + head-to-head, loaded lazily (after the live scoreboard) from
+// /api/pro-matches/{id}/history so it never blocks the live data.
+export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] }) {
+  const [data, setData] = useState<ProHistory | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/pro-matches/${id}/history`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const d = (await res.json()) as ProHistory;
+        if (!alive) return;
+        const anyForm = Object.values(d.form ?? {}).some((f) => f.length > 0);
+        const anyH2H = (d.h2h ?? []).length > 0;
+        setData(d);
+        setState(anyForm || anyH2H ? "ready" : "empty");
+      } catch {
+        if (alive) setState("error");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  if (state === "loading") {
+    return (
+      <section className="space-y-3">
+        <SectionTitle />
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[0, 1].map((i) => (
+            <div key={i} className="card h-40 animate-pulse bg-line/30" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+  if (state !== "ready" || !data) return null; // empty/error → hide silently
+
+  const a = teams[0];
+  const b = teams[1];
+  const h2h = data.h2h ?? [];
+  const aWins = h2h.filter((m) => m.winnerId === a?.gridId).length;
+  const bWins = h2h.filter((m) => m.winnerId === b?.gridId).length;
+
+  return (
+    <section className="space-y-3">
+      <SectionTitle />
+
+      {/* head-to-head */}
+      {h2h.length > 0 && a && b ? (
+        <div className="card-2 p-4">
+          <div className="mb-3 flex items-center justify-center gap-4 text-sm">
+            <span className="truncate font-bold" style={{ color: validHex(a.colorPrimary) ?? "var(--color-ink)" }}>
+              {a.shortName || a.name}
+            </span>
+            <span className="shrink-0 text-xl font-extrabold tabular-nums">
+              <span className={aWins >= bWins ? "text-ink" : "text-faint"}>{aWins}</span>
+              <span className="mx-1 text-sm text-faint">–</span>
+              <span className={bWins >= aWins ? "text-ink" : "text-faint"}>{bWins}</span>
+            </span>
+            <span className="truncate font-bold" style={{ color: validHex(b.colorPrimary) ?? "var(--color-ink)" }}>
+              {b.shortName || b.name}
+            </span>
+          </div>
+          <div className="mx-auto max-w-md space-y-1">
+            {h2h.map((m) => {
+              const as = m.scoreByTeam[a.gridId] ?? 0;
+              const bs = m.scoreByTeam[b.gridId] ?? 0;
+              return (
+                <Link
+                  key={m.seriesId}
+                  href={`/pro-matches/${m.seriesId}`}
+                  className="flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 text-xs transition hover:bg-panel/60"
+                >
+                  <span className="w-16 shrink-0 tabular-nums text-faint">{fmtDate(m.date)}</span>
+                  <span className="flex flex-1 items-center justify-center gap-2 tabular-nums">
+                    <span className={m.winnerId === a.gridId ? "font-bold text-ink" : "text-muted"}>{as}</span>
+                    <span className="text-faint">–</span>
+                    <span className={m.winnerId === b.gridId ? "font-bold text-ink" : "text-muted"}>{bs}</span>
+                  </span>
+                  <span className="w-16 shrink-0 text-right text-faint">
+                    {m.winnerId === a.gridId ? a.shortName : m.winnerId === b.gridId ? b.shortName : "—"}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-center text-[10px] text-faint">Recent meetings (last ~120 days)</p>
+        </div>
+      ) : null}
+
+      {/* recent form per team */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {[a, b].map((t) =>
+          t ? <FormCard key={t.gridId} team={t} entries={data.form?.[t.gridId] ?? []} /> : null,
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FormCard({ team, entries }: { team: ProTeam; entries: ProFormEntry[] }) {
+  const hex = validHex(team.colorPrimary) ?? "#8a93a5";
+  const wins = entries.filter((e) => e.won).length;
+  return (
+    <div className="card-2 p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={22} />
+          <span className="truncate text-sm font-bold text-ink">{team.shortName || team.name}</span>
+        </div>
+        {entries.length > 0 ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="flex gap-0.5">
+              {entries.map((e) => (
+                <span
+                  key={e.seriesId}
+                  className={`grid h-4 w-4 place-items-center rounded text-[8px] font-bold ${e.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}
+                  title={`${e.won ? "Won" : "Lost"} ${e.score[0]}–${e.score[1]} vs ${e.opponentName}`}
+                >
+                  {e.won ? "W" : "L"}
+                </span>
+              ))}
+            </span>
+            <span className="text-[11px] tabular-nums text-faint">
+              {wins}–{entries.length - wins}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-xs text-faint">No recent results on record.</p>
+      ) : (
+        <div className="divide-y divide-line/40" style={{ borderColor: `${hex}22` }}>
+          {entries.map((e) => (
+            <Link
+              key={e.seriesId}
+              href={`/pro-matches/${e.seriesId}`}
+              className="flex items-center gap-2 py-1.5 text-xs transition hover:bg-panel/50"
+            >
+              <span
+                className={`grid h-4 w-4 shrink-0 place-items-center rounded text-[8px] font-bold ${e.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}
+              >
+                {e.won ? "W" : "L"}
+              </span>
+              <span className="w-14 shrink-0 tabular-nums text-faint">{fmtDate(e.date)}</span>
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                <span className="text-faint">vs</span>
+                {e.opponentLogo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={e.opponentLogo} alt="" loading="lazy" className="h-3.5 w-3.5 shrink-0 rounded object-contain" />
+                ) : null}
+                <span className="truncate text-muted">{e.opponentName}</span>
+              </span>
+              <span className={`shrink-0 tabular-nums ${e.won ? "text-good" : "text-bad"}`}>
+                {e.score[0]}–{e.score[1]}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionTitle() {
+  return <h2 className="text-sm font-bold uppercase tracking-wider text-ink">Form &amp; head-to-head</h2>;
+}
+
+function fmtDate(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -270,6 +272,11 @@ type Client struct {
 
 	mu      sync.RWMutex
 	titleID string // resolved CS2 titleId; defaults to "28"
+
+	// Global Central-Data limiter (~20 req/min cap) shared by the poller's
+	// schedule loop and the history endpoint, so concurrent detail views can't
+	// burst past the Open-Access ceiling.
+	centralLim *rate.Limiter
 }
 
 // NewClient builds a Client. An empty baseURL falls back to the Open-Access host.
@@ -291,6 +298,7 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client, log *slog.Logger
 		apiKey:     strings.TrimSpace(apiKey),
 		log:        log,
 		titleID:    "28",
+		centralLim: rate.NewLimiter(rate.Every(time.Minute/18), 4),
 	}
 }
 
@@ -371,6 +379,7 @@ func (c *Client) ResolveTitleID(ctx context.Context) (string, error) {
 // returns whatever pages already succeeded rather than nothing.
 func (c *Client) FetchAllSeries(ctx context.Context, gte, lte string) ([]centralNode, error) {
 	query := centralQuery(c.getTitleID())
+	_ = c.centralLim.Wait(ctx)
 	var nodes []centralNode
 	after := ""
 	for page := 0; page < 20; page++ { // hard page cap as a safety net

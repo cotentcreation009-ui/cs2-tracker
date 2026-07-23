@@ -7,6 +7,7 @@ import { TeamLogo } from "./TeamLogo";
 import { LiveBadge } from "./LiveBadge";
 import { RoundStrip } from "./RoundStrip";
 import { TwitchLink } from "./TwitchLink";
+import { ProHistoryPanel } from "./ProHistory";
 import { agoShort, clockLabel, formatTag, mapsWon, sideHex, validHex } from "./format";
 
 const POLL_MS = 10_000;
@@ -141,6 +142,9 @@ export function MatchDetailClient({
           Player stats and map scores appear here once the match goes live.
         </div>
       ) : null}
+
+      {/* recent form + head-to-head, loaded lazily below the live data */}
+      {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} /> : null}
     </div>
   );
 }
