@@ -119,16 +119,18 @@ func (s *Server) StartProMatches(ctx context.Context) {
 }
 
 // prewarmProHistories keeps the lineups/form/h2h caches warm for live matches
-// and the soonest upcoming ones, so users basically never pay the cold-build
-// cost (a cold tier-1 match is ~30 rate-limited GRID calls). All fetches go
-// through the same cachedTTL keys the request path uses.
+// and upcoming ones, so users basically never pay the cold-build cost (a cold
+// tier-1 match is ~30 rate-limited GRID calls). All fetches go through the
+// same cachedTTL keys the request path uses — already-warm matches cost only
+// Redis hits, so sweeping the whole board each cycle converges quickly and
+// then stays cheap.
 func (s *Server) prewarmProHistories(ctx context.Context) {
-	const perCycle = 12
+	const perCycle = 60 // safety bound per 5-min cycle
 	// let the poller populate its board first
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(90 * time.Second):
+	case <-time.After(30 * time.Second):
 	}
 	tick := time.NewTicker(5 * time.Minute)
 	defer tick.Stop()

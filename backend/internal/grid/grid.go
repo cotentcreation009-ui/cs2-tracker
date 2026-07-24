@@ -304,7 +304,10 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client, log *slog.Logger
 		log:        log,
 		titleID:    "28",
 		centralLim: rate.NewLimiter(rate.Every(time.Minute/18), 4),
-		statsLim:   rate.NewLimiter(rate.Every(1500*time.Millisecond), 5),
+		// ~100/min with a small burst — the cap isn't documented for Open
+		// Access; postGraphQL retries transient 429s with backoff if we ever
+		// brush against it. (1/1.5s made cold lineups take ~20s+ on their own.)
+		statsLim: rate.NewLimiter(rate.Every(600*time.Millisecond), 8),
 	}
 }
 
