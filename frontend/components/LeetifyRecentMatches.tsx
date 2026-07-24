@@ -12,8 +12,11 @@ const sourceLabel: Record<string, string> = {
   wingman: "Wingman",
 };
 
+// Per-game leetify_rating arrives as a raw fraction (0.0434); Leetify's own
+// site displays it x100 ("+4.34"), matching the overall ranks.leetify scale.
 function signed(n: number): string {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}`;
+  const v = n * 100;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 }
 const impactColor = (n: number) =>
   n > 0.03 ? "text-good" : n < -0.03 ? "text-bad" : "text-mid";

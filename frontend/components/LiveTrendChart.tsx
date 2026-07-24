@@ -14,7 +14,7 @@ const METRICS: TrendMetric[] = [
   {
     key: "rating",
     label: "Rating",
-    format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`,
+    format: (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}`,
     baseline: 0,
   },
   { key: "preaim", label: "Preaim", format: (v) => `${v.toFixed(1)}°`, lowerBetter: true },
