@@ -31,7 +31,9 @@
 		# clickjacking protection. Tighten to nonces later if an HTML sink is added.
 		# script-src/connect-src also allow Cloudflare Web Analytics: the beacon
 		# loads from static.cloudflareinsights.com and reports to cloudflareinsights.com.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://storage.googleapis.com https://*.storage.googleapis.com https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
+		# connect-src also allows liquipedia.net: pro-player photos resolve in the
+		# browser (Liquipedia rate-limits datacenter IPs, so the VM can't).
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://storage.googleapis.com https://*.storage.googleapis.com https://cloudflareinsights.com https://liquipedia.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
 		-Server
 	}
 
