@@ -12,10 +12,13 @@ export function PlayerAvatar({
   nick,
   hex,
   size = 28,
+  shape = "circle",
 }: {
   nick: string;
   hex: string;
   size?: number;
+  /** "circle" = inline avatar; "card" = fills its parent (HLTV-style photo tile) */
+  shape?: "circle" | "card";
 }) {
   const [src, setSrc] = useState<string | null>(
     `/api/pro-matches/player-image/${encodeURIComponent(nick)}`,
@@ -40,14 +43,17 @@ export function PlayerAvatar({
       });
   };
 
+  const card = shape === "card";
   return (
     <span
       aria-hidden
-      className="relative grid shrink-0 place-items-center overflow-hidden rounded-full font-extrabold uppercase leading-none"
+      className={
+        card
+          ? "relative grid w-full place-items-center overflow-hidden rounded-lg font-extrabold uppercase leading-none"
+          : "relative grid shrink-0 place-items-center overflow-hidden rounded-full font-extrabold uppercase leading-none"
+      }
       style={{
-        width: size,
-        height: size,
-        fontSize: Math.max(8, Math.round(size * 0.36)),
+        ...(card ? { aspectRatio: "4 / 5", fontSize: 20 } : { width: size, height: size, fontSize: Math.max(8, Math.round(size * 0.36)) }),
         background: `${hex}1f`,
         color: hex,
         boxShadow: `inset 0 0 0 1px ${hex}40`,
@@ -63,7 +69,7 @@ export function PlayerAvatar({
           referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
           onError={onError}
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 h-full w-full object-cover ${card ? "object-top" : ""} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
         />
       ) : null}
     </span>

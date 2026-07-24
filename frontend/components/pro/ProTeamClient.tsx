@@ -214,10 +214,10 @@ function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: stri
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
   return (
     <tr className="border-t border-line/40 transition-colors hover:bg-panel/40">
-      <td className="max-w-0 px-4 py-2">
+      <td className="max-w-0 px-4 py-2.5">
         <span className="flex items-center gap-2.5">
           <span className="w-3 shrink-0 text-right text-[10px] tabular-nums text-faint">{rank}</span>
-          <PlayerAvatar nick={p.nick} hex={hex} size={28} />
+          <PlayerAvatar nick={p.nick} hex={hex} size={40} />
           <span className="truncate font-semibold text-ink">{p.nick}</span>
           {!p.inRoster ? (
             <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
@@ -250,7 +250,7 @@ function ResultRow({ r }: { r: ProTeamResult }) {
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="text-xs text-faint">vs</span>
-          <TeamLogo name={r.opponent?.shortName || r.opponent?.name} src={r.opponent?.logoUrl} color={r.opponent?.colorPrimary} size={18} />
+          <TeamLogo name={r.opponent?.shortName || r.opponent?.name} src={r.opponent?.logoUrl} color={r.opponent?.colorPrimary} size={24} />
           <span className="truncate font-medium text-muted">{r.opponent?.shortName || r.opponent?.name || "TBD"}</span>
         </span>
         <span className="mt-0.5 block truncate text-[10px] text-faint">{meta}</span>
