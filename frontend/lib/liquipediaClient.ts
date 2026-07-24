@@ -2,8 +2,14 @@
 // can't fetch (Liquipedia rate-limits datacenter IPs, so the GCE VM gets 429s
 // while residential visitor IPs are fine).
 //
+// Requests are BATCHED: avatars that mount together are collected for 250ms,
+// then resolved for the whole group in two API calls (MediaWiki accepts up to
+// 50 titles per query) — a full lineup resolves in ~3s instead of a serial
+// per-player queue.
+//
 // Terms compliance (liquipedia.net/api-terms-of-use), per visiting client:
-//  - requests are queued with a >2s gap (their 1-req/2s limit)
+//  - calls are spaced >2s apart (their 1-req/2s limit); batching means a page
+//    needs only 2-3 calls total
 //  - results cache in localStorage for 14 days (misses 3 days)
 //  - the browser sends gzip Accept-Encoding automatically
 // The CC BY-SA attribution is rendered next to every table that shows photos.
@@ -13,6 +19,8 @@ const CACHE_PREFIX = "lp:img:";
 const HIT_TTL_MS = 14 * 864e5;
 const MISS_TTL_MS = 3 * 864e5;
 const GAP_MS = 2100;
+const BATCH_WAIT_MS = 250;
+const MAX_TITLES = 50;
 
 type CacheEntry = { u: string | null; t: number };
 
@@ -37,9 +45,23 @@ function writeCache(nick: string, u: string | null): void {
   }
 }
 
-// One shared queue so simultaneous avatar mounts space their API calls out.
-let chain: Promise<void> = Promise.resolve();
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Global pacing shared by every call this tab makes.
 let lastCall = 0;
+async function pacedFetch(url: string): Promise<Response> {
+  const wait = lastCall + GAP_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastCall = Date.now();
+  return fetch(url);
+}
+
+type Pending = { nick: string; resolve: (u: string | null) => void };
+let pending: Pending[] = [];
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
+let batchChain: Promise<void> = Promise.resolve();
 const inflight = new Map<string, Promise<string | null>>();
 
 export function resolvePlayerPhoto(nick: string): Promise<string | null> {
@@ -50,67 +72,139 @@ export function resolvePlayerPhoto(nick: string): Promise<string | null> {
   if (existing) return existing;
 
   const p = new Promise<string | null>((resolve) => {
-    chain = chain.then(async () => {
-      // re-check: an earlier queued call may have resolved this nick
-      const c = readCache(nick);
-      if (c) {
-        resolve(c.u);
-        return;
-      }
-      const wait = lastCall + GAP_MS - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      lastCall = Date.now();
-      try {
-        const u = await lookup(nick);
-        writeCache(nick, u);
-        resolve(u);
-      } catch {
-        // network/CORS/429 — don't cache, just fall back to initials
-        resolve(null);
-      }
-    });
+    pending.push({ nick, resolve });
+    if (batchTimer == null) batchTimer = setTimeout(flushBatch, BATCH_WAIT_MS);
   });
   inflight.set(key, p);
   void p.finally(() => inflight.delete(key));
   return p;
 }
 
-// Same heuristic as the backend: the player's page → files named
-// "<Nick> at <Event>.jpg" (or "@") → newest year wins (the infobox shot).
-async function lookup(nick: string): Promise<string | null> {
+function flushBatch(): void {
+  batchTimer = null;
+  const batch = pending.splice(0, MAX_TITLES);
+  if (batch.length === 0) return;
+  batchChain = batchChain.then(() => execBatch(batch)).catch(() => {});
+  if (pending.length > 0) batchTimer = setTimeout(flushBatch, 0);
+}
+
+async function execBatch(batch: Pending[]): Promise<void> {
+  // dedupe nicks; an earlier batch may have resolved some already
+  const byNick = new Map<string, Pending[]>();
+  for (const b of batch) {
+    const c = readCache(b.nick);
+    if (c) {
+      b.resolve(c.u);
+      continue;
+    }
+    const k = b.nick.toLowerCase();
+    const arr = byNick.get(k) ?? [];
+    arr.push(b);
+    byNick.set(k, arr);
+  }
+  if (byNick.size === 0) return;
+  const nicks = [...byNick.values()].map((arr) => arr[0].nick);
+
+  try {
+    const files = await listPageFiles(nicks); // call 1 (+continuation)
+    const bestByNick = pickBest(nicks, files);
+    const wanted = [...new Set([...bestByNick.values()].filter((t): t is string => t !== null))];
+    const urls = wanted.length > 0 ? await fileThumbUrls(wanted) : new Map<string, string>(); // call 2
+    for (const [k, arr] of byNick) {
+      const title = bestByNick.get(k) ?? null;
+      const u = (title ? urls.get(title) : null) ?? null;
+      writeCache(arr[0].nick, u);
+      for (const b of arr) b.resolve(u);
+    }
+  } catch {
+    // network/CORS/429 — don't cache, fall back to initials
+    for (const arr of byNick.values()) for (const b of arr) b.resolve(null);
+  }
+}
+
+// One query for ALL the players' pages → every file title used on them.
+async function listPageFiles(nicks: string[]): Promise<string[]> {
+  const files: string[] = [];
+  let cont: string | null = null;
+  for (let page = 0; page < 3; page++) {
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      origin: "*", // anonymous CORS mode
+      redirects: "1",
+      titles: nicks.join("|"),
+      prop: "images",
+      imlimit: "500",
+    });
+    if (cont) params.set("imcontinue", cont);
+    const res = await pacedFetch(`${API}?${params}`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const d = (await res.json()) as {
+      query?: { pages?: Record<string, { images?: { title?: string }[] }> };
+      continue?: { imcontinue?: string };
+    };
+    for (const p of Object.values(d.query?.pages ?? {})) {
+      for (const im of p.images ?? []) if (im.title) files.push(im.title);
+    }
+    cont = d.continue?.imcontinue ?? null;
+    if (!cont) break;
+  }
+  return files;
+}
+
+// Same heuristic as the backend: files named "<Nick> at <Event>.jpg" (or "@"),
+// newest year wins (that's the wiki infobox shot). Keyed by lowercase nick.
+function pickBest(nicks: string[], files: string[]): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const nick of nicks) {
+    const esc = nick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^File:${esc}\\s*(?:at|@)\\s+.+\\.(?:jpe?g|png)$`, "i");
+    let bestKey = "";
+    let best: string | null = null;
+    for (const f of files) {
+      if (!re.test(f)) continue;
+      const years = f.match(/20\d\d/g);
+      const key = `${years ? years[years.length - 1] : "0"}|${f}`;
+      if (key > bestKey) {
+        bestKey = key;
+        best = f;
+      }
+    }
+    out.set(nick.toLowerCase(), best);
+  }
+  return out;
+}
+
+// One query for the chosen files → 256px thumbnail URLs, keyed by file title.
+async function fileThumbUrls(titles: string[]): Promise<Map<string, string>> {
   const params = new URLSearchParams({
     action: "query",
     format: "json",
-    origin: "*", // anonymous CORS mode
-    redirects: "1",
-    titles: nick,
-    generator: "images",
-    gimlimit: "50",
+    origin: "*",
+    titles: titles.slice(0, MAX_TITLES).join("|"),
     prop: "imageinfo",
     iiprop: "url",
     iiurlwidth: "256",
   });
-  const res = await fetch(`${API}?${params}`);
+  const res = await pacedFetch(`${API}?${params}`);
   if (!res.ok) throw new Error(`status ${res.status}`);
   const d = (await res.json()) as {
-    query?: { pages?: Record<string, { title?: string; imageinfo?: { thumburl?: string; url?: string }[] }> };
+    query?: {
+      normalized?: { from?: string; to?: string }[];
+      pages?: Record<string, { title?: string; imageinfo?: { thumburl?: string; url?: string }[] }>;
+    };
   };
-  const esc = nick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^File:${esc}\\s*(?:at|@)\\s+.+\\.(?:jpe?g|png)$`, "i");
-  let bestKey = "";
-  let bestUrl: string | null = null;
+  // map normalized titles back to what we asked for
+  const denorm = new Map<string, string>();
+  for (const n of d.query?.normalized ?? []) {
+    if (n.from && n.to) denorm.set(n.to, n.from);
+  }
+  const out = new Map<string, string>();
   for (const p of Object.values(d.query?.pages ?? {})) {
     const title = p.title ?? "";
-    if (!re.test(title)) continue;
-    const ii = p.imageinfo?.[0];
-    const u = ii?.thumburl || ii?.url;
-    if (!u) continue;
-    const years = title.match(/20\d\d/g);
-    const key = `${years ? years[years.length - 1] : "0"}|${title}`;
-    if (key > bestKey) {
-      bestKey = key;
-      bestUrl = u;
-    }
+    const u = p.imageinfo?.[0]?.thumburl || p.imageinfo?.[0]?.url;
+    if (!title || !u) continue;
+    out.set(denorm.get(title) ?? title, u);
   }
-  return bestUrl;
+  return out;
 }
