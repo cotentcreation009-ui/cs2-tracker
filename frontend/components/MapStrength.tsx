@@ -25,7 +25,8 @@ const sourceLabel: Record<string, string> = {
 
 const winColor = (p: number) =>
   p >= 53 ? "#46d369" : p >= 47 ? "#f5b942" : "#f5694a";
-const signed = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}`;
+// leetify_rating is a raw fraction; display x100 like leetify.com does.
+const signed = (n: number) => `${n >= 0 ? "+" : ""}${(n * 100).toFixed(2)}`;
 const impactColor = (n: number) =>
   n > 0.03 ? "text-good" : n < -0.03 ? "text-bad" : "text-mid";
 
@@ -432,7 +433,7 @@ function MapWinRadar({
                   </div>
                   <div className="tabular-nums text-muted">
                     {avgRating >= 0 ? "+" : ""}
-                    {avgRating.toFixed(2)} <span className="text-faint">avg rating</span>
+                    {(avgRating * 100).toFixed(2)} <span className="text-faint">avg rating</span>
                   </div>
                 </div>
               )}
