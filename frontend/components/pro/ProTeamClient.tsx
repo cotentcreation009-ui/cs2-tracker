@@ -80,13 +80,17 @@ export function ProTeamClient({ id }: { id: string }) {
         <span aria-hidden className="pointer-events-none absolute -left-24 -top-28 h-72 w-72 rounded-full opacity-[0.18] blur-3xl" style={{ background: hex }} />
         <span aria-hidden className="pointer-events-none absolute -right-20 -bottom-32 h-64 w-64 rounded-full opacity-[0.08] blur-3xl" style={{ background: hex }} />
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ backgroundImage: `linear-gradient(90deg, ${hex}, transparent 70%)` }} />
-        <div className="relative flex flex-wrap items-center gap-4">
-          <TeamLogo name={t.shortName || t.name} src={t.logoUrl} color={t.colorPrimary} size={72} />
+        <div className="relative flex flex-wrap items-center gap-5">
+          <span className="relative shrink-0">
+            <span aria-hidden className="pointer-events-none absolute inset-0 scale-125 rounded-2xl opacity-30 blur-xl" style={{ background: hex }} />
+            <TeamLogo name={t.shortName || t.name} src={t.logoUrl} color={t.colorPrimary} size={88} className="relative" />
+          </span>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">{t.name || t.shortName || "Team"}</h1>
-            <p className="mt-0.5 text-xs uppercase tracking-wider text-faint">
-              Counter-Strike 2 · pro team
-              {total > 0 ? <span className="ml-2 normal-case tracking-normal">last {total} series tracked</span> : null}
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: hex }}>Team profile</p>
+            <h1 className="truncate text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">{t.name || t.shortName || "Team"}</h1>
+            <p className="mt-1 text-xs uppercase tracking-wider text-faint">
+              Counter-Strike 2
+              {total > 0 ? <span className="ml-2 normal-case tracking-normal">· last {total} series tracked</span> : null}
             </p>
           </div>
         </div>
@@ -115,13 +119,14 @@ export function ProTeamClient({ id }: { id: string }) {
             <StatTile label="Last 5" sub={undefined}>
               <span className="inline-flex items-center gap-1">
                 {results.slice(0, 5).map((r) => (
-                  <span
+                  <Link
                     key={r.seriesId}
-                    title={`${r.won ? "Won" : "Lost"} ${r.score[0]}–${r.score[1]} vs ${r.opponent?.shortName || r.opponent?.name || "?"}`}
-                    className={`grid h-4.5 w-4.5 place-items-center rounded text-[8px] font-bold leading-none ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}
+                    href={`/pro-matches/${r.seriesId}`}
+                    title={`${r.won ? "Won" : "Lost"} ${r.score[0]}–${r.score[1]} vs ${r.opponent?.shortName || r.opponent?.name || "?"} — open match`}
+                    className={`grid h-5.5 w-5.5 place-items-center rounded-md text-[9px] font-bold leading-none transition hover:scale-110 ${r.won ? "bg-good/20 text-good hover:bg-good/30" : "bg-bad/20 text-bad hover:bg-bad/30"}`}
                   >
                     {r.won ? "W" : "L"}
-                  </span>
+                  </Link>
                 ))}
               </span>
             </StatTile>
@@ -216,9 +221,9 @@ function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: stri
     <tr className="border-t border-line/40 transition-colors hover:bg-panel/40">
       <td className="max-w-0 px-4 py-2.5">
         <span className="flex items-center gap-2.5">
-          <span className="w-3 shrink-0 text-right text-[10px] tabular-nums text-faint">{rank}</span>
-          <PlayerAvatar nick={p.nick} hex={hex} size={40} />
-          <span className="truncate font-semibold text-ink">{p.nick}</span>
+          <span className={`w-3 shrink-0 text-right text-[10px] font-bold tabular-nums ${rank === 1 ? "" : "text-faint"}`} style={rank === 1 ? { color: hex } : undefined}>{rank}</span>
+          <PlayerAvatar nick={p.nick} hex={hex} size={48} />
+          <span className="truncate text-[15px] font-semibold text-ink">{p.nick}</span>
           {!p.inRoster ? (
             <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
           ) : null}
@@ -241,21 +246,21 @@ function ResultRow({ r }: { r: ProTeamResult }) {
   return (
     <Link
       href={`/pro-matches/${r.seriesId}`}
-      className="group flex items-center gap-3 px-4 py-2.5 text-sm transition hover:bg-panel/50 active:bg-panel/80"
+      className="group flex items-center gap-3 px-4 py-3 text-sm transition hover:bg-panel/50 active:bg-panel/80"
       title="Open the full match breakdown"
     >
-      <span className={`grid h-6 w-6 shrink-0 place-items-center rounded text-[10px] font-bold ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
+      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md text-[11px] font-bold ${r.won ? "bg-good/20 text-good" : "bg-bad/20 text-bad"}`}>
         {r.won ? "W" : "L"}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="text-xs text-faint">vs</span>
           <TeamLogo name={r.opponent?.shortName || r.opponent?.name} src={r.opponent?.logoUrl} color={r.opponent?.colorPrimary} size={24} />
-          <span className="truncate font-medium text-muted">{r.opponent?.shortName || r.opponent?.name || "TBD"}</span>
+          <span className="truncate text-[15px] font-semibold text-ink">{r.opponent?.shortName || r.opponent?.name || "TBD"}</span>
         </span>
         <span className="mt-0.5 block truncate text-[10px] text-faint">{meta}</span>
       </span>
-      <span className={`shrink-0 tabular-nums text-sm font-semibold ${r.won ? "text-good" : "text-bad"}`}>
+      <span className={`shrink-0 tabular-nums text-base font-bold ${r.won ? "text-good" : "text-bad"}`}>
         {r.score[0]}–{r.score[1]}
       </span>
       <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-faint opacity-0 transition group-hover:opacity-100" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
@@ -267,10 +272,10 @@ function ResultRow({ r }: { r: ProTeamResult }) {
 
 function StatTile({ label, sub, children }: { label: string; sub?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-line/50 bg-panel/40 px-3 py-2">
-      <p className="text-[9px] font-semibold uppercase tracking-wider text-faint">{label}</p>
-      <p className="mt-0.5 text-lg font-extrabold tabular-nums leading-tight text-ink">{children}</p>
-      {sub ? <div className="mt-1">{sub}</div> : null}
+    <div className="group relative overflow-hidden rounded-xl border border-line/50 bg-panel/40 px-3.5 py-2.5 transition duration-150 hover:-translate-y-px hover:border-line2 hover:bg-panel/60">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-faint">{label}</p>
+      <p className="mt-1 text-xl font-extrabold tabular-nums leading-tight text-ink">{children}</p>
+      {sub ? <div className="mt-1.5">{sub}</div> : null}
     </div>
   );
 }
