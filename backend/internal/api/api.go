@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +112,60 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 func (s *Server) StartProMatches(ctx context.Context) {
 	if s.proMatches != nil {
 		s.proMatches.Start(ctx)
+		if s.proMatches.Store().Enabled() {
+			go s.prewarmProHistories(ctx)
+		}
+	}
+}
+
+// prewarmProHistories keeps the lineups/form/h2h caches warm for live matches
+// and the soonest upcoming ones, so users basically never pay the cold-build
+// cost (a cold tier-1 match is ~30 rate-limited GRID calls). All fetches go
+// through the same cachedTTL keys the request path uses.
+func (s *Server) prewarmProHistories(ctx context.Context) {
+	const perCycle = 12
+	// let the poller populate its board first
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(90 * time.Second):
+	}
+	tick := time.NewTicker(5 * time.Minute)
+	defer tick.Stop()
+	for {
+		board, _ := s.proMatches.Store().Board()
+		var picks []int
+		for i, m := range board {
+			if m.Status == "live" && len(m.Teams) >= 2 {
+				picks = append(picks, i)
+			}
+		}
+		var ups []int
+		for i, m := range board {
+			if m.Status == "upcoming" && len(m.Teams) >= 2 {
+				ups = append(ups, i)
+			}
+		}
+		sort.Slice(ups, func(a, b int) bool { // soonest first (RFC3339 sorts lexically)
+			return board[ups[a]].StartScheduled < board[ups[b]].StartScheduled
+		})
+		for _, i := range ups {
+			if len(picks) >= perCycle {
+				break
+			}
+			picks = append(picks, i)
+		}
+		for _, i := range picks {
+			if ctx.Err() != nil {
+				return
+			}
+			_ = s.buildMatchHistory(ctx, board[i])
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
 	}
 }
 

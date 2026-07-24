@@ -137,7 +137,12 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
       <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2.5 border-b px-4 py-3 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
         <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={32} />
         <span className="truncate text-base font-bold text-ink">{team.shortName || team.name}</span>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-faint">Lineup →</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="rounded bg-panel/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-faint" title="Stats cover the maps GRID tracked over the last 3 months — not every event is covered at every tier">
+            last 3 months
+          </span>
+          <span className="text-[10px] uppercase tracking-wider text-faint">Lineup →</span>
+        </span>
       </Link>
       {cards.length > 0 ? (
         <div className="grid grid-cols-5 gap-2 p-3">
@@ -160,7 +165,10 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
                     <span className="text-faint">— K/D</span>
                   )}
                 </p>
-                <p className="truncate text-center text-[10px] tabular-nums leading-tight text-faint">
+                <p
+                  className="truncate text-center text-[10px] tabular-nums leading-tight text-faint"
+                  title={has ? `Across the ${n} maps GRID tracked for ${p.nick} in the last 3 months${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} average kills per map` : ""}` : "No GRID-tracked matches in the last 3 months"}
+                >
                   {has ? `${n} maps${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}` : "no data yet"}
                 </p>
               </div>
@@ -180,7 +188,9 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
           ))}
         </div>
       ) : null}
-      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] text-faint">Official GRID player statistics, last 3 months · photos: Liquipedia (CC BY-SA 3.0)</p>
+      <p className="border-t border-line/40 px-4 py-1.5 text-[9px] leading-snug text-faint">
+        Stats: official GRID aggregates over the last 3 months of tracked pro play — map counts reflect GRID&apos;s event coverage, not every match played · Photos: Liquipedia (CC BY-SA 3.0)
+      </p>
     </div>
   );
 }
