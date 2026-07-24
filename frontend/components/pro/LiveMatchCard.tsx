@@ -94,7 +94,7 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
       {/* teams flanking the hero score */}
       <div className="relative mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={48} />
+          <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={58} />
           <div className="min-w-0">
             <div className="truncate text-[15px] font-bold leading-tight text-ink">{a?.shortName || a?.name || "TBD"}</div>
             {showPips ? <MapPips won={aWon} bestOf={bo} color={aColor} /> : null}
@@ -129,7 +129,7 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
             <div className="truncate text-[15px] font-bold leading-tight text-ink">{b?.shortName || b?.name || "TBD"}</div>
             {showPips ? <MapPips won={bWon} bestOf={bo} color={bColor} align="right" /> : null}
           </div>
-          <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={48} />
+          <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={58} />
         </div>
       </div>
 

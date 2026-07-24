@@ -121,64 +121,50 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
   );
 }
 
-// HLTV-style lineup: the team's current players with recent-series stats
-// (K/D + kills-per-round aggregated over their last tracked series).
+// HLTV-style lineup: a photo card per player (photo, name, K/D + maps),
+// starters first; extra stand-ins and no-data roster players fold into chips.
 function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
   const hex = validHex(team.colorPrimary) ?? "#8a93a5";
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
   const withStats = players.filter((p) => p.src !== "");
-  const noStats = players.filter((p) => p.src === "");
+  const cards = withStats.slice(0, 5);
+  const extras = [...withStats.slice(5), ...players.filter((p) => p.src === "")];
   return (
     <div className="card-2 overflow-hidden p-0">
-      <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2 border-b px-4 py-2.5 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
-        <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={24} />
-        <span className="truncate text-sm font-bold text-ink">{team.shortName || team.name}</span>
+      <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2.5 border-b px-4 py-3 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
+        <TeamLogo name={team.shortName || team.name} src={team.logoUrl} color={team.colorPrimary} size={32} />
+        <span className="truncate text-base font-bold text-ink">{team.shortName || team.name}</span>
         <span className="ml-auto text-[10px] uppercase tracking-wider text-faint">Lineup →</span>
       </Link>
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-[9px] uppercase tracking-wider text-faint">
-            <th className="px-4 py-1.5 text-left font-semibold">Player</th>
-            <th className="w-11 py-1.5 text-right font-semibold" title="Maps played in the window">Maps</th>
-            <th className="w-11 py-1.5 text-right font-semibold" title="Kills / deaths">K/D</th>
-            <th className="w-11 py-1.5 text-right font-semibold" title="Average kills per map">Avg K</th>
-            <th className="w-11 px-4 py-1.5 text-right font-semibold" title="% of maps where they got the first kill">FK%</th>
-          </tr>
-        </thead>
-        <tbody>
-          {withStats.map((p) => {
+      {cards.length > 0 ? (
+        <div className="grid grid-cols-5 gap-2 p-3">
+          {cards.map((p) => {
             const n = p.src === "grid" ? p.maps : p.series;
-            const avg = p.src === "grid" ? p.avgKills : p.series > 0 ? p.kills / Math.max(1, p.series) : 0;
             return (
-              <tr key={p.nick} className="border-t border-line/40">
-                <td className="max-w-0 px-4 py-1.5">
-                  <span className="flex items-center gap-2">
-                    <PlayerAvatar nick={p.nick} hex={hex} size={22} />
-                    <span className="truncate font-semibold text-ink">{p.nick}</span>
-                    {!p.inRoster ? (
-                      <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played in recent series but not on the current published roster">recent</span>
-                    ) : null}
-                  </span>
-                </td>
-                <td className="py-1.5 text-right tabular-nums text-muted">{n}</td>
-                <td className={`py-1.5 text-right tabular-nums ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</td>
-                <td className="py-1.5 text-right tabular-nums text-muted">{p.src === "grid" && avg > 0 ? avg.toFixed(1) : "—"}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums text-muted">{p.src === "grid" ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
-              </tr>
+              <div key={p.nick} className="min-w-0">
+                <PlayerAvatar nick={p.nick} hex={hex} shape="card" />
+                <p className="mt-1.5 truncate text-center text-xs font-bold text-ink" title={p.nick}>
+                  {p.nick}
+                </p>
+                <p className="text-center text-xs tabular-nums leading-tight">
+                  <span className={`font-bold ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</span>
+                  <span className="text-faint"> K/D</span>
+                </p>
+                <p className="text-center text-[10px] tabular-nums leading-tight text-faint">
+                  {n} maps{p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}
+                </p>
+              </div>
             );
           })}
-          {withStats.length === 0 ? (
-            <tr className="border-t border-line/40">
-              <td colSpan={5} className="px-4 py-3 text-center text-[11px] text-faint">No tracked stats yet for this lineup.</td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-      {noStats.length > 0 ? (
+        </div>
+      ) : (
+        <p className="px-4 py-4 text-center text-[11px] text-faint">No tracked stats yet for this lineup.</p>
+      )}
+      {extras.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-line/40 px-4 py-2">
           <span className="text-[9px] uppercase tracking-wider text-faint">Also on the roster</span>
-          {noStats.map((p) => (
-            <span key={p.nick} className="rounded bg-panel px-1.5 py-0.5 text-[11px] font-medium text-muted" title="No tracked matches in GRID's data yet">
+          {extras.map((p) => (
+            <span key={p.nick} className="rounded bg-panel px-1.5 py-0.5 text-[11px] font-medium text-muted" title={p.src === "" ? "No tracked matches in GRID's data yet" : `${p.kd.toFixed(2)} K/D over recent series`}>
               {p.nick}
             </span>
           ))}

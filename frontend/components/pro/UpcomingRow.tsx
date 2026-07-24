@@ -1,14 +1,18 @@
 import Link from "next/link";
 import type { MatchState } from "./types";
 import { TeamLogo } from "./TeamLogo";
-import { formatTag, startInfo, validHex } from "./format";
+import { dayGroup, formatTag, startInfo, validHex } from "./format";
 
 // Upcoming-match row: a team-colour edge, the start time, both teams with badge
 // logos, the tournament, and a Bo tag. Links to the detail route.
 export function UpcomingRow({ match }: { match: MatchState }) {
   const a = match.teams?.[0];
   const b = match.teams?.[1];
-  const { rel, abs } = startInfo(match.startScheduled);
+  const { rel, abs, date } = startInfo(match.startScheduled);
+  // rows group by event (not day), so carry the day on the row itself
+  const day = date ? dayGroup(date) : "";
+  const dayShort =
+    day === "Today" ? "" : day === "Tomorrow" ? "Tmrw" : date ? date.toLocaleDateString([], { weekday: "short" }) : "";
   const tag = formatTag(match);
   const aColor = validHex(a?.colorPrimary) ?? "#38d6ff";
   const bColor = validHex(b?.colorPrimary) ?? "#8a7dff";
@@ -27,18 +31,18 @@ export function UpcomingRow({ match }: { match: MatchState }) {
       />
 
       {/* time */}
-      <div className="w-16 shrink-0 sm:w-19">
+      <div className="w-18 shrink-0 sm:w-21">
         <div className={`truncate text-xs font-semibold ${soon ? "text-[#ff6b76]" : "text-brand"}`}>{rel || "TBD"}</div>
-        <div className="text-[11px] tabular-nums text-faint">{abs}</div>
+        <div className="truncate text-[11px] tabular-nums text-faint">{dayShort ? `${dayShort} · ` : ""}{abs}</div>
       </div>
 
       {/* teams */}
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={28} />
-        <span className="truncate text-sm font-semibold text-ink">{a?.shortName || a?.name || "TBD"}</span>
+        <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={34} />
+        <span className="truncate text-sm font-semibold text-ink sm:text-[15px]">{a?.shortName || a?.name || "TBD"}</span>
         <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-faint">vs</span>
-        <span className="truncate text-sm font-semibold text-ink">{b?.shortName || b?.name || "TBD"}</span>
-        <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={28} />
+        <span className="truncate text-sm font-semibold text-ink sm:text-[15px]">{b?.shortName || b?.name || "TBD"}</span>
+        <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={34} />
       </div>
 
       {/* tournament — hidden on the narrowest screens */}

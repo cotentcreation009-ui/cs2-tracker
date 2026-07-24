@@ -171,7 +171,7 @@ function TeamSide({
 }) {
   const inner = (
     <>
-      <TeamLogo name={name} src={logo} color={color} size={56} />
+      <TeamLogo name={name} src={logo} color={color} size={68} />
       <div className="min-w-0">
         <div className="truncate text-base font-bold text-ink sm:text-lg">{name || "TBD"}</div>
         {winner ? <div className="text-[11px] font-semibold uppercase tracking-wider text-good">Winner</div> : null}
@@ -296,7 +296,7 @@ function TeamScoreboard({
     <div className="overflow-hidden rounded-lg border border-line/70">
       <div className="flex items-center justify-between gap-2 border-b border-line/70 bg-panel/50 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <TeamLogo name={team?.shortName || team?.name} src={team?.logoUrl} color={team?.colorPrimary} size={20} />
+          <TeamLogo name={team?.shortName || team?.name} src={team?.logoUrl} color={team?.colorPrimary} size={26} />
           {team?.gridId ? (
             <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="truncate text-xs font-bold hover:underline" style={{ color: won ? "var(--color-good)" : hex }}>
               {team.shortName || team.name || "TBD"}

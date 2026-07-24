@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { MatchState, ProMatchesResponse } from "./types";
 import { usePoll, useNow } from "./usePoll";
-import { agoShort, dayGroup, startInfo } from "./format";
+import { agoShort } from "./format";
 import { LiveMatchCard } from "./LiveMatchCard";
 import { UpcomingRow } from "./UpcomingRow";
 
@@ -26,16 +26,20 @@ export function ProBoard() {
           new Date(x.startScheduled ?? 0).getTime() -
           new Date(y.startScheduled ?? 0).getTime(),
       );
-    // group upcoming by Today / Tomorrow / weekday-date, preserving time order
-    const groups: { label: string; items: MatchState[] }[] = [];
+    // group upcoming by EVENT; events ordered by their earliest match,
+    // matches inside each event stay in time order
+    const byEvent = new Map<string, { label: string; logo?: string; items: MatchState[] }>();
     for (const m of upcoming) {
-      const { date } = startInfo(m.startScheduled);
-      const label = date ? dayGroup(date) : "Scheduled";
-      const last = groups[groups.length - 1];
-      if (last && last.label === label) last.items.push(m);
-      else groups.push({ label, items: [m] });
+      const label = m.tournamentName || "Other matches";
+      const g = byEvent.get(label);
+      if (g) {
+        g.items.push(m);
+        if (!g.logo && m.tournamentLogoUrl) g.logo = m.tournamentLogoUrl;
+      } else {
+        byEvent.set(label, { label, logo: m.tournamentLogoUrl, items: [m] });
+      }
     }
-    return { live, upcomingGroups: groups };
+    return { live, upcomingGroups: [...byEvent.values()] };
   }, [data]);
 
   return (
@@ -70,12 +74,23 @@ export function ProBoard() {
 
           {upcomingGroups.length > 0 && (
             <section className="space-y-3">
-              <SectionHeading label="Upcoming" />
-              <div className="space-y-5">
+              <SectionHeading label="Upcoming · by event" />
+              <div className="space-y-6">
                 {upcomingGroups.map((g) => (
                   <div key={g.label} className="space-y-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
-                      {g.label}
+                    <div className="flex items-center gap-2 border-b border-line/50 pb-1.5">
+                      {g.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={g.logo} alt="" loading="lazy" className="h-5 w-5 shrink-0 rounded object-contain" />
+                      ) : (
+                        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70" />
+                      )}
+                      <span className="truncate text-xs font-bold uppercase tracking-wider text-muted">
+                        {g.label}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-faint">
+                        {g.items.length}
+                      </span>
                     </div>
                     <div className="space-y-2">
                       {g.items.map((m) => (
