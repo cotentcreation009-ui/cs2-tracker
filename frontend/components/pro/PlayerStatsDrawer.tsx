@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { ProPlayerStatsResponse, ProPlayerWindow } from "./types";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { resolvePlayerSteamId } from "@/lib/liquipediaClient";
 
 // Click-a-player drill-down: official GRID aggregates compared across time
 // windows (last week → last 12 months) plus peak-map highlights. Fetched
@@ -18,6 +20,21 @@ export function PlayerStatsDrawer({
 }) {
   const [data, setData] = useState<ProPlayerStatsResponse | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [steamId, setSteamId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    resolvePlayerSteamId(nick)
+      .then((id) => {
+        if (alive) setSteamId(id);
+      })
+      .catch(() => {
+        // no buttons, that's all
+      });
+    return () => {
+      alive = false;
+    };
+  }, [nick]);
 
   useEffect(() => {
     let alive = true;
@@ -106,9 +123,31 @@ export function PlayerStatsDrawer({
           })}
         </tbody>
       </table>
-      <p className="border-t border-line/30 px-4 py-1 text-[9px] text-faint">
-        Official GRID aggregates · map counts reflect GRID&apos;s tracked event coverage per window
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/30 px-4 py-2">
+        <p className="text-[9px] text-faint">
+          Official GRID aggregates · map counts reflect GRID&apos;s tracked event coverage per window
+        </p>
+        {steamId ? (
+          <span className="flex items-center gap-1.5">
+            <Link
+              href={`/profiles/${steamId}`}
+              title={`Open ${nick}'s player page on StatRun — matchmaking/FACEIT stats, friends and more (public data only)`}
+              className="btn btn-primary h-7 px-2.5 text-[11px]"
+            >
+              {nick} on StatRun
+            </Link>
+            <a
+              href={`https://steamcommunity.com/profiles/${steamId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Steam profile"
+              className="btn btn-ghost h-7 px-2.5 text-[11px]"
+            >
+              Steam ↗
+            </a>
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

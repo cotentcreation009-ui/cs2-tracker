@@ -45,6 +45,63 @@ function writeCache(nick: string, u: string | null): void {
   }
 }
 
+const STEAM_PREFIX = "lp:steam:";
+const STEAM_HIT_TTL_MS = 30 * 864e5;
+const STEAM_MISS_TTL_MS = 7 * 864e5;
+
+// Resolve a pro player's SteamID64 from their Liquipedia page's external
+// links (player infoboxes link steamcommunity.com/profiles/<id64>). Cached in
+// localStorage; paced on the same shared queue as photo lookups.
+export function resolvePlayerSteamId(nick: string): Promise<string | null> {
+  try {
+    const raw = localStorage.getItem(STEAM_PREFIX + nick.toLowerCase());
+    if (raw) {
+      const v = JSON.parse(raw) as { u: string | null; t: number };
+      const ttl = v.u ? STEAM_HIT_TTL_MS : STEAM_MISS_TTL_MS;
+      if (typeof v.t === "number" && Date.now() - v.t <= ttl) return Promise.resolve(v.u);
+    }
+  } catch {
+    // fall through to a live lookup
+  }
+  return (async () => {
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      origin: "*",
+      redirects: "1",
+      titles: nick,
+      prop: "extlinks",
+      ellimit: "500",
+    });
+    try {
+      const res = await pacedFetch(`${API}?${params}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const d = (await res.json()) as {
+        query?: { pages?: Record<string, { extlinks?: { "*"?: string }[] }> };
+      };
+      let id: string | null = null;
+      for (const p of Object.values(d.query?.pages ?? {})) {
+        for (const l of p.extlinks ?? []) {
+          const m = /steamcommunity\.com\/profiles\/(7656\d{13})/.exec(l["*"] ?? "");
+          if (m) {
+            id = m[1];
+            break;
+          }
+        }
+        if (id) break;
+      }
+      try {
+        localStorage.setItem(STEAM_PREFIX + nick.toLowerCase(), JSON.stringify({ u: id, t: Date.now() }));
+      } catch {
+        // uncached is fine
+      }
+      return id;
+    } catch {
+      return null; // transient — retry on a later view
+    }
+  })();
+}
+
 export function invalidatePlayerPhoto(nick: string): void {
   try {
     localStorage.removeItem(CACHE_PREFIX + nick.toLowerCase());

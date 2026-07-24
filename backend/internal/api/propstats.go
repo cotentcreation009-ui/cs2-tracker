@@ -43,32 +43,48 @@ func (s *Server) handleProPlayerStats(w http.ResponseWriter, r *http.Request) {
 		Stats  *grid.PlayerStats `json:"stats"` // null = no tracked data
 	}
 	rows := make([]windowRow, len(statWindows))
+	errs := make([]bool, len(statWindows))
 	var wg sync.WaitGroup
 	for i, win := range statWindows {
 		rows[i] = windowRow{Window: win.Key, Label: win.Label}
 		wg.Add(1)
 		go func(i int, key string) {
 			defer wg.Done()
-			wrapped, err := cachedTTL(s, ctx, cache.ProPlayerStatsKey(pid, key), 12*time.Hour,
-				func() (psWrap, error) {
-					st, err := cl.PlayerCareerStats(ctx, pid, key)
-					return psWrap{S: st}, err
-				})
+			fetch := func() (psWrap, error) {
+				return cachedTTL(s, ctx, cache.ProPlayerStatsKey(pid, key), 12*time.Hour,
+					func() (psWrap, error) {
+						st, err := cl.PlayerCareerStats(ctx, pid, key)
+						return psWrap{S: st}, err
+					})
+			}
+			wrapped, err := fetch()
+			if err != nil { // one retry — a transient miss otherwise renders a dash row
+				time.Sleep(400 * time.Millisecond)
+				wrapped, err = fetch()
+			}
 			if err == nil {
 				rows[i].Stats = wrapped.S
+			} else {
+				errs[i] = true
 			}
 		}(i, win.Key)
 	}
 	wg.Wait()
 
 	hasAny := false
-	for _, row := range rows {
+	clean := true
+	for i, row := range rows {
 		if row.Stats != nil {
 			hasAny = true
-			break
+		}
+		if errs[i] {
+			clean = false
 		}
 	}
-	setEdgeCache(w, 10*time.Minute)
+	// never let a partially-errored response sit at the edge for 10 minutes
+	if clean {
+		setEdgeCache(w, 10*time.Minute)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": true,
 		"any":     hasAny,
