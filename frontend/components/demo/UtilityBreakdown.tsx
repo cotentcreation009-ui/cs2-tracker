@@ -1029,7 +1029,7 @@ export default function UtilityBreakdown({
             }
           }}
         >
-          <div className="mb-1.5 flex w-full items-center gap-x-2 lg:w-[min(100cqw,calc(100cqh-72px))]">
+          <div className="mb-1.5 flex w-full items-center gap-x-2">
             <span className="stat-label shrink-0">Utility breakdown</span>
             {selPlayer && (
               <span className="pill min-w-0 truncate bg-panel text-ink" title={selPlayer.name}>
@@ -1054,7 +1054,7 @@ export default function UtilityBreakdown({
             )}
           </div>
           {selPlayer && selKinds.length > 0 && (
-            <div className="scroll-slim mb-2 flex w-full flex-wrap gap-1 lg:w-[min(100cqw,calc(100cqh-72px))] lg:flex-nowrap lg:overflow-x-auto">
+            <div className="scroll-slim mb-2 flex w-full flex-wrap gap-1 lg:flex-nowrap lg:overflow-x-auto">
               {selKinds.length > 1 && (
                 <button
                   type="button"
@@ -1110,7 +1110,8 @@ export default function UtilityBreakdown({
           )}
 
           {pinnedExec || (selPlayer && activeKind && selThrows.length > 0) ? (
-            <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-72px))] lg:max-w-none">
+            <div className="flex w-full flex-col gap-3 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
+            <div className="relative mx-auto w-full max-w-180 self-center lg:mx-0 lg:w-[min(calc(100cqw-17.5rem),calc(100cqh-72px))] lg:max-w-none lg:shrink-0">
               <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} timeline={!!pinnedExec} className="w-full" />
 
               <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
@@ -1173,6 +1174,59 @@ export default function UtilityBreakdown({
                 )}
               </div>
             </div>
+
+            {/* the throw list lives beside the map: hover previews, click pins */}
+            {selPlayer && activeKind && selThrows.length > 0 && (
+              <div className="min-w-0 flex-1 rounded-xl border border-line/60 bg-panel/20 px-3 py-2.5 lg:flex lg:min-h-0 lg:flex-col">
+                <div className="mb-1.5 flex items-center justify-between gap-2 lg:shrink-0">
+                  <span className="stat-label">
+                    {selThrows.length} {activeKindLabel}
+                  </span>
+                  <span className="hidden text-[10px] text-faint min-[1400px]:inline">hover = preview · click = pin</span>
+                </div>
+                <div className="scroll-slim max-h-56 space-y-1 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
+                  {selThrows.map((tw, i) => (
+                    <ThrowRow
+                      key={`${tw.round}-${tw.t}-${i}`}
+                      tw={tw}
+                      zone={zoneOf(tw.x, tw.y)}
+                      timing={timingOf(tw)}
+                      active={shownIdx === i}
+                      showKind={showAll}
+                      vic={tw.kind === "flash" ? flashVicOf(tw, selPlayer.i) : null}
+                      onClick={() => setThrowIdx(throwIdx === i ? null : i)}
+                      onEnter={() => setHoverIdx(i)}
+                      onLeave={() => setHoverIdx(null)}
+                    />
+                  ))}
+                </div>
+                {(spots.length > 1 || (spots.length === 1 && spots[0].count >= 2)) && (
+                  <div className="mt-2 border-t border-line pt-2 lg:shrink-0">
+                    <div className="stat-label mb-1">Repeated lineups</div>
+                    <div className="flex flex-wrap gap-1">
+                      {spots.slice(0, 6).map((sp, i) => {
+                        const z = zoneOf(sp.cx, sp.cy);
+                        const first = selThrows.indexOf(sp.throws[0]);
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => first >= 0 && setThrowIdx(first)}
+                            onMouseEnter={() => first >= 0 && setHoverIdx(first)}
+                            onMouseLeave={() => setHoverIdx(null)}
+                            title={`${sp.count}× · usually ${timingOf(sp.throws[0])} · avg ${mmss(sp.avgT)} · R${sp.throws.map((t) => t.round).join(", R")}`}
+                            className="pill bg-panel text-muted hover:text-ink"
+                          >
+                            {z ?? "spot"} ×{sp.count}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            </div>
           ) : (
             <div className="grid aspect-square w-full place-items-center rounded-xl border border-dashed border-line px-4 text-center text-sm text-muted lg:aspect-auto lg:min-h-0 lg:w-full lg:flex-1">
               {selPlayer
@@ -1217,57 +1271,6 @@ export default function UtilityBreakdown({
             </div>
           )}
 
-          {/* every throw of the active kind — hover previews it, click pins it */}
-          {selPlayer && activeKind && selThrows.length > 0 && (
-            <div className="card-2 px-3 py-2.5 lg:shrink-0">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <span className="stat-label">
-                  {selThrows.length} {activeKindLabel}
-                </span>
-                <span className="text-[10px] text-faint">hover = preview · click = pin · dashed = throw → land</span>
-              </div>
-              <div className="scroll-slim max-h-56 space-y-1 overflow-y-auto pr-1 lg:max-h-64">
-                {selThrows.map((tw, i) => (
-                  <ThrowRow
-                    key={`${tw.round}-${tw.t}-${i}`}
-                    tw={tw}
-                    zone={zoneOf(tw.x, tw.y)}
-                    timing={timingOf(tw)}
-                    active={shownIdx === i}
-                    showKind={showAll}
-                    vic={tw.kind === "flash" ? flashVicOf(tw, selPlayer.i) : null}
-                    onClick={() => setThrowIdx(throwIdx === i ? null : i)}
-                    onEnter={() => setHoverIdx(i)}
-                    onLeave={() => setHoverIdx(null)}
-                  />
-                ))}
-              </div>
-              {(spots.length > 1 || (spots.length === 1 && spots[0].count >= 2)) && (
-                <div className="mt-2 border-t border-line pt-2">
-                  <div className="stat-label mb-1">Repeated lineups</div>
-                  <div className="flex flex-wrap gap-1">
-                    {spots.slice(0, 6).map((sp, i) => {
-                      const z = zoneOf(sp.cx, sp.cy);
-                      const first = selThrows.indexOf(sp.throws[0]);
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => first >= 0 && setThrowIdx(first)}
-                          onMouseEnter={() => first >= 0 && setHoverIdx(first)}
-                          onMouseLeave={() => setHoverIdx(null)}
-                          title={`${sp.count}× · usually ${timingOf(sp.throws[0])} · avg ${mmss(sp.avgT)} · R${sp.throws.map((t) => t.round).join(", R")}`}
-                          className="pill bg-panel text-muted hover:text-ink"
-                        >
-                          {z ?? "spot"} ×{sp.count}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
 
           {executes.length > 0 && (
