@@ -10,8 +10,9 @@ import { useState } from "react";
 // scales, which is exactly the dual-axis mistake).
 
 const fmt = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+// thresholds on the x100 display scale (+2 = clearly good game, -2 = rough)
 const ratingTone = (v: number) =>
-  v >= 1.1 ? "text-good" : v <= 0.85 ? "text-bad" : "text-ink";
+  v >= 2 ? "text-good" : v <= -2 ? "text-bad" : "text-ink";
 
 const outFill = (o: string) =>
   o === "win" ? "bg-good" : o === "loss" ? "bg-bad" : "bg-mid";
@@ -21,7 +22,7 @@ const outLabel = (o: string) =>
   o === "win" ? "Win" : o === "loss" ? "Loss" : "Draw";
 
 export function RatingConsistencyChart({
-  ratings,
+  ratings: rawRatings,
   outcomes,
   total,
 }: {
@@ -30,6 +31,9 @@ export function RatingConsistencyChart({
   total: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  // per-game leetify_rating is a raw fraction; chart/labels use the x100
+  // display scale leetify.com shows ("+4.34")
+  const ratings = rawRatings.map((v) => v * 100);
   const n = ratings.length;
 
   const header = (

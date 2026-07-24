@@ -25,10 +25,11 @@ const METRICS: Metric[] = [
   {
     label: "Leetify rating",
     hint: "overall performance",
-    get: (s) => s.avgRating,
+    // avgRating is a raw fraction; leetify.com displays x100
+    get: (s) => s.avgRating * 100,
     fmt: fmtRating,
     dir: "high",
-    diverge: GAP_THRESHOLD,
+    diverge: GAP_THRESHOLD * 100,
   },
   { label: "Win rate", get: (s) => s.winPct, fmt: (v) => `${v.toFixed(0)}%`, dir: "high", diverge: 15 },
   {
