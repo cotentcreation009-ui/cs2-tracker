@@ -126,9 +126,12 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
 function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
   const hex = validHex(team.colorPrimary) ?? "#8a93a5";
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
-  const withStats = players.filter((p) => p.src !== "");
-  const cards = withStats.slice(0, 5);
-  const extras = [...withStats.slice(5), ...players.filter((p) => p.src === "")];
+  // Always show a full 5-card lineup: stat-backed players first, then the
+  // rest of the roster (silhouette + dash stats) so a thin-data team doesn't
+  // read as "3v5". Whoever doesn't fit folds into the chips row.
+  const ordered = [...players.filter((p) => p.src !== ""), ...players.filter((p) => p.src === "")];
+  const cards = ordered.slice(0, 5);
+  const extras = ordered.slice(5);
   return (
     <div className="card-2 overflow-hidden p-0">
       <Link href={`/pro-matches/team/${team.gridId}`} title="Team page — roster, stats & results" className="flex items-center gap-2.5 border-b px-4 py-3 transition hover:brightness-125" style={{ borderColor: `${hex}33`, background: `linear-gradient(90deg, ${hex}14, transparent)` }}>
@@ -139,6 +142,7 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
       {cards.length > 0 ? (
         <div className="grid grid-cols-5 gap-2 p-3">
           {cards.map((p) => {
+            const has = p.src !== "";
             const n = p.src === "grid" ? p.maps : p.series;
             return (
               <div key={p.nick} className="min-w-0">
@@ -147,11 +151,17 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
                   {p.nick}
                 </p>
                 <p className="text-center text-xs tabular-nums leading-tight">
-                  <span className={`font-bold ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</span>
-                  <span className="text-faint"> K/D</span>
+                  {has ? (
+                    <>
+                      <span className={`font-bold ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</span>
+                      <span className="text-faint"> K/D</span>
+                    </>
+                  ) : (
+                    <span className="text-faint">— K/D</span>
+                  )}
                 </p>
-                <p className="text-center text-[10px] tabular-nums leading-tight text-faint">
-                  {n} maps{p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}
+                <p className="truncate text-center text-[10px] tabular-nums leading-tight text-faint">
+                  {has ? `${n} maps${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}` : "no data yet"}
                 </p>
               </div>
             );

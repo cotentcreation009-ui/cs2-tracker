@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -26,7 +27,10 @@ func (s *Server) handleProPlayerImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown player")
 		return
 	}
-	ctx := r.Context()
+	// Hard budget: lookups queue on the Liquipedia limiter, and a page's worth
+	// of misses must never leave a request hanging for tens of seconds.
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	key := cache.ProPlayerImgKey(nick)
 
 	type img struct {
