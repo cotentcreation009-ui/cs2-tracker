@@ -98,7 +98,14 @@ export function MatchDetailClient({
             {isLive ? <LiveBadge /> : isFinished ? (
               <span className="pill border-line bg-panel text-[10px] uppercase tracking-wider text-muted">Final</span>
             ) : (
-              <span className="pill border-line bg-panel text-[10px] uppercase tracking-wider text-brand">Upcoming</span>
+              <>
+                {countdown(m.startScheduled, now) ? (
+                  <span className="pill border-brand/40 bg-brand/10 text-[11px] font-semibold tabular-nums text-brand" title={startAbs ? `Starts ${startAbs}` : undefined}>
+                    {countdown(m.startScheduled, now)}
+                  </span>
+                ) : null}
+                <span className="pill border-line bg-panel text-[10px] uppercase tracking-wider text-brand">Upcoming</span>
+              </>
             )}
           </div>
         </div>
@@ -152,6 +159,24 @@ export function MatchDetailClient({
       {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} /> : null}
     </div>
   );
+}
+
+// Live countdown to an upcoming match's scheduled start.
+function countdown(iso: string | undefined, now: number): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  let s = Math.floor((t - now) / 1000);
+  if (s <= 0) return "starting soon";
+  const d = Math.floor(s / 86400);
+  s -= d * 86400;
+  const h = Math.floor(s / 3600);
+  s -= h * 3600;
+  const m = Math.floor(s / 60);
+  const sec = s - m * 60;
+  if (d > 0) return `in ${d}d ${h}h ${m}m`;
+  if (h > 0) return `in ${h}h ${m}m ${sec}s`;
+  return `in ${m}m ${sec}s`;
 }
 
 function TeamSide({

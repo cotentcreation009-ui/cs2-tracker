@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { resolvePlayerPhoto } from "@/lib/liquipediaClient";
+import { useEffect, useRef, useState } from "react";
+import { invalidatePlayerPhoto, resolvePlayerPhoto } from "@/lib/liquipediaClient";
 
 // Pro-player avatar: team-tinted placeholder that upgrades to the player's
 // Liquipedia photo (CC BY-SA). Resolution happens in the BROWSER, batched for
@@ -23,6 +23,7 @@ export function PlayerAvatar({
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const retried = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -37,6 +38,22 @@ export function PlayerAvatar({
       alive = false;
     };
   }, [nick]);
+
+  // A resolved URL can still fail to load (CDN hiccup): retry the image once
+  // with a cache-buster; a second failure clears the cached verdict so the
+  // next page view re-resolves from scratch.
+  const onImgError = () => {
+    setLoaded(false);
+    if (!retried.current && src) {
+      retried.current = true;
+      const bust = `${src}${src.includes("?") ? "&" : "?"}r=1`;
+      setSrc(null);
+      setTimeout(() => setSrc(bust), 1200);
+    } else {
+      invalidatePlayerPhoto(nick);
+      setSrc(null);
+    }
+  };
 
   const card = shape === "card";
   return (
@@ -72,7 +89,7 @@ export function PlayerAvatar({
           loading="lazy"
           referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
-          onError={() => setSrc(null)}
+          onError={onImgError}
           className={`absolute inset-0 h-full w-full object-cover ${card ? "object-top" : ""} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
         />
       ) : null}

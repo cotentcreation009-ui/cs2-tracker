@@ -344,6 +344,38 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 		fillAggRow(&row, a)
 		rows = append(rows, row)
 	}
+	// GRID sometimes carries the same player under two nick spellings
+	// ("910" and "910-") — merge rows whose nicks differ only by trailing
+	// punctuation, keeping the record with more play and the clean spelling.
+	normNick := func(n string) string {
+		return strings.TrimRight(strings.ToLower(strings.TrimSpace(n)), "-_.~")
+	}
+	idx := map[string]int{}
+	deduped := rows[:0]
+	for _, row := range rows {
+		k := normNick(row.Nick)
+		if k == "" {
+			k = strings.ToLower(row.Nick)
+		}
+		if j, ok := idx[k]; ok {
+			cur := &deduped[j]
+			better := row.Maps > cur.Maps || (row.Maps == cur.Maps && row.Kills > cur.Kills)
+			if better {
+				if strings.ToLower(cur.Nick) == k { // keep the clean display nick
+					row.Nick = cur.Nick
+				}
+				row.InRoster = row.InRoster || cur.InRoster
+				*cur = row
+			} else if strings.ToLower(row.Nick) == k {
+				cur.Nick = row.Nick
+			}
+			continue
+		}
+		idx[k] = len(deduped)
+		deduped = append(deduped, row)
+	}
+	rows = deduped
+
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].InRoster != rows[j].InRoster {
 			return rows[i].InRoster
