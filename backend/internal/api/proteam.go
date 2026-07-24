@@ -40,17 +40,14 @@ func (s *Server) handleProTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resultOf := func(id string) *grid.SeriesResult {
-		res, err := cachedTTL(s, ctx, cache.ProSeriesResultKey(id), 3*time.Minute,
-			func() (*grid.SeriesResult, error) { return cl.SeriesResult(ctx, id) })
-		if err != nil || res == nil {
-			return nil
-		}
-		if res.Finished && s.cache != nil {
-			_ = s.cache.SetJSONTTL(ctx, cache.ProSeriesResultKey(id), res, 12*time.Hour)
-		}
-		return res
+	resultOf := s.seriesResultOf(ctx, cl)
+
+	// warm all result lookups concurrently before the serial pass
+	need := map[string]bool{}
+	for _, ps := range recent {
+		need[ps.ID] = true
 	}
+	prefetchResults(need, resultOf)
 
 	// team identity from its own past-series entries (no extra upstream call)
 	var team grid.Team

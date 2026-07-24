@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -101,23 +102,14 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"form": map[string]any{}, "h2h": []any{}})
 		return
 	}
-	ctx := r.Context()
-	cl := s.proMatches.Client()
-	gte, lte := grid.PastWindow(time.Now())
-	teamIDs := []string{ms.Teams[0].GridID, ms.Teams[1].GridID}
+	setEdgeCache(w, 60*time.Second)
+	writeJSON(w, http.StatusOK, s.buildMatchHistory(r.Context(), ms))
+}
 
-	// recent past series per team (cached 30m)
-	recent := map[string][]grid.PastSeries{}
-	for _, tid := range teamIDs {
-		ps, err := cachedTTL(s, ctx, cache.ProTeamRecentKey(tid), 30*time.Minute,
-			func() ([]grid.PastSeries, error) { return cl.RecentSeriesForTeam(ctx, tid, gte, lte) })
-		if err == nil {
-			recent[tid] = ps
-		}
-	}
-
-	// resolve a series' result (cached: finished 12h, else 3m)
-	resultOf := func(id string) *grid.SeriesResult {
+// seriesResultOf returns a cached-or-fetched series-result resolver
+// (finished results re-cached for 12h, unfinished 3m).
+func (s *Server) seriesResultOf(ctx context.Context, cl *grid.Client) func(string) *grid.SeriesResult {
+	return func(id string) *grid.SeriesResult {
 		res, err := cachedTTL(s, ctx, cache.ProSeriesResultKey(id), 3*time.Minute,
 			func() (*grid.SeriesResult, error) { return cl.SeriesResult(ctx, id) })
 		if err != nil || res == nil {
@@ -128,6 +120,71 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		return res
 	}
+}
+
+// prefetchResults warms the series-result cache for a set of ids with bounded
+// concurrency (the Series State endpoint allows 180/min — six in flight keeps
+// a cold page's ~20 lookups from running serially).
+func prefetchResults(ids map[string]bool, resultOf func(string) *grid.SeriesResult) {
+	sem := make(chan struct{}, 6)
+	var wg sync.WaitGroup
+	for id := range ids {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			_ = resultOf(id)
+		}(id)
+	}
+	wg.Wait()
+}
+
+// buildMatchHistory assembles lineups + recent form + head-to-head for a
+// series. Everything is cache-backed, and cold paths fan out concurrently
+// (both teams at once, bounded result/stat prefetches) — also called by the
+// background prewarmer so users rarely see a cold build.
+func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[string]any {
+	cl := s.proMatches.Client()
+	gte, lte := grid.PastWindow(time.Now())
+	teamIDs := []string{ms.Teams[0].GridID, ms.Teams[1].GridID}
+
+	// recent past series + roster per team, both teams concurrently (the
+	// Central limiter's burst covers the four calls)
+	recent := map[string][]grid.PastSeries{}
+	rosterOf := map[string][]grid.RosterPlayer{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, tid := range teamIDs {
+		wg.Add(1)
+		go func(tid string) {
+			defer wg.Done()
+			ps, err := cachedTTL(s, ctx, cache.ProTeamRecentKey(tid), 30*time.Minute,
+				func() ([]grid.PastSeries, error) { return cl.RecentSeriesForTeam(ctx, tid, gte, lte) })
+			ro, _ := cachedTTL(s, ctx, cache.ProTeamRosterKey(tid), 6*time.Hour,
+				func() ([]grid.RosterPlayer, error) { return cl.TeamRoster(ctx, tid) })
+			mu.Lock()
+			if err == nil {
+				recent[tid] = ps
+			}
+			rosterOf[tid] = ro
+			mu.Unlock()
+		}(tid)
+	}
+	wg.Wait()
+
+	resultOf := s.seriesResultOf(ctx, cl)
+
+	// warm every needed series result in parallel before the serial pass
+	need := map[string]bool{}
+	for _, tid := range teamIDs {
+		for _, ps := range recent[tid] {
+			if ps.ID != ms.SeriesID {
+				need[ps.ID] = true
+			}
+		}
+	}
+	prefetchResults(need, resultOf)
 
 	type formEntry struct {
 		SeriesID     string `json:"seriesId"`
@@ -212,19 +269,16 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 	// cached series results the form uses when a player has no official data.
 	rosters := map[string][]proPlayerRow{}
 	for _, tid := range teamIDs {
-		roster, _ := cachedTTL(s, ctx, cache.ProTeamRosterKey(tid), 6*time.Hour,
-			func() ([]grid.RosterPlayer, error) { return cl.TeamRoster(ctx, tid) })
 		agg := aggregateTeamPlayers(recent[tid], ms.SeriesID, tid, resultOf)
-		rosters[tid] = buildPlayerRows(s, ctx, cl, roster, agg, "LAST_3_MONTHS", 7)
+		rosters[tid] = buildPlayerRows(s, ctx, cl, rosterOf[tid], agg, "LAST_3_MONTHS", 7)
 	}
 
-	setEdgeCache(w, 60*time.Second)
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"teams":   ms.Teams,
 		"form":    form,
 		"h2h":     h2h,
 		"rosters": rosters,
-	})
+	}
 }
 
 // proPlayerRow is one lineup/team-page player row: official GRID aggregates
@@ -301,11 +355,22 @@ type psWrap struct {
 // buildPlayerRows merges the roster with official stats (window = a GRID
 // TimeRangeFilter enum name), falling back to the recent-series aggregates.
 func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []grid.RosterPlayer, agg map[string]*playerAgg, window string, limit int) []proPlayerRow {
-	var rows []proPlayerRow
-	seen := map[string]bool{}
-	for _, rp := range roster {
-		row := proPlayerRow{Nick: rp.Nick, InRoster: true}
-		if rp.ID != "" {
+	// official stats per player, fetched concurrently — the stats limiter
+	// still paces the upstream, but cache hits and HTTP overlap instead of
+	// queueing serially (this was the bulk of a cold page's wait)
+	rowsArr := make([]proPlayerRow, len(roster))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i, rp := range roster {
+		rowsArr[i] = proPlayerRow{Nick: rp.Nick, InRoster: true}
+		if rp.ID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, rp grid.RosterPlayer) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			w, err := cachedTTL(s, ctx, cache.ProPlayerStatsKey(rp.ID, window), 12*time.Hour,
 				func() (psWrap, error) {
 					st, err := cl.PlayerCareerStats(ctx, rp.ID, window)
@@ -315,6 +380,7 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 			// side (e.g. maps counted but no player lines) — fall through
 			if err == nil && w.S != nil && w.S.Kills+w.S.Deaths > 0 {
 				st := w.S
+				row := &rowsArr[i]
 				row.Src = "grid"
 				row.Series = st.SeriesCount
 				row.Maps = st.Maps
@@ -325,7 +391,14 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 				row.FKPct = st.FirstKillPct
 				row.WinPct = st.MapWinPct
 			}
-		}
+		}(i, rp)
+	}
+	wg.Wait()
+
+	var rows []proPlayerRow
+	seen := map[string]bool{}
+	for i, rp := range roster {
+		row := rowsArr[i]
 		if row.Src == "" {
 			if a := agg[strings.ToLower(rp.Nick)]; a != nil && a.k+a.d > 0 {
 				fillAggRow(&row, a)

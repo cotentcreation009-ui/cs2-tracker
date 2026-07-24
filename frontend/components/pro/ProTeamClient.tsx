@@ -141,7 +141,9 @@ export function ProTeamClient({ id }: { id: string }) {
         <section className="card-2 overflow-hidden p-0 self-start">
           <div className="flex items-center justify-between border-b border-line/70 px-4 py-2.5">
             <span className="text-sm font-bold uppercase tracking-wider text-ink">Roster &amp; stats</span>
-            <span className="text-[10px] text-faint">official GRID statistics · last year</span>
+            <span className="text-[10px] text-faint" title="Official GRID aggregates over the maps GRID tracked in the last 12 months — coverage varies by event tier">
+              official GRID statistics · last 12 months
+            </span>
           </div>
           {players.length === 0 ? (
             <p className="px-4 py-6 text-sm text-faint">No roster on record for this team.</p>
