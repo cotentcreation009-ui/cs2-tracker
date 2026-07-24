@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ProFormEntry, ProHistory, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
 import { validHex } from "./format";
 
 // Recent form + head-to-head, loaded lazily (after the live scoreboard) from
@@ -126,6 +127,8 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
 function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
   const hex = validHex(team.colorPrimary) ?? "#8a93a5";
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = players.find((p) => p.id && p.id === openId);
   // Always show a full 5-card lineup: stat-backed players first, then the
   // rest of the roster (silhouette + dash stats) so a thin-data team doesn't
   // read as "3v5". Whoever doesn't fit folds into the chips row.
@@ -149,8 +152,18 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
           {cards.map((p) => {
             const has = p.src !== "";
             const n = p.src === "grid" ? p.maps : p.series;
+            const clickable = !!p.id;
+            const isOpen = !!p.id && p.id === openId;
             return (
-              <div key={p.nick} className="min-w-0">
+              <button
+                key={p.nick}
+                type="button"
+                disabled={!clickable}
+                onClick={() => setOpenId(isOpen ? null : (p.id ?? null))}
+                title={clickable ? `${p.nick} — click for form over time` : undefined}
+                className={`min-w-0 rounded-lg text-left transition ${clickable ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"} ${isOpen ? "ring-1" : ""}`}
+                style={isOpen ? { boxShadow: `0 0 0 1px ${hex}66` } : undefined}
+              >
                 <PlayerAvatar nick={p.nick} hex={hex} shape="card" />
                 <p className="mt-1.5 truncate text-center text-xs font-bold text-ink" title={p.nick}>
                   {p.nick}
@@ -171,13 +184,23 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
                 >
                   {has ? `${n} maps${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}` : "no data yet"}
                 </p>
-              </div>
+                {clickable ? (
+                  <p className={`text-center text-[9px] leading-tight ${isOpen ? "" : "text-faint/70"}`} style={isOpen ? { color: hex } : undefined}>
+                    {isOpen ? "▲ close" : "▾ more stats"}
+                  </p>
+                ) : null}
+              </button>
             );
           })}
         </div>
       ) : (
         <p className="px-4 py-4 text-center text-[11px] text-faint">No tracked stats yet for this lineup.</p>
       )}
+      {open?.id ? (
+        <div className="border-t border-line/40 bg-panel/25">
+          <PlayerStatsDrawer playerId={open.id} nick={open.nick} hex={hex} />
+        </div>
+      ) : null}
       {extras.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-line/40 px-4 py-2">
           <span className="text-[9px] uppercase tracking-wider text-faint">Also on the roster</span>
@@ -255,6 +278,7 @@ function FormCard({ team, entries }: { team: ProTeam; entries: ProFormEntry[] })
           ))}
         </div>
       )}
+      <p className="mt-2 text-[9px] text-faint">Results from GRID-tracked events · last 120 days</p>
     </div>
   );
 }

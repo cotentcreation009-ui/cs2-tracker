@@ -285,6 +285,7 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 // (src "grid") or the recent-series fallback (src "agg"); recent stand-ins
 // not on the published roster carry inRoster=false.
 type proPlayerRow struct {
+	ID       string  `json:"id,omitempty"` // GRID player id (roster players only)
 	Nick     string  `json:"nick"`
 	InRoster bool    `json:"inRoster"`
 	Src      string  `json:"src"` // "grid" | "agg" | ""
@@ -362,7 +363,7 @@ func buildPlayerRows(s *Server, ctx context.Context, cl *grid.Client, roster []g
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
 	for i, rp := range roster {
-		rowsArr[i] = proPlayerRow{Nick: rp.Nick, InRoster: true}
+		rowsArr[i] = proPlayerRow{ID: rp.ID, Nick: rp.Nick, InRoster: true}
 		if rp.ID == "" {
 			continue
 		}

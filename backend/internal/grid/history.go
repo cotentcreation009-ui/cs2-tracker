@@ -334,17 +334,22 @@ type PlayerStats struct {
 	MapWinPct    float64 `json:"mapWinPct"`
 	Kills        int     `json:"kills"`
 	Deaths       int     `json:"deaths"`
+	Assists      int     `json:"assists"`
 	AvgKills     float64 `json:"avgKills"` // per map
 	MaxKills     int     `json:"maxKills"`
 	KD           float64 `json:"kd"`
 	FirstKillPct float64 `json:"firstKillPct"` // % of maps with the first kill
+	Rounds       int     `json:"rounds"`       // round segments played
+	RoundWinPct  float64 `json:"roundWinPct"`  // % of rounds won
+	KPR          float64 `json:"kpr"`          // kills per round
 }
 
 const playerStatsQuery = `query PlayerStats($pid: ID!, $w: TimeRangeFilter!) {
   playerStatistics(playerId: $pid, filter: { timeWindow: $w }) {
     series { count won { value count percentage } }
     game { count won { value count percentage } kills { sum avg max } deaths { sum avg }
-      firstKill { value count percentage } }
+      killAssistsReceived { sum } firstKill { value count percentage } }
+    segment { type count won { value count percentage } }
   }
 }`
 
@@ -383,8 +388,16 @@ func (c *Client) PlayerCareerStats(ctx context.Context, playerID, window string)
 						Sum int     `json:"sum"`
 						Avg float64 `json:"avg"`
 					} `json:"deaths"`
+					KillAssistsReceived struct {
+						Sum int `json:"sum"`
+					} `json:"killAssistsReceived"`
 					FirstKill []bucket `json:"firstKill"`
 				} `json:"game"`
+				Segment []struct {
+					Type  string   `json:"type"`
+					Count int      `json:"count"`
+					Won   []bucket `json:"won"`
+				} `json:"segment"`
 			} `json:"playerStatistics"`
 		} `json:"data"`
 	}
@@ -411,14 +424,24 @@ func (c *Client) PlayerCareerStats(ctx context.Context, playerID, window string)
 		MapWinPct:    pct(ps.Game.Won),
 		Kills:        ps.Game.Kills.Sum,
 		Deaths:       ps.Game.Deaths.Sum,
+		Assists:      ps.Game.KillAssistsReceived.Sum,
 		AvgKills:     ps.Game.Kills.Avg,
 		MaxKills:     ps.Game.Kills.Max,
 		FirstKillPct: pct(ps.Game.FirstKill),
+	}
+	for _, seg := range ps.Segment {
+		if seg.Type == "round" {
+			out.Rounds = seg.Count
+			out.RoundWinPct = pct(seg.Won)
+		}
 	}
 	if out.Deaths > 0 {
 		out.KD = float64(out.Kills) / float64(out.Deaths)
 	} else {
 		out.KD = float64(out.Kills)
+	}
+	if out.Rounds > 0 {
+		out.KPR = float64(out.Kills) / float64(out.Rounds)
 	}
 	return out, nil
 }
