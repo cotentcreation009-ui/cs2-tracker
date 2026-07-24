@@ -15,7 +15,7 @@
 // The CC BY-SA attribution is rendered next to every table that shows photos.
 
 const API = "https://liquipedia.net/counterstrike/api.php";
-const CACHE_PREFIX = "lp:img:";
+const CACHE_PREFIX = "lp:img2:";
 const HIT_TTL_MS = 14 * 864e5;
 const MISS_TTL_MS = 3 * 864e5;
 const GAP_MS = 2100;
@@ -42,6 +42,14 @@ function writeCache(nick: string, u: string | null): void {
     localStorage.setItem(CACHE_PREFIX + nick.toLowerCase(), JSON.stringify({ u, t: Date.now() }));
   } catch {
     // storage full/blocked — resolution still worked, just uncached
+  }
+}
+
+export function invalidatePlayerPhoto(nick: string): void {
+  try {
+    localStorage.removeItem(CACHE_PREFIX + nick.toLowerCase());
+  } catch {
+    // ignore
   }
 }
 
@@ -105,26 +113,36 @@ async function execBatch(batch: Pending[]): Promise<void> {
   if (byNick.size === 0) return;
   const nicks = [...byNick.values()].map((arr) => arr[0].nick);
 
-  try {
-    const files = await listPageFiles(nicks); // call 1 (+continuation)
-    const bestByNick = pickBest(nicks, files);
-    const wanted = [...new Set([...bestByNick.values()].filter((t): t is string => t !== null))];
-    const urls = wanted.length > 0 ? await fileThumbUrls(wanted) : new Map<string, string>(); // call 2
-    for (const [k, arr] of byNick) {
-      const title = bestByNick.get(k) ?? null;
-      const u = (title ? urls.get(title) : null) ?? null;
-      writeCache(arr[0].nick, u);
-      for (const b of arr) b.resolve(u);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { files, redirects } = await listPageFiles(nicks); // call 1 (+continuation)
+      const bestByNick = pickBest(nicks, files, redirects);
+      const wanted = [...new Set([...bestByNick.values()].filter((t): t is string => t !== null))];
+      const urls = wanted.length > 0 ? await fileThumbUrls(wanted) : new Map<string, string>(); // call 2
+      for (const [k, arr] of byNick) {
+        const title = bestByNick.get(k) ?? null;
+        const u = (title ? urls.get(title) : null) ?? null;
+        writeCache(arr[0].nick, u);
+        for (const b of arr) b.resolve(u);
+      }
+      return;
+    } catch {
+      // network/CORS/429 — retry the whole batch once before giving up
+      if (attempt === 0) await sleep(1500);
     }
-  } catch {
-    // network/CORS/429 — don't cache, fall back to initials
-    for (const arr of byNick.values()) for (const b of arr) b.resolve(null);
   }
+  // both attempts failed — don't cache, fall back to placeholders
+  for (const arr of byNick.values()) for (const b of arr) b.resolve(null);
 }
 
-// One query for ALL the players' pages → every file title used on them.
-async function listPageFiles(nicks: string[]): Promise<string[]> {
+// One query for ALL the players' pages → every file title used on them,
+// plus the redirect map (a nick like "MartinezSa" can redirect to a page
+// titled "Martinez" whose photo files are named after the TARGET title).
+async function listPageFiles(
+  nicks: string[],
+): Promise<{ files: string[]; redirects: Map<string, string> }> {
   const files: string[] = [];
+  const redirects = new Map<string, string>();
   let cont: string | null = null;
   for (let page = 0; page < 3; page++) {
     const params = new URLSearchParams({
@@ -140,34 +158,52 @@ async function listPageFiles(nicks: string[]): Promise<string[]> {
     const res = await pacedFetch(`${API}?${params}`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const d = (await res.json()) as {
-      query?: { pages?: Record<string, { images?: { title?: string }[] }> };
+      query?: {
+        redirects?: { from?: string; to?: string }[];
+        pages?: Record<string, { images?: { title?: string }[] }>;
+      };
       continue?: { imcontinue?: string };
     };
+    for (const r of d.query?.redirects ?? []) {
+      if (r.from && r.to) redirects.set(r.from.toLowerCase(), r.to);
+    }
     for (const p of Object.values(d.query?.pages ?? {})) {
       for (const im of p.images ?? []) if (im.title) files.push(im.title);
     }
     cont = d.continue?.imcontinue ?? null;
     if (!cont) break;
   }
-  return files;
+  return { files, redirects };
 }
 
 // Same heuristic as the backend: files named "<Nick> at <Event>.jpg" (or "@"),
-// newest year wins (that's the wiki infobox shot). Keyed by lowercase nick.
-function pickBest(nicks: string[], files: string[]): Map<string, string | null> {
+// newest year wins (that's the wiki infobox shot). Tries the nick and its
+// redirect-target page title (a nick like "MartinezSa" can redirect to a page
+// titled "Martinez" whose photo files are named after the TARGET title).
+// Keyed by lowercase nick.
+function pickBest(
+  nicks: string[],
+  files: string[],
+  redirects: Map<string, string>,
+): Map<string, string | null> {
   const out = new Map<string, string | null>();
   for (const nick of nicks) {
-    const esc = nick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`^File:${esc}\\s*(?:at|@)\\s+.+\\.(?:jpe?g|png)$`, "i");
+    const aliases = [nick];
+    const target = redirects.get(nick.toLowerCase());
+    if (target && target.toLowerCase() !== nick.toLowerCase()) aliases.push(target);
     let bestKey = "";
     let best: string | null = null;
-    for (const f of files) {
-      if (!re.test(f)) continue;
-      const years = f.match(/20\d\d/g);
-      const key = `${years ? years[years.length - 1] : "0"}|${f}`;
-      if (key > bestKey) {
-        bestKey = key;
-        best = f;
+    for (const alias of aliases) {
+      const esc = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`^File:${esc}\\s*(?:at|@)\\s+.+\\.(?:jpe?g|png)$`, "i");
+      for (const f of files) {
+        if (!re.test(f)) continue;
+        const years = f.match(/20\d\d/g);
+        const key = `${years ? years[years.length - 1] : "0"}|${f}`;
+        if (key > bestKey) {
+          bestKey = key;
+          best = f;
+        }
       }
     }
     out.set(nick.toLowerCase(), best);
