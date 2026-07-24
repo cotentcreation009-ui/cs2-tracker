@@ -12,6 +12,7 @@ package liquipedia
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,10 +20,16 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
+
+// ErrRateLimited is returned while the client is backing off after a 429
+// (Liquipedia rate-limits datacenter IP ranges — GCE traffic can be refused
+// outright). Callers should treat it as a soft miss.
+var ErrRateLimited = errors.New("liquipedia: backing off after 429")
 
 const (
 	apiURL    = "https://liquipedia.net/counterstrike/api.php"
@@ -42,6 +49,9 @@ type Client struct {
 	http *http.Client
 	lim  *rate.Limiter
 	log  *slog.Logger
+
+	mu         sync.Mutex
+	pauseUntil time.Time // set after a 429; calls fail fast until then
 }
 
 func NewClient(log *slog.Logger) *Client {
@@ -141,7 +151,27 @@ func (c *Client) PlayerPhoto(ctx context.Context, nick string) (*Photo, error) {
 	return &Photo{Mime: mime, Data: img}, nil
 }
 
+// checkPause fails fast while backing off; note429 starts a backoff window.
+func (c *Client) checkPause() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Now().Before(c.pauseUntil) {
+		return ErrRateLimited
+	}
+	return nil
+}
+
+func (c *Client) note429() {
+	c.mu.Lock()
+	c.pauseUntil = time.Now().Add(15 * time.Minute)
+	c.mu.Unlock()
+	c.log.Warn("liquipedia rate-limited this IP; pausing lookups", "until", c.pauseUntil)
+}
+
 func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
+	if err := c.checkPause(); err != nil {
+		return nil, err
+	}
 	if err := c.lim.Wait(ctx); err != nil {
 		return nil, err
 	}
@@ -157,6 +187,10 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 		return nil, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		c.note429()
+		return nil, ErrRateLimited
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("liquipedia: status %d", res.StatusCode)
 	}
@@ -164,6 +198,9 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 }
 
 func (c *Client) getImage(ctx context.Context, u string) ([]byte, string, error) {
+	if err := c.checkPause(); err != nil {
+		return nil, "", err
+	}
 	if err := c.lim.Wait(ctx); err != nil {
 		return nil, "", err
 	}
@@ -177,6 +214,10 @@ func (c *Client) getImage(ctx context.Context, u string) ([]byte, string, error)
 		return nil, "", err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		c.note429()
+		return nil, "", ErrRateLimited
+	}
 	if res.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("liquipedia: image status %d", res.StatusCode)
 	}

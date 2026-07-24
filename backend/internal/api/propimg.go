@@ -52,6 +52,13 @@ func (s *Server) handleProPlayerImage(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			s.log.Warn("liquipedia photo lookup failed", "nick", nick, "err", err)
+			// negative-cache errors briefly so failing lookups (e.g. this IP
+			// being rate-limited) don't add latency or upstream load on every
+			// page view; the browser-side resolver takes over meanwhile
+			if s.cache != nil {
+				_ = s.cache.SetJSONTTL(ctx, key, img{}, 30*time.Minute)
+			}
+			w.Header().Set("Cache-Control", "public, max-age=600, s-maxage=1800")
 			writeError(w, http.StatusNotFound, "unknown player")
 			return
 		}

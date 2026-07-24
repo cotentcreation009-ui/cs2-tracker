@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { resolvePlayerPhoto } from "@/lib/liquipediaClient";
 
 // Pro-player avatar: team-tinted initials that upgrade to the player's
-// Liquipedia photo (CC BY-SA) once /api/pro-matches/player-image resolves.
-// Cold lookups are rate-limited server-side, so photos can fill in
-// progressively — the initials stay as the instant fallback.
+// Liquipedia photo (CC BY-SA). Tries our backend cache first; if the server
+// can't provide it (Liquipedia rate-limits datacenter IPs), the browser
+// resolves the photo itself via Liquipedia's CORS API and hotlinks the
+// thumbnail with no referrer. Initials remain the instant fallback.
 export function PlayerAvatar({
   nick,
   hex,
@@ -15,8 +17,28 @@ export function PlayerAvatar({
   hex: string;
   size?: number;
 }) {
+  const [src, setSrc] = useState<string | null>(
+    `/api/pro-matches/player-image/${encodeURIComponent(nick)}`,
+  );
   const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [triedClient, setTriedClient] = useState(false);
+
+  const onError = () => {
+    setLoaded(false);
+    if (triedClient) {
+      setSrc(null);
+      return;
+    }
+    setTriedClient(true);
+    setSrc(null);
+    resolvePlayerPhoto(nick)
+      .then((u) => {
+        if (u) setSrc(u);
+      })
+      .catch(() => {
+        // keep initials
+      });
+  };
 
   return (
     <span
@@ -32,14 +54,15 @@ export function PlayerAvatar({
       }}
     >
       {nick.slice(0, 2)}
-      {!failed ? (
+      {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/api/pro-matches/player-image/${encodeURIComponent(nick)}`}
+          src={src}
           alt=""
           loading="lazy"
+          referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
+          onError={onError}
           className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
         />
       ) : null}
