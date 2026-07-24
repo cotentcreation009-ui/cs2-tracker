@@ -97,7 +97,7 @@ func ProPlayerImgKey(nick string) string { return "cs2:pro:pimg:" + strings.ToLo
 
 // ProPlayerStatsKey caches a player's official GRID aggregates per window.
 func ProPlayerStatsKey(playerID, window string) string {
-	return "cs2:pro:pstats:" + playerID + ":" + window
+	return "cs2:pro:pstats2:" + playerID + ":" + window
 }
 func SteamExtrasKey(steamID uint64) string {
 	return fmt.Sprintf("cs2:steamextras:%d", steamID)

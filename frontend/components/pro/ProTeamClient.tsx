@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
 import { validHex } from "./format";
 
 // HLTV-style team page: identity header with a record/form stat strip, the
@@ -13,6 +14,7 @@ import { validHex } from "./format";
 export function ProTeamClient({ id }: { id: string }) {
   const [data, setData] = useState<ProTeamPage | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -164,7 +166,14 @@ export function ProTeamClient({ id }: { id: string }) {
                   </thead>
                   <tbody>
                     {withStats.map((p, i) => (
-                      <RosterRow key={p.nick} p={p} rank={i + 1} hex={hex} />
+                      <RosterRow
+                        key={p.nick}
+                        p={p}
+                        rank={i + 1}
+                        hex={hex}
+                        open={!!p.id && p.id === openId}
+                        onToggle={() => setOpenId(p.id && p.id !== openId ? p.id : null)}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -189,7 +198,10 @@ export function ProTeamClient({ id }: { id: string }) {
         <section className="card-2 overflow-hidden p-0 self-start">
           <div className="flex items-center justify-between border-b border-line/70 px-4 py-2.5">
             <span className="text-sm font-bold uppercase tracking-wider text-ink">Recent results</span>
-            {rec ? <span className="text-[10px] tabular-nums text-faint">{rec.wins}–{rec.losses}</span> : null}
+            <span className="flex items-center gap-2">
+              <span className="text-[10px] text-faint" title="Series from GRID-tracked events over the last 120 days">last 120 days</span>
+              {rec ? <span className="text-[10px] tabular-nums text-faint">{rec.wins}–{rec.losses}</span> : null}
+            </span>
           </div>
           {results.length === 0 ? (
             <p className="px-4 py-6 text-sm text-faint">No finished series in the recent window.</p>
@@ -214,18 +226,41 @@ export function ProTeamClient({ id }: { id: string }) {
   );
 }
 
-function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: string }) {
+function RosterRow({
+  p,
+  rank,
+  hex,
+  open,
+  onToggle,
+}: {
+  p: ProTeamPlayer;
+  rank: number;
+  hex: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const grid = p.src === "grid";
   const n = grid ? p.maps : p.series;
   const diff = p.kills - p.deaths;
+  const clickable = !!p.id;
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
   return (
-    <tr className="border-t border-line/40 transition-colors hover:bg-panel/40">
+    <>
+    <tr
+      onClick={clickable ? onToggle : undefined}
+      title={clickable ? `${p.nick} — click for form over time` : undefined}
+      className={`border-t border-line/40 transition-colors hover:bg-panel/40 ${clickable ? "cursor-pointer" : ""} ${open ? "bg-panel/40" : ""}`}
+    >
       <td className="max-w-0 px-4 py-2.5">
         <span className="flex items-center gap-2.5">
           <span className={`w-3 shrink-0 text-right text-[10px] font-bold tabular-nums ${rank === 1 ? "" : "text-faint"}`} style={rank === 1 ? { color: hex } : undefined}>{rank}</span>
           <PlayerAvatar nick={p.nick} hex={hex} size={48} />
           <span className="truncate text-[15px] font-semibold text-ink">{p.nick}</span>
+          {clickable ? (
+            <svg viewBox="0 0 24 24" className={`h-3 w-3 shrink-0 text-faint transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          ) : null}
           {!p.inRoster ? (
             <span className="shrink-0 rounded bg-panel px-1 text-[8px] uppercase tracking-wider text-faint" title="Played recently but not on the current published roster">recent</span>
           ) : null}
@@ -240,6 +275,14 @@ function RosterRow({ p, rank, hex }: { p: ProTeamPlayer; rank: number; hex: stri
       <td className="py-2 pl-2 text-right tabular-nums text-muted">{grid ? `${p.fkPct.toFixed(0)}%` : "—"}</td>
       <td className={`py-2 pl-2 pr-4 text-right tabular-nums ${grid ? (p.winPct >= 55 ? "text-good" : p.winPct < 45 ? "text-bad" : "text-muted") : "text-faint"}`}>{grid ? `${p.winPct.toFixed(0)}%` : "—"}</td>
     </tr>
+    {open && p.id ? (
+      <tr className="border-t border-line/40 bg-panel/25">
+        <td colSpan={7} className="p-0">
+          <PlayerStatsDrawer playerId={p.id} nick={p.nick} hex={hex} />
+        </td>
+      </tr>
+    ) : null}
+    </>
   );
 }
 

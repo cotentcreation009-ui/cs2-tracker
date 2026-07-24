@@ -75,6 +75,7 @@ export interface ProH2HEntry {
 // aggregates over the window; src "agg" = fallback computed from the team's
 // recent tracked series; "" = no data (new signing/sub).
 export interface ProRosterPlayer {
+  id?: string; // GRID player id (roster players only) — enables the drill-down
   nick: string;
   inRoster: boolean;
   src: "grid" | "agg" | "";
@@ -117,6 +118,36 @@ export interface ProTeamPage {
   record?: { wins: number; losses: number; streak: number; streakWon: boolean };
   players?: ProTeamPlayer[];
   results?: ProTeamResult[];
+}
+
+// Per-window official aggregates for one player (the click-a-player drawer).
+export interface ProPlayerWindowStats {
+  seriesCount: number;
+  seriesWinPct: number;
+  maps: number;
+  mapWinPct: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  avgKills: number;
+  maxKills: number;
+  kd: number;
+  firstKillPct: number;
+  rounds: number;
+  roundWinPct: number;
+  kpr: number;
+}
+
+export interface ProPlayerWindow {
+  window: string;
+  label: string;
+  stats: ProPlayerWindowStats | null;
+}
+
+export interface ProPlayerStatsResponse {
+  enabled?: boolean;
+  any?: boolean;
+  windows?: ProPlayerWindow[];
 }
 
 export interface MatchState {
