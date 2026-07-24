@@ -175,6 +175,11 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 	if err := c.lim.Wait(ctx); err != nil {
 		return nil, err
 	}
+	// re-check after the limiter wait: a 429 on an earlier queued call must
+	// fail the rest of the queue fast, not after another limiter slot each
+	if err := c.checkPause(); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -202,6 +207,9 @@ func (c *Client) getImage(ctx context.Context, u string) ([]byte, string, error)
 		return nil, "", err
 	}
 	if err := c.lim.Wait(ctx); err != nil {
+		return nil, "", err
+	}
+	if err := c.checkPause(); err != nil {
 		return nil, "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
