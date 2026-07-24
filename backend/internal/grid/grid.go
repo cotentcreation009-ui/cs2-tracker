@@ -805,6 +805,9 @@ func prettyMap(raw string) string {
 	}
 	s = strings.TrimPrefix(strings.ToLower(s), "de_")
 	s = strings.TrimPrefix(s, "cs_")
+	// some events report "default-ancient" style names
+	s = strings.TrimPrefix(s, "default-")
+	s = strings.TrimPrefix(s, "default_")
 	switch s {
 	case "dust2":
 		return "Dust2"

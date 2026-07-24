@@ -124,14 +124,28 @@ export function MatchDetailClient({
           <TeamSide gridId={b?.gridId} name={b?.shortName || b?.name} logo={b?.logoUrl} color={b?.colorPrimary} winner={!!bWinner} align="right" />
         </div>
 
-        {/* format + schedule + stream */}
+        {/* format + schedule + stream / demo-analysis */}
         <div className="relative mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-4">
           <span className="text-xs text-muted">
             {formatBlurb(m)}
             {isUpcoming && startAbs ? ` · starts ${startAbs}` : ""}
             {isFinished && startAbs ? ` · played ${startAbs}` : ""}
           </span>
-          {m.streamUrl ? <TwitchLink url={m.streamUrl} /> : null}
+          <span className="flex items-center gap-2">
+            {isFinished ? (
+              <Link
+                href="/demos"
+                title="Grab this match's .dem from HLTV.org (or the event page) and drop it into StatRun's demo analyzer for round-by-round breakdowns, utility maps and duel stats"
+                className="btn btn-ghost h-8 gap-1.5 px-3 text-xs"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                  <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" />
+                </svg>
+                Analyze demo
+              </Link>
+            ) : null}
+            {m.streamUrl ? <TwitchLink url={m.streamUrl} /> : null}
+          </span>
         </div>
       </div>
 
@@ -239,7 +253,13 @@ function MapRow({
 
   const teamA = map.teams?.find((t) => t.gridId === aId);
   const teamB = map.teams?.find((t) => t.gridId === bId);
-  const hasBoards = (teamA?.players?.length ?? 0) > 0 || (teamB?.players?.length ?? 0) > 0;
+  // Lower-tier events sometimes carry player LISTS but no stat ingestion —
+  // an all-zero scoreboard reads as broken, so require some real data.
+  const anyData = [teamA, teamB].some((t) =>
+    (t?.players ?? []).some((p) => p.kills > 0 || p.deaths > 0 || p.assists > 0 || (p.netWorth ?? 0) > 0),
+  );
+  const hasBoards = anyData && ((teamA?.players?.length ?? 0) > 0 || (teamB?.players?.length ?? 0) > 0);
+  const emptyBoards = !anyData && ((teamA?.players?.length ?? 0) > 0 || (teamB?.players?.length ?? 0) > 0);
 
   return (
     <div className={`card overflow-hidden p-4 ${isLive ? "border-[#ff4655]/30" : ""}`}>
@@ -292,6 +312,10 @@ function MapRow({
           <TeamScoreboard team={a} side={aSide} score={aScore} players={teamA?.players} won={!!aMapWon} />
           <TeamScoreboard team={b} side={bSide} score={bScore} players={teamB?.players} won={!!bMapWon} />
         </div>
+      ) : emptyBoards && isDone ? (
+        <p className="mt-3 border-t border-line/60 pt-3 text-xs text-faint">
+          GRID didn&apos;t track per-player stats for this map (common at qualifier level) — only the map score is available.
+        </p>
       ) : null}
     </div>
   );
