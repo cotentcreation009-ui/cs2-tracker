@@ -7,6 +7,7 @@ import { computeInsights, type PlayerInsight } from "@/lib/demo/insights";
 import { demoCheat, BAND_HEX, BAND_LABEL, type DemoCheat } from "@/lib/demo/cheat";
 import { computeTendencies, playstyleSummary } from "@/lib/demo/tendencies";
 import { cheatMoments, hasAimData, type CheatMoment } from "@/lib/demo/evidence";
+import { analyzeRotations, type PlayerRotates, type RotateEvent } from "@/lib/demo/rotates";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import { cachedAccountScores, fetchAccountScores, getAiRead, setAiRead } from "@/lib/demo/accountStore";
 import type { DemoView } from "@/components/demo/MatchToolbar";
@@ -27,9 +28,23 @@ const isFlagged = (c: DemoCheat) => c.score >= FLAG_SCORE && c.confidence >= 0.5
 const FACTOR_HINT: Record<string, string> = {
   snap: "Landed a kill almost instantly despite the crosshair being far off target — a superhuman correction. The strongest tell, and it doesn't punish good angle-holding.",
   acc: "Share of fired bullets that hit — volume-independent gun accuracy.",
+  rot: "Cross-map rotations begun AFTER the enemy team committed elsewhere but BEFORE any information existed — no kills, enemy utility, bomb action, or audible contact. Legit hunches split evenly right/wrong and timer reads are slow; fast, consistently-correct blind rotates read like a radar. ✓ correct · ✗ wrong (subtracts).",
   hsacc: "Share of fired bullets that hit the head.",
   react: "Time from an enemy first becoming visible to the kill. Only very low (trigger-like) reads flag.",
   hs: "Headshot percentage of kills. Strong players run high too, so it's a weak corroborator.",
+};
+
+const VERDICT_UI: Record<RotateEvent["verdict"], { label: string; cls: string }> = {
+  "blind-correct": { label: "before any info — correct", cls: "bg-bad/15 text-bad" },
+  "blind-wrong": { label: "blind guess — wrong", cls: "bg-good/15 text-good" },
+  hunch: { label: "hunch", cls: "bg-panel text-muted" },
+  informed: { label: "informed", cls: "bg-panel text-faint" },
+};
+const VERDICT_ORDER: Record<RotateEvent["verdict"], number> = {
+  "blind-correct": 0,
+  "blind-wrong": 1,
+  hunch: 2,
+  informed: 3,
 };
 
 function safeName(name: string): string {
@@ -130,10 +145,46 @@ function MomentRow({ m, onWatch }: { m: CheatMoment; onWatch: () => void }) {
   );
 }
 
+// ── one analyzed rotation (jump-to-replay evidence) ────────────────────────
+function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
+  const ui = VERDICT_UI[ev.verdict];
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/40 px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className="font-bold tabular-nums text-ink">R{ev.roundN}</span>
+          <span className="tabular-nums text-faint">{mmss(ev.t0)}</span>
+          <span className="truncate font-semibold text-muted">
+            {ev.from} → {ev.to}
+          </span>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1">
+          <span className={`rounded-full px-1.5 text-[9px] font-bold ${ui.cls}`}>{ui.label}</span>
+          {ev.verdict === "blind-correct" && ev.reactSec != null && (
+            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
+              {ev.reactSec.toFixed(0)}s after the enemy shift
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onWatch}
+        title="Watch this rotation in the Replay tab"
+        className="shrink-0 rounded-md border border-brand/40 bg-brand/10 px-2 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
+      >
+        ▶ Watch
+      </button>
+    </div>
+  );
+}
+
 // ── the case file for one selected suspect ─────────────────────────────────
 function CaseFile({
   p,
   cheat,
+  rot,
+  rotReason,
   meta,
   rounds,
   view,
@@ -143,6 +194,8 @@ function CaseFile({
 }: {
   p: PlayerInsight;
   cheat: DemoCheat;
+  rot: PlayerRotates | null;
+  rotReason?: string;
   meta: ReplayMeta;
   rounds: ReplayRound[];
   view: DemoView;
@@ -155,6 +208,17 @@ function CaseFile({
   const tendLines = useMemo(() => playstyleSummary(p, tend.get(p.steamId)), [p, tend]);
   const moments = useMemo(() => cheatMoments(meta, rounds, p.i), [meta, rounds, p.i]);
   const aimBacked = useMemo(() => hasAimData(rounds), [rounds]);
+
+  const rotEvents = useMemo(
+    () =>
+      (rot?.events ?? [])
+        .slice()
+        .sort(
+          (a, b) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] || a.roundN - b.roundN,
+        )
+        .slice(0, 8),
+    [rot],
+  );
 
   const cheatFactors = cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ");
   const matchStats = `${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR${
@@ -187,7 +251,7 @@ function CaseFile({
         <div className="flex items-end justify-between">
           <div>
             <div className="stat-label">In-match CheatMeter</div>
-            <div className="text-[10px] text-faint">aim-anomaly only — never fragging volume · not proof</div>
+            <div className="text-[10px] text-faint">aim + information anomalies — never fragging volume · not proof</div>
           </div>
           <div className="text-right">
             <div className="text-2xl font-extrabold leading-none tabular-nums" style={{ color: BAND_HEX[cheat.band] }}>
@@ -250,6 +314,43 @@ function CaseFile({
         )}
       </div>
 
+      {/* rotation review — the information-anomaly evidence */}
+      <div className="lg:shrink-0">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="stat-label">Rotation review</span>
+          {rot && rot.total > 0 && (
+            <span className="text-[10px] tabular-nums text-faint">
+              {rot.total} rotate{rot.total > 1 ? "s" : ""} · {rot.blindCorrect} pre-info
+              {rot.avgReactSec != null ? ` · ~${rot.avgReactSec.toFixed(0)}s react` : ""}
+            </span>
+          )}
+        </div>
+        {rotReason ? (
+          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
+            Rotation analysis unavailable — {rotReason}.
+          </div>
+        ) : !rot || rot.total === 0 ? (
+          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
+            No cross-map rotations detected for this player.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {rotEvents.map((ev, i) => (
+              <RotateRow
+                key={`${ev.roundIdx}-${ev.t0}-${i}`}
+                ev={ev}
+                onWatch={() => onWatch(ev.roundIdx, Math.max(0, ev.t0 - 3), p.i)}
+              />
+            ))}
+            {rot.total > rotEvents.length && (
+              <div className="px-1 text-[10px] text-faint">
+                +{rot.total - rotEvents.length} more (informed rotations trimmed)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* tendencies */}
       {tendLines.length > 0 && (
         <div className="lg:shrink-0">
@@ -303,14 +404,19 @@ export default function MatchVerdict({
   onWatch: (round: number, t: number, player: number | null) => void;
 }) {
   const data = useMemo(() => computeInsights(meta, rounds), [meta, rounds]);
+  const rotReport = useMemo(() => analyzeRotations(meta, rounds), [meta, rounds]);
 
   const players = useMemo(
     () =>
       data.players
         .filter((p) => view.side === "all" || p.team === view.side)
-        .map((p) => ({ p, cheat: demoCheat(p) }))
+        .map((p) => ({
+          p,
+          rot: rotReport.byPlayer.get(p.i) ?? null,
+          cheat: demoCheat(p, rotReport.byPlayer.get(p.i) ?? null),
+        }))
         .sort((a, b) => b.cheat.score - a.cheat.score),
-    [data, view.side],
+    [data, rotReport, view.side],
   );
 
   const [selId, setSelId] = useState<string | null>(null);
@@ -367,16 +473,20 @@ export default function MatchVerdict({
     setMatchAi("loading");
     setMatchAiErr("");
     setMatchAiOpen(true);
-    const lines = players.map(({ p, cheat }) => {
+    const lines = players.map(({ p, cheat, rot }) => {
       const acct = cachedAccountScores(p.steamId);
       const acctBits = acct
         ? `${acct.banned ? ", BAN on record" : ""}${acct.trust != null ? `, trust ${acct.trust.toFixed(0)}/100` : ""}`
         : "";
       const tells = cheat.factors.slice(0, 2).map((f) => `${f.label} ${f.display}`).join(", ");
-      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${acctBits}`;
+      const rotBits =
+        rot && rot.blindCorrect + rot.blindWrong > 0
+          ? `, blind rotates ${rot.blindCorrect}✓/${rot.blindWrong}✗`
+          : "";
+      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${acctBits}`;
     });
     const summary = [
-      `MATCH-LEVEL read: a ${rounds.length}-round game on ${meta.map} with ${players.length} players (in-match CheatMeter is aim-anomaly only, not proof; account data included where already checked). Assess the LOBBY: which players (if any) warrant a closer look and why, who reads clean, and one overall line. Be measured and concrete.`,
+      `MATCH-LEVEL read: a ${rounds.length}-round game on ${meta.map} with ${players.length} players (in-match CheatMeter covers aim anomalies plus information anomalies — "blind rotates" are cross-map rotations made before any info existed, ✓ correct / ✗ wrong; not proof; account data included where already checked). Assess the LOBBY: which players (if any) warrant a closer look and why, who reads clean, and one overall line. Be measured and concrete.`,
       ...lines,
     ].join("\n");
     try {
@@ -423,8 +533,9 @@ export default function MatchVerdict({
             <span className="text-sm font-bold">{lobbyRead}</span>
           </div>
           <p className="mt-0.5 text-[11px] text-muted">
-            CheatMeter scores only aim-quality anomalies (snap kills, accuracy, reaction) — never fragging volume.
-            Pick a player for their case file; ▶ a moment to watch it. Signals from public data — not proof.
+            CheatMeter scores aim anomalies (snap kills, accuracy, reaction) and information anomalies
+            (rotations before any info existed) — never fragging volume. Pick a player for their case file;
+            ▶ a moment to watch it. Signals from public data — not proof.
           </p>
         </div>
         <div className="flex shrink-0 gap-1.5">
@@ -489,6 +600,8 @@ export default function MatchVerdict({
             key={selected.p.steamId}
             p={selected.p}
             cheat={selected.cheat}
+            rot={selected.rot}
+            rotReason={rotReport.available ? undefined : rotReport.reason}
             meta={meta}
             rounds={rounds}
             view={view}
