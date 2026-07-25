@@ -28,7 +28,7 @@ const isFlagged = (c: DemoCheat) => c.score >= FLAG_SCORE && c.confidence >= 0.5
 const FACTOR_HINT: Record<string, string> = {
   snap: "Landed a kill almost instantly despite the crosshair being far off target — a superhuman correction. The strongest tell, and it doesn't punish good angle-holding.",
   acc: "Share of fired bullets that hit — volume-independent gun accuracy.",
-  rot: "Cross-map rotations begun AFTER the enemy team committed elsewhere but BEFORE any information existed — no kills, enemy utility, bomb action, or audible contact. Legit hunches split evenly right/wrong and timer reads are slow; fast, consistently-correct blind rotates read like a radar. ✓ correct · ✗ wrong (subtracts).",
+  rot: "Cross-map rotations begun AFTER the enemy team committed elsewhere but BEFORE any information pointed at the destination — no kills, enemy utility, bomb action, or audible contact on that side of the map. Legit hunches split evenly right/wrong and timer reads are slow; fast, consistently-correct blind rotates read like a radar. ✓ correct · ✗ wrong (subtracts).",
   hsacc: "Share of fired bullets that hit the head.",
   react: "Time from an enemy first becoming visible to the kill. Only very low (trigger-like) reads flag.",
   hs: "Headshot percentage of kills. Strong players run high too, so it's a weak corroborator.",
@@ -37,8 +37,8 @@ const FACTOR_HINT: Record<string, string> = {
 const VERDICT_UI: Record<RotateEvent["verdict"], { label: string; cls: string }> = {
   "blind-correct": { label: "before any info — correct", cls: "bg-bad/15 text-bad" },
   "blind-wrong": { label: "blind guess — wrong", cls: "bg-good/15 text-good" },
-  hunch: { label: "hunch", cls: "bg-panel text-muted" },
-  informed: { label: "informed", cls: "bg-panel text-faint" },
+  hunch: { label: "blind hunch", cls: "bg-panel text-muted" },
+  informed: { label: "after info — normal", cls: "bg-panel text-faint" },
 };
 const VERDICT_ORDER: Record<RotateEvent["verdict"], number> = {
   "blind-correct": 0,
@@ -163,6 +163,11 @@ function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
           {ev.verdict === "blind-correct" && ev.reactSec != null && (
             <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
               {ev.reactSec.toFixed(0)}s after the enemy shift
+            </span>
+          )}
+          {ev.verdict === "informed" && ev.firstInfo != null && (
+            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
+              info at {mmss(ev.firstInfo)} → moved {mmss(ev.t0)}
             </span>
           )}
         </div>
@@ -293,6 +298,45 @@ function CaseFile({
         )}
       </div>
 
+      {/* rotation review — the information-anomaly evidence. Sits above the
+          flagged moments: it's the newest read and even an all-informed list
+          is a finding ("every rotate followed real information"). */}
+      <div className="lg:shrink-0">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="stat-label">Rotation review</span>
+          {rot && rot.total > 0 && (
+            <span className="text-[10px] tabular-nums text-faint">
+              {rot.total} rotate{rot.total > 1 ? "s" : ""} · {rot.blindCorrect} pre-info
+              {rot.avgReactSec != null ? ` · ~${rot.avgReactSec.toFixed(0)}s react` : ""}
+            </span>
+          )}
+        </div>
+        {rotReason ? (
+          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
+            Rotation analysis unavailable — {rotReason}.
+          </div>
+        ) : !rot || rot.total === 0 ? (
+          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
+            No cross-map rotations detected for this player — nothing to read here.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {rotEvents.map((ev, i) => (
+              <RotateRow
+                key={`${ev.roundIdx}-${ev.t0}-${i}`}
+                ev={ev}
+                onWatch={() => onWatch(ev.roundIdx, Math.max(0, ev.t0 - 3), p.i)}
+              />
+            ))}
+            {rot.total > rotEvents.length && (
+              <div className="px-1 text-[10px] text-faint">
+                +{rot.total - rotEvents.length} more (informed rotations trimmed)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* flagged moments — the reviewable evidence */}
       <div className="lg:shrink-0">
         <div className="mb-1.5 flex items-center justify-between">
@@ -310,43 +354,6 @@ function CaseFile({
             {moments.map((m, i) => (
               <MomentRow key={`${m.roundIdx}-${m.t}-${i}`} m={m} onWatch={() => onWatch(m.roundIdx, m.t, p.i)} />
             ))}
-          </div>
-        )}
-      </div>
-
-      {/* rotation review — the information-anomaly evidence */}
-      <div className="lg:shrink-0">
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="stat-label">Rotation review</span>
-          {rot && rot.total > 0 && (
-            <span className="text-[10px] tabular-nums text-faint">
-              {rot.total} rotate{rot.total > 1 ? "s" : ""} · {rot.blindCorrect} pre-info
-              {rot.avgReactSec != null ? ` · ~${rot.avgReactSec.toFixed(0)}s react` : ""}
-            </span>
-          )}
-        </div>
-        {rotReason ? (
-          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
-            Rotation analysis unavailable — {rotReason}.
-          </div>
-        ) : !rot || rot.total === 0 ? (
-          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
-            No cross-map rotations detected for this player.
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            {rotEvents.map((ev, i) => (
-              <RotateRow
-                key={`${ev.roundIdx}-${ev.t0}-${i}`}
-                ev={ev}
-                onWatch={() => onWatch(ev.roundIdx, Math.max(0, ev.t0 - 3), p.i)}
-              />
-            ))}
-            {rot.total > rotEvents.length && (
-              <div className="px-1 text-[10px] text-faint">
-                +{rot.total - rotEvents.length} more (informed rotations trimmed)
-              </div>
-            )}
           </div>
         )}
       </div>

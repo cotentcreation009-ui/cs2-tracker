@@ -10,6 +10,10 @@
 //
 //   rotate start t0   — when a settled player began a cross-map move
 //   firstInfo         — earliest thing their team could legitimately know
+//                       ABOUT THE DESTINATION (info is location-aware: a molly
+//                       at your own site never justifies rotating away from it;
+//                       real rounds always contain info somewhere, so a global
+//                       model would mark every rotate "informed" and never fire)
 //   commit onset tc   — when the enemy team's distribution actually shifted
 //
 // blind (t0 before firstInfo) + correct (enemies had committed) = the tell.
@@ -34,7 +38,7 @@ export interface RotateEvent {
   to: string; // site label rotated to
   t0: number; // seconds since round start — when the move began
   tArrive: number;
-  firstInfo: number | null; // earliest team info this round (null = none all round)
+  firstInfo: number | null; // earliest destination-relevant team info (null = none all round)
   commitAt: number | null; // enemy-shift onset backing the verdict
   reactSec: number | null; // t0 - commitAt for blind verdicts
   verdict: RotateVerdict;
@@ -122,39 +126,57 @@ function deriveAnchors(rounds: ReplayRound[]): Anchors | null {
   return { a: { ...a, label: labels[0] }, b: { ...b, label: labels[1] }, sep };
 }
 
-// Earliest information a team could legitimately have this round: any kill or
-// bomb event (both global — killfeed/plant beeps), an enemy or unattributed
-// grenade detonating, or an enemy inside audible/visible range of any living
-// teammate. Infinity when the round stays silent.
-function firstInfoTimes(r: ReplayRound, meta: ReplayMeta): { CT: number; T: number } {
-  let global = Infinity;
-  for (const k of r.kills ?? []) global = Math.min(global, k.t);
-  for (const b of r.bomb ?? []) global = Math.min(global, b.t);
-
-  let ct = global;
-  let t = global;
-  for (const n of r.nades ?? []) {
-    const thrower = n.by >= 0 ? sideOf(r, n.by, meta) : "";
-    if (thrower !== "CT") ct = Math.min(ct, n.t); // T or unknown nade informs CTs
-    if (thrower !== "T") t = Math.min(t, n.t);
+// Earliest information `side` could legitimately have ABOUT the destination
+// this round. Location-aware: an event only informs a rotate toward `to` when
+// it happened on the destination half of the map (or near mid — the 1.15
+// slack), because a fight or molly at your OWN site never tells you the real
+// hit is elsewhere. Counted events: kills (either participant's position —
+// killfeed + comms), enemy/unattributed grenade detonations (landing spot),
+// bomb events (site-revealing, so always global), and an enemy inside
+// audible/visible range of any living teammate while that enemy is on the
+// destination half. Infinity when nothing pointed there before round end.
+function firstRelevantInfo(
+  r: ReplayRound,
+  meta: ReplayMeta,
+  side: "CT" | "T",
+  to: { x: number; y: number },
+  from: { x: number; y: number },
+): number {
+  const relevant = (x: number, y: number) =>
+    d2d(x, y, to.x, to.y) <= 1.15 * d2d(x, y, from.x, from.y);
+  let best = Infinity;
+  for (const b of r.bomb ?? []) best = Math.min(best, b.t);
+  for (const k of r.kills ?? []) {
+    if (k.t >= best) continue;
+    if (relevant(k.vx, k.vy) || relevant(k.kx, k.ky)) best = k.t;
   }
-
-  const contactCutoff = Math.min(ct, t);
-  outer: for (const f of r.frames ?? []) {
-    if (f.t >= contactCutoff) break; // can't improve either side's earliest
-    const cts = f.p.filter((p) => p.h > 0 && sideOf(r, p.i, meta) === "CT");
-    const ts = f.p.filter((p) => p.h > 0 && sideOf(r, p.i, meta) === "T");
-    for (const c of cts) {
-      for (const e of ts) {
-        if (d2d(c.x, c.y, e.x, e.y) > CONTACT_RADIUS) continue;
-        if (c.z != null && e.z != null && Math.abs(c.z - e.z) > CONTACT_Z) continue;
-        ct = Math.min(ct, f.t); // contact is symmetric — both teams learn
-        t = Math.min(t, f.t);
-        break outer;
+  for (const n of r.nades ?? []) {
+    if (n.t >= best) continue;
+    const thrower = n.by >= 0 ? sideOf(r, n.by, meta) : "";
+    if (thrower === side) continue; // own utility isn't enemy info
+    if (relevant(n.x, n.y)) best = n.t;
+  }
+  for (const f of r.frames ?? []) {
+    if (f.t >= best) break;
+    const mine = f.p.filter((p) => p.h > 0 && sideOf(r, p.i, meta) === side);
+    if (!mine.length) continue;
+    for (const e of f.p) {
+      if (e.h <= 0) continue;
+      const es = sideOf(r, e.i, meta);
+      if (es === side || es === "") continue;
+      if (!relevant(e.x, e.y)) continue;
+      const heard = mine.some(
+        (m) =>
+          d2d(m.x, m.y, e.x, e.y) <= CONTACT_RADIUS &&
+          !(m.z != null && e.z != null && Math.abs(m.z - e.z) > CONTACT_Z),
+      );
+      if (heard) {
+        best = f.t;
+        break;
       }
     }
   }
-  return { CT: ct, T: t };
+  return best;
 }
 
 // Fraction of living `enemySide` players nearer `to` than `from`, per frame.
@@ -213,7 +235,6 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
 
   rounds.forEach((r, roundIdx) => {
     if (!r.frames?.length) return;
-    const info = firstInfoTimes(r, meta);
     // freeze end fallback: the first moment anyone actually moves
     let freezeEnd = r.freezeEnd ?? null;
     if (freezeEnd == null) {
@@ -281,7 +302,7 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
           if (before.some((p) => d2d(p.x, p.y, dest.x, dest.y) < SETTLE_FRAC * anchors.sep)) continue;
 
           const enemySide = side === "CT" ? "T" : "CT";
-          const teamInfo = info[side];
+          const teamInfo = firstRelevantInfo(r, meta, side, dest, origin);
           const blind = t0 < teamInfo - BLIND_EPS;
 
           let verdict: RotateVerdict = "informed";
