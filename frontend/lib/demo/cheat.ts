@@ -55,9 +55,10 @@ export function demoCheat(p: PlayerInsight, rot?: PlayerRotates | null): DemoChe
   // at 40-60%) doesn't saturate — only genuinely anomalous gun accuracy does.
   const sAcc = hasShots ? up(p.accuracy, 30, 65) : null; // bullets that hit
   const sHsAcc = hasShots ? up(p.hsAccuracy, 10, 28) : null; // bullets that headshot
-  // Information tell: net speed-weighted blind-correct rotates. Needs at least
-  // a couple of rotations to mean anything; 0 renders as a clean green row.
-  const sRot = rot && rot.total >= 2 ? up(rot.x, 1.2, 4.5) : null;
+  // Information tell: net speed-weighted blind-correct rotates. Present whenever
+  // the player rotated at all — 0 renders as a clean green row (on real legit
+  // lobbies nearly every rotate reads "informed", which is itself a finding).
+  const sRot = rot ? up(rot.x, 1.2, 4.5) : null;
   // Minor corroborators.
   const sReact = hasAim ? down(p.reactionMs, 220, 80) : null; // only very low (trigger-like)
   const sHs = p.kills >= 8 ? up(p.hsPct, 50, 88) : null; // pros run high too → weak
