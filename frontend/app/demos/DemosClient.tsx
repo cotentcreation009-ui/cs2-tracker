@@ -21,8 +21,14 @@ import {
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { mapLabel } from "@/lib/format";
 
+// sessionStorage key remembering the most recently analyzed demo, so its
+// library card can wear a NEW badge (cards of re-parsed matches all share the
+// same match730_… name and are otherwise indistinguishable).
+const LAST_ANALYZED_KEY = "demos:lastAnalyzed";
+
 export function DemosClient() {
   const [list, setList] = useState<MatchSummary[]>([]);
+  const [newId, setNewId] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [phase, setPhase] = useState(""); // human label
   const [percent, setPercent] = useState(0); // 0..100, monotonic
@@ -96,7 +102,21 @@ export function DemosClient() {
 
   useEffect(() => {
     void refresh();
+    try {
+      setNewId(sessionStorage.getItem(LAST_ANALYZED_KEY));
+    } catch {
+      /* storage unavailable — no badge */
+    }
   }, [refresh]);
+
+  const markNew = useCallback((id: string) => {
+    setNewId(id);
+    try {
+      sessionStorage.setItem(LAST_ANALYZED_KEY, id);
+    } catch {
+      /* storage unavailable — badge just won't survive navigation */
+    }
+  }, []);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -125,7 +145,8 @@ export function DemosClient() {
         lifeRef.current = "saving";
         recompute();
         const name = file.name.replace(/\.dem$/i, "");
-        await saveMatch(meta, rounds, name);
+        const saved = await saveMatch(meta, rounds, name);
+        markNew(saved.id);
         lifeRef.current = "done";
         percentRef.current = 100;
         setPercent(100);
@@ -139,7 +160,7 @@ export function DemosClient() {
         acRef.current = null;
       }
     },
-    [refresh, beginProgress, progressHandlers, recompute],
+    [refresh, beginProgress, progressHandlers, recompute, markNew],
   );
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,7 +195,8 @@ export function DemosClient() {
             /\.dem(\.(bz2|gz|zst))?$/i,
             "",
           ) || "Demo";
-      await saveMatch(meta, rounds, name);
+      const saved = await saveMatch(meta, rounds, name);
+      markNew(saved.id);
       lifeRef.current = "done";
       percentRef.current = 100;
       setPercent(100);
@@ -188,7 +210,7 @@ export function DemosClient() {
       setPhase("");
       acRef.current = null;
     }
-  }, [url, parsing, refresh, beginProgress, progressHandlers, recompute]);
+  }, [url, parsing, refresh, beginProgress, progressHandlers, recompute, markNew]);
 
   return (
     <div className="space-y-6">
@@ -410,6 +432,18 @@ export function DemosClient() {
                         </div>
                       )}
                       <div className="absolute inset-0 bg-linear-to-t from-[rgba(4,6,14,0.95)] via-[rgba(4,6,14,0.30)] to-transparent" />
+                      {m.id === newId && (
+                        <span
+                          className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full border border-good/40 bg-black/55 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-good backdrop-blur"
+                          title="The demo you just analyzed"
+                        >
+                          <span className="relative flex h-1.5 w-1.5" aria-hidden>
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-70 motion-reduce:hidden" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-good" />
+                          </span>
+                          New
+                        </span>
+                      )}
                       <div className="absolute inset-x-3 bottom-2 flex items-end justify-between gap-2">
                         <span className="truncate text-sm font-bold text-ink drop-shadow">
                           {m.name}
