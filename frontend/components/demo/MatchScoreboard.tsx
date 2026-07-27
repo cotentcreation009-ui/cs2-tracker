@@ -52,7 +52,7 @@ const COLS: { key: SortKey; label: string; title: string }[] = [
 function sortVal(p: PlayerInsight, key: SortKey, realAssists: boolean): number | string {
   switch (key) {
     case "name": return p.name.toLowerCase();
-    case "rating": return approxRating(p);
+    case "rating": return approxRating(p, realAssists);
     case "k": return p.kills;
     case "d": return p.deaths;
     case "a": return realAssists ? p.assists : p.assistsApprox;
@@ -92,10 +92,15 @@ export function MatchScoreboard({
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "rating", dir: -1 });
 
-  const { groups, scopeLabel, roundCount, hasRealAssists } = useMemo(() => {
+  const { groups, scopeLabel, roundCount, hasRealAssists, hasStats } = useMemo(() => {
     const r = view.scopeRound != null ? rounds[view.scopeRound] : undefined;
     const scoped = r ? [r] : rounds;
     const { players, hasRealAssists } = computeInsights(meta, scoped);
+    // old parses carry no per-round stats → ADR is 0 and the rating estimate
+    // silently deflates; hide the column rather than default-sort on bad data
+    const hasStats = scoped.some((rr) =>
+      (rr.stats ?? []).some((s) => s.dmg != null || s.equip != null || (s.shots ?? 0) > 0),
+    );
     const teamA = teamAStarters(rounds);
 
     // Stable team membership for the whole-match view. The round-1 snapshot
@@ -145,8 +150,10 @@ export function MatchScoreboard({
     }
 
     const cmp = (a: PlayerInsight, b: PlayerInsight) => {
-      const va = sortVal(a, sort.key, hasRealAssists);
-      const vb = sortVal(b, sort.key, hasRealAssists);
+      // with the rating column hidden (no stats), the default sort falls to kills
+      const key = sort.key === "rating" && !hasStats ? "k" : sort.key;
+      const va = sortVal(a, key, hasRealAssists);
+      const vb = sortVal(b, key, hasRealAssists);
       const d = typeof va === "string" || typeof vb === "string"
         ? String(va).localeCompare(String(vb))
         : va - (vb as number);
@@ -164,7 +171,7 @@ export function MatchScoreboard({
       { key: "other", label: "Unassigned", hex: OTHER, wins: 0, players: bySide("") },
     ].filter((g) => g.players.length > 0);
 
-    return { groups, scopeLabel: r ? `Round ${r.n}` : "Whole match", roundCount: scoped.length, hasRealAssists };
+    return { groups, scopeLabel: r ? `Round ${r.n}` : "Whole match", roundCount: scoped.length, hasRealAssists, hasStats };
   }, [meta, rounds, view.scopeRound, view.side, sort]);
 
   const onSort = (key: SortKey) =>
@@ -206,7 +213,7 @@ export function MatchScoreboard({
               >
                 Player{arrow("name")}
               </th>
-              {COLS.map((c) => (
+              {COLS.filter((c) => hasStats || c.key !== "rating").map((c) => (
                 <th
                   key={c.key}
                   scope="col"
@@ -225,11 +232,11 @@ export function MatchScoreboard({
           </thead>
           <tbody>
             {groups.map((g) => (
-              <FragmentRows key={g.key} group={g} view={view} realAssists={hasRealAssists} />
+              <FragmentRows key={g.key} group={g} view={view} realAssists={hasRealAssists} showRating={hasStats} />
             ))}
             {groups.length === 0 && (
               <tr>
-                <td colSpan={COLS.length + 1} className="px-4 py-6 text-center text-muted">
+                <td colSpan={COLS.length + 1 - (hasStats ? 0 : 1)} className="px-4 py-6 text-center text-muted">
                   No player stats in this scope.
                 </td>
               </tr>
@@ -251,12 +258,22 @@ export function MatchScoreboard({
 
 // One team's header row + its player rows (kept together so the table stays a
 // single element — required for aligned columns and the sticky header).
-function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoView; realAssists: boolean }) {
+function FragmentRows({
+  group,
+  view,
+  realAssists,
+  showRating,
+}: {
+  group: Group;
+  view: DemoView;
+  realAssists: boolean;
+  showRating: boolean;
+}) {
   const soft = SOFT[group.hex] ?? "var(--color-ink)";
   return (
     <>
       <tr style={{ background: `${group.hex}14` }}>
-        <td colSpan={COLS.length + 1} className="px-3 py-1.5">
+        <td colSpan={COLS.length + 1 - (showRating ? 0 : 1)} className="px-3 py-1.5">
           <span className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ background: group.hex }} />
             <span className="text-[10px] font-black uppercase tracking-wider" style={{ color: soft }}>
@@ -271,7 +288,7 @@ function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoVi
       {group.players.map((p) => {
         const focused = view.focusPlayer === p.i;
         const diff = p.kills - p.deaths;
-        const rating = approxRating(p);
+        const rating = approxRating(p, realAssists);
         return (
           <tr
             key={p.i}
@@ -290,13 +307,15 @@ function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoVi
             >
               {p.name}
             </td>
-            <td
-              className={`px-2 py-1.5 text-right font-bold tabular-nums ${
-                rating >= 1.1 ? "text-good" : rating < 0.85 ? "text-bad" : ""
-              }`}
-            >
-              {rating.toFixed(2)}
-            </td>
+            {showRating && (
+              <td
+                className={`px-2 py-1.5 text-right font-bold tabular-nums ${
+                  rating >= 1.1 ? "text-good" : rating < 0.85 ? "text-bad" : ""
+                }`}
+              >
+                {rating.toFixed(2)}
+              </td>
+            )}
             <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{p.kills}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.deaths}</td>
             <td

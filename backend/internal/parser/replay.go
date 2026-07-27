@@ -632,8 +632,11 @@ func (rc *replayCollector) onKill(e events.Kill) {
 	// Unseen kill: the spotted scanner (scanSpotted, full frame rate) records a
 	// rising edge the first time a victim becomes visible to each enemy. If a
 	// FIREARM kill lands and that pair has no episode at all this round, the
-	// killer shot a target the engine never made visible to them.
-	if e.Killer != nil && k.Killer >= 0 && isFirearm(e.Weapon) {
+	// killer shot a target the engine never made visible to them. scanSpotted
+	// only tracks ENEMY pairs with real SteamIDs, so teamkills and bot-involved
+	// kills must be excluded here or they'd all read "unseen" by omission.
+	if e.Killer != nil && k.Killer >= 0 && isFirearm(e.Weapon) &&
+		e.Killer.Team != e.Victim.Team && e.Killer.SteamID64 != 0 && e.Victim.SteamID64 != 0 {
 		if m, ok := rc.spotT[e.Victim.SteamID64]; !ok || m == nil {
 			k.Unseen = true
 		} else if _, ever := m[e.Killer.SteamID64]; !ever {

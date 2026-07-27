@@ -93,11 +93,13 @@ const TRADE_WINDOW = 5; // seconds
 //            + 0.0032·ADR + 0.1587,  Impact ≈ 2.13·KPR + 0.42·APR − 0.41
 // An estimate, not HLTV's licensed formula — labeled "Rating≈" in the UI. It
 // exists so the scoreboard's default sort rewards round impact, not raw kills.
-export function approxRating(p: PlayerInsight): number {
+export function approxRating(p: PlayerInsight, realAssists = true): number {
   const rounds = Math.max(1, p.roundsPlayed);
   const kpr = p.kills / rounds;
   const dpr = p.deaths / rounds;
-  const apr = (p.assists || p.assistsApprox) / rounds;
+  // same assist source as the scoreboard's A column — a real 0 must not
+  // silently fall back to the trade proxy
+  const apr = (realAssists ? p.assists : p.assistsApprox) / rounds;
   const impact = 2.13 * kpr + 0.42 * apr - 0.41;
   const r =
     0.0073 * p.kastPct + 0.3591 * kpr - 0.5329 * dpr + 0.2372 * impact + 0.0032 * p.adr + 0.1587;
@@ -474,9 +476,14 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
           dmg += v;
           hit++;
         }
+        // oz only when the backend origin is authoritative: on the frame-scan
+        // fallback ox/oy are the thrower's position near DETONATION time while
+        // n.oz would be the LANDING height — pairing them teleports the
+        // practice command into geometry on two-level maps.
+        const realOrigin = n.ox != null && n.oy != null && (n.ox !== n.x || n.oy !== n.y);
         a.nadeList.push({
           kind, x: n.x, y: n.y, z: n.z, round: r.n, t: n.t,
-          ox: o?.x ?? n.x, oy: o?.y ?? n.y, oz: n.oz,
+          ox: o?.x ?? n.x, oy: o?.y ?? n.y, oz: realOrigin ? n.oz : undefined,
           ...(dmg > 0 ? { dmg, hit } : {}),
         });
       }

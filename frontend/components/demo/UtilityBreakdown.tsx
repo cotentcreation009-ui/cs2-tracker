@@ -176,25 +176,14 @@ function CopyThrowButton({ tw }: { tw: UtilThrow }) {
     });
   };
   return (
-    <span
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        copy();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          copy();
-        }
-      }}
+    <button
+      type="button"
+      onClick={copy}
       title="Copy a practice-server command — teleports you to this throw's spot facing the landing (needs sv_cheats 1; demos don't record view angles, so raise your aim to arc it)"
-      className={`pill shrink-0 cursor-pointer transition ${ok ? "bg-good/15 text-good" : "bg-panel text-faint hover:text-brand"}`}
+      className={`pill shrink-0 self-center transition ${ok ? "bg-good/15 text-good" : "bg-panel text-faint hover:text-brand"}`}
     >
       {ok ? "copied ✓" : "practice"}
-    </span>
+    </button>
   );
 }
 
@@ -220,15 +209,20 @@ function ThrowRow({
   onLeave?: () => void;
 }) {
   return (
+    // wrapper keeps the hover-preview alive while reaching the practice chip;
+    // the chip is a SIBLING button (interactive-inside-interactive is invalid)
+    <div
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      className={`flex w-full items-stretch gap-1 rounded-lg border px-1 transition ${
+        active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
+      }`}
+    >
     <button
       type="button"
       onClick={onClick}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
       aria-pressed={active}
-      className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
-        active ? "border-brand/50 bg-brand/5" : "border-line hover:bg-panel/50"
-      }`}
+      className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-1.5 text-left"
     >
       <span className="flex min-w-0 items-center gap-2 text-xs">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[tw.kind] }} />
@@ -265,9 +259,10 @@ function ThrowRow({
           ))}
         <TimingBadge timing={timing} />
         <span className="tabular-nums">{mmss(tw.t)}</span>
-        <CopyThrowButton tw={tw} />
       </span>
     </button>
+    <CopyThrowButton tw={tw} />
+    </div>
   );
 }
 
