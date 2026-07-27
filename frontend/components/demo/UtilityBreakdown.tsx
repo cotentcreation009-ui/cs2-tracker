@@ -556,6 +556,119 @@ function UtilityCard({
   );
 }
 
+// ------------------------------------------------- lobby-wide util table ---
+
+type LobbyCol = "npr" | "dmg" | "ef" | "tf" | "blank" | "waste" | "fa";
+
+/** Every player's utility discipline in one sortable strip — the lobby
+ *  comparison the per-player card can't give. Click a header to re-rank,
+ *  click a row to focus that player everywhere. */
+function LobbyUtilTable({
+  players,
+  extrasOf,
+  hasTf,
+  hasFa,
+  focusI,
+  onFocus,
+}: {
+  players: PlayerInsight[];
+  extrasOf: (i: number) => UtilExtras;
+  hasTf: boolean;
+  hasFa: boolean;
+  focusI: number | null;
+  onFocus: (i: number) => void;
+}) {
+  const [sortBy, setSortBy] = useState<LobbyCol>("npr");
+  const val = (p: PlayerInsight, c: LobbyCol): number => {
+    const e = extrasOf(p.i);
+    switch (c) {
+      case "npr": return p.roundsPlayed ? p.utilNades.length / p.roundsPlayed : 0;
+      case "dmg": return p.utilDamage;
+      case "ef": return p.enemiesFlashed;
+      case "tf": return e.tf;
+      case "blank": return e.blankFlashRounds;
+      case "waste": return e.wastedDollars;
+      case "fa": return e.fa;
+    }
+  };
+  const cols: { key: LobbyCol; label: string; bad?: boolean; title: string }[] = [
+    { key: "npr", label: "n/rd", title: "grenades thrown per round played" },
+    { key: "dmg", label: "dmg", title: "HP dealt with HE/molotov" },
+    { key: "ef", label: "blind", title: "enemies flashed (hover a row for blind seconds)" },
+    ...(hasTf ? [{ key: "tf" as const, label: "tm⚠", bad: true, title: "teammates flashed — lower is better" }] : []),
+    { key: "blank", label: "blank", bad: true, title: "rounds with 1+ flash thrown and zero enemies blinded — lower is better" },
+    { key: "waste", label: "$ lost", bad: true, title: "est. value of grenades still in pocket on death — lower is better" },
+    ...(hasFa ? [{ key: "fa" as const, label: "FA", title: "flash assists — teammate kills off their flashes" }] : []),
+  ];
+  const rows = players.slice().sort((a, b) => val(b, sortBy) - val(a, sortBy));
+  const max = new Map<LobbyCol, number>(cols.map((c) => [c.key, Math.max(...rows.map((p) => val(p, c.key)))]));
+  const fmt = (c: LobbyCol, v: number) =>
+    c === "npr" ? v.toFixed(1) : c === "waste" ? (v > 0 ? `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}` : "0") : String(v);
+  return (
+    <div className="card-2 px-3 py-2.5 lg:shrink-0">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="stat-label">Lobby utility</span>
+        <span className="text-[10px] text-faint">click a column to rank · row = focus</span>
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_repeat(var(--nc),minmax(34px,auto))] items-center gap-x-2 gap-y-0.5" style={{ "--nc": cols.length } as React.CSSProperties}>
+        <span />
+        {cols.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setSortBy(c.key)}
+            aria-pressed={sortBy === c.key}
+            title={c.title}
+            className={`text-right text-[9px] font-bold uppercase tracking-wide transition ${
+              sortBy === c.key ? "text-brand" : "text-faint hover:text-ink"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+        {rows.map((p) => {
+          const e = extrasOf(p.i);
+          const on = focusI === p.i;
+          return (
+            <button
+              key={p.i}
+              type="button"
+              onClick={() => onFocus(p.i)}
+              aria-pressed={on}
+              title={`${p.name} · ${p.utilNades.length} nades in ${p.roundsPlayed} rounds${p.flashDuration > 0 ? ` · ${p.flashDuration.toFixed(1)}s enemy blind dealt` : ""}${hasTf && e.tfDur > 0 ? ` · ${e.tfDur.toFixed(1)}s teammate blind` : ""}`}
+              className={`col-span-full grid grid-cols-subgrid items-center rounded px-0 py-0.5 text-left transition ${
+                on ? "bg-brand/10" : "hover:bg-panel/60"
+              }`}
+            >
+              <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: sideHex(p.team) }} />
+                <span className={`truncate ${on ? "font-bold text-brand" : "text-ink"}`}>{p.name}</span>
+              </span>
+              {cols.map((c) => {
+                const v = val(p, c.key);
+                const isMax = v > 0 && v === max.get(c.key);
+                return (
+                  <span
+                    key={c.key}
+                    className={`text-right text-[11px] tabular-nums ${
+                      isMax ? (c.bad ? "font-bold text-bad" : "font-bold text-ink") : v === 0 ? "text-faint" : "text-muted"
+                    }`}
+                  >
+                    {fmt(c.key, v)}
+                  </span>
+                );
+              })}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 text-[9px] text-faint">
+        bold = lobby-leading (<span className="text-bad">red</span> where leading is bad) · $ lost is a conservative estimate
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------- main ---
 export default function UtilityBreakdown({
   meta,
@@ -1311,7 +1424,16 @@ export default function UtilityBreakdown({
             </div>
           )}
 
-
+          {players.length > 1 && (
+            <LobbyUtilTable
+              players={players}
+              extrasOf={extrasOf}
+              hasTf={hasTf}
+              hasFa={hasFa}
+              focusI={focusI}
+              onFocus={(i) => view.setFocusPlayer(view.focusPlayer === i ? null : i)}
+            />
+          )}
 
           {executes.length > 0 && (
             <div className="card-2 px-3 py-2.5 lg:shrink-0">
