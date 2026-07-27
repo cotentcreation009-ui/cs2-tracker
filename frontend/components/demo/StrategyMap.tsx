@@ -6,11 +6,12 @@ import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { buildProjection } from "@/lib/demo/projection";
 import { throwOrigin } from "@/lib/demo/insights";
 import { loadZones, classifyPosition } from "@/lib/maps/zones";
+import { zoneTimings, earlySetups } from "@/lib/demo/zonetiming";
 import { KIND_COLOR } from "@/components/demo/RadarMap";
 import type { DemoView, SideFilter } from "@/components/demo/MatchToolbar";
 
 const SIZE = 720;
-type Layer = "positions" | "kills" | "deaths" | "nades";
+type Layer = "positions" | "kills" | "deaths" | "nades" | "setups";
 type Spread = "tight" | "normal" | "wide";
 
 const LAYERS: { key: Layer; label: string }[] = [
@@ -18,7 +19,11 @@ const LAYERS: { key: Layer; label: string }[] = [
   { key: "kills", label: "Kills" },
   { key: "deaths", label: "Deaths" },
   { key: "nades", label: "Utility" },
+  { key: "setups", label: "Early setups" },
 ];
+const SETUP_TIMES = [10, 20, 30];
+const CT_HEX = "#5b9dff";
+const T_HEX = "#e7b53c";
 const SPREADS: { key: Spread; label: string; mult: number }[] = [
   { key: "tight", label: "Tight", mult: 0.66 },
   { key: "normal", label: "Normal", mult: 1 },
@@ -132,6 +137,7 @@ export function StrategyMap({
   const [active, setActive] = useState<Set<Layer>>(new Set(["positions"]));
   const [localSide, setLocalSide] = useState<SideFilter>("all");
   const [spread, setSpread] = useState<Spread>("normal");
+  const [setupAt, setSetupAt] = useState(20);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -187,6 +193,19 @@ export function StrategyMap({
     if (rd.t?.includes(i)) return "T";
     return "all";
   }, []);
+
+  const scopedRounds = useMemo(
+    () => (scopeRound != null && rounds[scopeRound] ? [rounds[scopeRound]] : rounds),
+    [rounds, scopeRound],
+  );
+  const setups = useMemo(
+    () => (active.has("setups") ? earlySetups(meta, scopedRounds, setupAt) : []),
+    [active, meta, scopedRounds, setupAt],
+  );
+  const touches = useMemo(
+    () => zoneTimings(meta, scopedRounds, zones, (i) => focusPlayer == null || i === focusPlayer),
+    [meta, scopedRounds, zones, focusPlayer],
+  );
 
   const redraw = useCallback(() => {
     const cv = canvasRef.current;
@@ -312,7 +331,55 @@ export function StrategyMap({
           ctx.stroke();
         }
     }
-  }, [rounds, active, side, scopeRound, focusPlayer, spreadMult, toPx, sideOfRound]);
+    if (active.has("setups")) {
+      // each player's typical spot `setupAt` seconds after barrier drop —
+      // faint per-round samples, a medoid dot, and a facing wedge
+      const groups = setups.filter((g) => sideOk(g.side as SideFilter) && playerOk(g.i));
+      const labelOk = groups.length <= 14; // a full 10v10 both-sides view gets dots only
+      for (const g of groups) {
+        const col = g.side === "CT" ? CT_HEX : T_HEX;
+        for (const sm of g.samples) {
+          const c = toPx(sm.x, sm.y, sm.z);
+          ctx.globalAlpha = 0.28;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 2.5, 0, 7);
+          ctx.fillStyle = col;
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        const c = toPx(g.x, g.y, g.z);
+        const rad = (-g.dirDeg * Math.PI) / 180; // same convention as the replay radar
+        const coneLen = 26;
+        const half = (33 * Math.PI) / 180;
+        const cone = ctx.createRadialGradient(c.x, c.y, 5, c.x, c.y, coneLen);
+        cone.addColorStop(0, `${col}99`);
+        cone.addColorStop(1, `${col}00`);
+        ctx.fillStyle = cone;
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.arc(c.x, c.y, coneLen, rad - half, rad + half);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 6, 0, 7);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(4,6,14,0.9)";
+        ctx.stroke();
+        if (labelOk) {
+          const label = (meta.players[g.i]?.name || "?").slice(0, 10);
+          ctx.font = "600 10px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(4,6,14,0.85)";
+          ctx.strokeText(label, c.x, c.y - 10);
+          ctx.fillStyle = "#e6edf8";
+          ctx.fillText(label, c.x, c.y - 10);
+        }
+      }
+    }
+  }, [rounds, active, side, scopeRound, focusPlayer, spreadMult, toPx, sideOfRound, setups, meta]);
 
   useEffect(() => {
     redraw();
@@ -449,6 +516,27 @@ export function StrategyMap({
             </>
           )}
 
+          {active.has("setups") && (
+            <>
+              <div className="stat-label mb-1.5 mt-3">Setup moment</div>
+              <div className="flex rounded-lg border border-line bg-panel p-0.5">
+                {SETUP_TIMES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSetupAt(s)}
+                    aria-pressed={setupAt === s}
+                    className={`flex-1 rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition ${
+                      setupAt === s ? "bg-brand/15 text-brand" : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    +{s}s
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
           {/* local side toggle only when there is no shared toolbar */}
           {!view && (
             <>
@@ -511,6 +599,42 @@ export function StrategyMap({
           </div>
         )}
 
+        {/* first-touch timing — when each side first reaches a call-out */}
+        {touches.length > 0 && (
+          <div className="card px-4 py-3 lg:flex lg:min-h-0 lg:flex-col">
+            <div className="mb-2 flex items-baseline justify-between gap-2 lg:shrink-0">
+              <span className="stat-label">First touch</span>
+              <span className="text-[10px] lowercase text-faint">median s after barrier drop</span>
+            </div>
+            <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-faint lg:shrink-0">
+              <span className="min-w-0 flex-1">call-out</span>
+              <span className={`w-11 shrink-0 text-right ${side === "CT" ? "opacity-40" : ""}`} style={{ color: T_HEX }}>T</span>
+              <span className={`w-11 shrink-0 text-right ${side === "T" ? "opacity-40" : ""}`} style={{ color: CT_HEX }}>CT</span>
+            </div>
+            <div className="scroll-slim space-y-1 lg:min-h-0 lg:overflow-y-auto">
+              {touches.slice(0, 14).map((z) => (
+                <div key={z.zone} className="flex items-center gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-muted" title={`${z.zone} — touched by T in ${z.t.n}, CT in ${z.ct.n} of the rounds${z.t.fastest != null ? ` · fastest T ${z.t.fastest.toFixed(0)}s` : ""}${z.ct.fastest != null ? ` · fastest CT ${z.ct.fastest.toFixed(0)}s` : ""}`}>
+                    {z.contested && (
+                      <span className="mr-1 text-mid" title="Both sides arrive within ~3s — an early-fight spot">⚔</span>
+                    )}
+                    {z.zone}
+                  </span>
+                  <span className={`w-11 shrink-0 text-right tabular-nums ${side === "CT" ? "opacity-40" : ""}`} style={{ color: z.t.median != null ? T_HEX : "var(--color-faint)" }}>
+                    {z.t.median != null ? `${z.t.median.toFixed(0)}s` : "—"}
+                  </span>
+                  <span className={`w-11 shrink-0 text-right tabular-nums ${side === "T" ? "opacity-40" : ""}`} style={{ color: z.ct.median != null ? CT_HEX : "var(--color-faint)" }}>
+                    {z.ct.median != null ? `${z.ct.median.toFixed(0)}s` : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] text-faint lg:shrink-0">
+              earliest first — how map control unfolds · ⚔ = contested inside ~3s · hover a row for round counts
+            </div>
+          </div>
+        )}
+
         <div className="card px-4 py-3 text-xs text-muted lg:shrink-0">
           {scopeRound != null && rounds[scopeRound] ? (
             <>
@@ -537,6 +661,13 @@ export function StrategyMap({
           )}
           {active.has("nades") && (
             <div className="mt-1">Utility shown as throw → landing lines.</div>
+          )}
+          {active.has("setups") && (
+            <div className="mt-1">
+              Early setups: each player&apos;s <span className="font-semibold text-ink">typical spot {setupAt}s</span> after
+              barrier drop — small dots are the individual rounds, the wedge shows typical facing. A tight dot
+              cluster means a predictable setup.
+            </div>
           )}
           {!hasCalibration(meta.map) && (
             <div className="mt-1 text-mid">
