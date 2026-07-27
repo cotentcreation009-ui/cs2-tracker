@@ -96,14 +96,16 @@ interface Anchors {
 
 // Site anchors from observed plant positions. Newer parses label plants with
 // the real bombsite; older ones fall back to a mean-x split (rough A/B, same
-// convention as insights' area lean).
-function deriveAnchors(rounds: ReplayRound[]): Anchors | null {
+// convention as insights' area lean). Returns a human-readable reason instead
+// of anchors when the analysis genuinely can't run on this match.
+function deriveAnchors(rounds: ReplayRound[]): { anchors: Anchors } | { reason: string } {
   const plants: { x: number; y: number; site?: string }[] = [];
   for (const r of rounds) {
     for (const b of r.bomb ?? []) {
       if (b.k === "plant" || b.k === "plant_start") plants.push({ x: b.x, y: b.y, site: b.site });
     }
   }
+  if (plants.length === 0) return { reason: "no bomb plants in this match to locate the sites" };
   const mean = (g: { x: number; y: number }[]) =>
     g.length
       ? { x: g.reduce((s, p) => s + p.x, 0) / g.length, y: g.reduce((s, p) => s + p.y, 0) / g.length }
@@ -112,18 +114,26 @@ function deriveAnchors(rounds: ReplayRound[]): Anchors | null {
   const lb = plants.filter((p) => p.site === "B");
   let a = mean(la);
   let b = mean(lb);
-  let labels: [string, string] = ["A", "B"];
+  const labeledBoth = !!(a && b);
   if (!a || !b) {
-    if (plants.length < 2) return null;
+    if (plants.length < 2) return { reason: "only one bomb plant recorded — both sites are needed" };
     const mx = plants.reduce((s, p) => s + p.x, 0) / plants.length;
     a = mean(plants.filter((p) => p.x <= mx));
     b = mean(plants.filter((p) => p.x > mx));
-    labels = ["A", "B"]; // rough — plant clusters, not real callouts
   }
-  if (!a || !b) return null;
+  if (!a || !b) return { reason: "bomb plants cluster at a single site" };
   const sep = d2d(a.x, a.y, b.x, b.y);
-  if (sep < MIN_SEP) return null;
-  return { a: { ...a, label: labels[0] }, b: { ...b, label: labels[1] }, sep };
+  if (sep < MIN_SEP) {
+    // Plants at both sites but (almost) the same radar spot → vertically
+    // stacked sites (Nuke). Site-rotation timing can't be read from radar
+    // positions there — say so instead of pretending nothing was planted.
+    return {
+      reason: labeledBoth
+        ? "this map's sites sit on top of each other (Nuke-style verticality), so cross-site rotates can't be read from radar positions"
+        : "bomb plants cluster at a single site",
+    };
+  }
+  return { anchors: { a: { ...a, label: "A" }, b: { ...b, label: "B" }, sep } };
 }
 
 // Earliest information `side` could legitimately have ABOUT the destination
@@ -220,16 +230,18 @@ function commitOnset(series: { t: number; frac: number | null }[], t0: number): 
 const reactWeight = (react: number) => (react <= 6 ? 1.5 : react <= 12 ? 1 : 0.5);
 
 export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): RotationReport {
-  const empty = (reason: string): RotationReport => ({
-    available: false,
-    reason,
-    siteA: "A",
-    siteB: "B",
-    events: [],
-    byPlayer: new Map(),
-  });
-  const anchors = deriveAnchors(rounds);
-  if (!anchors) return empty("needs bomb plants at both sites to locate them");
+  const derived = deriveAnchors(rounds);
+  if ("reason" in derived) {
+    return {
+      available: false,
+      reason: derived.reason,
+      siteA: "A",
+      siteB: "B",
+      events: [],
+      byPlayer: new Map(),
+    };
+  }
+  const anchors = derived.anchors;
 
   const events: RotateEvent[] = [];
 

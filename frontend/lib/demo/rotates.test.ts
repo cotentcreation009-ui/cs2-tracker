@@ -89,6 +89,20 @@ describe("analyzeRotations", () => {
     expect(analyzeRotations(meta, [r]).available).toBe(false);
   });
 
+  it("declares Nuke-style stacked sites honestly instead of blaming plants", () => {
+    // labeled plants at BOTH sites, but ~200u apart on the radar (Nuke: B is
+    // directly under A) — must be unavailable with the verticality reason
+    const r1 = round(1, cast({}), {
+      bomb: [{ t: 70, k: "plant", x: 700, y: -800, site: "A" }],
+    });
+    const r2 = round(2, cast({}), {
+      bomb: [{ t: 70, k: "plant", x: 650, y: -980, site: "B" }],
+    });
+    const rep = analyzeRotations(meta, [r1, r2]);
+    expect(rep.available).toBe(false);
+    expect(rep.reason).toMatch(/on top of each other/);
+  });
+
   it("flags a blind-correct CT rotate: after the enemy commit, before any info", () => {
     // CT0 anchors B, leaves for A at t=40 — 8s after all five Ts committed to
     // A's side (t≈30-32) — with zero kills/nades/bomb/contact before t=40.

@@ -165,6 +165,11 @@ function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
               {ev.reactSec.toFixed(0)}s after the enemy shift
             </span>
           )}
+          {ev.verdict === "blind-correct" && (
+            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
+              {ev.firstInfo != null ? `no info until ${mmss(ev.firstInfo)}` : "no info all round"}
+            </span>
+          )}
           {ev.verdict === "informed" && ev.firstInfo != null && (
             <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
               info at {mmss(ev.firstInfo)} → moved {mmss(ev.t0)}
@@ -321,6 +326,12 @@ function CaseFile({
           </div>
         ) : (
           <div className="space-y-1.5">
+            {rot.blindCorrect === 0 && rot.blindWrong === 0 && rot.hunch === 0 && (
+              <div className="flex items-center gap-1.5 px-1 pb-0.5 text-[10px] text-good">
+                <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                Every rotation followed real information — normal map sense, no radar tell.
+              </div>
+            )}
             {rotEvents.map((ev, i) => (
               <RotateRow
                 key={`${ev.roundIdx}-${ev.t0}-${i}`}
@@ -434,6 +445,15 @@ export default function MatchVerdict({
 
   const flaggedCount = players.filter((x) => isFlagged(x.cheat)).length;
 
+  // lobby-level rotation read — one line proving the check ran and what it found
+  const rotTotals = useMemo(
+    () => ({
+      total: rotReport.events.length,
+      bc: rotReport.events.filter((e) => e.verdict === "blind-correct").length,
+    }),
+    [rotReport],
+  );
+
   // "Check all" prefetches every player's account scores (staggered + deduped)
   // so the AI match read is enriched and any case file opens instantly.
   const [checkAll, setCheckAll] = useState(false);
@@ -544,6 +564,24 @@ export default function MatchVerdict({
             (rotations before any info existed) — never fragging volume. Pick a player for their case file;
             ▶ a moment to watch it. Signals from public data — not proof.
           </p>
+          <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                !rotReport.available ? "bg-faint/40" : rotTotals.bc ? "bg-bad" : "bg-good"
+              }`}
+            />
+            <span className="min-w-0 truncate text-faint" title="Cross-map rotations vs. the information that could justify them — the radar-hack read">
+              {!rotReport.available
+                ? `Rotation read unavailable — ${rotReport.reason}.`
+                : rotTotals.total === 0
+                  ? "Rotation read: no cross-map rotations this match."
+                  : `Rotation read: ${rotTotals.total} rotation${rotTotals.total > 1 ? "s" : ""} analyzed · ${
+                      rotTotals.bc
+                        ? `${rotTotals.bc} began before any info — review in the case files`
+                        : "every one followed real information"
+                    }`}
+            </span>
+          </div>
         </div>
         <div className="flex shrink-0 gap-1.5">
           <button
