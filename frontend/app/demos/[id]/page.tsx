@@ -21,12 +21,14 @@ import { weaponLabel, throwOrigin } from "@/lib/demo/insights";
 import { killContext, TRADE_WINDOW } from "@/lib/demo/killContext";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
 import { MatchScoreboard } from "@/components/demo/MatchScoreboard";
+import { EconomyBreakdown } from "@/components/demo/EconomyBreakdown";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { teamScore } from "@/lib/demo/score";
 
 const TABS = [
   { k: "replay", label: "Replay" },
   { k: "scoreboard", label: "Scoreboard" },
+  { k: "economy", label: "Economy" },
   { k: "routes", label: "Routes" },
   { k: "weapons", label: "Weapons" },
   { k: "insights", label: "Utility" },
@@ -46,6 +48,7 @@ const SPEEDS = [1, 2, 4, 8];
 const TAB_ICON: Record<Tab, string> = {
   replay: "M8 5v14l11-7z",
   scoreboard: "M3 5h18v14H3zM3 10h18M9 10v9M15 10v9", // stats table
+  economy: "M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H7", // dollar
 
   routes: "M4 18h5a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3h5M17 3l3 3-3 3M4 15l-3 3 3 3", // rough path
   weapons: "M12 2v4M12 18v4M2 12h4M18 12h4M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z", // crosshair
@@ -1588,6 +1591,7 @@ export default function ReplayPage() {
           and scroll internally; the pane (never the page) absorbs overflow */}
       <div className="scroll-slim lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       {tab === "scoreboard" && <MatchScoreboard meta={meta} rounds={rounds} view={view} />}
+      {tab === "economy" && <EconomyBreakdown meta={meta} rounds={rounds} view={view} />}
       {tab === "routes" && <RouteAnalytics meta={meta} rounds={rounds} view={view} />}
       {tab === "weapons" && <WeaponInsights meta={meta} rounds={rounds} view={view} />}
       {tab === "insights" && <UtilityBreakdown meta={meta} rounds={rounds} view={view} />}
