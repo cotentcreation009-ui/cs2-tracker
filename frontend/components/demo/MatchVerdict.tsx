@@ -780,7 +780,12 @@ function CaseFile({
   const tend = useMemo(() => computeTendencies(meta, rounds), [meta, rounds]);
   const tendLines = useMemo(() => playstyleSummary(p, tend.get(p.steamId)), [p, tend]);
   const moments = useMemo(() => cheatMoments(meta, rounds, p.i), [meta, rounds, p.i]);
+  // uncapped set for the round timeline — the rail's top-12 cap must not make
+  // additionally-flagged rounds render as clean cells
+  const allMoments = useMemo(() => cheatMoments(meta, rounds, p.i, 1000), [meta, rounds, p.i]);
   const aimBacked = useMemo(() => hasAimData(rounds), [rounds]);
+  // the bundled sample match uses fake ids — no profile page or account data exists
+  const sampleId = p.steamId.startsWith("sample-");
 
   const rotEvents = useMemo(
     () =>
@@ -813,12 +818,14 @@ function CaseFile({
             {p.team || "—"} · {p.kills}-{p.deaths} · {p.adr.toFixed(0)} ADR · {p.hsPct.toFixed(0)}% HS
           </div>
         </div>
-        <Link
-          href={`/profiles/${p.steamId}`}
-          className="ml-auto shrink-0 rounded border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-panel/50 hover:text-ink"
-        >
-          Profile →
-        </Link>
+        {!sampleId && (
+          <Link
+            href={`/profiles/${p.steamId}`}
+            className="ml-auto shrink-0 rounded border border-line px-2 py-1 text-[11px] text-muted transition hover:bg-panel/50 hover:text-ink"
+          >
+            Profile →
+          </Link>
+        )}
       </div>
 
       {/* CheatMeter headline + factor breakdown */}
@@ -882,7 +889,7 @@ function CaseFile({
           {rounds.map((r, ri) => {
             const side = r.ct?.includes(p.i) ? "CT" : r.t?.includes(p.i) ? "T" : "";
             const won = side !== "" && r.winner === side;
-            const kills = moments.filter((m) => m.roundIdx === ri);
+            const kills = allMoments.filter((m) => m.roundIdx === ri);
             const rots = (rot?.events ?? []).filter((e) => e.roundIdx === ri);
             const bc = rots.some((e) => e.verdict === "blind-correct");
             const bits = [
@@ -901,11 +908,12 @@ function CaseFile({
               >
                 <span className="flex items-center gap-px leading-none">
                   {kills.length > 0 && (
+                    // rows merge per round, so "more kills" lives in extraKills
                     <span
                       className="rounded-full bg-bad"
                       style={{
-                        width: kills.length > 1 ? 7 : 5,
-                        height: kills.length > 1 ? 7 : 5,
+                        width: (kills[0]?.extraKills ?? 0) > 0 ? 7 : 5,
+                        height: (kills[0]?.extraKills ?? 0) > 0 ? 7 : 5,
                         opacity: 0.55 + Math.min(0.45, (kills[0]?.weight ?? 0) / 20),
                       }}
                     />
@@ -993,16 +1001,22 @@ function CaseFile({
 
       {/* account check + AI read (session-cached, demo-scoped) */}
       <div className="lg:shrink-0">
-        <AccountCheck
-          steamId={p.steamId}
-          name={p.name}
-          matchScore={cheat.score}
-          matchStats={matchStats}
-          cheatFactors={cheatFactors}
-          tendencyLines={tendLines}
-          aiKey={`player:${demoId}:${p.steamId}`}
-          autoRun={autoRunAccount ? 0 : null}
-        />
+        {sampleId ? (
+          <div className="rounded-lg border border-dashed border-line px-3 py-3 text-center text-[11px] text-faint">
+            Account checks aren&apos;t available for the sample match — its players are anonymized.
+          </div>
+        ) : (
+          <AccountCheck
+            steamId={p.steamId}
+            name={p.name}
+            matchScore={cheat.score}
+            matchStats={matchStats}
+            cheatFactors={cheatFactors}
+            tendencyLines={tendLines}
+            aiKey={`player:${demoId}:${p.steamId}`}
+            autoRun={autoRunAccount ? 0 : null}
+          />
+        )}
       </div>
     </div>
   );
@@ -1078,11 +1092,13 @@ export default function MatchVerdict({
   const [checkAll, setCheckAll] = useState(false);
   useEffect(() => {
     if (!checkAll) return;
-    const timers = players.map((x, idx) =>
-      setTimeout(() => {
-        void fetchAccountScores(x.p.steamId);
-      }, idx * 350),
-    );
+    const timers = players
+      .filter((x) => !x.p.steamId.startsWith("sample-")) // anonymized sample ids have no accounts
+      .map((x, idx) =>
+        setTimeout(() => {
+          void fetchAccountScores(x.p.steamId);
+        }, idx * 350),
+      );
     return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkAll, players.length]);

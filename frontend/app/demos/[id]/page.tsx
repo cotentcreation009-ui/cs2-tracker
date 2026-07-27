@@ -303,7 +303,19 @@ function EventFeed({
 
   const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= time);
   const ended = (round.bomb ?? []).find((b) => (b.k === "defuse" || b.k === "explode") && b.t <= time);
-  const defusing = (round.bomb ?? []).some((b) => b.k === "defuse_start" && b.t <= time) && !ended;
+  // A defuse is only "live" while the defuser is alive and within the defuse
+  // duration — demos carry no abort event, so a fake tap or a killed defuser
+  // would otherwise read "Being defused… has time" until the bomb explodes.
+  const ds = plant
+    ? (round.bomb ?? []).filter((b) => b.k === "defuse_start" && b.t >= plant.t && b.t <= time).pop()
+    : undefined;
+  const dsDead =
+    ds != null &&
+    ds.p != null &&
+    ds.p > 0 &&
+    (round.kills ?? []).some((k) => k.v === (ds.p ?? 0) - 1 && k.t > ds.t && k.t <= time);
+  const defusing =
+    ds != null && !ended && !dsDead && time - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5;
 
   const dead = new Set<number>();
   for (const k of round.kills ?? []) if (k.v >= 0 && k.t <= time) dead.add(k.v);
@@ -372,9 +384,6 @@ function EventFeed({
       {plant && !ended && (() => {
         // countdown + defuse race: does the defuser started now have the time?
         const rem = Math.max(0, C4_TIME - (time - plant.t));
-        const ds = (round.bomb ?? [])
-          .filter((b) => b.k === "defuse_start" && b.t >= plant.t && b.t <= time)
-          .pop();
         const race =
           defusing && ds
             ? C4_TIME - (ds.t - plant.t) >= (ds.kit ? DEFUSE_KIT : DEFUSE_BARE)
@@ -1122,7 +1131,14 @@ export default function ReplayPage() {
             .filter((x) => x.k === "defuse_start" && x.t >= plant.t && x.t <= t)
             .pop()
         : undefined;
-      if (plant && !ended && ds && t - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5) {
+      // stale-defuse guard: the demo has no abort event, so stop asserting a
+      // live defuse once the defuser has died
+      const dsDead =
+        ds != null &&
+        ds.p != null &&
+        ds.p > 0 &&
+        (round.kills ?? []).some((k) => k.v === (ds.p ?? 0) - 1 && k.t > ds.t && k.t <= t);
+      if (plant && !ended && ds && !dsDead && t - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5) {
         const hasTime = C4_TIME - (ds.t - plant.t) >= (ds.kit ? DEFUSE_KIT : DEFUSE_BARE);
         b = hasTime ? `Defusing… ${ds.kit ? "kit" : "no kit"} — has time` : "Defusing… not enough time!";
       } else if (plant && !ended) {
@@ -1269,6 +1285,12 @@ export default function ReplayPage() {
     focusRef.current = focusPlayer;
   }, [focusPlayer]);
 
+  // the hover tooltip only updates on mousemove — drop it when playback,
+  // zoom/pan or a round change would otherwise leave it showing stale data
+  useEffect(() => {
+    setHoverBlip(null);
+  }, [roundIdx, playing, vp]);
+
   // the shared round scope drives which round the replay shows
   useEffect(() => {
     if (scopeRound == null || scopeRound < 0 || scopeRound >= rounds.length) return;
@@ -1309,7 +1331,8 @@ export default function ReplayPage() {
     // Number(null) === 0, so absent params MUST read as NaN, not zero
     const num = (k: string) => (q.get(k) == null ? NaN : Number(q.get(k)));
     const qt = q.get("tab");
-    if (qt && qt in TAB_ICON) setTab(qt as Tab);
+    // hasOwnProperty — a plain `in` accepts Object.prototype keys ("toString")
+    if (qt && Object.prototype.hasOwnProperty.call(TAB_ICON, qt)) setTab(qt as Tab);
     const r = num("r");
     const hasRound = Number.isFinite(r) && r >= 1 && r <= rounds.length;
     if (hasRound) setScopeRound(r - 1);
@@ -1326,19 +1349,26 @@ export default function ReplayPage() {
 
   useEffect(() => {
     if (!urlReady.current) return;
-    const q = new URLSearchParams(window.location.search);
-    const put = (k: string, v: string | null) => (v == null ? q.delete(k) : q.set(k, v));
-    put("tab", tab === "replay" ? null : tab);
-    put("r", scopeRound != null ? String(scopeRound + 1) : null);
-    put("p", focusPlayer != null ? String(focusPlayer) : null);
-    // the playhead is only worth a link while paused mid-round
-    put("t", !playing && time > 1 ? String(Math.floor(time)) : null);
-    const qs = q.toString();
-    const next = qs ? `?${qs}` : "";
-    if (next !== window.location.search) {
-      window.history.replaceState(null, "", `${window.location.pathname}${next}`);
-    }
-  }, [tab, scopeRound, focusPlayer, playing, time]);
+    // Debounced: scrubbing changes `time` every frame and Safari rate-limits
+    // replaceState (~100 calls / 30s) — hammering it throws SecurityError.
+    const h = setTimeout(() => {
+      const q = new URLSearchParams(window.location.search);
+      const put = (k: string, v: string | null) => (v == null ? q.delete(k) : q.set(k, v));
+      put("tab", tab === "replay" ? null : tab);
+      // the playhead is only worth a link while paused mid-round — and it MUST
+      // carry its round, even unscoped, or the restore lands in round 1
+      const tOut = !playing && time > 1 ? String(Math.floor(time)) : null;
+      put("r", scopeRound != null ? String(scopeRound + 1) : tOut != null ? String(roundIdx + 1) : null);
+      put("p", focusPlayer != null ? String(focusPlayer) : null);
+      put("t", tOut);
+      const qs = q.toString();
+      const next = qs ? `?${qs}` : "";
+      if (next !== window.location.search) {
+        window.history.replaceState(null, "", `${window.location.pathname}${next}`);
+      }
+    }, 350);
+    return () => clearTimeout(h);
+  }, [tab, scopeRound, focusPlayer, playing, time, roundIdx]);
 
   // wheel-zoom toward the cursor (non-passive so the page doesn't scroll)
   useEffect(() => {

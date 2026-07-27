@@ -15,7 +15,7 @@ import { useMemo } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 import { classifyBuy, buyTierOf, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
-import { teamAStarters, roundWinnerTeam } from "@/lib/demo/score";
+import { teamAStarters } from "@/lib/demo/score";
 
 const CT = "#5b9dff";
 const T = "#e7b53c";
@@ -83,7 +83,11 @@ export function EconomyBreakdown({
       };
       const a = teamOf(rosterA);
       const b = teamOf(rosterB);
-      const winner = roundWinnerTeam(r, teamA);
+      // winner derived from the SAME aOnCT split as the economy sums — mixing
+      // in roundWinnerTeam's independent test could credit one side's economy
+      // with the other side's win on odd rosters
+      const winner: "A" | "B" | null =
+        r.winner === "CT" ? (aOnCT ? "A" : "B") : r.winner === "T" ? (aOnCT ? "B" : "A") : null;
       if (winner === "A") a.won = true;
       if (winner === "B") b.won = true;
       perRound.push({ n: r.n, a, b, winner });
@@ -101,6 +105,23 @@ export function EconomyBreakdown({
         m.set(t.tier, v);
       }
       return m;
+    };
+
+    // stable team membership incl. late connectors (mirrors the scoreboard):
+    // absent from round 1, match their first appearing round against where
+    // team A plays that round
+    const memberOfA = (i: number): boolean => {
+      if (teamA.has(i)) return true;
+      for (const r of rounds) {
+        const inCT = r.ct?.includes(i);
+        const inT = r.t?.includes(i);
+        if (!inCT && !inT) continue;
+        const aOnCT =
+          (r.ct?.filter((x) => teamA.has(x)).length ?? 0) >=
+          (r.t?.filter((x) => teamA.has(x)).length ?? 0);
+        return inCT ? aOnCT : !aOnCT;
+      }
+      return false;
     };
 
     // per-player economy over the match
@@ -132,7 +153,7 @@ export function EconomyBreakdown({
         return {
           i,
           name: pl.name || `P${i + 1}`,
-          isA: teamA.has(i),
+          isA: memberOfA(i),
           avgEquip: nEquip ? equip / nEquip : 0,
           spent,
           avgLeft: nCash ? left / nCash : 0,

@@ -232,7 +232,7 @@ export function PlayerRoundCard({
         <span className="pill shrink-0" style={{ background: `${col}22`, color: col }}>
           {d.side || "—"}
         </span>
-        {d.steamId && (
+        {d.steamId && !d.steamId.startsWith("sample-") && (
           <Link
             href={`/profiles/${d.steamId}`}
             className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted transition hover:bg-panel/50 hover:text-ink"

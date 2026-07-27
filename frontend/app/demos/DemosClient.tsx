@@ -145,9 +145,10 @@ export function DemosClient() {
       );
       markNew(saved.id);
       router.push(`/demos/${saved.id}`);
+      // stay busy until navigation unmounts us — re-enabling here would let a
+      // second click save a duplicate sample match
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load the sample demo.");
-    } finally {
       setSampleBusy(false);
     }
   }, [sampleBusy, markNew, router]);
