@@ -7,7 +7,13 @@ import { computeInsights, type PlayerInsight } from "@/lib/demo/insights";
 import { demoCheat, BAND_HEX, BAND_LABEL, type DemoCheat } from "@/lib/demo/cheat";
 import { computeTendencies, playstyleSummary } from "@/lib/demo/tendencies";
 import { cheatMoments, hasAimData, type CheatMoment } from "@/lib/demo/evidence";
-import { analyzeRotations, type PlayerRotates, type RotateEvent } from "@/lib/demo/rotates";
+import {
+  analyzeRotations,
+  TRIGGER_LABEL,
+  type PlayerRotates,
+  type RotateEvent,
+  type TriggerKind,
+} from "@/lib/demo/rotates";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import { cachedAccountScores, fetchAccountScores, getAiRead, setAiRead } from "@/lib/demo/accountStore";
 import type { DemoView } from "@/components/demo/MatchToolbar";
@@ -45,6 +51,16 @@ const VERDICT_ORDER: Record<RotateEvent["verdict"], number> = {
   "blind-wrong": 1,
   hunch: 2,
   informed: 3,
+};
+
+// compact factor names for the narrow suspicion-rail rows (full labels truncate)
+const FACTOR_SHORT: Record<string, string> = {
+  snap: "snap kills",
+  acc: "accuracy",
+  hsacc: "HS acc",
+  react: "reaction",
+  hs: "HS %",
+  rot: "rotates",
 };
 
 function safeName(name: string): string {
@@ -101,7 +117,7 @@ function SuspectRow({
           {cheat.score.toFixed(0)}%
         </span>
         <span className="block truncate text-[9px] uppercase tracking-wide text-faint">
-          {top ? top.label : cheat.confidence < 0.5 ? "low data" : "clean"}
+          {top ? FACTOR_SHORT[top.key] ?? top.label : cheat.confidence < 0.5 ? "low data" : "clean"}
         </span>
       </span>
     </button>
@@ -124,9 +140,17 @@ function MomentRow({ m, onWatch }: { m: CheatMoment; onWatch: () => void }) {
           <span className="tabular-nums text-faint">{mmss(m.t)}</span>
           <span className="truncate text-muted">→ {m.victim}</span>
           {m.hs && <span className="shrink-0 text-bad" title="headshot">⌖</span>}
+          {(m.extraKills ?? 0) > 0 && (
+            <span
+              className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint"
+              title="This round's other flagged kills share the same round-level tells — one row covers them"
+            >
+              +{m.extraKills} more kill{(m.extraKills ?? 0) > 1 ? "s" : ""}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex flex-wrap gap-1">
-          {m.tags.slice(0, 3).map((tg, i) => (
+          {m.tags.slice(0, 4).map((tg, i) => (
             <span key={i} className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
               {tg}
             </span>
@@ -170,9 +194,14 @@ function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
               {ev.firstInfo != null ? `no info until ${mmss(ev.firstInfo)}` : "no info all round"}
             </span>
           )}
-          {ev.verdict === "informed" && ev.firstInfo != null && (
+          {ev.verdict === "informed" && ev.trigger != null && (
             <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
-              info at {mmss(ev.firstInfo)} → moved {mmss(ev.t0)}
+              ↳ {ev.trigger.label} {mmss(ev.trigger.t)} · moved +{Math.max(0, ev.t0 - ev.trigger.t).toFixed(0)}s
+            </span>
+          )}
+          {ev.verdict === "hunch" && (
+            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
+              no info, enemies uncommitted — a read/guess
             </span>
           )}
         </div>
@@ -330,6 +359,18 @@ function CaseFile({
               <div className="flex items-center gap-1.5 px-1 pb-0.5 text-[10px] text-good">
                 <span className="h-1.5 w-1.5 rounded-full bg-good" />
                 Every rotation followed real information — normal map sense, no radar tell.
+              </div>
+            )}
+            {rot.informed > 0 && Object.keys(rot.byTrigger).length > 0 && (
+              <div className="px-1 pb-0.5 text-[10px] leading-relaxed text-muted">
+                Rotates on{" "}
+                {Object.entries(rot.byTrigger)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([k, n]) => `${TRIGGER_LABEL[k as TriggerKind]} ×${n}`)
+                  .join(" · ")}
+                {rot.avgResponseSec != null &&
+                  ` — typically moves ~${rot.avgResponseSec.toFixed(0)}s after the info appears`}
+                {rot.hunch > 0 && ` · plus ${rot.hunch} pure read${rot.hunch > 1 ? "s" : ""} (no info)`}
               </div>
             )}
             {rotEvents.map((ev, i) => (
@@ -510,7 +551,15 @@ export default function MatchVerdict({
         rot && rot.blindCorrect + rot.blindWrong > 0
           ? `, blind rotates ${rot.blindCorrect}✓/${rot.blindWrong}✗`
           : "";
-      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${acctBits}`;
+      const rotStyle =
+        rot && rot.informed > 0 && rot.avgResponseSec != null
+          ? `, rotates ~${rot.avgResponseSec.toFixed(0)}s after info (${Object.entries(rot.byTrigger)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 2)
+              .map(([k]) => TRIGGER_LABEL[k as TriggerKind])
+              .join(", ")})`
+          : "";
+      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${rotStyle}${acctBits}`;
     });
     const summary = [
       `MATCH-LEVEL read: a ${rounds.length}-round game on ${meta.map} with ${players.length} players (in-match CheatMeter covers aim anomalies plus information anomalies — "blind rotates" are cross-map rotations made before any info existed, ✓ correct / ✗ wrong; not proof; account data included where already checked). Assess the LOBBY: which players (if any) warrant a closer look and why, who reads clean, and one overall line. Be measured and concrete.`,
@@ -624,7 +673,7 @@ export default function MatchVerdict({
         <div className="card-2 flex flex-col px-3 py-2.5 lg:min-h-0 lg:px-2.5 lg:py-2">
           <div className="mb-1.5 flex items-center justify-between lg:shrink-0">
             <span className="stat-label">Suspicion ranking</span>
-            <span className="text-[10px] text-faint">aim anomaly ↓</span>
+            <span className="text-[10px] text-faint">aim + info anomaly ↓</span>
           </div>
           <div className="scroll-slim space-y-0.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-0.5">
             {players.map(({ p, cheat }, idx) => (

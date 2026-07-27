@@ -29,6 +29,22 @@ import type { ReplayMeta, ReplayRound } from "./types";
 
 export type RotateVerdict = "informed" | "hunch" | "blind-correct" | "blind-wrong";
 
+// What kind of information a rotate responded to — the "tell" behind it.
+export type TriggerKind = "utility" | "fight" | "contact" | "bomb";
+
+export interface RotateTrigger {
+  t: number; // when the information appeared
+  kind: TriggerKind;
+  label: string; // compact human phrase, e.g. "enemy smoke near A"
+}
+
+export const TRIGGER_LABEL: Record<TriggerKind, string> = {
+  utility: "enemy utility",
+  fight: "kills/deaths",
+  contact: "sound/contact",
+  bomb: "bomb action",
+};
+
 export interface RotateEvent {
   roundIdx: number;
   roundN: number;
@@ -39,6 +55,7 @@ export interface RotateEvent {
   t0: number; // seconds since round start — when the move began
   tArrive: number;
   firstInfo: number | null; // earliest destination-relevant team info (null = none all round)
+  trigger: RotateTrigger | null; // the event behind firstInfo (null = silent round)
   commitAt: number | null; // enemy-shift onset backing the verdict
   reactSec: number | null; // t0 - commitAt for blind verdicts
   verdict: RotateVerdict;
@@ -54,6 +71,10 @@ export interface PlayerRotates {
   avgReactSec: number | null; // mean reaction of blind-correct rotates
   x: number; // suspicion input: Σ speed-weighted blind-correct − 0.75·blind-wrong
   events: RotateEvent[];
+  // how this player rotates: what their informed rotates responded to, and how
+  // fast they moved after the information appeared
+  byTrigger: Partial<Record<TriggerKind, number>>;
+  avgResponseSec: number | null; // mean t0 − trigger.t across informed rotates
 }
 
 export interface RotationReport {
@@ -137,37 +158,60 @@ function deriveAnchors(rounds: ReplayRound[]): { anchors: Anchors } | { reason: 
 }
 
 // Earliest information `side` could legitimately have ABOUT the destination
-// this round. Location-aware: an event only informs a rotate toward `to` when
-// it happened on the destination half of the map (or near mid — the 1.15
-// slack), because a fight or molly at your OWN site never tells you the real
-// hit is elsewhere. Counted events: kills (either participant's position —
-// killfeed + comms), enemy/unattributed grenade detonations (landing spot),
-// bomb events (site-revealing, so always global), and an enemy inside
-// audible/visible range of any living teammate while that enemy is on the
-// destination half. Infinity when nothing pointed there before round end.
+// this round — returned as the actual triggering EVENT so the UI can say what
+// a rotate responded to, not just when. Location-aware: an event only informs
+// a rotate toward `to` when it happened on the destination half of the map (or
+// near mid — the 1.15 slack), because a fight or molly at your OWN site never
+// tells you the real hit is elsewhere. Counted events: kills (either
+// participant's position — killfeed + comms), enemy/unattributed grenade
+// detonations (landing spot), bomb events (site-revealing, so always global),
+// and an enemy inside audible/visible range of any living teammate while that
+// enemy is on the destination half. null when nothing pointed there all round.
 function firstRelevantInfo(
   r: ReplayRound,
   meta: ReplayMeta,
   side: "CT" | "T",
-  to: { x: number; y: number },
+  to: { x: number; y: number; label: string },
   from: { x: number; y: number },
-): number {
+): RotateTrigger | null {
   const relevant = (x: number, y: number) =>
     d2d(x, y, to.x, to.y) <= 1.15 * d2d(x, y, from.x, from.y);
-  let best = Infinity;
-  for (const b of r.bomb ?? []) best = Math.min(best, b.t);
-  for (const k of r.kills ?? []) {
-    if (k.t >= best) continue;
-    if (relevant(k.vx, k.vy) || relevant(k.kx, k.ky)) best = k.t;
+  let best: RotateTrigger | null = null;
+  let bestT = Infinity; // tracked separately — TS can't narrow through the closure
+  const consider = (t: number, kind: TriggerKind, label: string) => {
+    if (t < bestT) {
+      bestT = t;
+      best = { t, kind, label };
+    }
+  };
+
+  for (const b of r.bomb ?? []) {
+    const what =
+      b.k === "plant" ? "bomb planted" : b.k === "plant_start" ? "plant started" : "bomb action";
+    consider(b.t, "bomb", b.site ? `${what} at ${b.site}` : what);
   }
+  for (const k of r.kills ?? []) {
+    if (k.t >= bestT) continue;
+    if (!relevant(k.vx, k.vy) && !relevant(k.kx, k.ky)) continue;
+    const victimMine = k.v >= 0 && sideOf(r, k.v, meta) === side;
+    const killerMine = k.k >= 0 && sideOf(r, k.k, meta) === side;
+    if (victimMine) consider(k.t, "fight", `teammate died near ${to.label}`);
+    else if (killerMine) consider(k.t, "fight", `teammate's kill near ${to.label}`);
+    else consider(k.t, "fight", `a death near ${to.label}`); // killfeed
+  }
+  const NADE_NAME: Record<string, string> = {
+    smoke: "smoke", flash: "flash", he: "HE", decoy: "decoy",
+    molotov: "molotov", inferno: "molotov", incgrenade: "molotov",
+  };
   for (const n of r.nades ?? []) {
-    if (n.t >= best) continue;
+    if (n.t >= bestT) continue;
     const thrower = n.by >= 0 ? sideOf(r, n.by, meta) : "";
     if (thrower === side) continue; // own utility isn't enemy info
-    if (relevant(n.x, n.y)) best = n.t;
+    if (relevant(n.x, n.y))
+      consider(n.t, "utility", `enemy ${NADE_NAME[n.k] ?? "utility"} near ${to.label}`);
   }
   for (const f of r.frames ?? []) {
-    if (f.t >= best) break;
+    if (f.t >= bestT) break;
     const mine = f.p.filter((p) => p.h > 0 && sideOf(r, p.i, meta) === side);
     if (!mine.length) continue;
     for (const e of f.p) {
@@ -181,7 +225,7 @@ function firstRelevantInfo(
           !(m.z != null && e.z != null && Math.abs(m.z - e.z) > CONTACT_Z),
       );
       if (heard) {
-        best = f.t;
+        consider(f.t, "contact", `enemy heard/seen near ${to.label}`);
         break;
       }
     }
@@ -314,7 +358,8 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
           if (before.some((p) => d2d(p.x, p.y, dest.x, dest.y) < SETTLE_FRAC * anchors.sep)) continue;
 
           const enemySide = side === "CT" ? "T" : "CT";
-          const teamInfo = firstRelevantInfo(r, meta, side, dest, origin);
+          const trigger = firstRelevantInfo(r, meta, side, dest, origin);
+          const teamInfo = trigger?.t ?? Infinity;
           const blind = t0 < teamInfo - BLIND_EPS;
 
           let verdict: RotateVerdict = "informed";
@@ -357,6 +402,7 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
             t0,
             tArrive,
             firstInfo: Number.isFinite(teamInfo) ? teamInfo : null,
+            trigger,
             commitAt,
             reactSec,
             verdict,
@@ -382,13 +428,17 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
         avgReactSec: null,
         x: 0,
         events: [],
+        byTrigger: {},
+        avgResponseSec: null,
       };
       byPlayer.set(ev.playerIdx, p);
     }
     p.total++;
     p.events.push(ev);
-    if (ev.verdict === "informed") p.informed++;
-    else if (ev.verdict === "hunch") p.hunch++;
+    if (ev.verdict === "informed") {
+      p.informed++;
+      if (ev.trigger) p.byTrigger[ev.trigger.kind] = (p.byTrigger[ev.trigger.kind] ?? 0) + 1;
+    } else if (ev.verdict === "hunch") p.hunch++;
     else if (ev.verdict === "blind-wrong") {
       p.blindWrong++;
       p.x -= 0.75;
@@ -401,6 +451,10 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
     const reacts = p.events.filter((e) => e.verdict === "blind-correct" && e.reactSec != null);
     p.avgReactSec = reacts.length
       ? reacts.reduce((s, e) => s + (e.reactSec ?? 0), 0) / reacts.length
+      : null;
+    const responses = p.events.filter((e) => e.verdict === "informed" && e.trigger != null);
+    p.avgResponseSec = responses.length
+      ? responses.reduce((s, e) => s + (e.t0 - (e.trigger?.t ?? e.t0)), 0) / responses.length
       : null;
     p.x = Math.max(0, p.x);
   }
