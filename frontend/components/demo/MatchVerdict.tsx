@@ -7,6 +7,7 @@ import { computeInsights, type PlayerInsight } from "@/lib/demo/insights";
 import { demoCheat, BAND_HEX, BAND_LABEL, type DemoCheat } from "@/lib/demo/cheat";
 import { computeTendencies, playstyleSummary } from "@/lib/demo/tendencies";
 import { cheatMoments, hasAimData, type CheatMoment } from "@/lib/demo/evidence";
+import { aimConsistency, type SeriesPoint, type StepChange } from "@/lib/demo/consistency";
 import {
   aggregateTeamRotates,
   analyzeRotations,
@@ -751,6 +752,70 @@ function EvidenceExplorer({
 }
 
 // ── the case file for one selected suspect ─────────────────────────────────
+const STEP_METRIC_LABEL: Record<StepChange["metric"], string> = {
+  reaction: "Reaction time",
+  preaim: "Pre-aim offset",
+  accuracy: "Accuracy",
+};
+
+/** One consistency sparkline: a per-round series with the flagged step (if any)
+ *  shaded. Single series, so no legend — the row label names it. */
+function Spark({
+  label,
+  pts,
+  totalRounds,
+  step,
+  fmt,
+}: {
+  label: string;
+  pts: SeriesPoint[];
+  totalRounds: number;
+  step: StepChange | null; // only when THIS metric carries the flagged step
+  fmt: (v: number) => string;
+}) {
+  const W = 260;
+  const H = 30;
+  if (pts.length < 4) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="w-16 shrink-0 text-[9px] font-bold uppercase tracking-wide text-faint">{label}</span>
+        <span className="text-[10px] text-faint">not enough rounds with samples</span>
+      </div>
+    );
+  }
+  const lo = Math.min(...pts.map((p) => p.v));
+  const hi = Math.max(...pts.map((p) => p.v));
+  const pad = Math.max((hi - lo) * 0.15, 1e-3);
+  const x = (round: number) => (totalRounds <= 1 ? 0 : ((round - 1) / (totalRounds - 1)) * W);
+  const y = (v: number) => H - 3 - ((v - lo + pad) / (hi - lo + 2 * pad)) * (H - 6);
+  const line = pts.map((p) => `${x(p.round).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const mean = pts.reduce((s, p) => s + p.v, 0) / pts.length;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-[9px] font-bold uppercase tracking-wide text-faint">{label}</span>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-7.5 min-w-0 flex-1" aria-label={`${label} per round`}>
+        {step && (
+          <>
+            {/* the "after" regime — where the numbers changed */}
+            <rect x={x(step.atRound)} y={0} width={Math.max(0, W - x(step.atRound))} height={H} fill="#ff5c5c" opacity={0.08} />
+            <line x1={x(step.atRound)} y1={0} x2={x(step.atRound)} y2={H} stroke="#ff5c5c" strokeWidth={1} strokeDasharray="3 2" />
+          </>
+        )}
+        <polyline points={line} fill="none" stroke={step ? "#c95560" : "#7f8ea3"} strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
+        {/* invisible per-sample hover columns — hit target far bigger than the mark */}
+        {pts.map((p) => (
+          <rect key={p.round} x={x(p.round) - W / (2 * totalRounds)} y={0} width={W / totalRounds} height={H} fill="transparent">
+            <title>{`R${p.round} · ${fmt(p.v)}`}</title>
+          </rect>
+        ))}
+      </svg>
+      <span className={`w-21.5 shrink-0 text-right text-[10px] tabular-nums ${step ? "font-bold text-bad" : "text-muted"}`}>
+        {step ? `${fmt(step.before)} → ${fmt(step.after)}` : `avg ${fmt(mean)}`}
+      </span>
+    </div>
+  );
+}
+
 function CaseFile({
   p,
   cheat,
@@ -784,6 +849,7 @@ function CaseFile({
   // additionally-flagged rounds render as clean cells
   const allMoments = useMemo(() => cheatMoments(meta, rounds, p.i, 1000), [meta, rounds, p.i]);
   const aimBacked = useMemo(() => hasAimData(rounds), [rounds]);
+  const consist = useMemo(() => aimConsistency(rounds, p.i), [rounds, p.i]);
   // the bundled sample match uses fake ids — no profile page or account data exists
   const sampleId = p.steamId.startsWith("sample-");
 
@@ -874,6 +940,51 @@ function CaseFile({
           </div>
         )}
       </div>
+
+      {/* consistency — the toggle signature. Legit aim wanders around a personal
+          mean; a sharp sustained mid-match improvement is worth a manual look. */}
+      {(consist.reaction.length >= 4 || consist.accuracy.length >= 4) && (
+        <div className="rounded-lg border border-line bg-panel/30 px-3 py-2.5 lg:shrink-0">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="stat-label">Consistency by round</span>
+            <span className="text-[10px] text-faint">hover a column for the round&apos;s number</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Spark
+              label="Reaction"
+              pts={consist.reaction}
+              totalRounds={rounds.length}
+              step={consist.step?.metric === "reaction" ? consist.step : null}
+              fmt={(v) => `${v.toFixed(0)}ms`}
+            />
+            <Spark
+              label="Pre-aim"
+              pts={consist.preaim}
+              totalRounds={rounds.length}
+              step={consist.step?.metric === "preaim" ? consist.step : null}
+              fmt={(v) => `${v.toFixed(1)}°`}
+            />
+            <Spark
+              label="Accuracy"
+              pts={consist.accuracy}
+              totalRounds={rounds.length}
+              step={consist.step?.metric === "accuracy" ? consist.step : null}
+              fmt={(v) => `${v.toFixed(0)}%`}
+            />
+          </div>
+          {consist.step ? (
+            <div className="mt-2 border-t border-line pt-1.5 text-[10px] text-bad">
+              ⚠ {STEP_METRIC_LABEL[consist.step.metric]} stepped sharply at R{consist.step.atRound} and stayed
+              there — a mid-match jump like this is the classic toggle pattern. Worth watching those rounds.
+              Not proof, and it does not change the CheatMeter score.
+            </div>
+          ) : (
+            <div className="mt-1.5 text-[10px] text-faint">
+              No sharp mid-match step — aim quality wanders normally round to round.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* suspect timeline — anomalies vs the scoreline. A cheater who toggles
           when losing shows as markers clustering on red cells. */}
@@ -1145,6 +1256,10 @@ export default function MatchVerdict({
         rot && rot.blindCorrect + rot.blindWrong > 0
           ? `, blind rotates ${rot.blindCorrect}✓/${rot.blindWrong}✗`
           : "";
+      const step = aimConsistency(rounds, p.i).step;
+      const stepBit = step
+        ? `, MID-MATCH STEP: ${STEP_METRIC_LABEL[step.metric].toLowerCase()} ${step.before.toFixed(0)}→${step.after.toFixed(0)} from R${step.atRound}`
+        : "";
       const rotStyle =
         rot && rot.informed > 0 && rot.avgResponseSec != null
           ? `, rotates ~${rot.avgResponseSec.toFixed(0)}s after info (${Object.entries(rot.byTrigger)
@@ -1153,7 +1268,7 @@ export default function MatchVerdict({
               .map(([k]) => TRIGGER_LABEL[k as TriggerKind])
               .join(", ")})`
           : "";
-      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${rotStyle}${acctBits}`;
+      return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${stepBit}${rotStyle}${acctBits}`;
     });
     const teamStyleLine = (label: string, tr: TeamRotates | null) => {
       if (!tr || tr.informed === 0) return null;
