@@ -88,6 +88,11 @@ interface Blip {
   bomb?: boolean;
 }
 
+// standard competitive C4 timer + defuse times (mp_c4timer isn't in the demo)
+const C4_TIME = 40;
+const DEFUSE_KIT = 5;
+const DEFUSE_BARE = 10;
+
 // approximate on-map lifetime per grenade kind (seconds) for the "active now" feed
 const UTIL_LIFE: Record<string, number> = {
   smoke: 17,
@@ -361,13 +366,33 @@ function EventFeed({
         </span>
       </div>
 
-      {plant && !ended && (
-        <div className="mb-2 flex items-center gap-2 rounded-md bg-bad/10 px-2 py-1 text-xs text-bad">
-          <span className="font-bold">C4</span>
-          <span>{defusing ? "Being defused…" : "Bomb planted"}</span>
-          <span className="ml-auto tabular-nums">{mmss(time - plant.t)} ago</span>
-        </div>
-      )}
+      {plant && !ended && (() => {
+        // countdown + defuse race: does the defuser started now have the time?
+        const rem = Math.max(0, C4_TIME - (time - plant.t));
+        const ds = (round.bomb ?? [])
+          .filter((b) => b.k === "defuse_start" && b.t >= plant.t && b.t <= time)
+          .pop();
+        const race =
+          defusing && ds
+            ? C4_TIME - (ds.t - plant.t) >= (ds.kit ? DEFUSE_KIT : DEFUSE_BARE)
+              ? ds.kit
+                ? "kit — has time"
+                : "no kit — has time"
+              : "not enough time!"
+            : null;
+        const planter = plant.p != null && plant.p > 0 ? name(plant.p - 1) : null;
+        return (
+          <div className="mb-2 flex items-center gap-2 rounded-md bg-bad/10 px-2 py-1 text-xs text-bad">
+            <span className="font-bold">C4{plant.site ? ` · ${plant.site}` : ""}</span>
+            <span className="truncate">
+              {defusing ? `Being defused… ${race ?? ""}` : planter ? `Planted by ${planter}` : "Bomb planted"}
+            </span>
+            <span className={`ml-auto shrink-0 font-bold tabular-nums ${rem <= 10 ? "animate-pulse" : ""}`}>
+              0:{String(Math.ceil(rem)).padStart(2, "0")}
+            </span>
+          </div>
+        );
+      })()}
 
       <div className="mb-2">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Active utility</div>
@@ -672,6 +697,14 @@ export default function ReplayPage() {
   // to the replay, scope the round, then seek to the kill once it's loaded.
   const [jump, setJump] = useState<{ round: number; time: number } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  // radar hover: full name + HP + bomb for the dot under the cursor
+  const [hoverBlip, setHoverBlip] = useState<{
+    name: string;
+    hp: number;
+    bomb: boolean;
+    left: number;
+    top: number;
+  } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const focusRef = useRef<number | null>(null);
@@ -962,6 +995,17 @@ export default function ReplayPage() {
         ctx.fillStyle = "#fff";
         ctx.font = `bold ${9 * s}px sans-serif`;
         ctx.fillText("C4", c.x - 8 * s, c.y - 8 * s);
+        // live countdown under the marker — urgent red inside 10s
+        const rem = Math.max(0, C4_TIME - (t - plant.t));
+        ctx.font = `bold ${10 * s}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.lineWidth = 3 * s;
+        ctx.strokeStyle = "rgba(0,0,0,0.65)";
+        const remTxt = `0:${String(Math.ceil(rem)).padStart(2, "0")}`;
+        ctx.strokeText(remTxt, c.x, c.y + 15 * s);
+        ctx.fillStyle = rem <= 10 ? "#ff5c5c" : "#ffd54a";
+        ctx.fillText(remTxt, c.x, c.y + 15 * s);
+        ctx.textAlign = "start";
       }
 
       // recent kills: X on victim for 4s, killer line for 1.5s
@@ -1026,6 +1070,17 @@ export default function ReplayPage() {
         ctx.strokeStyle = "rgba(4,6,14,0.9)";
         ctx.stroke();
 
+        // health arc — remaining HP as a ring share (green → amber → red), so
+        // a 9hp exit reads differently from a 100hp hold at a glance
+        if (p.h < 100) {
+          const hp = clamp(p.h, 0, 100);
+          ctx.strokeStyle = hp > 66 ? "#46d369" : hp > 33 ? "#e7b53c" : "#ff5c5c";
+          ctx.lineWidth = 1.8 * s;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, r + 1.9 * s, -Math.PI / 2, -Math.PI / 2 + (hp / 100) * Math.PI * 2);
+          ctx.stroke();
+        }
+
         if (p.bomb) {
           ctx.strokeStyle = "#f5694a";
           ctx.lineWidth = 2.5 * s;
@@ -1055,10 +1110,18 @@ export default function ReplayPage() {
       }
       ctx.restore();
 
-      // advisory banner (round result is shown as a popup, not here)
+      // advisory banner (round result is shown as a popup, not here). The
+      // defuse verdict answers the clutch-review question: could the defuser
+      // who just started actually beat the C4 timer?
       let b = "";
-      if ((round.bomb ?? []).some((x) => x.k === "defuse_start" && Math.abs(x.t - t) < 3)) {
-        b = "Defusing…";
+      const ds = plant
+        ? (round.bomb ?? [])
+            .filter((x) => x.k === "defuse_start" && x.t >= plant.t && x.t <= t)
+            .pop()
+        : undefined;
+      if (plant && !ended && ds && t - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5) {
+        const hasTime = C4_TIME - (ds.t - plant.t) >= (ds.kit ? DEFUSE_KIT : DEFUSE_BARE);
+        b = hasTime ? `Defusing… ${ds.kit ? "kit" : "no kit"} — has time` : "Defusing… not enough time!";
       } else if (plant && !ended) {
         b = "Bomb planted";
       } else if ((aliveCT === 1 && aliveT > 1) || (aliveT === 1 && aliveCT > 1)) {
@@ -1124,12 +1187,45 @@ export default function ReplayPage() {
   const onCanvasMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const d = dragRef.current;
     const cv = canvasRef.current;
-    if (!d || !cv) return; // only pans while the button is held (down → up/leave)
-    const rect = cv.getBoundingClientRect();
-    const dx = ((e.clientX - d.cx) / rect.width) * SIZE;
-    const dy = ((e.clientY - d.cy) / rect.height) * SIZE;
-    if (Math.abs(e.clientX - d.cx) + Math.abs(e.clientY - d.cy) > 3) d.moved = true;
-    setViewport(clampVp(vpRef.current.scale, d.ox + dx, d.oy + dy));
+    if (!cv) return;
+    if (d) {
+      // panning while the button is held (down → up/leave)
+      const rect = cv.getBoundingClientRect();
+      const dx = ((e.clientX - d.cx) / rect.width) * SIZE;
+      const dy = ((e.clientY - d.cy) / rect.height) * SIZE;
+      if (Math.abs(e.clientX - d.cx) + Math.abs(e.clientY - d.cy) > 3) d.moved = true;
+      setViewport(clampVp(vpRef.current.scale, d.ox + dx, d.oy + dy));
+      setHoverBlip(null);
+      return;
+    }
+    // button-less hover: name + HP tooltip for the dot under the cursor
+    if (!round) return;
+    const { x: mx, y: my } = toInternal(e.clientX, e.clientY);
+    const v = vpRef.current;
+    const wx = (mx - v.ox) / v.scale;
+    const wy = (my - v.oy) / v.scale;
+    let best: Blip | null = null;
+    let bestD = Infinity;
+    for (const p of posAt(round, tRef.current)) {
+      const c = toPx(p.x, p.y, p.z);
+      const dd = Math.hypot(c.x - wx, c.y - wy);
+      if (dd < bestD) {
+        bestD = dd;
+        best = p;
+      }
+    }
+    if (best && bestD <= 16 / v.scale) {
+      const rect = cv.getBoundingClientRect();
+      setHoverBlip({
+        name: meta?.players[best.i]?.name || `P${best.i + 1}`,
+        hp: Math.round(clamp(best.h, 0, 100)),
+        bomb: !!best.bomb,
+        left: e.clientX - rect.left,
+        top: e.clientY - rect.top,
+      });
+    } else {
+      setHoverBlip(null);
+    }
   };
   const onCanvasUp = () => {
     // carry the "was a pan" flag to the click that fires next, then clear drag so
@@ -1139,6 +1235,7 @@ export default function ReplayPage() {
   };
   const onCanvasLeave = () => {
     dragRef.current = null;
+    setHoverBlip(null);
   };
   const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (movedRef.current) {
@@ -1197,6 +1294,48 @@ export default function ReplayPage() {
     pendingJumpRound.current = null;
     setJump(null);
   }, [jump, roundIdx, duration]);
+
+  // ── URL-synced workspace state: tab / round / player / paused playhead ────
+  // Refresh keeps your place, back/forward stops ejecting the workspace, and
+  // every view becomes linkable. replaceState avoids router re-renders.
+  const urlReady = useRef(false);
+  useEffect(() => {
+    if (loading || !meta || urlReady.current) return;
+    urlReady.current = true;
+    const q = new URLSearchParams(window.location.search);
+    // Number(null) === 0, so absent params MUST read as NaN, not zero
+    const num = (k: string) => (q.get(k) == null ? NaN : Number(q.get(k)));
+    const qt = q.get("tab");
+    if (qt && qt in TAB_ICON) setTab(qt as Tab);
+    const r = num("r");
+    const hasRound = Number.isFinite(r) && r >= 1 && r <= rounds.length;
+    if (hasRound) setScopeRound(r - 1);
+    const p = num("p");
+    if (Number.isFinite(p) && p >= 0 && p < meta.players.length) setFocusPlayer(p);
+    const t = num("t");
+    if (Number.isFinite(t) && t > 0) {
+      // same path as "watch this moment": scope the round, then seek once loaded
+      pendingJumpRound.current = hasRound ? r - 1 : 0;
+      if (!hasRound) setScopeRound(0);
+      setJump({ round: hasRound ? r - 1 : 0, time: t });
+    }
+  }, [loading, meta, rounds.length]);
+
+  useEffect(() => {
+    if (!urlReady.current) return;
+    const q = new URLSearchParams(window.location.search);
+    const put = (k: string, v: string | null) => (v == null ? q.delete(k) : q.set(k, v));
+    put("tab", tab === "replay" ? null : tab);
+    put("r", scopeRound != null ? String(scopeRound + 1) : null);
+    put("p", focusPlayer != null ? String(focusPlayer) : null);
+    // the playhead is only worth a link while paused mid-round
+    put("t", !playing && time > 1 ? String(Math.floor(time)) : null);
+    const qs = q.toString();
+    const next = qs ? `?${qs}` : "";
+    if (next !== window.location.search) {
+      window.history.replaceState(null, "", `${window.location.pathname}${next}`);
+    }
+  }, [tab, scopeRound, focusPlayer, playing, time]);
 
   // wheel-zoom toward the cursor (non-passive so the page doesn't scroll)
   useEffect(() => {
@@ -1481,6 +1620,22 @@ export default function ReplayPage() {
               vp.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
             }`}
           />
+          {/* hover tooltip: who is this dot, at what HP */}
+          {hoverBlip && (
+            <div
+              className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border border-line bg-bg/90 px-2 py-1 text-[11px] leading-tight shadow-lg backdrop-blur"
+              style={{ left: hoverBlip.left, top: hoverBlip.top - 12, transform: "translate(-50%, -100%)" }}
+            >
+              <span className="font-bold text-ink">{hoverBlip.name}</span>
+              <span
+                className="ml-1.5 font-semibold tabular-nums"
+                style={{ color: hoverBlip.hp > 66 ? "#46d369" : hoverBlip.hp > 33 ? "#e7b53c" : "#ff5c5c" }}
+              >
+                {hoverBlip.hp} HP
+              </span>
+              {hoverBlip.bomb && <span className="ml-1.5 font-bold text-bad">C4</span>}
+            </div>
+          )}
           {/* zoom controls */}
           <div className="absolute right-2 top-2 flex flex-col gap-1">
             <button
