@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MAX_DEMO_BYTES,
@@ -27,8 +28,10 @@ import { mapLabel } from "@/lib/format";
 const LAST_ANALYZED_KEY = "demos:lastAnalyzed";
 
 export function DemosClient() {
+  const router = useRouter();
   const [list, setList] = useState<MatchSummary[]>([]);
   const [newId, setNewId] = useState<string | null>(null);
+  const [sampleBusy, setSampleBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [phase, setPhase] = useState(""); // human label
   const [percent, setPercent] = useState(0); // 0..100, monotonic
@@ -117,6 +120,37 @@ export function DemosClient() {
       /* storage unavailable — badge just won't survive navigation */
     }
   }, []);
+
+  // "Try a sample demo": a bundled pre-parsed, anonymized real match, so the
+  // empty library isn't a dead end that demands sourcing a .dem first.
+  const loadSample = useCallback(async () => {
+    if (sampleBusy) return;
+    setSampleBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/sample-demo.json");
+      if (!res.ok) throw new Error("Couldn't load the sample demo.");
+      const rm = (await res.json()) as {
+        map: string;
+        tickRate: number;
+        frameHz: number;
+        players: { steamId: string; name: string; team: "CT" | "T" | "" }[];
+        rounds: number;
+        roundData: Parameters<typeof saveMatch>[1];
+      };
+      const saved = await saveMatch(
+        { map: rm.map, tickRate: rm.tickRate, frameHz: rm.frameHz, players: rm.players, rounds: rm.rounds },
+        rm.roundData,
+        "Sample match · Inferno",
+      );
+      markNew(saved.id);
+      router.push(`/demos/${saved.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load the sample demo.");
+    } finally {
+      setSampleBusy(false);
+    }
+  }, [sampleBusy, markNew, router]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -408,8 +442,19 @@ export function DemosClient() {
           )}
         </h2>
         {list.length === 0 ? (
-          <div className="card px-4 py-10 text-center text-sm text-muted">
-            No demos yet — upload one above to get started.
+          <div className="card flex flex-col items-center gap-3 px-4 py-10 text-center text-sm text-muted">
+            <span>No demos yet — upload one above, or take the analyzer for a spin first:</span>
+            <button
+              type="button"
+              onClick={() => void loadSample()}
+              disabled={sampleBusy}
+              className="btn btn-ghost text-sm disabled:opacity-50"
+            >
+              {sampleBusy ? "Loading sample…" : "▶ Try a sample demo"}
+            </button>
+            <span className="text-[11px] text-faint">
+              A real (anonymized) Inferno match — every tab works: replay, economy, routes, utility, Cheat/AI.
+            </span>
           </div>
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
