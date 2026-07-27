@@ -299,9 +299,12 @@ func (c *collector) onPlayerHurt(e events.PlayerHurt) {
 		return
 	}
 	ap := c.player(aid)
-	ap.Damage += e.HealthDamage
+	// HealthDamageTaken is capped at the victim's remaining HP (no over-damage),
+	// matching the replay pass (replay.go onPlayerHurt) — the two passes MUST
+	// agree or the match ADR and the replay's per-round damage visibly diverge.
+	ap.Damage += e.HealthDamageTaken
 	if e.Weapon != nil && e.Weapon.Class() == common.EqClassGrenade {
-		ap.UtilityDamage += e.HealthDamage
+		ap.UtilityDamage += e.HealthDamageTaken
 	}
 }
 

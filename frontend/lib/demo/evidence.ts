@@ -132,6 +132,15 @@ export function cheatMoments(
         weight += 4;
         primary = true;
       }
+      // Parser's "no spotted record" flag. Validated on real demos: the CS2
+      // spotted mask misses ~29% of ordinary fast kills, so this is NEVER a
+      // primary tell on its own — it corroborates (adds weight + a tag) when
+      // something else flags the kill, and reads strongest on through-cover
+      // kills below.
+      if (k.us) {
+        tags.push("never spotted the victim");
+        weight += 1.5;
+      }
       // landing a kill WHILE FLASHED — tracking through a white screen
       if (k.bl) {
         tags.push("killed while flashed");

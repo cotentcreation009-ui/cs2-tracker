@@ -167,6 +167,13 @@ type ReplayKill struct {
 	// killer until the kill. Only set for "sighted" kills (a tracked visibility
 	// rising edge within a 0–3s window); 0/omitted = not measurable for this kill.
 	Rct int32 `json:"rct,omitempty"`
+	// No spotted rising edge was EVER recorded for this (victim, killer) pair
+	// this round (see scanSpotted). Firearm kills only. CAUTION: CS2's spotted
+	// mask under-reports fast visibility — measured ~29% of ordinary kills in a
+	// real MM demo carry this flag (fast peeks die before an edge registers).
+	// It is corroborating context (strong on wallbang/through-smoke kills),
+	// NOT standalone wall-tracking evidence.
+	Unseen bool `json:"us,omitempty"`
 }
 
 type ReplayNade struct {
@@ -620,6 +627,17 @@ func (rc *replayCollector) onKill(e events.Kill) {
 		if ai := rc.playerIndex(e.Assister); ai >= 0 {
 			k.Assister = ai + 1
 			k.FlashAst = e.AssistedFlash // assist credit came from blinding the victim
+		}
+	}
+	// Unseen kill: the spotted scanner (scanSpotted, full frame rate) records a
+	// rising edge the first time a victim becomes visible to each enemy. If a
+	// FIREARM kill lands and that pair has no episode at all this round, the
+	// killer shot a target the engine never made visible to them.
+	if e.Killer != nil && k.Killer >= 0 && isFirearm(e.Weapon) {
+		if m, ok := rc.spotT[e.Victim.SteamID64]; !ok || m == nil {
+			k.Unseen = true
+		} else if _, ever := m[e.Killer.SteamID64]; !ever {
+			k.Unseen = true
 		}
 	}
 	// Aim tells for the killer: if the victim had become visible to them, how
