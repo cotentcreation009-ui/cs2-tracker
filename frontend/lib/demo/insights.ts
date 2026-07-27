@@ -280,10 +280,12 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       get(opener.v).openD++;
     }
 
-    // per-round kill tallies (for multikills + weapons + hs)
+    // per-round kill tallies (for multikills + weapons + hs). Only ENEMY kills
+    // credit the killer — a teamkill or suicide is not a kill on any stat site
+    // (deaths still count for the victim either way).
     const perRoundKills = new Map<number, number>();
     for (const k of kills) {
-      if (k.k >= 0) {
+      if (k.k >= 0 && k.v >= 0 && k.v !== k.k && sideOf(r, k.k, meta) !== sideOf(r, k.v, meta)) {
         const a = get(k.k);
         a.kills++;
         if (k.hs) a.hs++;

@@ -158,6 +158,10 @@ describe("analyzeRotations", () => {
     expect(p0!.blindCorrect).toBe(0);
     expect(p0!.informed).toBe(1);
     expect(p0!.x).toBe(0);
+    // trigger attribution: the kill is the info this rotate responded to
+    expect(p0!.events[0].trigger?.kind).toBe("fight");
+    expect(p0!.byTrigger.fight).toBe(1);
+    expect(p0!.avgResponseSec).toBeCloseTo(5, 0); // kill 0:35 → moved 0:40
   });
 
   it("counts a blind rotate away from the real hit as blind-wrong", () => {
@@ -238,5 +242,7 @@ describe("analyzeRotations", () => {
     const rep = analyzeRotations(meta, [r1, r2]);
     expect(rep.byPlayer.get(0)!.informed).toBe(1);
     expect(rep.byPlayer.get(0)!.blindCorrect).toBe(0);
+    expect(rep.byPlayer.get(0)!.events[0].trigger?.kind).toBe("utility");
+    expect(rep.byPlayer.get(0)!.events[0].trigger?.label).toMatch(/enemy smoke near A/);
   });
 });
