@@ -35,3 +35,17 @@ export function classifyBuy(equip: number, roundNum: number): BuyClass {
 
 // Display order (strongest → weakest) for buy-mix summaries.
 export const BUY_KEYS: BuyKey[] = ["full", "force", "semi", "eco", "pistol"];
+
+// One tier resolver for every surface, so the same kill can't land in
+// different buy buckets on two views: prefer the parser's own buy class
+// (pistol|eco|force|full — it never emits "semi"), fall back to classifying
+// the equipment value, null when the round has no economy data at all.
+export function buyTierOf(
+  st: { buy?: string; equip?: number } | undefined,
+  roundNum: number,
+): BuyKey | null {
+  if (!st) return null;
+  if (st.buy && (BUY_KEYS as string[]).includes(st.buy)) return st.buy as BuyKey;
+  if (st.equip != null) return classifyBuy(st.equip, roundNum).key;
+  return null;
+}

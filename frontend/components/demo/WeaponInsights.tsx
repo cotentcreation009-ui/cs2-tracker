@@ -12,7 +12,7 @@ import {
   type WeaponInsightsData,
   type WeaponClass,
 } from "@/lib/demo/weapons";
-import { classifyBuy, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
+import { buyTierOf, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
 import { getActiveZones, classifyPosition } from "@/lib/maps/zones";
 import { radarImage } from "@/lib/maps/calibration";
@@ -729,7 +729,7 @@ function DuelMap({
         if (buy !== "any") {
           // the subject's buy that round (killer in kills mode, victim in deaths)
           const st = r.stats?.find((s) => s.i === subj);
-          const bk = st?.buy ?? (st?.equip != null ? classifyBuy(st.equip, r.n).key : null);
+          const bk = buyTierOf(st, r.n);
           if (!bk || !buyMatch(bk)) continue;
         }
         if (dist !== "any") {
