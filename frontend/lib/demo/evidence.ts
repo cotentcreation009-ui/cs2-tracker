@@ -20,6 +20,10 @@ export interface CheatMoment {
   tags: string[]; // why it's worth a look, strongest first
   weight: number; // ranking score
   extraKills?: number; // other flagged kills in the same round, folded into this row
+  kx: number; // killer position (world space) — drawn on the evidence map
+  ky: number;
+  vx: number; // victim position
+  vy: number;
 }
 
 const ONE_TAP = /deagle|revolver|awp|ssg08|scar20|g3sg1/i;
@@ -125,6 +129,10 @@ export function cheatMoments(
         hs: !!k.hs,
         tags: [...new Set(tags)],
         weight,
+        kx: k.kx,
+        ky: k.ky,
+        vx: k.vx,
+        vy: k.vy,
       });
     }
     // one row per round: keep the strongest kill, fold the rest into a count

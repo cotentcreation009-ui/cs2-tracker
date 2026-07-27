@@ -36,6 +36,8 @@ export interface RotateTrigger {
   t: number; // when the information appeared
   kind: TriggerKind;
   label: string; // compact human phrase, e.g. "enemy smoke near A"
+  x?: number; // where it happened (world space) — drawn on the evidence map
+  y?: number;
 }
 
 export const TRIGGER_LABEL: Record<TriggerKind, string> = {
@@ -59,7 +61,8 @@ export interface RotateEvent {
   commitAt: number | null; // enemy-shift onset backing the verdict
   reactSec: number | null; // t0 - commitAt for blind verdicts
   verdict: RotateVerdict;
-  path: { x: number; y: number }[]; // world-space route t0→arrival (≤16 samples) for the mini-map
+  path: { x: number; y: number }[]; // world-space route t0→arrival (≤16 samples) for the map
+  enemies: { x: number; y: number }[]; // living enemies at move start — the hidden state
 }
 
 export interface PlayerRotates {
@@ -83,6 +86,8 @@ export interface RotationReport {
   reason?: string; // when unavailable
   siteA: string;
   siteB: string;
+  anchorA: { x: number; y: number } | null; // site positions for map labels
+  anchorB: { x: number; y: number } | null;
   events: RotateEvent[];
   byPlayer: Map<number, PlayerRotates>;
 }
@@ -241,26 +246,26 @@ function firstRelevantInfo(
     d2d(x, y, to.x, to.y) <= 1.15 * d2d(x, y, from.x, from.y);
   let best: RotateTrigger | null = null;
   let bestT = Infinity; // tracked separately — TS can't narrow through the closure
-  const consider = (t: number, kind: TriggerKind, label: string) => {
+  const consider = (t: number, kind: TriggerKind, label: string, x?: number, y?: number) => {
     if (t < bestT) {
       bestT = t;
-      best = { t, kind, label };
+      best = { t, kind, label, x, y };
     }
   };
 
   for (const b of r.bomb ?? []) {
     const what =
       b.k === "plant" ? "bomb planted" : b.k === "plant_start" ? "plant started" : "bomb action";
-    consider(b.t, "bomb", b.site ? `${what} at ${b.site}` : what);
+    consider(b.t, "bomb", b.site ? `${what} at ${b.site}` : what, b.x, b.y);
   }
   for (const k of r.kills ?? []) {
     if (k.t >= bestT) continue;
     if (!relevant(k.vx, k.vy) && !relevant(k.kx, k.ky)) continue;
     const victimMine = k.v >= 0 && sideOf(r, k.v, meta) === side;
     const killerMine = k.k >= 0 && sideOf(r, k.k, meta) === side;
-    if (victimMine) consider(k.t, "fight", `teammate died near ${to.label}`);
-    else if (killerMine) consider(k.t, "fight", `teammate's kill near ${to.label}`);
-    else consider(k.t, "fight", `a death near ${to.label}`); // killfeed
+    if (victimMine) consider(k.t, "fight", `teammate died near ${to.label}`, k.vx, k.vy);
+    else if (killerMine) consider(k.t, "fight", `teammate's kill near ${to.label}`, k.kx, k.ky);
+    else consider(k.t, "fight", `a death near ${to.label}`, k.vx, k.vy); // killfeed
   }
   const NADE_NAME: Record<string, string> = {
     smoke: "smoke", flash: "flash", he: "HE", decoy: "decoy",
@@ -271,7 +276,7 @@ function firstRelevantInfo(
     const thrower = n.by >= 0 ? sideOf(r, n.by, meta) : "";
     if (thrower === side) continue; // own utility isn't enemy info
     if (relevant(n.x, n.y))
-      consider(n.t, "utility", `enemy ${NADE_NAME[n.k] ?? "utility"} near ${to.label}`);
+      consider(n.t, "utility", `enemy ${NADE_NAME[n.k] ?? "utility"} near ${to.label}`, n.x, n.y);
   }
   for (const f of r.frames ?? []) {
     if (f.t >= bestT) break;
@@ -288,7 +293,7 @@ function firstRelevantInfo(
           !(m.z != null && e.z != null && Math.abs(m.z - e.z) > CONTACT_Z),
       );
       if (heard) {
-        consider(f.t, "contact", `enemy heard/seen near ${to.label}`);
+        consider(f.t, "contact", `enemy heard/seen near ${to.label}`, e.x, e.y);
         break;
       }
     }
@@ -344,6 +349,8 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
       reason: derived.reason,
       siteA: "A",
       siteB: "B",
+      anchorA: null,
+      anchorB: null,
       events: [],
       byPlayer: new Map(),
     };
@@ -460,6 +467,16 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
           const path = seg
             .filter((_, n) => n % step === 0 || n === seg.length - 1)
             .map((p) => ({ x: p.x, y: p.y }));
+          // where the living enemies actually were the second the move began —
+          // the hidden state the player could not legitimately see
+          let moveFrame: (typeof r.frames)[number] | null = null;
+          for (const f of r.frames) {
+            if (f.t > t0) break;
+            moveFrame = f;
+          }
+          const enemies = (moveFrame?.p ?? [])
+            .filter((pp) => pp.h > 0 && sideOf(r, pp.i, meta) === enemySide)
+            .map((pp) => ({ x: pp.x, y: pp.y }));
 
           events.push({
             roundIdx,
@@ -476,6 +493,7 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
             reactSec,
             verdict,
             path,
+            enemies,
           });
         }
       }
@@ -533,6 +551,8 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
     available: true,
     siteA: anchors.a.label,
     siteB: anchors.b.label,
+    anchorA: { x: anchors.a.x, y: anchors.a.y },
+    anchorB: { x: anchors.b.x, y: anchors.b.y },
     events,
     byPlayer,
   };
