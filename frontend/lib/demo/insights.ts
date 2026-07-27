@@ -48,8 +48,10 @@ export interface UtilThrow {
   kind: string; // smoke | molotov | flash | he | decoy
   x: number; // landing position
   y: number;
+  z?: number; // landing height — level-aware radar placement on Nuke/Vertigo
   ox: number; // thrower's position at throw time (arc origin)
   oy: number;
+  oz?: number; // throw-origin height
   t: number; // seconds since round start
   round: number;
   dmg?: number; // HE/molotov: enemy HP this detonation dealt (absent = none)
@@ -176,12 +178,12 @@ export function throwOrigin(
 // distance to join a cluster (~7% of the radar). Sorted by count desc.
 export function clusterUtilThrows(
   throws: UtilThrow[],
-  project: (x: number, y: number) => { x: number; y: number } | null,
+  project: (x: number, y: number, z?: number) => { x: number; y: number } | null,
   threshold = 0.07,
 ): UtilSpot[] {
   const clusters: { nx: number; ny: number; members: UtilThrow[] }[] = [];
   for (const tw of throws) {
-    const n = project(tw.x, tw.y);
+    const n = project(tw.x, tw.y, tw.z);
     if (!n) {
       clusters.push({ nx: Number.POSITIVE_INFINITY, ny: 0, members: [tw] });
       continue;
@@ -457,8 +459,8 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
           hit++;
         }
         a.nadeList.push({
-          kind, x: n.x, y: n.y, round: r.n, t: n.t,
-          ox: o?.x ?? n.x, oy: o?.y ?? n.y,
+          kind, x: n.x, y: n.y, z: n.z, round: r.n, t: n.t,
+          ox: o?.x ?? n.x, oy: o?.y ?? n.y, oz: n.oz,
           ...(dmg > 0 ? { dmg, hit } : {}),
         });
       }

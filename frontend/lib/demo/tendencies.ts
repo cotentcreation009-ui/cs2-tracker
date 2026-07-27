@@ -65,8 +65,8 @@ export function computeTendencies(
       const alive = f.p.filter((p) => p.h > 0);
       // project once per frame
       const proj2 = alive.map((p) => {
-        const r = proj.project(p.x, p.y);
-        return r ? { i: p.i, x: r.x, y: r.y, wx: p.x, wy: p.y, ct: ctSet.has(p.i) } : null;
+        const r = proj.project(p.x, p.y, p.z);
+        return r ? { i: p.i, x: r.x, y: r.y, wx: p.x, wy: p.y, wz: p.z, ct: ctSet.has(p.i) } : null;
       });
       const pts = proj2.filter((v): v is NonNullable<typeof v> => v != null);
       for (const me of pts) {
@@ -88,7 +88,7 @@ export function computeTendencies(
         }
         // zone occupancy + rotation count — calibrated maps only (radar zones)
         if (calibrated) {
-          const z = classifyPosition(meta.map, me.wx, me.wy, zones);
+          const z = classifyPosition(meta.map, me.wx, me.wy, zones, me.wz);
           const zk = zoneKey(z?.kind);
           if (zk) {
             const bucket = me.ct ? ct[me.i] : tt[me.i];

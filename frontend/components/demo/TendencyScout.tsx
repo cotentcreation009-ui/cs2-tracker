@@ -217,7 +217,7 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         continue;
       }
       if (p.b) carriedBomb = true;
-      const r = proj.project(p.x, p.y);
+      const r = proj.project(p.x, p.y, p.z);
       if (!r) continue;
       const still =
         prev != null && Math.hypot(p.x - prev.x, p.y - prev.y) / Math.max(1, f.t - prev.t) < STILL_SPEED;
@@ -227,7 +227,7 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
       if (post) sawPostPlant = true;
       pts.push({ x: r.x * 100, y: r.y * 100, side, opening, rn: rd.n, still, dir: p.d, post });
       if (!proj.calibrated) continue;
-      const z = classifyPosition(meta.map, p.x, p.y, zones);
+      const z = classifyPosition(meta.map, p.x, p.y, zones, p.z);
       if (f.t <= freeze + SETUP_WINDOW) {
         setupSeq.push(z?.name && !/spawn/i.test(z.name) ? z.name : null);
       }
@@ -291,8 +291,8 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
         killTiming[bucket(k.t)]++;
         killDistSum += d;
         killDistN++;
-        const kr = proj.project(k.kx, k.ky);
-        const vr = proj.project(k.vx, k.vy);
+        const kr = proj.project(k.kx, k.ky, k.kz);
+        const vr = proj.project(k.vx, k.vy, k.vz);
         if (kr) {
           killPts.push({
             x: kr.x * 100, y: kr.y * 100,
@@ -330,10 +330,10 @@ function computeScout(meta: ReplayMeta, rounds: ReplayRound[], idx: number): Sco
           deathDistSum += d;
           deathDistN++;
         }
-        const r = proj.project(k.vx, k.vy);
+        const r = proj.project(k.vx, k.vy, k.vz);
         if (r) deaths.push({ x: r.x * 100, y: r.y * 100, side, rn: rd.n });
         if (proj.calibrated) {
-          const dz = classifyPosition(meta.map, k.vx, k.vy, zones);
+          const dz = classifyPosition(meta.map, k.vx, k.vy, zones, k.vz);
           if (dz?.name) {
             const arr = deathZone.get(dz.name) ?? [];
             arr.push(rd.n);

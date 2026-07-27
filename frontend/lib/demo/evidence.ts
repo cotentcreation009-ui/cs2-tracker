@@ -22,8 +22,10 @@ export interface CheatMoment {
   extraKills?: number; // other flagged kills in the same round, folded into this row
   kx: number; // killer position (world space) — drawn on the evidence map
   ky: number;
+  kz?: number; // heights — level-aware placement on two-level maps
   vx: number; // victim position
   vy: number;
+  vz?: number;
 }
 
 const ONE_TAP = /deagle|revolver|awp|ssg08|scar20|g3sg1/i;
@@ -187,8 +189,10 @@ export function cheatMoments(
         weight,
         kx: k.kx,
         ky: k.ky,
+        kz: k.kz,
         vx: k.vx,
         vy: k.vy,
+        vz: k.vz,
       });
     }
     // one row per round: keep the strongest kill, fold the rest into a count

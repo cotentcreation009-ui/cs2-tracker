@@ -47,6 +47,10 @@ function buildPaths(meta: ReplayMeta, rounds: ReplayRound[]): PlayerPath[] {
   const out: PlayerPath[] = [];
   rounds.forEach((round, roundIdx) => {
     if (!round.frames?.length) return;
+    // Paths start at freeze end — buy-time shuffle would otherwise pollute
+    // shapes, lifetimes and the cluster signatures. (15s ≈ the standard
+    // freeze on older parses that lack the field.)
+    const tMin = round.freezeEnd ?? 15;
     const samples = new Map<number, RoutePoint[]>();
     const lastHealth = new Map<number, number>();
     for (const f of round.frames) {
@@ -55,7 +59,8 @@ function buildPaths(meta: ReplayMeta, rounds: ReplayRound[]): PlayerPath[] {
         if (!arr) { arr = []; samples.set(p.i, arr); }
         if (p.h <= 0) { lastHealth.set(p.i, 0); continue; }
         if (lastHealth.get(p.i) === 0) continue;
-        arr.push({ x: p.x, y: p.y, t: f.t });
+        if (f.t < tMin) { lastHealth.set(p.i, p.h); continue; }
+        arr.push({ x: p.x, y: p.y, z: p.z, t: f.t });
         lastHealth.set(p.i, p.h);
       }
     }
@@ -65,13 +70,13 @@ function buildPaths(meta: ReplayMeta, rounds: ReplayRound[]): PlayerPath[] {
       const player = meta.players[i];
       if (!player) continue;
       const death = (round.kills ?? []).find((k) => k.v === i) ?? null;
-      const kills = (round.kills ?? []).filter((k) => k.k === i).map((k) => ({ x: k.kx, y: k.ky }));
+      const kills = (round.kills ?? []).filter((k) => k.k === i).map((k) => ({ x: k.kx, y: k.ky, z: k.kz }));
       out.push({
         key: `${round.n}-${i}`, round: round.n, roundIdx, playerIndex: i,
         playerName: player.name || `Player ${i}`, side, points,
         died: !!death, lifetime: points[points.length - 1].t - points[0].t,
         won: round.winner === side, kills,
-        death: death ? { x: death.vx, y: death.vy } : null, signature: "",
+        death: death ? { x: death.vx, y: death.vy, z: death.vz } : null, signature: "",
       });
     }
   });

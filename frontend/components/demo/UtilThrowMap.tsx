@@ -218,8 +218,8 @@ export function UtilThrowMap({
     const span = timeline && throws.length ? Math.max(...throws.map((t) => t.t)) - t0 : 0;
     const SCALE = span > 9 ? 9 / span : 1;
 
-    const place = (x: number, y: number) => {
-      const r = proj.project(x, y);
+    const place = (x: number, y: number, z?: number) => {
+      const r = proj.project(x, y, z);
       return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: SIZE / 2, y: SIZE / 2 };
     };
 
@@ -227,8 +227,8 @@ export function UtilThrowMap({
     const items: Item[] = throws.map((t, i) => {
       // origin === landing means the origin couldn't be resolved (legacy demo)
       const hasOrigin = t.ox !== t.x || t.oy !== t.y;
-      const o = place(t.ox, t.oy);
-      const l = place(t.x, t.y);
+      const o = place(t.ox, t.oy, t.oz);
+      const l = place(t.x, t.y, t.z);
       const dist = Math.hypot(l.x - o.x, l.y - o.y);
       const c = {
         x: (o.x + l.x) / 2,
