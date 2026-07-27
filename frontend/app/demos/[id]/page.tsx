@@ -22,6 +22,7 @@ import { killContext, TRADE_WINDOW } from "@/lib/demo/killContext";
 import { PlayerRoundCard } from "@/components/demo/PlayerRoundCard";
 import { MatchScoreboard } from "@/components/demo/MatchScoreboard";
 import { EconomyBreakdown } from "@/components/demo/EconomyBreakdown";
+import { roundWinProb, type RoundWinProb } from "@/lib/demo/winprob";
 import { loadZones, classifyPosition, type Zone } from "@/lib/maps/zones";
 import { teamScore } from "@/lib/demo/score";
 
@@ -271,6 +272,7 @@ function EventFeed({
   time,
   meta,
   zones,
+  swings,
   onSeek,
   hasChat,
   onOpenChat,
@@ -279,6 +281,7 @@ function EventFeed({
   time: number;
   meta: ReplayMeta;
   zones: Zone[];
+  swings?: Map<number, number>; // kill index → Δ win probability (CT view)
   onSeek: (t: number) => void;
   hasChat?: boolean; // any round in the match carries chat (new parses)
   onOpenChat?: () => void;
@@ -506,6 +509,30 @@ function EventFeed({
                   <KillFlagPills k={k} />
                   <span className="shrink-0 text-faint">{weaponLabel(k.w)}{k.hs ? " ⌖" : ""}</span>
                   <span className="ml-auto truncate text-muted">{name(k.v)}</span>
+                  {(() => {
+                    // this kill's estimated win-probability swing, signed for
+                    // the KILLER's team (a teamkill shows negative)
+                    const d = swings?.get(idx);
+                    if (d == null) return null;
+                    const forKiller = sideOf(k.k) === "T" ? -d : d;
+                    if (Math.abs(forKiller) < 0.005) return null;
+                    const big = Math.abs(forKiller) >= 0.15;
+                    return (
+                      <span
+                        className={`shrink-0 rounded-full px-1.5 text-[9px] font-bold tabular-nums ${
+                          forKiller < 0
+                            ? "bg-bad/15 text-bad"
+                            : big
+                              ? "bg-good/20 text-good"
+                              : "bg-panel text-muted"
+                        }`}
+                        title="Estimated win-probability swing from this kill, for the killer's team"
+                      >
+                        {forKiller >= 0 ? "+" : ""}
+                        {Math.round(forKiller * 100)}%
+                      </span>
+                    );
+                  })()}
                   {round.st != null && (
                     <CopyTickButton tick={round.st + Math.round(k.t * meta.tickRate)} killer={name(k.k)} />
                   )}
@@ -515,6 +542,57 @@ function EventFeed({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Win-probability ribbon above the scrubber: the round's momentum curve as a
+// midline-split area (CT blue above even, T amber below), with cliffs at
+// kills/plants. An ESTIMATE from man count + bomb state + clocks — labeled so.
+function WinProbRibbon({
+  wp,
+  duration,
+  time,
+  onSeek,
+}: {
+  wp: RoundWinProb;
+  duration: number;
+  time: number;
+  onSeek: (t: number) => void;
+}) {
+  const W = 1000;
+  const H = 56;
+  const geom = useMemo(() => {
+    const pts = wp.points;
+    if (!pts.length || duration <= 0) return null;
+    const x = (t: number) => (Math.min(t, duration) / duration) * W;
+    const y = (p: number) => H - p * H;
+    const line = pts.map((pt) => `${x(pt.t).toFixed(1)},${y(pt.p).toFixed(1)}`).join(" ");
+    const area = `M ${x(pts[0].t).toFixed(1)},${H / 2} L ${line} L ${x(pts[pts.length - 1].t).toFixed(1)},${H / 2} Z`;
+    return { line, area };
+  }, [wp, duration]);
+  if (!geom) return null;
+  return (
+    <div
+      className="group relative mb-1 h-7 w-full cursor-pointer"
+      title="Estimated CT win probability through the round (man count · bomb · clocks · equipment) — click to seek"
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        onSeek(((e.clientX - r.left) / r.width) * duration);
+      }}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full">
+        <clipPath id="wpTop"><rect x="0" y="0" width={W} height={H / 2} /></clipPath>
+        <clipPath id="wpBot"><rect x="0" y={H / 2} width={W} height={H / 2} /></clipPath>
+        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--color-line)" strokeWidth="1.5" strokeDasharray="5 4" />
+        <path d={geom.area} fill={CT} opacity="0.3" clipPath="url(#wpTop)" />
+        <path d={geom.area} fill={T} opacity="0.3" clipPath="url(#wpBot)" />
+        <polyline points={geom.line} fill="none" stroke="#cfd8e6" strokeWidth="1.6" opacity="0.85" vectorEffect="non-scaling-stroke" />
+        <line x1={(Math.min(time, duration) / Math.max(1, duration)) * W} y1="0" x2={(Math.min(time, duration) / Math.max(1, duration)) * W} y2={H} stroke="#38d6ff" strokeWidth="1.6" vectorEffect="non-scaling-stroke" opacity="0.9" />
+      </svg>
+      <span className="pointer-events-none absolute left-1 top-0 text-[8px] font-semibold uppercase tracking-wider text-faint">
+        win % <span className="normal-case">(est.)</span>
+      </span>
     </div>
   );
 }
@@ -807,6 +885,13 @@ export default function ReplayPage() {
     for (const n of round.nades ?? []) d = Math.max(d, n.t + (n.dur || 0));
     return d + 1.5;
   }, [round]);
+
+  // win-probability curve + per-kill swings for the ribbon and the kill feed
+  const wp = useMemo(() => (meta && round ? roundWinProb(meta, round) : null), [meta, round]);
+  const killSwings = useMemo(
+    () => new Map((wp?.swings ?? []).map((s) => [s.killIndex, s.delta])),
+    [wp],
+  );
 
   // throw origin per grenade (thrower position at throw time), computed once per
   // round so the draw loop can show origin → landing without re-deriving it.
@@ -1830,6 +1915,18 @@ export default function ReplayPage() {
               {mmss(time)} / {mmss(duration)}
             </span>
           </div>
+          {wp && (
+            <WinProbRibbon
+              wp={wp}
+              duration={duration}
+              time={time}
+              onSeek={(t) => {
+                playRef.current = false;
+                setPlaying(false);
+                seek(t);
+              }}
+            />
+          )}
           <ScrubBar
             round={round}
             duration={duration}
@@ -1856,6 +1953,7 @@ export default function ReplayPage() {
               time={time}
               meta={meta}
               zones={zones}
+              swings={killSwings}
               hasChat={rounds.some((r) => r.chat?.length)}
               onOpenChat={() => setChatOpen(true)}
               // pause on jump — reviewing a kill at 4x speed is useless, and
