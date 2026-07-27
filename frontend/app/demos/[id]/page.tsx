@@ -119,11 +119,21 @@ const KILL_FLAGS = [
   { key: "bl", label: "BLIND", hex: "#ffd54a", tip: "Attacker was flashed when they got the kill" },
   { key: "ns", label: "NOSCOPE", hex: "#ff7ab8", tip: "Noscope — scoped weapon fired unscoped" },
 ] as const;
+// UNSEEN corroborates through-cover kills only — the engine's spotted mask
+// misses many ordinary fast kills, so the pill would be noise on plain frags.
+const UNSEEN_FLAG = {
+  key: "us",
+  label: "UNSEEN",
+  hex: "#ff5c5c",
+  tip: "No spotted record for this pair all round — through cover, on a target the engine never showed them",
+} as const;
+const killFlagsFor = (k: ReplayKill) =>
+  k.us && (k.wb || k.ts) ? [...KILL_FLAGS, UNSEEN_FLAG] : KILL_FLAGS;
 
 function KillFlagPills({ k }: { k: ReplayKill }) {
   return (
     <>
-      {KILL_FLAGS.filter((f) => k[f.key]).map((f) => (
+      {killFlagsFor(k).filter((f) => k[f.key]).map((f) => (
         <span
           key={f.key}
           style={{ color: f.hex, background: `${f.hex}1a` }}

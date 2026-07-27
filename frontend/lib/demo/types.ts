@@ -42,6 +42,7 @@ export interface ReplayKill {
   bl?: boolean; // attacker was flashed
   ns?: boolean; // noscope — scoped weapon fired unscoped
   rct?: number; // reaction ms for THIS kill (victim became visible → kill); absent = not measurable
+  us?: boolean; // firearm kill on a victim who NEVER became visible to the killer this round (wall-tracking tell; needs a recent re-parse)
 }
 
 export interface ReplayNade {

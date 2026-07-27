@@ -98,6 +98,15 @@ describe("cheatMoments qualification", () => {
     expect(ms[0].tags).toContain("75% accuracy");
   });
 
+  it("treats the parser's unseen flag as corroboration, never a flag by itself", () => {
+    // the CS2 spotted mask misses ~29% of ordinary kills — us alone means little
+    expect(cheatMoments(meta, [rd(1, [kill({ us: true, hs: true })])], 0)).toHaveLength(0);
+    const ms = cheatMoments(meta, [rd(1, [kill({ us: true, rct: 95 })])], 0);
+    expect(ms).toHaveLength(1);
+    expect(ms[0].tags).toContain("never spotted the victim");
+    expect(ms[0].tags).toContain("95ms reaction");
+  });
+
   it("never flags teamkills, whatever their tells", () => {
     expect(cheatMoments(meta, [rd(1, [kill({ v: 3, bl: true, rct: 100 })])], 0)).toHaveLength(0);
   });

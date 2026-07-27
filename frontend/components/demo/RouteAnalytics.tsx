@@ -1076,6 +1076,7 @@ function RoundDetail({
                     {k.ts && <FlagPill hex={KIND_COLOR.smoke} label="SMOKE" tip="Killed through smoke" />}
                     {k.bl && <FlagPill hex={KIND_COLOR.flash} label="BLIND" tip="Killer was flashed" />}
                     {k.ns && <FlagPill hex="#ff7ab8" label="NOSCOPE" tip="AWP/scout kill without scoping" />}
+                    {k.us && (k.wb || k.ts) && <FlagPill hex="#ff5c5c" label="UNSEEN" tip="No spotted record for this pair all round — through cover, on a target the engine never showed them" />}
                     {k.rct != null && k.rct > 0 && (
                       <span
                         className="shrink-0 rounded-full bg-panel px-1.5 text-[9px] font-semibold tabular-nums text-muted"
