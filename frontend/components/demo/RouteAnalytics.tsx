@@ -120,8 +120,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
     setCenter({ x: 50, y: 50 });
   };
 
-  const pt = (x: number, y: number) => {
-    const r = proj.project(x, y);
+  const pt = (x: number, y: number, z?: number) => {
+    const r = proj.project(x, y, z);
     return r ? { x: r.x * 100, y: r.y * 100 } : null;
   };
   const matchPath = (p: PlayerPath) =>
@@ -249,7 +249,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const sideOfIdx = (r: ReplayRound, i: number): Side =>
     r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : meta.players[i]?.team === "T" ? "T" : "CT";
-  const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  const zoneOf = (x: number, y: number, z?: number) => classifyPosition(meta.map, x, y, zones, z)?.name ?? null;
 
   // bomb-plant time of the scoped round — path segments after it draw dashed
   // so post-plant movement (rotations) reads visually distinct
@@ -417,10 +417,10 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                       (n.dmg?.[playerFilter] ?? 0) <= 0
                     )
                       return null;
-                    const c = pt(n.x, n.y); if (!c) return null;
+                    const c = pt(n.x, n.y, n.z); if (!c) return null;
                     const col = KIND_COLOR[n.k] ?? "#8a7dff";
                     const o = throwOrigin(scopedRound, n);
-                    const oc = o ? pt(o.x, o.y) : null;
+                    const oc = o ? pt(o.x, o.y, n.oz) : null;
                     const related = !active
                       ? true
                       : active.kind === "util"
@@ -429,7 +429,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                           ? n.by === active.id
                           : false;
                     const on = sameActive(active, { kind: "util", id: i });
-                    const z = zoneOf(n.x, n.y);
+                    const z = zoneOf(n.x, n.y, n.z);
                     return (
                       <g
                         key={`n${i}`}
@@ -525,8 +525,8 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                     // when a player is selected, only their own engagements (their
                     // kills + their death) — not where other people were fighting
                     if (playerFilter !== "all" && k.k !== playerFilter && k.v !== playerFilter) return null;
-                    const kc = pt(k.kx, k.ky);
-                    const vc = pt(k.vx, k.vy); if (!vc) return null;
+                    const kc = pt(k.kx, k.ky, k.kz);
+                    const vc = pt(k.vx, k.vy, k.vz); if (!vc) return null;
                     const related = !active
                       ? true
                       : active.kind === "kill"
@@ -590,18 +590,18 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                         return k ? k.t : Infinity;
                       };
                       const cutoff = Math.min(deathT(a), deathT(v));
-                      let best: { d: number; ax: number; ay: number; vx: number; vy: number; t: number } | null = null;
+                      let best: { d: number; ax: number; ay: number; az?: number; vx: number; vy: number; vz?: number; t: number } | null = null;
                       for (const f of scopedRound.frames ?? []) {
                         if (f.t > cutoff + 0.5) break;
                         const pa = f.p.find((p) => p.i === a);
                         const pv = f.p.find((p) => p.i === v);
                         if (!pa || !pv) continue;
                         const dd = Math.hypot(pa.x - pv.x, pa.y - pv.y);
-                        if (!best || dd < best.d) best = { d: dd, ax: pa.x, ay: pa.y, vx: pv.x, vy: pv.y, t: f.t };
+                        if (!best || dd < best.d) best = { d: dd, ax: pa.x, ay: pa.y, az: pa.z, vx: pv.x, vy: pv.y, vz: pv.z, t: f.t };
                       }
                       if (!best) return null;
-                      const ca = pt(best.ax, best.ay);
-                      const cv = pt(best.vx, best.vy);
+                      const ca = pt(best.ax, best.ay, best.az);
+                      const cv = pt(best.vx, best.vy, best.vz);
                       if (!ca || !cv) return null;
                       const aHex = sideHex(sideOfIdx(scopedRound, a));
                       const vHex = sideHex(sideOfIdx(scopedRound, v));
@@ -624,7 +624,7 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
                   {/* bomb phases: plant_start pulse ring · plant C4 · defuse_start
                       blue ring · defuse DEF · explode burst */}
                   {(scopedRound.bomb ?? []).map((b, i) => {
-                    const c = pt(b.x, b.y); if (!c) return null;
+                    const c = pt(b.x, b.y, b.z); if (!c) return null;
                     const key = `b${i}`;
                     switch (b.k) {
                       case "plant_start":
@@ -653,11 +653,11 @@ export default function RouteAnalytics({ meta, rounds, view }: Props) {
               ) : (
                 <>
                   {/* cluster kills/deaths (aggregate view) */}
-                  {clusterKills.map((k, i) => { const c = pt(k.x, k.y); if (!c) return null;
+                  {clusterKills.map((k, i) => { const c = pt(k.x, k.y, k.z); if (!c) return null;
                     return <g key={`ck${i}`} stroke="#46d369" strokeWidth={0.5 * s}>
                       <line x1={c.x - s} y1={c.y - s} x2={c.x + s} y2={c.y + s} />
                       <line x1={c.x + s} y1={c.y - s} x2={c.x - s} y2={c.y + s} /></g>; })}
-                  {clusterDeaths.map((dp, i) => { const c = pt(dp.x, dp.y); if (!c) return null;
+                  {clusterDeaths.map((dp, i) => { const c = pt(dp.x, dp.y, dp.z); if (!c) return null;
                     return <g key={`cd${i}`} stroke="#f5694a" strokeWidth={0.45 * s} strokeLinecap="round">
                       <line x1={c.x - 0.9 * s} y1={c.y - 0.9 * s} x2={c.x + 0.9 * s} y2={c.y + 0.9 * s} />
                       <line x1={c.x + 0.9 * s} y1={c.y - 0.9 * s} x2={c.x - 0.9 * s} y2={c.y + 0.9 * s} /></g>; })}
@@ -847,7 +847,7 @@ function RoundDetail({
   onPin: (a: Active) => void;
   name: (i: number) => string;
   sideOfIdx: (i: number) => Side;
-  zoneOf: (x: number, y: number) => string | null;
+  zoneOf: (x: number, y: number, z?: number) => string | null;
 }) {
   const winHex = round.winner === "T" ? T : round.winner === "CT" ? CT : "#8a7dff";
   const kctx = useMemo(() => killContext(round), [round]);
@@ -990,7 +990,7 @@ function RoundDetail({
             ) : (
               <div className="space-y-0.5">
                 {nades.map(({ n, i }) => {
-                  const zone = zoneOf(n.x, n.y);
+                  const zone = zoneOf(n.x, n.y, n.z);
                   const on = sameActive(active, { kind: "util", id: i });
                   return (
                     <button key={i} type="button" {...rowProps({ kind: "util", id: i }, on)}>
@@ -1013,7 +1013,7 @@ function RoundDetail({
             <div className="stat-label mb-1.5">Bomb</div>
             <div className="space-y-0.5">
               {(round.bomb ?? []).slice().sort((a, b) => a.t - b.t).map((b, i) => {
-                const zone = zoneOf(b.x, b.y);
+                const zone = zoneOf(b.x, b.y, b.z);
                 // b.p = acting player index + 1 (0/absent = unknown, old parses)
                 const actor = b.p != null && b.p > 0 ? b.p - 1 : null;
                 // with an actor named, the verb form reads better ("X planted A")
@@ -1137,9 +1137,9 @@ function recomputeCluster(c: RouteCluster): RouteCluster {
     centroid: c.uncommon || !members.length ? [] : averagePath(members) };
 }
 
-type PtFn = (x: number, y: number) => { x: number; y: number } | null;
+type PtFn = (x: number, y: number, z?: number) => { x: number; y: number } | null;
 function pathD(points: RoutePoint[], pt: PtFn): string | null {
-  const pts = points.map((s) => pt(s.x, s.y)).filter(Boolean) as { x: number; y: number }[];
+  const pts = points.map((s) => pt(s.x, s.y, s.z)).filter(Boolean) as { x: number; y: number }[];
   if (pts.length < 2) return null;
   return pts.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`).join(" ");
 }
@@ -1155,7 +1155,7 @@ function splitPoints(points: RoutePoint[], plantT: number | null): [RoutePoint[]
 }
 function StartEnd({ path, winRate, pt, scale }: { path: PlayerPath; winRate: number; pt: PtFn; scale: number }) {
   const a = path.points[0]; const b = path.points[path.points.length - 1];
-  const start = pt(a.x, a.y); const end = pt(b.x, b.y);
+  const start = pt(a.x, a.y, a.z); const end = pt(b.x, b.y, b.z);
   return <>{start && <circle cx={start.x} cy={start.y} r={0.55 * scale} fill={path.side === "T" ? T : CT} />}
     {end && <circle cx={end.x} cy={end.y} r={0.7 * scale} fill={winColor(winRate)} />}</>;
 }

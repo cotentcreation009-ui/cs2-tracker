@@ -9,13 +9,16 @@ import type { ReplayRound } from "./types";
 
 export interface Projection {
   calibrated: boolean;
-  /** world (x,y) → fraction {x,y} in 0..1, or null if it can't be placed. */
-  project: (x: number, y: number) => { x: number; y: number } | null;
+  /** world (x,y[,z]) → fraction {x,y} in 0..1, or null if it can't be placed.
+   *  Pass z whenever the source datum has one: on two-level maps
+   *  (Nuke/Vertigo) the calibration shifts lower-level points onto the lower
+   *  radar inset — without z both levels smear onto one plane. */
+  project: (x: number, y: number, z?: number) => { x: number; y: number } | null;
 }
 
 export function buildProjection(map: string, rounds: ReplayRound[]): Projection {
   if (hasCalibration(map)) {
-    return { calibrated: true, project: (x, y) => worldToRadar(map, x, y) };
+    return { calibrated: true, project: (x, y, z) => worldToRadar(map, x, y, z) };
   }
 
   // No calibration — derive a square bounding box from every world point in the

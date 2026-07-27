@@ -711,7 +711,7 @@ export default function UtilityBreakdown({
       for (const k of UTIL_KINDS) {
         const throws = p.utilNades.filter((n) => n.kind === k);
         if (throws.length < 3) continue;
-        const best = clusterUtilThrows(throws, (x, y) => proj.project(x, y))[0];
+        const best = clusterUtilThrows(throws, (x, y, z) => proj.project(x, y, z))[0];
         if (best && best.count >= 3 && (!clock || best.count > clock.count)) {
           clock = { p, kind: k, count: best.count };
         }
@@ -914,19 +914,19 @@ export default function UtilityBreakdown({
           .slice()
           .sort((a, b) => a.round - b.round || a.t - b.t)
       : [];
-  const spots = activeKind && !showAll ? clusterUtilThrows(selThrows, (x, y) => proj.project(x, y)) : [];
+  const spots = activeKind && !showAll ? clusterUtilThrows(selThrows, (x, y, z) => proj.project(x, y, z)) : [];
   const activeKindLabel = showAll ? "util" : (KIND_LABEL[activeKind ?? ""] ?? activeKind ?? "").toLowerCase();
   const shownIdx = hoverIdx ?? throwIdx;
   const soloThrow = shownIdx != null && selThrows[shownIdx] ? selThrows[shownIdx] : null;
   const pinnedExec = teamPin != null ? executes[teamPin] ?? null : null;
   const mapThrows = pinnedExec ? pinnedExec.throws : soloThrow ? [soloThrow] : selThrows;
-  const zoneOf = (x: number, y: number) =>
-    classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  const zoneOf = (x: number, y: number, z?: number) =>
+    classifyPosition(meta.map, x, y, zones, z)?.name ?? null;
   // name a round package by the top 1-2 callouts its grenades landed in
   const execZone = (ex: (typeof executes)[number]): string | null => {
     const counts = new Map<string, number>();
     for (const tw of ex.throws) {
-      const z = zoneOf(tw.x, tw.y);
+      const z = zoneOf(tw.x, tw.y, tw.z);
       if (z) counts.set(z, (counts.get(z) ?? 0) + 1);
     }
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
@@ -1134,7 +1134,7 @@ export default function UtilityBreakdown({
                     <span title="dashed line = thrown from → landed">
                       <span className="font-semibold text-ink">Throw {(shownIdx ?? 0) + 1}/{selThrows.length}</span>
                       <span className="text-faint"> · R{soloThrow.round} · {mmss(soloThrow.t)}</span>
-                      {zoneOf(soloThrow.x, soloThrow.y) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y)}</span>}
+                      {zoneOf(soloThrow.x, soloThrow.y, soloThrow.z) && <span className="text-faint"> · {zoneOf(soloThrow.x, soloThrow.y, soloThrow.z)}</span>}
                       <span className="text-brand"> · {timingOf(soloThrow)}</span>
                       {(soloThrow.kind === "he" || soloThrow.kind === "molotov") && (
                         <span className={soloThrow.dmg ? "text-bad" : "text-faint"}>
@@ -1189,7 +1189,7 @@ export default function UtilityBreakdown({
                     <ThrowRow
                       key={`${tw.round}-${tw.t}-${i}`}
                       tw={tw}
-                      zone={zoneOf(tw.x, tw.y)}
+                      zone={zoneOf(tw.x, tw.y, tw.z)}
                       timing={timingOf(tw)}
                       active={shownIdx === i}
                       showKind={showAll}

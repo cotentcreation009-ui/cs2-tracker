@@ -82,6 +82,7 @@ interface Blip {
   i: number;
   x: number;
   y: number;
+  z?: number; // height — level-aware placement on Nuke/Vertigo
   d: number;
   h: number;
   bomb?: boolean;
@@ -277,7 +278,7 @@ function EventFeed({
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const sideOf = (i: number) => (round.ct?.includes(i) ? "CT" : round.t?.includes(i) ? "T" : "");
   const lifeOf = (n: { k: string; dur: number }) => Math.max(n.dur || 0, UTIL_LIFE[n.k] ?? 1);
-  const zoneOf = (x: number, y: number) => classifyPosition(meta.map, x, y, zones)?.name ?? null;
+  const zoneOf = (x: number, y: number, z?: number) => classifyPosition(meta.map, x, y, zones, z)?.name ?? null;
 
   // FIRST/TRADE tags — shared definition, so the pills agree with every other
   // feed. Indexed by position in round.kills, so keep original indices around.
@@ -375,7 +376,7 @@ function EventFeed({
         ) : (
           <div className="space-y-0.5">
             {active.map((a, i) => {
-              const z = zoneOf(a.n.x, a.n.y);
+              const z = zoneOf(a.n.x, a.n.y, a.n.z);
               return (
                 <div key={i} className="flex items-center gap-2 text-xs">
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[a.n.k] ?? "#8a7dff" }} />
@@ -769,12 +770,13 @@ export default function ReplayPage() {
     [round],
   );
 
-  // world -> canvas px (calibrated, else normalize to data bounds)
+  // world -> canvas px (calibrated, else normalize to data bounds). Pass z so
+  // two-level maps (Nuke/Vertigo) place lower-level marks on the lower inset.
   const toPx = useMemo(() => {
-    if (!meta) return (x: number, y: number) => ({ x, y });
+    if (!meta) return (x: number, y: number, _z?: number) => ({ x, y });
     const proj = buildProjection(meta.map, rounds);
-    return (x: number, y: number) => {
-      const r = proj.project(x, y);
+    return (x: number, y: number, z?: number) => {
+      const r = proj.project(x, y, z);
       return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
     };
   }, [meta, rounds]);
@@ -828,11 +830,13 @@ export default function ReplayPage() {
     const aMap = new Map(a.p.map((p) => [p.i, p]));
     return b.p.map((pb) => {
       const pa = aMap.get(pb.i);
-      if (!pa) return { i: pb.i, x: pb.x, y: pb.y, d: pb.d, h: pb.h, bomb: pb.b };
+      if (!pa) return { i: pb.i, x: pb.x, y: pb.y, z: pb.z, d: pb.d, h: pb.h, bomb: pb.b };
       return {
         i: pb.i,
         x: lerp(pa.x, pb.x, k),
         y: lerp(pa.y, pb.y, k),
+        // don't interpolate across a level change — snap to the newer sample
+        z: pb.z,
         d: lerpAngle(pa.d, pb.d, k),
         h: pb.h,
         bomb: pb.b,
@@ -881,14 +885,14 @@ export default function ReplayPage() {
       (round.nades ?? []).forEach((n, ni) => {
         const life = Math.max(n.dur || 0, UTIL_LIFE[n.k] ?? 1);
         if (t < n.t || t > n.t + life) return;
-        const c = toPx(n.x, n.y);
+        const c = toPx(n.x, n.y, n.z);
         const age = (t - n.t) / life;
         const col = KIND_COLOR[n.k] ?? "#8a7dff";
 
         // throw origin → landing
         const o = nadeOrigins[ni];
         if (o) {
-          const oc = toPx(o.x, o.y);
+          const oc = toPx(o.x, o.y, n.oz);
           ctx.globalAlpha = 0.5 * (1 - age) + 0.15;
           ctx.strokeStyle = col;
           ctx.lineWidth = 1.5 * s;
@@ -950,7 +954,7 @@ export default function ReplayPage() {
         (b) => (b.k === "defuse" || b.k === "explode") && b.t <= t,
       );
       if (plant && !ended) {
-        const c = toPx(plant.x, plant.y);
+        const c = toPx(plant.x, plant.y, plant.z);
         ctx.fillStyle = "#f5694a";
         ctx.beginPath();
         ctx.arc(c.x, c.y, 5 * s, 0, 7);
@@ -963,7 +967,7 @@ export default function ReplayPage() {
       // recent kills: X on victim for 4s, killer line for 1.5s
       for (const ki of round.kills ?? []) {
         if (ki.t > t || t - ki.t > 4) continue;
-        const v = toPx(ki.vx, ki.vy);
+        const v = toPx(ki.vx, ki.vy, ki.vz);
         const xr = 5 * s;
         ctx.strokeStyle = "#f5694a";
         ctx.lineWidth = 2 * s;
@@ -974,7 +978,7 @@ export default function ReplayPage() {
         ctx.lineTo(v.x - xr, v.y + xr);
         ctx.stroke();
         if (t - ki.t < 1.5 && ki.k >= 0) {
-          const a = toPx(ki.kx, ki.ky);
+          const a = toPx(ki.kx, ki.ky, ki.kz);
           ctx.strokeStyle = "rgba(245,105,74,0.5)";
           ctx.lineWidth = 1 * s;
           ctx.beginPath();
@@ -993,7 +997,7 @@ export default function ReplayPage() {
         const pside = sideOf(p.i);
         if (pside === "CT") aliveCT++;
         else aliveT++;
-        const c = toPx(p.x, p.y);
+        const c = toPx(p.x, p.y, p.z);
         const col = pside === "CT" ? CT : T;
         const dim = focus != null && p.i !== focus;
         ctx.globalAlpha = dim ? 0.4 : 1;
@@ -1149,7 +1153,7 @@ export default function ReplayPage() {
     let best = -1;
     let bestD = Infinity;
     for (const p of posAt(round, tRef.current)) {
-      const c = toPx(p.x, p.y);
+      const c = toPx(p.x, p.y, p.z);
       const dd = Math.hypot(c.x - wx, c.y - wy);
       if (dd < bestD) {
         bestD = dd;
@@ -1683,7 +1687,7 @@ export default function ReplayPage() {
                 meta={meta}
                 i={focusPlayer}
                 rounds={rounds}
-                zoneOf={(x, y) => classifyPosition(meta.map, x, y, zones)?.name ?? null}
+                zoneOf={(x, y, z) => classifyPosition(meta.map, x, y, zones, z)?.name ?? null}
                 onClose={() => setFocusPlayer(null)}
               />
             </div>

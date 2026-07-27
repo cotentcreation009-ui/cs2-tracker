@@ -201,7 +201,7 @@ export function PlayerRoundCard({
   onRefHover?: (ref: MapRef | null) => void;
   onRefPin?: (ref: MapRef) => void;
   activeRef?: MapRef | null;
-  zoneOf?: (x: number, y: number) => string | null;
+  zoneOf?: (x: number, y: number, z?: number) => string | null;
 }) {
   const utilInteractive = !!onUtilHover || !!onUtilPin;
   const refInteractive = !!onRefHover || !!onRefPin;
@@ -444,7 +444,7 @@ export function PlayerRoundCard({
           </div>
           <div className="mt-0.5 space-y-0.5">
             {d.nades.map((n) => {
-              const zone = zoneOf?.(n.x, n.y);
+              const zone = zoneOf?.(n.x, n.y, n.z);
               const on = activeUtilId != null && activeUtilId === n.ni;
               const dmgEntries = n.dmg
                 ? Object.entries(n.dmg)

@@ -144,8 +144,8 @@ export function StrategyMap({
 
   const toPx = useMemo(() => {
     const proj = buildProjection(meta.map, rounds);
-    return (x: number, y: number) => {
-      const r = proj.project(x, y);
+    return (x: number, y: number, z?: number) => {
+      const r = proj.project(x, y, z);
       return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: 0, y: 0 };
     };
   }, [meta.map, rounds]);
@@ -243,7 +243,7 @@ export function StrategyMap({
             if (speed > 110) continue; // running through — not a hold
             const still = speed < 35 ? 2 : 1; // planted vs slow-walking
             const w = still * (fullBuy.has(p.i) ? 1.6 : 1);
-            const c = toPx(p.x, p.y);
+            const c = toPx(p.x, p.y, p.z);
             pts.push({ x: c.x, y: c.y, w });
           }
         }
@@ -263,7 +263,7 @@ export function StrategyMap({
       const pts: HeatPt[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky));
+          if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) pts.push(toPx(k.kx, k.ky, k.kz));
       drawHeat(ctx, off, pts, {
         radius: Math.round(11 * spreadMult),
         blur: Math.round(8 * spreadMult),
@@ -275,7 +275,7 @@ export function StrategyMap({
       const pts: HeatPt[] = [];
       for (const rd of scoped)
         for (const k of rd.kills ?? [])
-          if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy));
+          if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) pts.push(toPx(k.vx, k.vy, k.vz));
       drawHeat(ctx, off, pts, {
         radius: Math.round(11 * spreadMult),
         blur: Math.round(8 * spreadMult),
@@ -287,11 +287,11 @@ export function StrategyMap({
       for (const rd of scoped)
         for (const n of rd.nades ?? []) {
           if (focusPlayer != null && n.by !== focusPlayer) continue;
-          const c = toPx(n.x, n.y);
+          const c = toPx(n.x, n.y, n.z);
           const col = KIND_COLOR[n.k] ?? "#8a7dff";
           const o = throwOrigin(rd, n);
           if (o) {
-            const oc = toPx(o.x, o.y);
+            const oc = toPx(o.x, o.y, n.oz);
             ctx.globalAlpha = 0.6;
             ctx.strokeStyle = col;
             ctx.lineWidth = 1.4;
@@ -340,17 +340,17 @@ export function StrategyMap({
         if (f.t < freezeEnd) continue;
         for (const p of f.p) {
           if (p.h <= 0 || !playerOk(p.i) || !sideOk(sideOfRound(rd, p.i))) continue;
-          const c = classifyPosition(meta.map, p.x, p.y, zones);
+          const c = classifyPosition(meta.map, p.x, p.y, zones, p.z);
           if (c) z(c.name).hold++;
         }
       }
       for (const k of rd.kills ?? []) {
         if (k.k >= 0 && playerOk(k.k) && sideOk(sideOfRound(rd, k.k))) {
-          const c = classifyPosition(meta.map, k.kx, k.ky, zones);
+          const c = classifyPosition(meta.map, k.kx, k.ky, zones, k.kz);
           if (c) z(c.name).kills++;
         }
         if (k.v >= 0 && playerOk(k.v) && sideOk(sideOfRound(rd, k.v))) {
-          const c = classifyPosition(meta.map, k.vx, k.vy, zones);
+          const c = classifyPosition(meta.map, k.vx, k.vy, zones, k.vz);
           if (c) z(c.name).deaths++;
         }
       }

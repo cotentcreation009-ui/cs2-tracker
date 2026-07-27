@@ -169,8 +169,11 @@ export function classifyPosition(
   worldX: number,
   worldY: number,
   zones: Zone[],
+  worldZ?: number,
 ): Zone | null {
-  const r = worldToRadar(map, worldX, worldY);
+  // z matters on two-level maps: zone shapes are drawn on the split radar, so
+  // a lower-level position must be shifted onto the lower inset to classify.
+  const r = worldToRadar(map, worldX, worldY, worldZ);
   if (!r) return null;
 
   let bestPoly: Zone | null = null;

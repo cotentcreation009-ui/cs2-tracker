@@ -753,12 +753,12 @@ function DuelMap({
           );
           if (!traded) continue;
         }
-        const v = proj.project(k.vx, k.vy);
+        const v = proj.project(k.vx, k.vy, k.vz);
         if (!v) continue;
-        const kp = proj.project(k.kx, k.ky);
+        const kp = proj.project(k.kx, k.ky, k.kz);
         out.push({ vx: v.x * 100, vy: v.y * 100, kx: kp ? kp.x * 100 : null, ky: kp ? kp.y * 100 : null, color: wm.color });
         if (zones.length) {
-          const z = classifyPosition(meta.map, k.vx, k.vy, zones);
+          const z = classifyPosition(meta.map, k.vx, k.vy, zones, k.vz);
           if (z?.name) spots.set(z.name, (spots.get(z.name) ?? 0) + 1);
         }
       }

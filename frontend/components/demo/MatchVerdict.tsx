@@ -129,24 +129,27 @@ function EvidenceMap({
   playerName: string;
 }) {
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
-  const P = (wx: number, wy: number) => {
-    const p = proj.project(wx, wy);
+  const P = (wx: number, wy: number, wz?: number) => {
+    const p = proj.project(wx, wy, wz);
     return p ? { x: p.x * 100, y: p.y * 100 } : null;
   };
   const rot = sel?.kind === "rot" ? sel.ev : null;
   const kill = sel?.kind === "kill" ? sel.m : null;
 
   const pts = (rot?.path ?? [])
-    .map((p) => P(p.x, p.y))
+    .map((p) => P(p.x, p.y, p.z))
     .filter((p): p is { x: number; y: number } => p != null);
   const line = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const last = pts[pts.length - 1];
   const prev = pts.length > 1 ? pts[pts.length - 2] : null;
   const ang = last && prev ? (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI : 0;
   const hex = rot ? VERDICT_UI[rot.verdict].hex : "#7f8ea3";
-  const trig = rot?.trigger && rot.trigger.x != null && rot.trigger.y != null ? P(rot.trigger.x, rot.trigger.y) : null;
-  const kp = kill ? P(kill.kx, kill.ky) : null;
-  const vp = kill ? P(kill.vx, kill.vy) : null;
+  const trig =
+    rot?.trigger && rot.trigger.x != null && rot.trigger.y != null
+      ? P(rot.trigger.x, rot.trigger.y, rot.trigger.z)
+      : null;
+  const kp = kill ? P(kill.kx, kill.ky, kill.kz) : null;
+  const vp = kill ? P(kill.vx, kill.vy, kill.vz) : null;
   // CS2 world units → meters (1 unit = 0.75in = 0.01905 m)
   const killDist = kill ? Math.hypot(kill.kx - kill.vx, kill.ky - kill.vy) * 0.01905 : 0;
 
@@ -218,7 +221,7 @@ function EvidenceMap({
         {/* rotation: enemies (hidden state) + route + info marker */}
         {rot &&
           rot.enemies.map((e, i) => {
-            const p = P(e.x, e.y);
+            const p = P(e.x, e.y, e.z);
             return p ? (
               <g key={i}>
                 <circle cx={p.x} cy={p.y} r="2.1" fill="rgba(255,92,92,0.28)" stroke="#ff5c5c" strokeWidth="0.7" />
