@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyzeRotations } from "./rotates";
+import { aggregateTeamRotates, analyzeRotations } from "./rotates";
 import type { ReplayFrame, ReplayMeta, ReplayRound } from "./types";
 
 // ── synthetic map ───────────────────────────────────────────────────────────
@@ -162,6 +162,16 @@ describe("analyzeRotations", () => {
     expect(p0!.events[0].trigger?.kind).toBe("fight");
     expect(p0!.byTrigger.fight).toBe(1);
     expect(p0!.avgResponseSec).toBeCloseTo(5, 0); // kill 0:35 → moved 0:40
+
+    // team aggregation: the CT roster's profile carries the same event
+    const ct = aggregateTeamRotates(rep, [0, 1, 2, 3, 4]);
+    expect(ct).toBeTruthy();
+    expect(ct!.total).toBe(1);
+    expect(ct!.informed).toBe(1);
+    expect(ct!.byTrigger.fight).toBe(1);
+    expect(ct!.avgResponseSec).toBeCloseTo(5, 0);
+    expect(ct!.fastest).toBeNull(); // needs ≥2 informed rotates
+    expect(aggregateTeamRotates(rep, [5, 6, 7, 8, 9])).toBeNull(); // Ts never rotated
   });
 
   it("counts a blind rotate away from the real hit as blind-wrong", () => {

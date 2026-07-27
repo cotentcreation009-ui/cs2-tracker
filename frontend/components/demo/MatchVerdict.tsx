@@ -8,15 +8,19 @@ import { demoCheat, BAND_HEX, BAND_LABEL, type DemoCheat } from "@/lib/demo/chea
 import { computeTendencies, playstyleSummary } from "@/lib/demo/tendencies";
 import { cheatMoments, hasAimData, type CheatMoment } from "@/lib/demo/evidence";
 import {
+  aggregateTeamRotates,
   analyzeRotations,
   TRIGGER_LABEL,
   type PlayerRotates,
   type RotateEvent,
+  type TeamRotates,
   type TriggerKind,
 } from "@/lib/demo/rotates";
 import { AccountCheck } from "@/components/demo/AccountCheck";
 import { cachedAccountScores, fetchAccountScores, getAiRead, setAiRead } from "@/lib/demo/accountStore";
 import type { DemoView } from "@/components/demo/MatchToolbar";
+import { buildProjection, type Projection } from "@/lib/demo/projection";
+import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 
 const CT = "#5b9dff";
 const T = "#e7b53c";
@@ -40,11 +44,11 @@ const FACTOR_HINT: Record<string, string> = {
   hs: "Headshot percentage of kills. Strong players run high too, so it's a weak corroborator.",
 };
 
-const VERDICT_UI: Record<RotateEvent["verdict"], { label: string; cls: string }> = {
-  "blind-correct": { label: "before any info — correct", cls: "bg-bad/15 text-bad" },
-  "blind-wrong": { label: "blind guess — wrong", cls: "bg-good/15 text-good" },
-  hunch: { label: "blind hunch", cls: "bg-panel text-muted" },
-  informed: { label: "after info — normal", cls: "bg-panel text-faint" },
+const VERDICT_UI: Record<RotateEvent["verdict"], { label: string; cls: string; hex: string }> = {
+  "blind-correct": { label: "before any info — correct", cls: "bg-bad/15 text-bad", hex: "#ff5c5c" },
+  "blind-wrong": { label: "blind guess — wrong", cls: "bg-good/15 text-good", hex: "#46d369" },
+  hunch: { label: "blind hunch", cls: "bg-panel text-muted", hex: "#e7b53c" },
+  informed: { label: "after info — normal", cls: "bg-panel text-faint", hex: "#7f8ea3" },
 };
 const VERDICT_ORDER: Record<RotateEvent["verdict"], number> = {
   "blind-correct": 0,
@@ -52,6 +56,134 @@ const VERDICT_ORDER: Record<RotateEvent["verdict"], number> = {
   hunch: 2,
   informed: 3,
 };
+
+// trigger-kind hues (identity also carried by the icon + tooltip, never color alone)
+const KIND_HEX: Record<TriggerKind, string> = {
+  utility: "#38d6ff",
+  fight: "#e7b53c",
+  contact: "#8a7dff",
+  bomb: "#ff7a5c",
+};
+
+// tiny glyphs so trigger kinds read at a glance instead of as sentences
+function KindIcon({ kind, className = "h-3 w-3" }: { kind: TriggerKind; className?: string }) {
+  switch (kind) {
+    case "utility": // grenade
+      return (
+        <svg viewBox="0 0 12 12" className={className} fill="currentColor" aria-hidden>
+          <circle cx="6" cy="7.2" r="3.4" />
+          <rect x="4.9" y="1" width="2.2" height="2.6" rx="0.6" />
+        </svg>
+      );
+    case "fight": // crosshair
+      return (
+        <svg viewBox="0 0 12 12" className={className} fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+          <circle cx="6" cy="6" r="2.9" />
+          <path d="M6 0.6v2.2M6 9.2v2.2M0.6 6h2.2M9.2 6h2.2" />
+        </svg>
+      );
+    case "contact": // sound waves
+      return (
+        <svg viewBox="0 0 12 12" className={className} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>
+          <path d="M2.6 4.6a4.6 4.6 0 0 1 0 2.8" />
+          <path d="M5.4 3a8 8 0 0 1 0 6" />
+          <path d="M8.2 1.5a11.4 11.4 0 0 1 0 9" />
+        </svg>
+      );
+    case "bomb": // planted C4
+      return (
+        <svg viewBox="0 0 12 12" className={className} fill="currentColor" aria-hidden>
+          <rect x="1.8" y="4.4" width="8.4" height="5.8" rx="1.4" />
+          <rect x="4.2" y="2" width="3.6" height="2.2" rx="0.5" />
+        </svg>
+      );
+  }
+}
+
+// ── mini-map: the actual route this rotation took, on the radar ────────────
+function RotateMiniMap({
+  ev,
+  proj,
+  radar,
+}: {
+  ev: RotateEvent;
+  proj: Projection;
+  radar: string | null;
+}) {
+  const pts = ev.path
+    .map((p) => proj.project(p.x, p.y))
+    .filter((p): p is { x: number; y: number } => p != null);
+  const hex = VERDICT_UI[ev.verdict].hex;
+  const line = pts.map((p) => `${(p.x * 100).toFixed(1)},${(p.y * 100).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  const prev = pts.length > 1 ? pts[pts.length - 2] : null;
+  // arrowhead angle from the final segment
+  const ang = last && prev ? Math.atan2(last.y - prev.y, last.x - prev.x) : 0;
+  return (
+    <div
+      className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border border-line bg-panel2"
+      title={`${ev.from} → ${ev.to} · left ${mmss(ev.t0)}, arrived ${mmss(ev.tArrive)}`}
+    >
+      {radar && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={radar} alt="" className="absolute inset-0 h-full w-full object-cover opacity-50" />
+      )}
+      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
+        {pts.length > 1 && (
+          <>
+            <polyline points={line} fill="none" stroke="#04060e" strokeWidth="5" strokeLinejoin="round" opacity="0.7" />
+            <polyline points={line} fill="none" stroke={hex} strokeWidth="2.6" strokeLinejoin="round" />
+          </>
+        )}
+        {pts[0] && <circle cx={pts[0].x * 100} cy={pts[0].y * 100} r="3.4" fill="#04060e" stroke="#cfd8e6" strokeWidth="1.4" />}
+        {last && (
+          <g transform={`translate(${last.x * 100} ${last.y * 100}) rotate(${(ang * 180) / Math.PI})`}>
+            <path d="M6 0 L-4 -5 L-4 5 Z" fill={hex} stroke="#04060e" strokeWidth="1" />
+          </g>
+        )}
+      </svg>
+    </div>
+  );
+}
+
+// ── micro-timeline: SEE the order of events — info dot vs move segment ─────
+function RotateTimeline({ ev }: { ev: RotateEvent }) {
+  const W = 168;
+  const H = 18;
+  const tMax = Math.max(ev.tArrive, ev.firstInfo ?? 0, ev.commitAt ?? 0) + 8;
+  const x = (t: number) => 4 + (Math.max(0, t) / tMax) * (W - 8);
+  const hex = VERDICT_UI[ev.verdict].hex;
+  const kindHex = ev.trigger ? KIND_HEX[ev.trigger.kind] : "#cfd8e6";
+  const title = [
+    ev.trigger ? `${ev.trigger.label} at ${mmss(ev.trigger.t)}` : "no info appeared",
+    ev.commitAt != null ? `enemy shift ${mmss(ev.commitAt)}` : null,
+    `moved ${mmss(ev.t0)} → arrived ${mmss(ev.tArrive)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-4.5 w-full max-w-42" role="img" aria-label={title}>
+      <title>{title}</title>
+      <line x1="4" y1="12" x2={W - 4} y2="12" stroke="var(--color-line)" strokeWidth="1.5" />
+      {/* the move — a bold segment with an arrowhead */}
+      <line x1={x(ev.t0)} y1="12" x2={Math.max(x(ev.t0) + 3, x(ev.tArrive) - 3)} y2="12" stroke={hex} strokeWidth="4" strokeLinecap="round" />
+      <path d={`M${x(ev.tArrive) + 3} 12 L${x(ev.tArrive) - 3.5} 8.6 L${x(ev.tArrive) - 3.5} 15.4 Z`} fill={hex} />
+      {/* enemy shift (hidden state) — diamond */}
+      {ev.commitAt != null && (
+        <path
+          d={`M${x(ev.commitAt)} 3.6 l3.1 3.1 -3.1 3.1 -3.1 -3.1 Z`}
+          fill="#ff9d5c"
+          stroke="#04060e"
+          strokeWidth="0.8"
+        />
+      )}
+      {/* the information — kind-colored dot; for a blind rotate it sits RIGHT of the move start */}
+      {ev.firstInfo != null && (
+        <circle cx={x(ev.firstInfo)} cy="12" r="3.4" fill={kindHex} stroke="#04060e" strokeWidth="1.2" />
+      )}
+    </svg>
+  );
+}
 
 // compact factor names for the narrow suspicion-rail rows (full labels truncate)
 const FACTOR_SHORT: Record<string, string> = {
@@ -169,11 +301,100 @@ function MomentRow({ m, onWatch }: { m: CheatMoment; onWatch: () => void }) {
   );
 }
 
-// ── one analyzed rotation (jump-to-replay evidence) ────────────────────────
-function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
-  const ui = VERDICT_UI[ev.verdict];
+// ── one team's rotation habits: speed bar + trigger-mix bar ────────────────
+function TeamRotateRow({
+  label,
+  hex,
+  team,
+  fastestName,
+  maxResp,
+}: {
+  label: string;
+  hex: string;
+  team: TeamRotates;
+  fastestName: string | null;
+  maxResp: number; // shared scale so the two teams' speed bars compare
+}) {
+  const kinds = Object.entries(team.byTrigger).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
+  const kindTotal = kinds.reduce((s, [, n]) => s + (n ?? 0), 0);
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-line bg-panel/40 px-2 py-1.5">
+    <div className="rounded-lg border border-line bg-panel/40 px-2 py-1.5">
+      <div className="flex items-center gap-1.5 text-[11px]">
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hex }} />
+        <span className="font-semibold text-ink">{label}</span>
+        {team.blindCorrect > 0 && (
+          <span className="rounded-full bg-bad/15 px-1.5 text-[9px] font-bold text-bad">
+            {team.blindCorrect} pre-info
+          </span>
+        )}
+        <span className="ml-auto tabular-nums text-[10px] text-faint">
+          {team.total}× {fastestName && team.fastest ? `· ⚡ ${fastestName}` : ""}
+        </span>
+      </div>
+      {team.avgResponseSec != null && (
+        <div
+          className="mt-1 flex items-center gap-1.5"
+          title={`Average delay between information appearing and a player moving — shorter bar = faster team (fastest: ${fastestName ?? "—"})`}
+        >
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-panel">
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${Math.min(100, (team.avgResponseSec / maxResp) * 100)}%`, background: hex }}
+            />
+          </div>
+          <span className="w-8 shrink-0 text-right text-[9px] tabular-nums text-muted">
+            ~{team.avgResponseSec.toFixed(0)}s
+          </span>
+        </div>
+      )}
+      {kindTotal > 0 && (
+        <div className="mt-1 flex items-center gap-1.5">
+          <div className="flex h-1.5 flex-1 gap-px overflow-hidden rounded-full">
+            {kinds.map(([k, n]) => (
+              <div
+                key={k}
+                style={{ width: `${((n ?? 0) / kindTotal) * 100}%`, background: KIND_HEX[k as TriggerKind] }}
+                title={`${TRIGGER_LABEL[k as TriggerKind]}: ${n} of ${kindTotal} informed rotations`}
+              />
+            ))}
+          </div>
+          <span className="flex w-8 shrink-0 items-center justify-end gap-0.5">
+            {kinds.slice(0, 2).map(([k]) => (
+              <span key={k} style={{ color: KIND_HEX[k as TriggerKind] }} title={TRIGGER_LABEL[k as TriggerKind]}>
+                <KindIcon kind={k as TriggerKind} className="h-2.5 w-2.5" />
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── one analyzed rotation: mini-map route + event timeline, words on hover ──
+function RotateRow({
+  ev,
+  proj,
+  radar,
+  onWatch,
+}: {
+  ev: RotateEvent;
+  proj: Projection;
+  radar: string | null;
+  onWatch: () => void;
+}) {
+  const ui = VERDICT_UI[ev.verdict];
+  const hover =
+    ev.verdict === "blind-correct"
+      ? `moved ${ev.reactSec != null ? `${ev.reactSec.toFixed(0)}s after the hidden enemy shift` : "on the hidden enemy shift"}${ev.firstInfo != null ? `, ${(ev.firstInfo - ev.t0).toFixed(0)}s BEFORE any info` : ", with no info all round"}`
+      : ev.verdict === "hunch"
+        ? "no info and enemies uncommitted — a read/guess"
+        : ev.trigger
+          ? `${ev.trigger.label} at ${mmss(ev.trigger.t)} → moved +${Math.max(0, ev.t0 - ev.trigger.t).toFixed(0)}s`
+          : "";
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel/40 px-2 py-1.5" title={hover}>
+      <RotateMiniMap ev={ev} proj={proj} radar={radar} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[11px]">
           <span className="font-bold tabular-nums text-ink">R{ev.roundN}</span>
@@ -181,29 +402,15 @@ function RotateRow({ ev, onWatch }: { ev: RotateEvent; onWatch: () => void }) {
           <span className="truncate font-semibold text-muted">
             {ev.from} → {ev.to}
           </span>
+          {ev.trigger && ev.verdict === "informed" && (
+            <span className="flex shrink-0 items-center" style={{ color: KIND_HEX[ev.trigger.kind] }} title={ev.trigger.label}>
+              <KindIcon kind={ev.trigger.kind} />
+            </span>
+          )}
+          <span className={`ml-auto shrink-0 rounded-full px-1.5 text-[9px] font-bold ${ui.cls}`}>{ui.label}</span>
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1">
-          <span className={`rounded-full px-1.5 text-[9px] font-bold ${ui.cls}`}>{ui.label}</span>
-          {ev.verdict === "blind-correct" && ev.reactSec != null && (
-            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
-              {ev.reactSec.toFixed(0)}s after the enemy shift
-            </span>
-          )}
-          {ev.verdict === "blind-correct" && (
-            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
-              {ev.firstInfo != null ? `no info until ${mmss(ev.firstInfo)}` : "no info all round"}
-            </span>
-          )}
-          {ev.verdict === "informed" && ev.trigger != null && (
-            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
-              ↳ {ev.trigger.label} {mmss(ev.trigger.t)} · moved +{Math.max(0, ev.t0 - ev.trigger.t).toFixed(0)}s
-            </span>
-          )}
-          {ev.verdict === "hunch" && (
-            <span className="rounded-full bg-panel px-1.5 text-[9px] font-medium text-faint">
-              no info, enemies uncommitted — a read/guess
-            </span>
-          )}
+        <div className="mt-1">
+          <RotateTimeline ev={ev} />
         </div>
       </div>
       <button
@@ -258,6 +465,8 @@ function CaseFile({
         .slice(0, 8),
     [rot],
   );
+  const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
+  const radar = hasCalibration(meta.map) ? radarImage(meta.map) : null;
 
   const cheatFactors = cheat.factors.slice(0, 4).map((f) => `${f.label} ${f.display}`).join(", ");
   const matchStats = `${p.kills}-${p.deaths} (K/D ${p.kd.toFixed(2)}, ${p.kpr.toFixed(2)} KPR), ${p.hsPct.toFixed(0)}% HS, ${p.adr.toFixed(0)} ADR${
@@ -355,28 +564,43 @@ function CaseFile({
           </div>
         ) : (
           <div className="space-y-1.5">
-            {rot.blindCorrect === 0 && rot.blindWrong === 0 && rot.hunch === 0 && (
-              <div className="flex items-center gap-1.5 px-1 pb-0.5 text-[10px] text-good">
-                <span className="h-1.5 w-1.5 rounded-full bg-good" />
-                Every rotation followed real information — normal map sense, no radar tell.
-              </div>
-            )}
-            {rot.informed > 0 && Object.keys(rot.byTrigger).length > 0 && (
-              <div className="px-1 pb-0.5 text-[10px] leading-relaxed text-muted">
-                Rotates on{" "}
-                {Object.entries(rot.byTrigger)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([k, n]) => `${TRIGGER_LABEL[k as TriggerKind]} ×${n}`)
-                  .join(" · ")}
-                {rot.avgResponseSec != null &&
-                  ` — typically moves ~${rot.avgResponseSec.toFixed(0)}s after the info appears`}
-                {rot.hunch > 0 && ` · plus ${rot.hunch} pure read${rot.hunch > 1 ? "s" : ""} (no info)`}
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-1 px-1 pb-0.5">
+              {rot.blindCorrect === 0 && rot.blindWrong === 0 && rot.hunch === 0 && (
+                <span className="flex items-center gap-1.5 text-[10px] text-good" title="Every rotation followed real information — normal map sense">
+                  <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                  all after info — no radar tell
+                </span>
+              )}
+              {Object.entries(rot.byTrigger)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, n]) => (
+                  <span
+                    key={k}
+                    className="flex items-center gap-1 rounded-full bg-panel px-1.5 py-0.5 text-[9px] font-semibold"
+                    style={{ color: KIND_HEX[k as TriggerKind] }}
+                    title={`${TRIGGER_LABEL[k as TriggerKind]} triggered ${n} rotation${n > 1 ? "s" : ""}`}
+                  >
+                    <KindIcon kind={k as TriggerKind} className="h-2.5 w-2.5" />
+                    ×{n}
+                  </span>
+                ))}
+              {rot.avgResponseSec != null && (
+                <span className="rounded-full bg-panel px-1.5 py-0.5 text-[9px] font-semibold text-muted" title="Typical delay between the information appearing and this player moving">
+                  info → move ~{rot.avgResponseSec.toFixed(0)}s
+                </span>
+              )}
+              {rot.hunch > 0 && (
+                <span className="rounded-full bg-panel px-1.5 py-0.5 text-[9px] font-semibold text-faint" title="Rotations with no information and no enemy commit — pure reads/guesses">
+                  {rot.hunch} read{rot.hunch > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
             {rotEvents.map((ev, i) => (
               <RotateRow
                 key={`${ev.roundIdx}-${ev.t0}-${i}`}
                 ev={ev}
+                proj={proj}
+                radar={radar}
                 onWatch={() => onWatch(ev.roundIdx, Math.max(0, ev.t0 - 3), p.i)}
               />
             ))}
@@ -495,6 +719,17 @@ export default function MatchVerdict({
     [rotReport],
   );
 
+  // team rotation styles — keyed by STARTING roster (halftime swaps don't
+  // split a team's profile), independent of the side filter
+  const teamRot = useMemo(() => {
+    if (!rotReport.available) return null;
+    const ct = aggregateTeamRotates(rotReport, data.players.filter((p) => p.team === "CT").map((p) => p.i));
+    const t = aggregateTeamRotates(rotReport, data.players.filter((p) => p.team === "T").map((p) => p.i));
+    return ct || t ? { ct, t } : null;
+  }, [rotReport, data]);
+  const fastestName = (tr: TeamRotates | null) =>
+    tr?.fastest ? (meta.players[tr.fastest.playerIdx]?.name ?? null) : null;
+
   // "Check all" prefetches every player's account scores (staggered + deduped)
   // so the AI match read is enriched and any case file opens instantly.
   const [checkAll, setCheckAll] = useState(false);
@@ -561,8 +796,22 @@ export default function MatchVerdict({
           : "";
       return `- ${safeName(p.name)} (${p.team || "?"}): ${p.kills}-${p.deaths}, ADR ${p.adr.toFixed(0)}, HS ${p.hsPct.toFixed(0)}%, CheatMeter ${cheat.score.toFixed(0)}%${tells ? ` (${tells})` : ""}${rotBits}${rotStyle}${acctBits}`;
     });
+    const teamStyleLine = (label: string, tr: TeamRotates | null) => {
+      if (!tr || tr.informed === 0) return null;
+      const mix = Object.entries(tr.byTrigger)
+        .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+        .slice(0, 2)
+        .map(([k]) => TRIGGER_LABEL[k as TriggerKind])
+        .join(", ");
+      return `- TEAM ${label} rotation style: ${tr.total} rotations${
+        tr.avgResponseSec != null ? `, moves ~${tr.avgResponseSec.toFixed(0)}s after info` : ""
+      }${mix ? `, reads ${mix}` : ""}${tr.blindCorrect ? `, ${tr.blindCorrect} PRE-INFO rotate(s)` : ""}`;
+    };
     const summary = [
       `MATCH-LEVEL read: a ${rounds.length}-round game on ${meta.map} with ${players.length} players (in-match CheatMeter covers aim anomalies plus information anomalies — "blind rotates" are cross-map rotations made before any info existed, ✓ correct / ✗ wrong; not proof; account data included where already checked). Assess the LOBBY: which players (if any) warrant a closer look and why, who reads clean, and one overall line. Be measured and concrete.`,
+      ...[teamStyleLine("CT-start", teamRot?.ct ?? null), teamStyleLine("T-start", teamRot?.t ?? null)].filter(
+        (x): x is string => x != null,
+      ),
       ...lines,
     ].join("\n");
     try {
@@ -687,6 +936,38 @@ export default function MatchVerdict({
               />
             ))}
           </div>
+          {teamRot && (
+            <div className="mt-2 border-t border-line pt-2 lg:shrink-0">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="stat-label">Team rotation styles</span>
+                <span
+                  className="text-[10px] text-faint"
+                  title="How each starting roster rotates: what information they respond to and how quickly they move after it appears"
+                >
+                  info → move
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {(() => {
+                  const maxResp = Math.max(
+                    teamRot.ct?.avgResponseSec ?? 0,
+                    teamRot.t?.avgResponseSec ?? 0,
+                    20,
+                  );
+                  return (
+                    <>
+                      {teamRot.ct && (
+                        <TeamRotateRow label="CT start" hex={CT} team={teamRot.ct} fastestName={fastestName(teamRot.ct)} maxResp={maxResp} />
+                      )}
+                      {teamRot.t && (
+                        <TeamRotateRow label="T start" hex={T} team={teamRot.t} fastestName={fastestName(teamRot.t)} maxResp={maxResp} />
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
 
         {selected && (

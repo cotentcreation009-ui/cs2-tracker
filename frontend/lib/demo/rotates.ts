@@ -59,6 +59,7 @@ export interface RotateEvent {
   commitAt: number | null; // enemy-shift onset backing the verdict
   reactSec: number | null; // t0 - commitAt for blind verdicts
   verdict: RotateVerdict;
+  path: { x: number; y: number }[]; // world-space route t0→arrival (≤16 samples) for the mini-map
 }
 
 export interface PlayerRotates {
@@ -84,6 +85,68 @@ export interface RotationReport {
   siteB: string;
   events: RotateEvent[];
   byPlayer: Map<number, PlayerRotates>;
+}
+
+// One TEAM's rotation habits (aggregate of its players' events — keyed by
+// roster, not side, so a halftime swap doesn't split the profile).
+export interface TeamRotates {
+  total: number;
+  informed: number;
+  hunch: number;
+  blindCorrect: number;
+  blindWrong: number;
+  avgResponseSec: number | null; // mean info→move delay across informed rotates
+  byTrigger: Partial<Record<TriggerKind, number>>;
+  fastest: { playerIdx: number; avgResponseSec: number } | null; // ≥2 informed rotates
+}
+
+// Aggregate a roster's rotation events into a team profile. Returns null when
+// none of the given players rotated at all.
+export function aggregateTeamRotates(
+  report: RotationReport,
+  playerIdxs: number[],
+): TeamRotates | null {
+  const members = playerIdxs
+    .map((i) => report.byPlayer.get(i))
+    .filter((p): p is PlayerRotates => p != null);
+  if (!members.length) return null;
+
+  const team: TeamRotates = {
+    total: 0,
+    informed: 0,
+    hunch: 0,
+    blindCorrect: 0,
+    blindWrong: 0,
+    avgResponseSec: null,
+    byTrigger: {},
+    fastest: null,
+  };
+  let delaySum = 0;
+  let delayN = 0;
+  for (const p of members) {
+    team.total += p.total;
+    team.informed += p.informed;
+    team.hunch += p.hunch;
+    team.blindCorrect += p.blindCorrect;
+    team.blindWrong += p.blindWrong;
+    for (const [k, n] of Object.entries(p.byTrigger)) {
+      const kind = k as TriggerKind;
+      team.byTrigger[kind] = (team.byTrigger[kind] ?? 0) + (n ?? 0);
+    }
+    for (const ev of p.events) {
+      if (ev.verdict !== "informed" || !ev.trigger) continue;
+      delaySum += ev.t0 - ev.trigger.t;
+      delayN++;
+    }
+    const n = p.events.filter((e) => e.verdict === "informed" && e.trigger).length;
+    if (n >= 2 && p.avgResponseSec != null) {
+      if (!team.fastest || p.avgResponseSec < team.fastest.avgResponseSec) {
+        team.fastest = { playerIdx: p.playerIdx, avgResponseSec: p.avgResponseSec };
+      }
+    }
+  }
+  team.avgResponseSec = delayN ? delaySum / delayN : null;
+  return team;
 }
 
 // ── tuning ──────────────────────────────────────────────────────────────────
@@ -392,6 +455,12 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
             if (verdict === "blind-correct" && commitAt != null) reactSec = Math.max(0, t0 - commitAt);
           }
 
+          const seg = pts.slice(k, idx + 1);
+          const step = Math.max(1, Math.ceil(seg.length / 16));
+          const path = seg
+            .filter((_, n) => n % step === 0 || n === seg.length - 1)
+            .map((p) => ({ x: p.x, y: p.y }));
+
           events.push({
             roundIdx,
             roundN: r.n,
@@ -406,6 +475,7 @@ export function analyzeRotations(meta: ReplayMeta, rounds: ReplayRound[]): Rotat
             commitAt,
             reactSec,
             verdict,
+            path,
           });
         }
       }
