@@ -88,6 +88,22 @@ export interface InsightsResult {
 
 const TRADE_WINDOW = 5; // seconds
 
+// Approximate HLTV-2.0-style rating from the widely-cited public regression:
+//   Rating ≈ 0.0073·KAST% + 0.3591·KPR − 0.5329·DPR + 0.2372·Impact
+//            + 0.0032·ADR + 0.1587,  Impact ≈ 2.13·KPR + 0.42·APR − 0.41
+// An estimate, not HLTV's licensed formula — labeled "Rating≈" in the UI. It
+// exists so the scoreboard's default sort rewards round impact, not raw kills.
+export function approxRating(p: PlayerInsight): number {
+  const rounds = Math.max(1, p.roundsPlayed);
+  const kpr = p.kills / rounds;
+  const dpr = p.deaths / rounds;
+  const apr = (p.assists || p.assistsApprox) / rounds;
+  const impact = 2.13 * kpr + 0.42 * apr - 0.41;
+  const r =
+    0.0073 * p.kastPct + 0.3591 * kpr - 0.5329 * dpr + 0.2372 * impact + 0.0032 * p.adr + 0.1587;
+  return Math.max(0, r);
+}
+
 const sideOf = (r: ReplayRound, i: number, meta: ReplayMeta): "CT" | "T" | "" => {
   if (r.ct?.includes(i)) return "CT";
   if (r.t?.includes(i)) return "T";

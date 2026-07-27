@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import type { DemoView } from "@/components/demo/MatchToolbar";
-import { computeInsights, type PlayerInsight } from "@/lib/demo/insights";
+import { approxRating, computeInsights, type PlayerInsight } from "@/lib/demo/insights";
 import { teamAStarters, roundWinnerTeam } from "@/lib/demo/score";
 import { kdColor } from "@/lib/format";
 
@@ -20,8 +20,8 @@ const OTHER = "#8a93a5";
 const SOFT: Record<string, string> = { [CT]: "#9cc1ff", [T]: "#f0cd78", [OTHER]: "#c3ccda" };
 
 type SortKey =
-  | "name" | "k" | "d" | "a" | "diff" | "kd" | "adr" | "kast"
-  | "hs" | "ok" | "od" | "trd" | "mk" | "cl" | "ud";
+  | "name" | "rating" | "k" | "d" | "a" | "diff" | "kd" | "adr" | "kast"
+  | "hs" | "ok" | "od" | "trd" | "k2" | "k3" | "k4" | "k5" | "cl" | "ud";
 
 // The A column's title depends on the assist source (per-demo): real demo
 // credits when the parse carries kill.a, else the trade-based proxy.
@@ -29,6 +29,7 @@ const A_TITLE_REAL = "Assists (from the demo)";
 const A_TITLE_PROXY = "Assists — trade-based proxy (the demo doesn't credit every assist)";
 
 const COLS: { key: SortKey; label: string; title: string }[] = [
+  { key: "rating", label: "Rating≈", title: "HLTV-2.0-style estimate from KAST, kills/deaths per round, impact and ADR — the default sort, so round impact beats raw kills" },
   { key: "k", label: "K", title: "Kills" },
   { key: "d", label: "D", title: "Deaths" },
   { key: "a", label: "A", title: A_TITLE_PROXY },
@@ -40,7 +41,10 @@ const COLS: { key: SortKey; label: string; title: string }[] = [
   { key: "ok", label: "OK", title: "Opening kills (won the round's first duel)" },
   { key: "od", label: "OD", title: "Opening deaths (lost the round's first duel)" },
   { key: "trd", label: "TRD", title: "Trade kills — avenged a teammate within 5s" },
-  { key: "mk", label: "MK", title: "Multi-kill rounds (2+ kills)" },
+  { key: "k2", label: "2K", title: "Rounds with exactly 2 kills" },
+  { key: "k3", label: "3K", title: "Rounds with exactly 3 kills" },
+  { key: "k4", label: "4K", title: "Rounds with exactly 4 kills" },
+  { key: "k5", label: "ACE", title: "Rounds with 5 kills" },
   { key: "cl", label: "1vX", title: "Clutches won / attempted (last alive vs X)" },
   { key: "ud", label: "UD", title: "Utility damage (HE / molotov)" },
 ];
@@ -48,6 +52,7 @@ const COLS: { key: SortKey; label: string; title: string }[] = [
 function sortVal(p: PlayerInsight, key: SortKey, realAssists: boolean): number | string {
   switch (key) {
     case "name": return p.name.toLowerCase();
+    case "rating": return approxRating(p);
     case "k": return p.kills;
     case "d": return p.deaths;
     case "a": return realAssists ? p.assists : p.assistsApprox;
@@ -59,7 +64,10 @@ function sortVal(p: PlayerInsight, key: SortKey, realAssists: boolean): number |
     case "ok": return p.openingKills;
     case "od": return p.openingDeaths;
     case "trd": return p.tradeKills;
-    case "mk": return p.multiKillRounds;
+    case "k2": return p.multiKills.k2;
+    case "k3": return p.multiKills.k3;
+    case "k4": return p.multiKills.k4;
+    case "k5": return p.multiKills.k5;
     case "cl": return p.clutchWon * 1000 + p.clutchTotal; // won first, attempts break ties
     case "ud": return p.utilDamage;
   }
@@ -82,7 +90,7 @@ export function MatchScoreboard({
   rounds: ReplayRound[];
   view: DemoView;
 }) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "k", dir: -1 });
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "rating", dir: -1 });
 
   const { groups, scopeLabel, roundCount, hasRealAssists } = useMemo(() => {
     const r = view.scopeRound != null ? rounds[view.scopeRound] : undefined;
@@ -235,7 +243,7 @@ export function MatchScoreboard({
         {hasRealAssists
           ? "A is the demo's own assist credit (flash assists included)"
           : "A is a trade-based proxy (the demo doesn't credit every assist)"}
-        ; OK/OD are the round&apos;s opening duel.
+        ; OK/OD are the round&apos;s opening duel; Rating≈ is an HLTV-2.0-style estimate, not the licensed formula.
       </div>
     </div>
   );
@@ -263,6 +271,7 @@ function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoVi
       {group.players.map((p) => {
         const focused = view.focusPlayer === p.i;
         const diff = p.kills - p.deaths;
+        const rating = approxRating(p);
         return (
           <tr
             key={p.i}
@@ -280,6 +289,13 @@ function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoVi
               }}
             >
               {p.name}
+            </td>
+            <td
+              className={`px-2 py-1.5 text-right font-bold tabular-nums ${
+                rating >= 1.1 ? "text-good" : rating < 0.85 ? "text-bad" : ""
+              }`}
+            >
+              {rating.toFixed(2)}
             </td>
             <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{p.kills}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.deaths}</td>
@@ -305,7 +321,18 @@ function FragmentRows({ group, view, realAssists }: { group: Group; view: DemoVi
             <td className="px-2 py-1.5 text-right tabular-nums">{p.openingKills}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.openingDeaths}</td>
             <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.tradeKills}</td>
-            <td className="px-2 py-1.5 text-right tabular-nums text-muted">{p.multiKillRounds}</td>
+            {([p.multiKills.k2, p.multiKills.k3, p.multiKills.k4, p.multiKills.k5] as const).map(
+              (n, mi) => (
+                <td
+                  key={mi}
+                  className={`px-2 py-1.5 text-right tabular-nums ${
+                    n === 0 ? "text-faint" : mi >= 2 ? "font-semibold text-good" : "text-muted"
+                  }`}
+                >
+                  {n === 0 ? "—" : n}
+                </td>
+              ),
+            )}
             <td className="px-2 py-1.5 text-right tabular-nums">
               {p.clutchTotal > 0 ? (
                 <span className={p.clutchWon > 0 ? "text-good" : "text-muted"}>

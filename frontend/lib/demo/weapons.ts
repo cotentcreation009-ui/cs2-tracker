@@ -10,7 +10,7 @@
 // sliced per player (their personal weapon breakdown + HS%).
 
 import type { ReplayMeta, ReplayRound, ReplayPlayerStat } from "@/lib/demo/types";
-import { classifyBuy, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
+import { buyTierOf, BUY_KEYS, type BuyKey } from "@/lib/demo/economy";
 
 export type WeaponClass = "rifle" | "sniper" | "smg" | "pistol" | "heavy" | "other";
 
@@ -377,9 +377,12 @@ export function computeBuyMatrix(
       const ks = byIdx.get(k.k);
       const vs = byIdx.get(k.v);
       if (!ks || !vs) continue; // need both economies
+      // one shared tier resolver (prefers the parser's buy class) so this
+      // matrix and the DuelMap buy filter bucket the same kill identically
+      const kt = buyTierOf(ks, r.n);
+      const vt = buyTierOf(vs, r.n);
+      if (!kt || !vt) continue;
       hasData = true;
-      const kt = classifyBuy(ks.equip ?? 0, r.n).key;
-      const vt = classifyBuy(vs.equip ?? 0, r.n).key;
       const cell = ++cells[kt][vt];
       if (cell > max) max = cell;
       rowTotals[kt]++;
