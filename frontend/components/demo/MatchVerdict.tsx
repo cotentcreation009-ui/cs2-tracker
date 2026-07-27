@@ -868,6 +868,60 @@ function CaseFile({
         )}
       </div>
 
+      {/* suspect timeline — anomalies vs the scoreline. A cheater who toggles
+          when losing shows as markers clustering on red cells. */}
+      <div className="lg:shrink-0">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="stat-label">Round timeline</span>
+          <span className="text-[10px] text-faint">
+            green = his team won · <span className="text-bad">●</span> flagged kill ·{" "}
+            <span className="text-bad">▲</span> pre-info rotate · ▽ other rotate · click = watch
+          </span>
+        </div>
+        <div className="flex gap-0.5">
+          {rounds.map((r, ri) => {
+            const side = r.ct?.includes(p.i) ? "CT" : r.t?.includes(p.i) ? "T" : "";
+            const won = side !== "" && r.winner === side;
+            const kills = moments.filter((m) => m.roundIdx === ri);
+            const rots = (rot?.events ?? []).filter((e) => e.roundIdx === ri);
+            const bc = rots.some((e) => e.verdict === "blind-correct");
+            const bits = [
+              ...kills.map((m) => m.tags[0]),
+              ...rots.map((e) => `${e.from}→${e.to} (${VERDICT_RAIL[e.verdict].label})`),
+            ].join(" · ");
+            return (
+              <button
+                key={ri}
+                type="button"
+                onClick={() => onWatch(ri, kills[0]?.t ?? Math.max(0, (rots[0]?.t0 ?? 3) - 3), p.i)}
+                title={`R${r.n} · ${won ? "won" : side ? "lost" : "—"}${bits ? ` · ${bits}` : ""}`}
+                className={`flex h-6 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-sm transition hover:brightness-150 ${
+                  won ? "bg-good/15" : side ? "bg-bad/10" : "bg-panel"
+                }`}
+              >
+                <span className="flex items-center gap-px leading-none">
+                  {kills.length > 0 && (
+                    <span
+                      className="rounded-full bg-bad"
+                      style={{
+                        width: kills.length > 1 ? 7 : 5,
+                        height: kills.length > 1 ? 7 : 5,
+                        opacity: 0.55 + Math.min(0.45, (kills[0]?.weight ?? 0) / 20),
+                      }}
+                    />
+                  )}
+                  {rots.length > 0 && (
+                    <span className={`text-[7px] leading-none ${bc ? "text-bad" : "text-faint"}`}>
+                      {bc ? "▲" : "▽"}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* evidence — one big map, everything reviewable drawn on it */}
       <div className="lg:shrink-0">
         <div className="mb-1.5 flex items-center justify-between gap-2">

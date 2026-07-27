@@ -154,6 +154,50 @@ function UtilPill({
 }
 
 // One individual throw — click to play its lineup solo on the map.
+// "Copy practice command" — the Refrag-style trick from data we already store:
+// teleport to the throw origin facing the landing spot on a private server
+// (sv_cheats 1). The demo records positions, not view angles, so the pitch
+// points AT the landing — the thrower arcs their aim up from there.
+function CopyThrowButton({ tw }: { tw: UtilThrow }) {
+  const [ok, setOk] = useState(false);
+  const oz = tw.oz; // capture so the closure keeps the narrowing
+  if (oz == null) return null; // legacy parse — no origin height recorded
+  const copy = () => {
+    const dx = tw.x - tw.ox;
+    const dy = tw.y - tw.oy;
+    const dz = (tw.z ?? oz) - oz;
+    const yaw = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const pitch = -(Math.atan2(dz, Math.hypot(dx, dy)) * 180) / Math.PI;
+    // origin is the projectile spawn (eye-ish) — drop ~60u so setpos lands feet
+    const cmd = `setpos_exact ${tw.ox.toFixed(1)} ${tw.oy.toFixed(1)} ${(oz - 60).toFixed(1)}; setang ${pitch.toFixed(1)} ${yaw.toFixed(1)} 0`;
+    void navigator.clipboard?.writeText(cmd).then(() => {
+      setOk(true);
+      setTimeout(() => setOk(false), 1200);
+    });
+  };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation();
+        copy();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          copy();
+        }
+      }}
+      title="Copy a practice-server command — teleports you to this throw's spot facing the landing (needs sv_cheats 1; demos don't record view angles, so raise your aim to arc it)"
+      className={`pill shrink-0 cursor-pointer transition ${ok ? "bg-good/15 text-good" : "bg-panel text-faint hover:text-brand"}`}
+    >
+      {ok ? "copied ✓" : "practice"}
+    </span>
+  );
+}
+
 function ThrowRow({
   tw,
   zone,
@@ -221,6 +265,7 @@ function ThrowRow({
           ))}
         <TimingBadge timing={timing} />
         <span className="tabular-nums">{mmss(tw.t)}</span>
+        <CopyThrowButton tw={tw} />
       </span>
     </button>
   );
