@@ -616,6 +616,12 @@ function EvidenceExplorer({
         {rotReason && rotEvents.length === 0 && (
           <div className="pb-0.5 text-[10px] text-faint">Rotations n/a — {rotReason}.</div>
         )}
+        {moments.length === 0 && (
+          <div className="flex items-center gap-1.5 pb-0.5 pt-1 text-[10px] text-good">
+            <span className="h-1.5 w-1.5 rounded-full bg-good" />
+            no flagged kills — every kill reads like normal aim
+          </div>
+        )}
         {list.map((e, i) => (
           <div key={e.kind === "rot" ? `r${e.ev.roundIdx}-${e.ev.t0}` : `k${e.m.roundIdx}-${e.m.t}`}>
             {e.kind === "kill" && (i === 0 || list[i - 1].kind === "rot") && (

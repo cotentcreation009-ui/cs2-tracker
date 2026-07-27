@@ -29,19 +29,34 @@ export interface CheatMoment {
 const ONE_TAP = /deagle|revolver|awp|ssg08|scar20|g3sg1/i;
 
 /**
- * Rank a player's kills into review-worthy "moments". Rounds where their aim
- * aggregates look anomalous lift every kill in that round; each kill also earns
- * weight from its own tells (headshot, one-tap weapon, per-kill reaction,
- * multi-kill round). Only ENEMY kills count (a teamkill is not evidence), the
- * reaction tag prefers the kill's own measured reaction over the round average,
- * and a multi-kill round collapses to ONE row (its strongest kill) so the list
- * never repeats identical tag sets.
+ * Rank a player's kills into review-worthy "moments".
+ *
+ * A kill is FLAGGED only when it carries at least one PRIMARY tell — something
+ * genuinely anomalous, aligned with the CheatMeter's aim-anomaly philosophy:
+ *   • snap kill(s) this round — superhuman correction from a far crosshair
+ *   • extreme pre-aim         — crosshair already on target when the enemy
+ *                               appeared (round avg < 3°; ordinary angle-
+ *                               holding runs far higher)
+ *   • trigger-like reaction   — THIS kill's spotted→kill under 180 ms
+ *   • killed while flashed    — landed the kill blind (parser's bl flag)
+ *   • wallbang / through-smoke HEADSHOT — hitting a head you can't see
+ *   • anomalous round accuracy — ≥70% of ≥10 bullets hit
+ *
+ * Headshots, one-taps, multi-kill rounds, plain wallbangs/smoke kills and
+ * ordinary reactions (180-260 ms) only ADD ranking weight — they can never
+ * flag a kill by themselves, because strong players produce those all game
+ * (that would be flagging volume, which this tab promises not to do).
+ *
+ * Only ENEMY kills count (a teamkill is not evidence), the reaction tag
+ * prefers the kill's own measured reaction over the round average (~ marks
+ * the fallback), and a multi-kill round collapses to ONE row (its strongest
+ * kill) so the list never repeats identical tag sets.
  */
 export function cheatMoments(
   meta: ReplayMeta,
   rounds: ReplayRound[],
   playerIdx: number,
-  limit = 14,
+  limit = 12,
 ): CheatMoment[] {
   const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
   const sideOf = (r: ReplayRound, i: number) =>
@@ -50,28 +65,38 @@ export function cheatMoments(
 
   rounds.forEach((r, roundIdx) => {
     const st = r.stats?.find((s) => s.i === playerIdx);
-    // round-level aim flags (shared by every kill the player got this round)
+    // round-level tells (shared by every kill the player got this round)
     const roundTags: string[] = [];
     let roundWeight = 0;
+    let roundPrimary = false;
     let roundAvgReact = 0;
     if (st) {
       if ((st.snap ?? 0) > 0) {
         roundTags.push(st.snap && st.snap > 1 ? `${st.snap} snap kills` : "snap kill");
         roundWeight += 5 * Math.min(3, st.snap ?? 1);
+        roundPrimary = true;
       }
       if (st.aimN && st.aimN > 0) {
         const preaim = (st.preaim ?? 0) / st.aimN;
         roundAvgReact = (st.rctMs ?? 0) / st.aimN;
-        if (preaim > 0 && preaim < 9) {
+        // a single sampled kill under 3° is just holding an angle; the tell is
+        // a SUSTAINED round — 2+ sampled kills averaging under 2°
+        if (preaim > 0 && preaim < 3) {
           roundTags.push(`${preaim.toFixed(1)}° pre-aim`);
-          roundWeight += 3;
+          if (st.aimN >= 2 && preaim < 2) {
+            roundWeight += preaim < 1 ? 5 : 3;
+            roundPrimary = true;
+          } else {
+            roundWeight += 1;
+          }
         }
       }
-      if (st.shots && st.shots >= 8) {
+      if (st.shots && st.shots >= 10) {
         const acc = ((st.hits ?? 0) / st.shots) * 100;
-        if (acc >= 65) {
+        if (acc >= 70) {
           roundTags.push(`${acc.toFixed(0)}% accuracy`);
-          roundWeight += 2;
+          roundWeight += 2.5;
+          roundPrimary = true;
         }
       }
     }
@@ -86,38 +111,60 @@ export function cheatMoments(
       const wm = weaponMeta(k.w);
       const tags = [...roundTags];
       let weight = roundWeight;
+      let primary = roundPrimary;
+
       // reaction: prefer THIS kill's measured spotted→kill time; fall back to
-      // the round average (marked ~) when this kill has no aim sample
+      // the round average (marked ~) when this kill has no aim sample. Only
+      // true trigger territory (<120ms — faster than a prepared human) is a
+      // primary tell; 120-260 is fast-but-plausible (peeker's advantage,
+      // prefires) and merely adds weight when something else flagged the kill.
       const react = k.rct ?? 0;
       if (react > 0 && react < 260) {
         tags.push(`${react.toFixed(0)}ms reaction`);
-        weight += react < 180 ? 3 : 2;
-      } else if (k.rct == null && roundAvgReact > 0 && roundAvgReact < 260) {
-        tags.push(`~${roundAvgReact.toFixed(0)}ms reaction`);
-        weight += 2;
-      }
-      if (k.hs) {
-        tags.push("headshot");
-        weight += 1.5;
-        if (ONE_TAP.test(k.w)) {
-          tags.push(`${wm.label} one-tap`);
-          weight += 2.5;
+        if (react < 120) {
+          weight += 5;
+          primary = true;
+        } else {
+          weight += react < 180 ? 2.5 : 1.5;
         }
+      } else if (k.rct == null && roundAvgReact > 0 && roundAvgReact < 120) {
+        tags.push(`~${roundAvgReact.toFixed(0)}ms reaction`);
+        weight += 4;
+        primary = true;
       }
+      // landing a kill WHILE FLASHED — tracking through a white screen
+      if (k.bl) {
+        tags.push("killed while flashed");
+        weight += 4;
+        primary = true;
+      }
+      // hitting what you can't see: wallbang / smoke kills are spam-luck on
+      // their own, but a HEADSHOT through cover is a real tell
       if (k.wb) {
-        tags.push("through a wall");
-        weight += 2;
+        tags.push(k.hs ? "headshot through a wall" : "through a wall");
+        weight += k.hs ? 3.5 : 1.5;
+        if (k.hs) primary = true;
       }
       if (k.ts) {
-        tags.push("through smoke");
-        weight += 2;
+        tags.push(k.hs ? "headshot through smoke" : "through smoke");
+        weight += k.hs ? 3.5 : 1.5;
+        if (k.hs) primary = true;
+      }
+      // modifiers — ranking weight only, never a flag by themselves
+      if (k.hs) {
+        tags.push("headshot");
+        weight += 1;
+        if (ONE_TAP.test(k.w)) {
+          tags.push(`${wm.label} one-tap`);
+          weight += 1.5;
+        }
       }
       if (multi) {
         tags.push(`${kills.length}K round`);
         weight += 1;
       }
-      // only surface kills that earned at least one flag
-      if (tags.length === 0) continue;
+      // a kill is flagged only when a PRIMARY tell backs it
+      if (!primary) continue;
       rows.push({
         roundIdx,
         roundN: r.n,
