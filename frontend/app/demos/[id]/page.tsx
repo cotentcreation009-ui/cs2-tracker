@@ -1284,16 +1284,65 @@ export default function ReplayPage() {
   );
 
   // --- map pan + click-to-select ---
-  const onCanvasDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Pointer-events interaction (mouse + touch): one pointer drags/pans, two
+  // pointers pinch-zoom about their midpoint. Touch pointers are tracked in a
+  // map; pinch state carries the last distance + midpoint so each move applies
+  // an incremental zoom-and-follow.
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ dist: number; mx: number; my: number } | null>(null);
+
+  const onCanvasDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* pointer already gone */
+    }
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size === 2) {
+      // pinch begins — a two-finger gesture is never a pan or a select
+      dragRef.current = null;
+      const [a, b] = [...pointersRef.current.values()];
+      const ia = toInternal(a.x, a.y);
+      const ib = toInternal(b.x, b.y);
+      pinchRef.current = {
+        dist: Math.max(1, Math.hypot(ia.x - ib.x, ia.y - ib.y)),
+        mx: (ia.x + ib.x) / 2,
+        my: (ia.y + ib.y) / 2,
+      };
+      setHoverBlip(null);
+      return;
+    }
+    movedRef.current = false; // fresh gesture — a stale pinch flag must not eat the next tap
     const v = vpRef.current;
     dragRef.current = { cx: e.clientX, cy: e.clientY, ox: v.ox, oy: v.oy, moved: false };
   };
-  const onCanvasMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const d = dragRef.current;
+  const onCanvasMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const cv = canvasRef.current;
     if (!cv) return;
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    const pinch = pinchRef.current;
+    if (pinch && pointersRef.current.size >= 2) {
+      // zoom by the finger-distance ratio about the midpoint, and follow the
+      // midpoint as it moves (pinch + pan in one gesture)
+      const [a, b] = [...pointersRef.current.values()];
+      const ia = toInternal(a.x, a.y);
+      const ib = toInternal(b.x, b.y);
+      const dist = Math.max(1, Math.hypot(ia.x - ib.x, ia.y - ib.y));
+      const mx = (ia.x + ib.x) / 2;
+      const my = (ia.y + ib.y) / 2;
+      const v = vpRef.current;
+      const ns = clamp(v.scale * (dist / pinch.dist), 1, 6);
+      const k = ns / v.scale;
+      setViewport(clampVp(ns, mx - (mx - v.ox) * k + (mx - pinch.mx), my - (my - v.oy) * k + (my - pinch.my)));
+      movedRef.current = true;
+      pinchRef.current = { dist, mx, my };
+      return;
+    }
+    const d = dragRef.current;
     if (d) {
-      // panning while the button is held (down → up/leave)
+      // panning while the button/finger is held (down → up/leave)
       const rect = cv.getBoundingClientRect();
       const dx = ((e.clientX - d.cx) / rect.width) * SIZE;
       const dy = ((e.clientY - d.cy) / rect.height) * SIZE;
@@ -1302,7 +1351,9 @@ export default function ReplayPage() {
       setHoverBlip(null);
       return;
     }
-    // button-less hover: name + HP tooltip for the dot under the cursor
+    // button-less hover: name + HP tooltip for the dot under the cursor.
+    // Mouse only — a finger lifting would leave the tooltip stuck.
+    if (e.pointerType !== "mouse") return;
     if (!round) return;
     const { x: mx, y: my } = toInternal(e.clientX, e.clientY);
     const v = vpRef.current;
@@ -1331,11 +1382,29 @@ export default function ReplayPage() {
       setHoverBlip(null);
     }
   };
-  const onCanvasUp = () => {
-    // carry the "was a pan" flag to the click that fires next, then clear drag so
-    // a button-less hover never pans.
-    movedRef.current = dragRef.current?.moved ?? false;
+  const onCanvasUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* not captured */
+    }
+    if (pinchRef.current && pointersRef.current.size < 2) {
+      pinchRef.current = null;
+      movedRef.current = true; // the gesture was a pinch, not a select tap
+    }
+    // carry the "was a pan" flag to the click that fires next, then clear drag
+    // so a button-less hover never pans.
+    movedRef.current = movedRef.current || (dragRef.current?.moved ?? false);
     dragRef.current = null;
+  };
+  // OS-cancelled touches (edge swipe, page scroll takeover) fire neither
+  // pointerup nor leave — clear every gesture so nothing sticks
+  const onCanvasCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    pinchRef.current = null;
+    dragRef.current = null;
+    setHoverBlip(null);
   };
   const onCanvasLeave = () => {
     dragRef.current = null;
@@ -1730,13 +1799,17 @@ export default function ReplayPage() {
             ref={canvasRef}
             width={SIZE}
             height={SIZE}
-            onMouseDown={onCanvasDown}
-            onMouseMove={onCanvasMove}
-            onMouseUp={onCanvasUp}
-            onMouseLeave={onCanvasLeave}
+            onPointerDown={onCanvasDown}
+            onPointerMove={onCanvasMove}
+            onPointerUp={onCanvasUp}
+            onPointerCancel={onCanvasCancel}
+            onPointerLeave={onCanvasLeave}
             onClick={onCanvasClick}
+            // touch-action: unzoomed, a single finger still scrolls the page
+            // (pan-y) while pinch stays ours; zoomed, the map owns every touch
+            // so one finger pans it
             className={`aspect-square w-full select-none rounded-xl border border-line bg-panel2 ${
-              vp.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+              vp.scale > 1 ? "cursor-grab touch-none active:cursor-grabbing" : "cursor-pointer touch-pan-y"
             }`}
           />
           {/* hover tooltip: who is this dot, at what HP */}
@@ -1760,7 +1833,7 @@ export default function ReplayPage() {
             <button
               type="button"
               onClick={() => zoomAt(SIZE / 2, SIZE / 2, 1.3)}
-              title="Zoom in (scroll on the map)"
+              title="Zoom in (scroll or pinch on the map)"
               className="grid h-7 w-7 place-items-center rounded-md border border-line2 bg-bg/80 text-base font-bold backdrop-blur transition hover:bg-panel"
             >
               +
