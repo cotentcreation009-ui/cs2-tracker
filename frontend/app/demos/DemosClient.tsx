@@ -14,10 +14,17 @@ import {
 import { computePercent, phaseOf, type UploadPhase } from "@/lib/demo/uploadProgress";
 import {
   deleteMatch,
+  exportLibrary,
+  exportMatch,
+  importMatches,
   listMatches,
+  parseImportPayload,
   renameMatch,
+  requestPersist,
   saveMatch,
+  storageInfo,
   type MatchSummary,
+  type StorageInfo,
 } from "@/lib/demo/store";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { mapLabel } from "@/lib/format";
@@ -38,8 +45,11 @@ export function DemosClient() {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [url, setUrl] = useState("");
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const acRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   // progress model state: current phase, real upload fraction, and when the
   // (time-eased) parse phase began. percentRef enforces monotonicity.
@@ -101,6 +111,7 @@ export function DemosClient() {
     } catch {
       /* IndexedDB unavailable (private mode) — leave empty */
     }
+    setStorage(await storageInfo());
   }, []);
 
   useEffect(() => {
@@ -152,6 +163,51 @@ export function DemosClient() {
       setSampleBusy(false);
     }
   }, [sampleBusy, markNew, router]);
+
+  // ---- library export / import / durability --------------------------------
+
+  const downloadJson = (name: string, data: unknown) => {
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const safeFile = (s: string) => s.replace(/[^\w.-]+/g, "_").slice(0, 60) || "demo";
+
+  const onExport = useCallback(async (m: MatchSummary) => {
+    const em = await exportMatch(m.id);
+    if (em) downloadJson(`${safeFile(m.name)}.statrun.json`, em);
+  }, []);
+
+  const onExportAll = useCallback(async () => {
+    const lib = await exportLibrary();
+    if (lib.demos.length) downloadJson(`statrun-library-${new Date().toISOString().slice(0, 10)}.json`, lib);
+  }, []);
+
+  const onImportFile = useCallback(
+    async (file: File) => {
+      setError(null);
+      setImportBusy(true);
+      try {
+        const demos = parseImportPayload(JSON.parse(await file.text()));
+        const saved = await importMatches(demos);
+        if (saved.length) markNew(saved[saved.length - 1].id);
+        await refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't import that file.");
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [markNew, refresh],
+  );
+
+  const onProtect = useCallback(async () => {
+    await requestPersist();
+    setStorage(await storageInfo());
+  }, []);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -435,13 +491,72 @@ export function DemosClient() {
 
       {/* library */}
       <section>
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
-          <span className="h-3.5 w-1 rounded-full bg-linear-to-b from-brand to-brand2" />
-          Your match library
-          {list.length > 0 && (
-            <span className="pill bg-panel text-faint">{list.length}</span>
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted">
+            <span className="h-3.5 w-1 rounded-full bg-linear-to-b from-brand to-brand2" />
+            Your match library
+            {list.length > 0 && (
+              <span className="pill bg-panel text-faint">{list.length}</span>
+            )}
+          </h2>
+          <div className="ml-auto flex items-center gap-1.5">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onImportFile(f);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => importRef.current?.click()}
+              disabled={importBusy}
+              title="Import a StatRun demo or library .json export"
+              className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-50"
+            >
+              {importBusy ? "Importing…" : "⇪ Import"}
+            </button>
+            {list.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void onExportAll()}
+                title="Download the whole library as one .json backup"
+                className="btn btn-ghost px-2.5 py-1 text-xs"
+              >
+                ⇩ Export all
+              </button>
+            )}
+          </div>
+        </div>
+        {/* storage meter — the library lives in this browser only; back it up
+            and (if the browser allows) protect it from storage eviction */}
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-faint">
+          <span>Saved in this browser only — Export makes a portable backup.</span>
+          {storage && storage.quota > 0 && (
+            <span className="tabular-nums">
+              {(storage.usage / 1048576).toFixed(0)} MB of {(storage.quota / 1073741824).toFixed(1)} GB used
+            </span>
           )}
-        </h2>
+          {storage &&
+            (storage.persisted ? (
+              <span className="text-good" title="The browser granted persistent storage — it won't silently evict the library under disk pressure">
+                ✓ protected from eviction
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void onProtect()}
+                title="Ask the browser to protect this site's storage from automatic eviction"
+                className="text-mid underline decoration-dotted underline-offset-2 hover:text-ink"
+              >
+                storage is best-effort — protect it
+              </button>
+            ))}
+        </div>
         {list.length === 0 ? (
           <div className="card flex flex-col items-center gap-3 px-4 py-10 text-center text-sm text-muted">
             <span>No demos yet — upload one above, or take the analyzer for a spin first:</span>
@@ -530,6 +645,14 @@ export function DemosClient() {
                         className="btn btn-ghost px-3 py-1.5 text-xs"
                       >
                         Rename
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onExport(m)}
+                        title="Download this match as a portable .json (re-import it on any machine)"
+                        className="btn btn-ghost px-3 py-1.5 text-xs"
+                      >
+                        Export
                       </button>
                       <button
                         type="button"
