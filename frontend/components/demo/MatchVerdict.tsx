@@ -112,18 +112,23 @@ const KIND_SHORT: Record<TriggerKind, string> = {
 
 // The centerpiece: a large radar with the selected evidence drawn on it —
 // a rotation's full route + where the (unseen) enemies actually stood, or a
-// flagged kill's sight line.
+// flagged kill's sight line. Every mark explains itself on hover (enlarged
+// invisible hit areas → styled tooltip), and a small legend sits on the map
+// so the symbols are readable without hovering at all.
 function EvidenceMap({
   sel,
   proj,
   radar,
   anchors,
+  playerName,
 }: {
   sel: Evidence | null;
   proj: Projection;
   radar: string | null;
   anchors: { a: { x: number; y: number; label: string }; b: { x: number; y: number; label: string } } | null;
+  playerName: string;
 }) {
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const P = (wx: number, wy: number) => {
     const p = proj.project(wx, wy);
     return p ? { x: p.x * 100, y: p.y * 100 } : null;
@@ -142,6 +147,41 @@ function EvidenceMap({
   const trig = rot?.trigger && rot.trigger.x != null && rot.trigger.y != null ? P(rot.trigger.x, rot.trigger.y) : null;
   const kp = kill ? P(kill.kx, kill.ky) : null;
   const vp = kill ? P(kill.vx, kill.vy) : null;
+  // CS2 world units → meters (1 unit = 0.75in = 0.01905 m)
+  const killDist = kill ? Math.hypot(kill.kx - kill.vx, kill.ky - kill.vy) * 0.01905 : 0;
+
+  // hover helpers: show a styled tooltip anchored to a map position
+  const show = (x: number, y: number, text: string) => ({
+    onMouseEnter: () => setTip({ x, y, text }),
+    onMouseLeave: () => setTip(null),
+  });
+  const hit = { fill: "transparent", stroke: "transparent", style: { cursor: "help" } as const };
+
+  const legend =
+    sel == null ? null : sel.kind === "rot" ? (
+      <>
+        <div>
+          <span style={{ color: hex }}>━▶</span> {playerName}&apos;s route
+        </div>
+        <div>
+          <span className="text-bad">○</span> enemies when he moved
+        </div>
+        {rot?.trigger && (
+          <div>
+            <span style={{ color: KIND_HEX[rot.trigger.kind] }}>●</span> the info ({KIND_SHORT[rot.trigger.kind]})
+          </div>
+        )}
+      </>
+    ) : (
+      <>
+        <div>
+          <span className="text-brand">●</span> {playerName} shot from
+        </div>
+        <div>
+          <span className="text-bad">✕</span> {kill?.victim} died · ~{killDist.toFixed(0)}m
+        </div>
+      </>
+    );
 
   return (
     <div className="relative w-full overflow-hidden rounded-xl border border-line bg-panel2" style={{ aspectRatio: "1" }}>
@@ -150,7 +190,7 @@ function EvidenceMap({
         <img src={radar} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" />
       )}
       <div className="absolute inset-0 bg-[rgba(4,6,14,0.25)]" />
-      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
+      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" onMouseLeave={() => setTip(null)}>
         {/* site labels */}
         {anchors &&
           ([anchors.a, anchors.b] as const).map((s) => {
@@ -183,6 +223,7 @@ function EvidenceMap({
               <g key={i}>
                 <circle cx={p.x} cy={p.y} r="2.1" fill="rgba(255,92,92,0.28)" stroke="#ff5c5c" strokeWidth="0.7" />
                 <circle cx={p.x} cy={p.y} r="0.7" fill="#ff5c5c" />
+                <circle cx={p.x} cy={p.y} r="4" {...hit} {...show(p.x, p.y, `enemy standing here when ${playerName} moved — not visible to him`)} />
               </g>
             ) : null;
           })}
@@ -190,20 +231,48 @@ function EvidenceMap({
           <>
             <polyline points={line} fill="none" stroke="#04060e" strokeWidth="3.2" strokeLinejoin="round" opacity="0.75" />
             <polyline points={line} fill="none" stroke={hex} strokeWidth="1.7" strokeLinejoin="round" />
+            <polyline
+              points={line}
+              fill="none"
+              stroke="transparent"
+              strokeWidth="6"
+              strokeLinejoin="round"
+              style={{ cursor: "help" }}
+              {...(pts[Math.floor(pts.length / 2)]
+                ? show(
+                    pts[Math.floor(pts.length / 2)].x,
+                    pts[Math.floor(pts.length / 2)].y,
+                    `${playerName}'s route ${rot.from} → ${rot.to} · ${mmss(rot.t0)} → ${mmss(rot.tArrive)}`,
+                  )
+                : {})}
+            />
           </>
         )}
         {rot && pts[0] && (
-          <circle cx={pts[0].x} cy={pts[0].y} r="2" fill="#04060e" stroke="#e8eefb" strokeWidth="1" />
+          <g>
+            <circle cx={pts[0].x} cy={pts[0].y} r="2" fill="#04060e" stroke="#e8eefb" strokeWidth="1" />
+            <circle cx={pts[0].x} cy={pts[0].y} r="4" {...hit} {...show(pts[0].x, pts[0].y, `start — left ${rot.from} at ${mmss(rot.t0)}`)} />
+          </g>
         )}
         {rot && last && (
-          <g transform={`translate(${last.x} ${last.y}) rotate(${ang})`}>
-            <path d="M3.6 0 L-2.6 -3 L-2.6 3 Z" fill={hex} stroke="#04060e" strokeWidth="0.7" />
+          <g>
+            <g transform={`translate(${last.x} ${last.y}) rotate(${ang})`}>
+              <path d="M3.6 0 L-2.6 -3 L-2.6 3 Z" fill={hex} stroke="#04060e" strokeWidth="0.7" />
+            </g>
+            <circle cx={last.x} cy={last.y} r="4.5" {...hit} {...show(last.x, last.y, `arrived at ${rot.to} · ${mmss(rot.tArrive)}`)} />
           </g>
         )}
         {rot && trig && rot.trigger && (
           <g>
             <circle cx={trig.x} cy={trig.y} r="3.4" fill="none" stroke={KIND_HEX[rot.trigger.kind]} strokeWidth="0.8" opacity="0.65" />
             <circle cx={trig.x} cy={trig.y} r="1.9" fill={KIND_HEX[rot.trigger.kind]} stroke="#04060e" strokeWidth="0.8" />
+            <circle
+              cx={trig.x}
+              cy={trig.y}
+              r="5"
+              {...hit}
+              {...show(trig.x, trig.y, `the info he could act on: ${rot.trigger.label} at ${mmss(rot.trigger.t)}`)}
+            />
           </g>
         )}
 
@@ -212,16 +281,54 @@ function EvidenceMap({
           <>
             <line x1={kp.x} y1={kp.y} x2={vp.x} y2={vp.y} stroke="#04060e" strokeWidth="2" opacity="0.7" />
             <line x1={kp.x} y1={kp.y} x2={vp.x} y2={vp.y} stroke="#e8eefb" strokeWidth="0.8" strokeDasharray="2 1.6" />
+            <line
+              x1={kp.x}
+              y1={kp.y}
+              x2={vp.x}
+              y2={vp.y}
+              strokeWidth="5"
+              {...hit}
+              {...show((kp.x + vp.x) / 2, (kp.y + vp.y) / 2, `the sight line · ~${killDist.toFixed(0)}m${kill.tags[0] ? ` · ${kill.tags[0]}` : ""}`)}
+            />
           </>
         )}
-        {kill && kp && <circle cx={kp.x} cy={kp.y} r="2.2" fill="#38d6ff" stroke="#04060e" strokeWidth="0.9" />}
+        {kill && kp && (
+          <g>
+            <circle cx={kp.x} cy={kp.y} r="2.2" fill="#38d6ff" stroke="#04060e" strokeWidth="0.9" />
+            <circle cx={kp.x} cy={kp.y} r="4.5" {...hit} {...show(kp.x, kp.y, `${playerName} shot from here · R${kill.roundN} ${mmss(kill.t)}`)} />
+          </g>
+        )}
         {kill && vp && (
-          <g stroke="#ff5c5c" strokeWidth="1.1" strokeLinecap="round">
-            <line x1={vp.x - 1.7} y1={vp.y - 1.7} x2={vp.x + 1.7} y2={vp.y + 1.7} />
-            <line x1={vp.x - 1.7} y1={vp.y + 1.7} x2={vp.x + 1.7} y2={vp.y - 1.7} />
+          <g>
+            <g stroke="#ff5c5c" strokeWidth="1.1" strokeLinecap="round">
+              <line x1={vp.x - 1.7} y1={vp.y - 1.7} x2={vp.x + 1.7} y2={vp.y + 1.7} />
+              <line x1={vp.x - 1.7} y1={vp.y + 1.7} x2={vp.x + 1.7} y2={vp.y - 1.7} />
+            </g>
+            <circle cx={vp.x} cy={vp.y} r="4.5" {...hit} {...show(vp.x, vp.y, `${kill.victim} died here${kill.hs ? " — headshot" : ""}`)} />
           </g>
         )}
       </svg>
+
+      {/* what the symbols mean — always visible, bottom-left */}
+      {legend && (
+        <div className="pointer-events-none absolute bottom-1.5 left-1.5 space-y-0.5 rounded-md bg-black/65 px-2 py-1 text-[9px] leading-relaxed text-muted backdrop-blur-sm">
+          {legend}
+        </div>
+      )}
+
+      {/* hover tooltip */}
+      {tip && (
+        <div
+          className="pointer-events-none absolute z-10 max-w-[85%] rounded-md border border-line bg-black/90 px-2 py-1 text-[10px] font-medium text-ink shadow-lg"
+          style={{
+            left: `${Math.min(80, Math.max(10, tip.x))}%`,
+            top: `${tip.y}%`,
+            transform: tip.y < 16 ? "translate(-50%, 14px)" : "translate(-50%, calc(-100% - 10px))",
+          }}
+        >
+          {tip.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -522,6 +629,7 @@ function EvidenceExplorer({
   radar,
   anchors,
   playerIdx,
+  playerName,
   onWatch,
 }: {
   rotEvents: RotateEvent[];
@@ -532,6 +640,7 @@ function EvidenceExplorer({
   radar: string | null;
   anchors: { a: { x: number; y: number; label: string }; b: { x: number; y: number; label: string } } | null;
   playerIdx: number;
+  playerName: string;
   onWatch: (round: number, t: number, player: number | null) => void;
 }) {
   const list: Evidence[] = useMemo(
@@ -562,7 +671,7 @@ function EvidenceExplorer({
       {/* the map pane — the selected evidence, drawn big (capped so the
           caption + timeline stay in view on wide screens) */}
       <div className="w-full max-w-115 lg:w-[46%] lg:shrink-0">
-        <EvidenceMap sel={sel} proj={proj} radar={radar} anchors={anchors} />
+        <EvidenceMap sel={sel} proj={proj} radar={radar} anchors={anchors} playerName={playerName} />
         {sel?.kind === "rot" && (
           <>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -580,16 +689,6 @@ function EvidenceExplorer({
               )}
             </div>
             <EvidenceTimeline ev={sel.ev} />
-            <div className="text-[10px] leading-relaxed text-faint">
-              <span className="text-bad">○</span> enemies at move time · route ={" "}
-              <span style={{ color: VERDICT_UI[sel.ev.verdict].hex }}>his path</span>
-              {sel.ev.trigger?.x != null && (
-                <>
-                  {" "}
-                  · <span style={{ color: KIND_HEX[sel.ev.trigger.kind] }}>●</span> the info
-                </>
-              )}
-            </div>
           </>
         )}
         {sel?.kind === "kill" && (
@@ -816,6 +915,7 @@ function CaseFile({
           radar={radar}
           anchors={anchors}
           playerIdx={p.i}
+          playerName={p.name}
           onWatch={onWatch}
         />
       </div>
