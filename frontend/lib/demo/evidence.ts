@@ -16,10 +16,12 @@ export interface CheatMoment {
   weaponLabel: string;
   weaponColor: string;
   victim: string;
+  victimIdx: number; // victim player index — the tracking trace needs their path
   hs: boolean;
   tags: string[]; // why it's worth a look, strongest first
   weight: number; // ranking score
   extraKills?: number; // other flagged kills in the same round, folded into this row
+  trkPct?: number; // pre-sight tracking % (wave-2b) — draws the trace on the map
   kx: number; // killer position (world space) — drawn on the evidence map
   ky: number;
   kz?: number; // heights — level-aware placement on two-level maps
@@ -145,6 +147,21 @@ export function cheatMoments(
         tags.push("never spotted the victim");
         weight += 1.5;
       }
+      // Pre-sight tracking (wave-2b): the crosshair TURNED with an occluded,
+      // moving, out-of-earshot victim before they ever became visible — the
+      // aim-side radar tell. Heavily gated in the parser (sweep + distance +
+      // occlusion) and calibrated to near-zero on legit demos, so ≥60% is a
+      // primary tell; 40-59% corroborates.
+      const trkPct = k.trk != null ? k.trk - 1 : null;
+      if (trkPct != null && trkPct >= 40) {
+        tags.push(`tracked through walls ${trkPct}% pre-sight`);
+        if (trkPct >= 60) {
+          weight += 7;
+          primary = true;
+        } else {
+          weight += 2;
+        }
+      }
       // landing a kill WHILE FLASHED — tracking through a white screen
       if (k.bl) {
         tags.push("killed while flashed");
@@ -186,9 +203,11 @@ export function cheatMoments(
         weaponLabel: wm.label,
         weaponColor: wm.color,
         victim: name(k.v),
+        victimIdx: k.v,
         hs: !!k.hs,
         tags: [...new Set(tags)],
         weight,
+        ...(trkPct != null && trkPct >= 40 ? { trkPct } : {}),
         kx: k.kx,
         ky: k.ky,
         kz: k.kz,

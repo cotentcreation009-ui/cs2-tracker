@@ -43,6 +43,13 @@ export interface ReplayKill {
   ns?: boolean; // noscope — scoped weapon fired unscoped
   rct?: number; // reaction ms for THIS kill (victim became visible → kill); absent = not measurable
   us?: boolean; // firearm kill on a victim who NEVER became visible to the killer this round (wall-tracking tell; needs a recent re-parse)
+  // Pre-sight tracking score (wave-2b), stored +1 so 0% survives omitempty:
+  // trk-1 = % of pre-sight samples where the killer's crosshair stayed pinned
+  // (<8°) on the occluded victim WHILE the victim's bearing swept ≥5°/s at
+  // beyond-footstep range (>1100u). Sweep + distance + occlusion gates kill
+  // the legit explanations (angle-holding, audio, extrapolating a peek);
+  // calibrated: two real MM demos produce zero kills ≥60%.
+  trk?: number;
   // Killer movement/stance at the kill (wave-2 parses only). vel is horizontal
   // speed in game units/s (250 ≈ full run); 0/absent is ambiguous between
   // stationary and old parse — probe cr/sc/vel across the demo before trusting.

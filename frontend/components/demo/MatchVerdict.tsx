@@ -116,18 +116,27 @@ const KIND_SHORT: Record<TriggerKind, string> = {
 // flagged kill's sight line. Every mark explains itself on hover (enlarged
 // invisible hit areas → styled tooltip), and a small legend sits on the map
 // so the symbols are readable without hovering at all.
+// pre-kill tracking trace: both players' 1 Hz paths in the seconds before a
+// tracked kill — the killer's view rays vs the occluded victim's route
+interface KillTrace {
+  killer: { x: number; y: number; z?: number; d: number; t: number }[];
+  victim: { x: number; y: number; z?: number; t: number }[];
+}
+
 function EvidenceMap({
   sel,
   proj,
   radar,
   anchors,
   playerName,
+  trace,
 }: {
   sel: Evidence | null;
   proj: Projection;
   radar: string | null;
   anchors: { a: { x: number; y: number; label: string }; b: { x: number; y: number; label: string } } | null;
   playerName: string;
+  trace: KillTrace | null;
 }) {
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
   const P = (wx: number, wy: number, wz?: number) => {
@@ -184,6 +193,16 @@ function EvidenceMap({
         <div>
           <span className="text-bad">✕</span> {kill?.victim} died · ~{killDist.toFixed(0)}m
         </div>
+        {trace && (
+          <>
+            <div>
+              <span className="text-bad">┅</span> {kill?.victim}&apos;s hidden route before the kill
+            </div>
+            <div>
+              <span className="text-brand">╱</span> {playerName}&apos;s crosshair, second by second
+            </div>
+          </>
+        )}
       </>
     );
 
@@ -277,6 +296,53 @@ function EvidenceMap({
               {...hit}
               {...show(trig.x, trig.y, `the info he could act on: ${rot.trigger.label} at ${mmss(rot.trigger.t)}`)}
             />
+          </g>
+        )}
+
+        {/* pre-kill tracking trace: the victim's occluded route + the killer's
+            crosshair direction at each 1 Hz sample. A fan of rays that keeps
+            pointing at the moving hidden target IS the tell, made visible. */}
+        {kill && trace && (
+          <g>
+            {(() => {
+              const vpts = trace.victim
+                .map((s) => P(s.x, s.y, s.z))
+                .filter((q): q is { x: number; y: number } => q != null);
+              const vline = vpts.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+              return (
+                <>
+                  {vpts.length > 1 && (
+                    <polyline points={vline} fill="none" stroke="#ff5c5c" strokeWidth="1" strokeDasharray="1.6 1.6" opacity="0.8" />
+                  )}
+                  {trace.killer.map((s, i) => {
+                    const q = P(s.x, s.y, s.z);
+                    if (!q) return null;
+                    const rad = (-s.d * Math.PI) / 180; // same convention as the replay radar
+                    const age = (trace.killer[trace.killer.length - 1].t - s.t) / 8;
+                    return (
+                      <g key={i} opacity={0.9 - 0.6 * age}>
+                        <line
+                          x1={q.x}
+                          y1={q.y}
+                          x2={q.x + Math.cos(rad) * 7}
+                          y2={q.y + Math.sin(rad) * 7}
+                          stroke="#38d6ff"
+                          strokeWidth="0.6"
+                        />
+                        <circle cx={q.x} cy={q.y} r="0.8" fill="#38d6ff" />
+                        <circle
+                          cx={q.x}
+                          cy={q.y}
+                          r="2.5"
+                          {...hit}
+                          {...show(q.x, q.y, `${playerName} at ${mmss(s.t)} — the ray is his crosshair while ${kill.victim} was hidden`)}
+                        />
+                      </g>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </g>
         )}
 
@@ -634,6 +700,7 @@ function EvidenceExplorer({
   anchors,
   playerIdx,
   playerName,
+  rounds,
   onWatch,
 }: {
   rotEvents: RotateEvent[];
@@ -645,6 +712,7 @@ function EvidenceExplorer({
   anchors: { a: { x: number; y: number; label: string }; b: { x: number; y: number; label: string } } | null;
   playerIdx: number;
   playerName: string;
+  rounds: ReplayRound[];
   onWatch: (round: number, t: number, player: number | null) => void;
 }) {
   const list: Evidence[] = useMemo(
@@ -658,6 +726,24 @@ function EvidenceExplorer({
   const [hover, setHover] = useState<number | null>(null);
   const selIdx = hover ?? Math.min(pin, Math.max(0, list.length - 1));
   const sel = list[selIdx] ?? null;
+
+  // pre-kill trace for tracked kills: both players' 1 Hz paths over the 8 s
+  // before the kill, from the frames we already store
+  const trace = useMemo(() => {
+    if (sel?.kind !== "kill" || sel.m.trkPct == null) return null;
+    const r = rounds[sel.m.roundIdx];
+    if (!r) return null;
+    const killer: KillTrace["killer"] = [];
+    const victim: KillTrace["victim"] = [];
+    for (const f of r.frames ?? []) {
+      if (f.t < sel.m.t - 8 || f.t > sel.m.t) continue;
+      for (const p of f.p) {
+        if (p.i === playerIdx) killer.push({ x: p.x, y: p.y, z: p.z, d: p.d, t: f.t });
+        else if (p.i === sel.m.victimIdx) victim.push({ x: p.x, y: p.y, z: p.z, t: f.t });
+      }
+    }
+    return killer.length && victim.length ? { killer, victim } : null;
+  }, [sel, rounds, playerIdx]);
 
   if (list.length === 0) {
     return (
@@ -675,7 +761,7 @@ function EvidenceExplorer({
       {/* the map pane — the selected evidence, drawn big (capped so the
           caption + timeline stay in view on wide screens) */}
       <div className="w-full max-w-115 lg:w-[46%] lg:shrink-0">
-        <EvidenceMap sel={sel} proj={proj} radar={radar} anchors={anchors} playerName={playerName} />
+        <EvidenceMap sel={sel} proj={proj} radar={radar} anchors={anchors} playerName={playerName} trace={trace} />
         {sel?.kind === "rot" && (
           <>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -1099,6 +1185,7 @@ function CaseFile({
           anchors={anchors}
           playerIdx={p.i}
           playerName={p.name}
+          rounds={rounds}
           onWatch={onWatch}
         />
       </div>
