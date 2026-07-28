@@ -7,9 +7,12 @@ import { API_BASE, internalHeaders } from "@/lib/api";
 // soon" state on the page), so this proxy just forwards whatever it gets.
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   try {
-    const res = await fetch(`${API_BASE}/api/pro-matches`, {
+    // Forward the query string — the board relies on ?include=finished for the
+    // Recent results section; dropping it silently empties that whole section.
+    const { search } = new URL(req.url);
+    const res = await fetch(`${API_BASE}/api/pro-matches${search}`, {
       headers: internalHeaders(),
       cache: "no-store",
     });
