@@ -8,7 +8,7 @@ import { dayGroup, formatTag, startInfo, validHex } from "./format";
 export function UpcomingRow({ match }: { match: MatchState }) {
   const a = match.teams?.[0];
   const b = match.teams?.[1];
-  const { rel, abs, date } = startInfo(match.startScheduled);
+  const { rel, abs, date, delayed } = startInfo(match.startScheduled);
   // rows group by event (not day), so carry the day on the row itself
   const day = date ? dayGroup(date) : "";
   const dayShort =
@@ -31,9 +31,16 @@ export function UpcomingRow({ match }: { match: MatchState }) {
       />
 
       {/* time */}
-      <div className="w-18 shrink-0 sm:w-21">
-        <div className={`truncate text-xs font-semibold ${soon ? "text-[#ff6b76]" : "text-brand"}`}>{rel || "TBD"}</div>
-        <div className="truncate text-[11px] tabular-nums text-faint">{dayShort ? `${dayShort} · ` : ""}{abs}</div>
+      <div
+        className="w-18 shrink-0 sm:w-21"
+        title={delayed ? "Running late — likely waiting on the previous series to finish" : undefined}
+      >
+        <div className={`truncate text-xs font-semibold ${delayed ? "text-mid" : soon ? "text-[#ff6b76]" : "text-brand"}`}>
+          {delayed ? "Delayed" : rel || "TBD"}
+        </div>
+        <div className="truncate text-[11px] tabular-nums text-faint">
+          {delayed ? `was ${abs}` : `${dayShort ? `${dayShort} · ` : ""}${abs}`}
+        </div>
       </div>
 
       {/* teams */}

@@ -6,7 +6,7 @@ import type { MatchState, ProFormEntry, ProHistory, ProPredTeamStats, ProPredict
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
-import { validHex } from "./format";
+import { teamBarColors, validHex } from "./format";
 
 // Recent form + head-to-head, loaded lazily (after the live scoreboard) from
 // /api/pro-matches/{id}/history so it never blocks the live data.
@@ -155,32 +155,6 @@ function fmtFactor(key: string, v: number): string {
     default:
       return v.toFixed(2);
   }
-}
-
-// Bar colors need to IDENTIFY the two teams: brand colors when they work on a
-// dark card, resolved to distinct fallbacks when a team has no color, the
-// color is too dark to see, or both teams landed on near-identical hues
-// (real case: a missing colorPrimary fell back to the same amber as the
-// opponent's brand, rendering the split bar as one solid color).
-function teamBarColors(aIn?: string, bIn?: string): [string, string] {
-  const usable = (h?: string): string | null => {
-    const v = validHex(h);
-    if (!v) return null;
-    const n = v.replace("#", "");
-    const r = parseInt(n.slice(0, 2), 16);
-    const g = parseInt(n.slice(2, 4), 16);
-    const bl = parseInt(n.slice(4, 6), 16);
-    // relative-luminance floor — near-black brand colors vanish on the card
-    return 0.2126 * r + 0.7152 * g + 0.0722 * bl < 46 ? null : v;
-  };
-  const dist = (h1: string, h2: string) => {
-    const p = (h: string, i: number) => parseInt(h.replace("#", "").slice(i, i + 2), 16);
-    return Math.abs(p(h1, 0) - p(h2, 0)) + Math.abs(p(h1, 2) - p(h2, 2)) + Math.abs(p(h1, 4) - p(h2, 4));
-  };
-  const a = usable(aIn) ?? "#5b9dff";
-  let b = usable(bIn) ?? "#e7b53c";
-  if (dist(a, b) < 140) b = dist(a, "#e7b53c") < 140 ? "#38d6ff" : "#e7b53c";
-  return [a, b];
 }
 
 function StreakPill({ st }: { st?: ProPredTeamStats }) {
