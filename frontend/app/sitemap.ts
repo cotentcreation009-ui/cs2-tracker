@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { getLeaderboard } from "@/lib/api";
+import { API_BASE, getLeaderboard, internalHeaders } from "@/lib/api";
 import { GUIDES } from "@/lib/guides";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
@@ -8,12 +8,37 @@ const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 // (top tracked players) plus the static routes.
 export const revalidate = 3600;
 
+// Finished pro matches are durable result pages (indexable since the detail
+// page flips them out of noindex) — every completed series becomes inventory.
+async function finishedProMatches(): Promise<MetadataRoute.Sitemap> {
+  try {
+    const res = await fetch(`${API_BASE}/api/pro-matches`, {
+      headers: internalHeaders(),
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return [];
+    const j = (await res.json()) as {
+      matches?: { seriesId: string; status: string; teams?: unknown[]; fetchedAt?: string }[];
+    };
+    return (j.matches ?? [])
+      .filter((m) => m.status === "finished" && (m.teams?.length ?? 0) === 2 && m.seriesId)
+      .map((m) => ({
+        url: `${siteUrl}/pro-matches/${m.seriesId}`,
+        changeFrequency: "monthly" as const,
+        priority: 0.6,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const players = (await getLeaderboard(100).catch(() => [])).map((p) => ({
     url: `${siteUrl}/profiles/${p.steamId64}`,
     changeFrequency: "daily" as const,
     priority: 0.8,
   }));
+  const proMatches = await finishedProMatches();
 
   return [
     { url: `${siteUrl}/`, changeFrequency: "daily" as const, priority: 1 },
@@ -29,9 +54,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly" as const,
       priority: 0.7,
     })),
+    { url: `${siteUrl}/pro-matches`, changeFrequency: "hourly" as const, priority: 0.8 },
     { url: `${siteUrl}/compare`, changeFrequency: "weekly" as const, priority: 0.5 },
     { url: `${siteUrl}/privacy`, changeFrequency: "yearly" as const, priority: 0.2 },
     { url: `${siteUrl}/terms`, changeFrequency: "yearly" as const, priority: 0.2 },
     ...players,
+    ...proMatches,
   ];
 }
