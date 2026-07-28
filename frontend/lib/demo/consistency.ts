@@ -75,6 +75,7 @@ export function aimConsistency(rounds: ReplayRound[], playerIdx: number): AimCon
   const preaim: SeriesPoint[] = [];
   const accuracy: SeriesPoint[] = [];
   for (const r of rounds) {
+    if (r.bots?.includes(playerIdx)) continue; // bot-controlled — not their aim
     const st = (r.stats ?? []).find((s) => s.i === playerIdx);
     if (!st) continue;
     if ((st.aimN ?? 0) > 0) {

@@ -43,6 +43,12 @@ export interface ReplayKill {
   ns?: boolean; // noscope — scoped weapon fired unscoped
   rct?: number; // reaction ms for THIS kill (victim became visible → kill); absent = not measurable
   us?: boolean; // firearm kill on a victim who NEVER became visible to the killer this round (wall-tracking tell; needs a recent re-parse)
+  // Killer movement/stance at the kill (wave-2 parses only). vel is horizontal
+  // speed in game units/s (250 ≈ full run); 0/absent is ambiguous between
+  // stationary and old parse — probe cr/sc/vel across the demo before trusting.
+  vel?: number;
+  cr?: boolean; // killer was ducking
+  sc?: boolean; // killer was scoped
 }
 
 export interface ReplayNade {
@@ -82,6 +88,7 @@ export interface ReplayPlayerStat {
   shots?: number; // firearm bullets fired
   hits?: number; // firearm bullets that dealt damage
   hsHits?: number; // of hits, headshots
+  legHits?: number; // of hits, leg shots — panic-spray vs head-level signal (wave-2 parses)
   tf?: number; // teammates flashed (self excluded)
   tfDur?: number; // total teammate blind seconds dealt (rounded to 0.1s)
   tDmg?: number; // team damage dealt (self-damage excluded)
@@ -105,7 +112,7 @@ export interface ReplayChat {
 
 export interface ReplayBomb {
   t: number;
-  k: "plant_start" | "plant" | "defuse_start" | "defuse" | "explode" | string;
+  k: "plant_start" | "plant" | "plant_abort" | "defuse_start" | "defuse" | "defuse_abort" | "drop" | "pickup" | "explode" | string;
   x: number;
   y: number;
   z?: number; // height (game units)
@@ -128,6 +135,9 @@ export interface ReplayRound {
   bomb: ReplayBomb[];
   chat?: ReplayChat[]; // in-game chat sent during the round (older parses lack this)
   stats?: ReplayPlayerStat[]; // per-player aggregates (older parses lack this)
+  // player indices bot-controlled at some point this round (casual/wingman
+  // takeovers) — aim data from these rounds describes the bot, not the human
+  bots?: number[];
 }
 
 export interface ReplayMeta {

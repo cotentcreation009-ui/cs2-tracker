@@ -307,8 +307,9 @@ function EventFeed({
   const plant = (round.bomb ?? []).find((b) => b.k === "plant" && b.t <= time);
   const ended = (round.bomb ?? []).find((b) => (b.k === "defuse" || b.k === "explode") && b.t <= time);
   // A defuse is only "live" while the defuser is alive and within the defuse
-  // duration — demos carry no abort event, so a fake tap or a killed defuser
-  // would otherwise read "Being defused… has time" until the bomb explodes.
+  // duration. Wave-2 parses carry a real defuse_abort event (the definitive
+  // signal — also how a FAKE defuse is recognised); older parses fall back to
+  // the duration + defuser-death heuristics.
   const ds = plant
     ? (round.bomb ?? []).filter((b) => b.k === "defuse_start" && b.t >= plant.t && b.t <= time).pop()
     : undefined;
@@ -317,8 +318,21 @@ function EventFeed({
     ds.p != null &&
     ds.p > 0 &&
     (round.kills ?? []).some((k) => k.v === (ds.p ?? 0) - 1 && k.t > ds.t && k.t <= time);
+  const dsAborted =
+    ds != null && (round.bomb ?? []).some((b) => b.k === "defuse_abort" && b.t >= ds.t && b.t <= time);
   const defusing =
-    ds != null && !ended && !dsDead && time - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5;
+    ds != null && !ended && !dsDead && !dsAborted && time - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5;
+  // transient "faked it" notes — a live abort reads for ~4s, then fades
+  const fakeDefuse = plant
+    ? (round.bomb ?? [])
+        .filter((b) => b.k === "defuse_abort" && b.t <= time && time - b.t <= 4)
+        .pop()
+    : undefined;
+  const fakePlant = !plant
+    ? (round.bomb ?? [])
+        .filter((b) => b.k === "plant_abort" && b.t <= time && time - b.t <= 4)
+        .pop()
+    : undefined;
 
   const dead = new Set<number>();
   for (const k of round.kills ?? []) if (k.v >= 0 && k.t <= time) dead.add(k.v);
@@ -396,11 +410,18 @@ function EventFeed({
               : "not enough time!"
             : null;
         const planter = plant.p != null && plant.p > 0 ? name(plant.p - 1) : null;
+        const faker = fakeDefuse?.p != null && fakeDefuse.p > 0 ? name(fakeDefuse.p - 1) : null;
         return (
           <div className="mb-2 flex items-center gap-2 rounded-md bg-bad/10 px-2 py-1 text-xs text-bad">
             <span className="font-bold">C4{plant.site ? ` · ${plant.site}` : ""}</span>
             <span className="truncate">
-              {defusing ? `Being defused… ${race ?? ""}` : planter ? `Planted by ${planter}` : "Bomb planted"}
+              {defusing
+                ? `Being defused… ${race ?? ""}`
+                : fakeDefuse
+                  ? `✋ ${faker ?? "Defuser"} faked the defuse`
+                  : planter
+                    ? `Planted by ${planter}`
+                    : "Bomb planted"}
             </span>
             <span className={`ml-auto shrink-0 font-bold tabular-nums ${rem <= 10 ? "animate-pulse" : ""}`}>
               0:{String(Math.ceil(rem)).padStart(2, "0")}
@@ -408,6 +429,15 @@ function EventFeed({
           </div>
         );
       })()}
+
+      {fakePlant && (
+        <div className="mb-2 flex items-center gap-2 rounded-md bg-mid/10 px-2 py-1 text-xs text-mid">
+          <span className="font-bold">C4</span>
+          <span className="truncate">
+            ✋ {fakePlant.p != null && fakePlant.p > 0 ? name(fakePlant.p - 1) : "Planter"} faked the plant
+          </span>
+        </div>
+      )}
 
       <div className="mb-2">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-faint">Active utility</div>
@@ -1216,14 +1246,16 @@ export default function ReplayPage() {
             .filter((x) => x.k === "defuse_start" && x.t >= plant.t && x.t <= t)
             .pop()
         : undefined;
-      // stale-defuse guard: the demo has no abort event, so stop asserting a
-      // live defuse once the defuser has died
+      // stale-defuse guards: wave-2 parses carry the real defuse_abort event;
+      // older parses fall back to the defuser-death + duration heuristics
       const dsDead =
         ds != null &&
         ds.p != null &&
         ds.p > 0 &&
         (round.kills ?? []).some((k) => k.v === (ds.p ?? 0) - 1 && k.t > ds.t && k.t <= t);
-      if (plant && !ended && ds && !dsDead && t - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5) {
+      const dsAborted =
+        ds != null && (round.bomb ?? []).some((x) => x.k === "defuse_abort" && x.t >= ds.t && x.t <= t);
+      if (plant && !ended && ds && !dsDead && !dsAborted && t - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5) {
         const hasTime = C4_TIME - (ds.t - plant.t) >= (ds.kit ? DEFUSE_KIT : DEFUSE_BARE);
         b = hasTime ? `Defusing… ${ds.kit ? "kit" : "no kit"} — has time` : "Defusing… not enough time!";
       } else if (plant && !ended) {
