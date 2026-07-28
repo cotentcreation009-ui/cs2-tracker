@@ -126,6 +126,24 @@ type ReplayPlayerStat struct {
 	// Per-weapon accuracy (same firearm gate as Shots/Hits): weapon display name
 	// -> shots fired / bullets that dealt enemy damage.
 	Wacc map[string]*ReplayWeaponAcc `json:"wacc,omitempty"`
+	// Firing-style buckets (wave-2b parses): how this player commits bullets.
+	Fire *ReplayFireStyle `json:"fire,omitempty"`
+}
+
+// ReplayFireStyle groups a round's firearm shots into bursts (consecutive
+// shots < 0.25s apart on the same weapon) and buckets them by burst length:
+// tap = 1 shot, burst = 2-4, spray = 5+. H counts bullets that dealt enemy
+// damage (same definition as Hits). FirstS/FirstH track only each burst's
+// OPENING shot — first-bullet accuracy, the crosshair-placement stat.
+type ReplayFireStyle struct {
+	TapS   int `json:"tapS,omitempty"`
+	TapH   int `json:"tapH,omitempty"`
+	BurstS int `json:"burstS,omitempty"`
+	BurstH int `json:"burstH,omitempty"`
+	SprayS int `json:"sprayS,omitempty"`
+	SprayH int `json:"sprayH,omitempty"`
+	FirstS int `json:"firstS,omitempty"`
+	FirstH int `json:"firstH,omitempty"`
 }
 
 // ReplayWeaponAcc is one weapon's shots/hits tally inside ReplayPlayerStat.Wacc.
@@ -358,9 +376,28 @@ type replayCollector struct {
 	// the most recent delta — read by onKill for the killer's speed at the kill.
 	velPrev map[uint64]velSample
 	velNow  map[uint64]float64
+
+	// firing-style tracking (per round): each player's CURRENT burst — shots
+	// accumulate until a gap or weapon switch closes it, then it's bucketed
+	// into ReplayFireStyle. Flushed at round end BEFORE stats are emitted.
+	// pendingHit buffers a PlayerHurt that arrived BEFORE its same-tick
+	// WeaponFire (game-event order is not guaranteed) so the join still lands.
+	bursts     map[int]*fireBurst
+	pendingHit map[int]float64
 }
 
 type velSample struct{ x, y, t float64 }
+
+type fireShot struct {
+	t   float64
+	hit bool
+}
+
+type fireBurst struct {
+	weapon string
+	shots  []fireShot
+	lastT  float64
+}
 
 type throwOrigin struct {
 	x, y, z int32
@@ -469,6 +506,8 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.pickedSeen = map[string]bool{}
 	rc.velPrev = map[uint64]velSample{} // reset so a round-start teleport can't read as speed
 	rc.velNow = map[uint64]float64{}
+	rc.bursts = map[int]*fireBurst{}
+	rc.pendingHit = map[int]float64{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -492,6 +531,12 @@ func (rc *replayCollector) onRoundEnd(e events.RoundEnd) {
 	}
 	rc.cur.Winner = teamStr(e.Winner)
 	rc.cur.Reason = reasonString(e.Reason)
+	// Close every in-flight burst BEFORE stats are flushed, or the round's
+	// final spray would be lost.
+	for i, b := range rc.bursts {
+		rc.flushBurst(i, b)
+	}
+	rc.bursts = map[int]*fireBurst{}
 	// Flush per-player aggregates (sorted by index for stable output).
 	if len(rc.stat) > 0 {
 		idxs := make([]int, 0, len(rc.stat))
@@ -1129,18 +1174,99 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		if e.HitGroup == events.HitGroupLeftLeg || e.HitGroup == events.HitGroupRightLeg {
 			s.LegHits++
 		}
+		// Join the hit back to the bullet that caused it — the SAME-TICK
+		// WeaponFire (hitscan). Event order within the tick is not guaranteed:
+		// when the shot is already recorded (|Δt| ≤ one tick) mark it; when the
+		// hurt arrives first, buffer it for onWeaponFire to consume. A spray's
+		// ~0.1s cycle sits outside the tolerance, so a continuation bullet can
+		// never mark its predecessor. Idempotent for multi-victim penetration.
+		ai := rc.playerIndex(e.Attacker)
+		now := rc.rt()
+		if b := rc.bursts[ai]; b != nil && len(b.shots) > 0 && now-b.lastT <= 0.02 {
+			b.shots[len(b.shots)-1].hit = true
+		} else if ai >= 0 {
+			rc.pendingHit[ai] = now
+		}
 	}
 }
 
-// onWeaponFire counts firearm shots for accuracy (hits/shots). Grenades, knife
-// and zeus are excluded so accuracy reflects gunplay only.
+// burstGap is the inter-shot silence that ends a burst. Auto fire cycles at
+// ~90-150 ms, so consecutive spray bullets stay inside the gap while a
+// deliberate re-tap (~300 ms+) starts a fresh burst.
+const burstGap = 0.25
+
+// onWeaponFire counts firearm shots for accuracy (hits/shots) and threads each
+// shot into the shooter's current burst for the firing-style buckets. Grenades,
+// knife and zeus are excluded so accuracy reflects gunplay only.
 func (rc *replayCollector) onWeaponFire(e events.WeaponFire) {
 	if rc.cur == nil || e.Shooter == nil || !isFirearm(e.Weapon) {
 		return
 	}
-	if s := rc.stats(rc.playerIndex(e.Shooter)); s != nil {
+	i := rc.playerIndex(e.Shooter)
+	if s := rc.stats(i); s != nil {
 		s.Shots++
 		s.wacc(e.Weapon.String()).S++
+	}
+	if i < 0 {
+		return
+	}
+	now := rc.rt()
+	w := e.Weapon.String()
+	b := rc.bursts[i]
+	if b != nil && (now-b.lastT > burstGap || b.weapon != w) {
+		rc.flushBurst(i, b)
+		b = nil
+	}
+	if b == nil {
+		b = &fireBurst{weapon: w}
+		rc.bursts[i] = b
+	}
+	sh := fireShot{t: now}
+	// consume a same-tick hurt that outran this WeaponFire event
+	if pt, ok := rc.pendingHit[i]; ok {
+		if now-pt <= 0.02 {
+			sh.hit = true
+		}
+		delete(rc.pendingHit, i) // stale entries die here either way
+	}
+	b.shots = append(b.shots, sh)
+	b.lastT = now
+}
+
+// flushBurst buckets a finished burst into the shooter's ReplayFireStyle.
+func (rc *replayCollector) flushBurst(i int, b *fireBurst) {
+	if b == nil || len(b.shots) == 0 {
+		return
+	}
+	s := rc.stats(i)
+	if s == nil {
+		return
+	}
+	if s.Fire == nil {
+		s.Fire = &ReplayFireStyle{}
+	}
+	f := s.Fire
+	n := len(b.shots)
+	hits := 0
+	for _, sh := range b.shots {
+		if sh.hit {
+			hits++
+		}
+	}
+	switch {
+	case n == 1:
+		f.TapS += n
+		f.TapH += hits
+	case n <= 4:
+		f.BurstS += n
+		f.BurstH += hits
+	default:
+		f.SprayS += n
+		f.SprayH += hits
+	}
+	f.FirstS++
+	if b.shots[0].hit {
+		f.FirstH++
 	}
 }
 
