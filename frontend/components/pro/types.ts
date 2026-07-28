@@ -114,13 +114,24 @@ export interface ProPrediction {
   model: string;
 }
 
+// One map's W-L record for a team over the tracked window.
+export interface ProMapRecord {
+  map: string; // normalized: "mirage", "inferno", …
+  w: number;
+  l: number;
+}
+
 export interface ProHistory {
   enabled?: boolean;
   teams?: ProTeam[];
   form?: Record<string, ProFormEntry[]>; // by gridId
   h2h?: ProH2HEntry[];
   rosters?: Record<string, ProRosterPlayer[]>; // by gridId
+  maps?: Record<string, ProMapRecord[]>; // by gridId — the map-pool receipts
   prediction?: ProPrediction;
+  // the model's own resolved track record (append-once pre-match calls,
+  // reconciled after series finish) — the system grading itself in public
+  record?: { model: string; n: number; correct: number } | null;
 }
 
 // The pro-team page (/pro-matches/team/[id]).

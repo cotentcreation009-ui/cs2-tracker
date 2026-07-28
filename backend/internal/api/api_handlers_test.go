@@ -40,6 +40,17 @@ func (f *fakeStore) CountPlayerMatches(_ context.Context, id uint64) (int, error
 	return 0, nil
 }
 
+func (f *fakeStore) InsertProPrediction(context.Context, string, string, float64, string, string, string, string) error {
+	return nil
+}
+func (f *fakeStore) ListUnresolvedProPredictions(context.Context, int) ([]db.ProPredictionRow, error) {
+	return nil, nil
+}
+func (f *fakeStore) ResolveProPrediction(context.Context, string, string, bool) error { return nil }
+func (f *fakeStore) GetProPredictionRecord(context.Context, string) (db.ProPredictionRecord, error) {
+	return db.ProPredictionRecord{}, nil
+}
+
 func (f *fakeStore) Ping(context.Context) error {
 	if f.ping != nil {
 		return f.ping()
