@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import { computeInsights, clusterUtilThrows, weaponLabel, type PlayerInsight, type UtilThrow } from "@/lib/demo/insights";
 import { computeTendencies, playstyleSummary, type PlayerTendencies } from "@/lib/demo/tendencies";
+import { execPackages, tradePairs, type TeamExecs, type TeamTrades } from "@/lib/demo/teamscout";
 import { classifyBuy } from "@/lib/demo/economy";
 import { buildProjection } from "@/lib/demo/projection";
 import { getActiveZones, classifyPosition } from "@/lib/maps/zones";
@@ -30,6 +31,60 @@ const STILL_SPEED = 70;
 
 const sideHex = (s: "CT" | "T" | "") => (s === "T" ? T : CT);
 const sideSoft = (s: "CT" | "T" | "") => (s === "T" ? T_SOFT : CT_SOFT);
+
+// Team-level scouting band for the picker view: the duo structure (who trades
+// whom) and the T-side utility packages the team actually rehearses.
+function TeamScoutBand({
+  meta,
+  trades,
+  execs,
+}: {
+  meta: ReplayMeta;
+  trades: TeamTrades;
+  execs: TeamExecs;
+}) {
+  const name = (i: number) => meta.players[i]?.name ?? `P${i + 1}`;
+  const tradePct = trades.deaths ? Math.round((trades.traded / trades.deaths) * 100) : 0;
+  const pairs = trades.pairs.filter((p) => p.count >= 2).slice(0, 2);
+  const KIND_ORDER = ["smoke", "flash", "molotov", "he", "decoy"];
+  return (
+    <div className="mb-2.5 space-y-1.5 rounded-lg border border-line/60 bg-panel/30 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+        <span className="stat-label">Team reads</span>
+        <span
+          className="tabular-nums text-muted"
+          title={`${trades.traded} of ${trades.deaths} enemy-inflicted deaths were avenged within 5s — how well they play in pairs`}
+        >
+          trades <span className={`font-bold ${tradePct >= 40 ? "text-good" : tradePct <= 20 ? "text-bad" : "text-ink"}`}>{tradePct}%</span> of deaths
+        </span>
+        {pairs.map((p) => (
+          <span key={`${p.avenged}:${p.avenger}`} className="text-faint" title={`${name(p.avenger)} killed ${name(p.avenged)}'s killer within 5s, ${p.count}×`}>
+            <span className="text-ink">{name(p.avenger)}</span> avenges <span className="text-ink">{name(p.avenged)}</span> ×{p.count}
+          </span>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T_SOFT }}>
+          T packages
+        </span>
+        {execs.packages.length === 0 ? (
+          <span className="text-faint">no rehearsed 3+ nade executes — utility arrives spread out</span>
+        ) : (
+          execs.packages.map((pk) => (
+            <span
+              key={pk.site}
+              className="pill bg-panel tabular-nums text-muted"
+              title={`${pk.count} execute${pk.count === 1 ? "" : "s"} onto ${pk.site} in ${execs.tRounds} T rounds (R${pk.rounds.join(", R")}) · util mix: ${KIND_ORDER.filter((k) => pk.kinds[k]).map((k) => `${pk.kinds[k]} ${k}`).join(", ")}`}
+            >
+              <span className="font-bold text-ink">{pk.site}</span> exec ×{pk.count}
+              <span className={pk.wins * 2 >= pk.count ? " text-good" : " text-bad"}> · won {pk.wins}</span>
+            </span>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 // One-word role heuristic (weapon + opening duels + positioning).
 function roleOf(p: PlayerInsight, t?: PlayerTendencies): string {
@@ -706,6 +761,9 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
 
   const player = focus != null ? insights.players.find((p) => p.i === focus) ?? null : null;
   const tend = player ? tendencies.get(player.steamId) : undefined;
+  // team-level reads for the picker view (cheap single passes over kills/nades)
+  const teamTrades = useMemo(() => tradePairs(meta, rounds), [meta, rounds]);
+  const teamExecs = useMemo(() => execPackages(meta, rounds, zonePolys), [meta, rounds, zonePolys]);
   const scout = useMemo(
     () => (focus != null ? computeScout(meta, rounds, focus) : null),
     [meta, rounds, focus],
@@ -829,6 +887,11 @@ export default function TendencyScout({ meta, rounds, view }: { meta: ReplayMeta
                   {team} start
                 </span>
               </div>
+              <TeamScoutBand
+                meta={meta}
+                trades={team === "CT" ? teamTrades.a : teamTrades.b}
+                execs={team === "CT" ? teamExecs.a : teamExecs.b}
+              />
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-2">{byTeam(team).map(card)}</div>
             </div>
           ))}
