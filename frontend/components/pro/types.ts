@@ -163,6 +163,21 @@ export interface ProTeamPage {
   record?: { wins: number; losses: number; streak: number; streakWon: boolean };
   players?: ProTeamPlayer[];
   results?: ProTeamResult[];
+  nextMatch?: ProNextMatch | null;
+}
+
+// The team's live or next scheduled series, trimmed from the board state.
+export interface ProNextMatch {
+  seriesId: string;
+  status: "live" | "upcoming";
+  startScheduled?: string;
+  tournamentName?: string;
+  tournamentLogoUrl?: string;
+  formatShort?: string;
+  bestOf?: number;
+  teams?: ProTeam[];
+  seriesScore?: Record<string, number>;
+  streamUrl?: string;
 }
 
 // Per-window official aggregates for one player (the click-a-player drawer).

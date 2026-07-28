@@ -70,27 +70,33 @@ func (s *Server) handleProMatch(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "seriesId")
 	ms, ok := s.proMatches.Store().Get(id)
 	if !ok {
-		// Historical series that aged out of the live board (e.g. a result row
-		// on a team page): resolve on demand from GRID and cache hard once
-		// finished so repeat views cost nothing.
-		ctx := r.Context()
-		cl := s.proMatches.Client()
-		det, err := cachedTTL(s, ctx, cache.ProSeriesDetailKey(id), 15*time.Minute,
-			func() (msWrap, error) {
-				d, err := cl.FetchSeriesDetail(ctx, id)
-				return msWrap{M: d}, err
-			})
-		if err != nil || det.M == nil {
+		ms, ok = s.resolveOffBoardSeries(r.Context(), id)
+		if !ok {
 			writeError(w, http.StatusNotFound, "series not found")
 			return
 		}
-		if det.M.Status == "finished" && s.cache != nil {
-			_ = s.cache.SetJSONTTL(ctx, cache.ProSeriesDetailKey(id), det, 24*time.Hour)
-		}
-		ms = *det.M
 	}
 	setEdgeCache(w, 5*time.Second)
 	writeJSON(w, http.StatusOK, ms)
+}
+
+// resolveOffBoardSeries recovers a series that aged out of the live board (a
+// result row on a team page, an old H2H link) via a cached Central detail
+// lookup; finished series are re-cached for 24h so repeat views cost nothing.
+func (s *Server) resolveOffBoardSeries(ctx context.Context, id string) (grid.MatchState, bool) {
+	cl := s.proMatches.Client()
+	det, err := cachedTTL(s, ctx, cache.ProSeriesDetailKey(id), 15*time.Minute,
+		func() (msWrap, error) {
+			d, err := cl.FetchSeriesDetail(ctx, id)
+			return msWrap{M: d}, err
+		})
+	if err != nil || det.M == nil {
+		return grid.MatchState{}, false
+	}
+	if det.M.Status == "finished" && s.cache != nil {
+		_ = s.cache.SetJSONTTL(ctx, cache.ProSeriesDetailKey(id), det, 24*time.Hour)
+	}
+	return *det.M, true
 }
 
 // handleProMatchHistory returns recent-form + head-to-head for a series' two
@@ -103,6 +109,12 @@ func (s *Server) handleProMatchHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ms, ok := s.proMatches.Store().Get(chi.URLParam(r, "seriesId"))
+	if !ok {
+		// Off-board series (team-page results, old H2H links) used to land here
+		// and lose the entire panel — lineups, form, H2H and the prediction.
+		// Recover the teams the same way handleProMatch does.
+		ms, ok = s.resolveOffBoardSeries(r.Context(), chi.URLParam(r, "seriesId"))
+	}
 	if !ok || len(ms.Teams) < 2 {
 		writeJSON(w, http.StatusOK, map[string]any{"form": map[string]any{}, "h2h": []any{}})
 		return

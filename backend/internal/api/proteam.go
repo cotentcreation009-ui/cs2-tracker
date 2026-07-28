@@ -120,10 +120,60 @@ func (s *Server) handleProTeam(w http.ResponseWriter, r *http.Request) {
 
 	setEdgeCache(w, 120*time.Second)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true,
-		"team":    team,
-		"record":  map[string]any{"wins": wins, "losses": losses, "streak": streak, "streakWon": streakWon},
-		"players": players,
-		"results": results,
+		"enabled":   true,
+		"team":      team,
+		"record":    map[string]any{"wins": wins, "losses": losses, "streak": streak, "streakWon": streakWon},
+		"players":   players,
+		"results":   results,
+		"nextMatch": s.teamNextMatch(tid),
 	})
+}
+
+// teamNextMatch finds the team's live series — or failing that its next
+// scheduled one — on the already-polled board (zero extra GRID calls), trimmed
+// to what the team page's fixture card needs. nil when nothing is scheduled.
+func (s *Server) teamNextMatch(tid string) map[string]any {
+	board, _ := s.proMatches.Store().Board()
+	var pick *grid.MatchState
+	for i := range board {
+		m := &board[i]
+		mine := false
+		for _, t := range m.Teams {
+			if t.GridID == tid {
+				mine = true
+				break
+			}
+		}
+		if !mine {
+			continue
+		}
+		switch m.Status {
+		case "live":
+			pick = m
+		case "upcoming":
+			// earliest scheduled start wins; unscheduled sorts last
+			if pick == nil || (pick.Status == "upcoming" &&
+				m.StartScheduled != "" && (pick.StartScheduled == "" || m.StartScheduled < pick.StartScheduled)) {
+				pick = m
+			}
+		}
+		if pick != nil && pick.Status == "live" {
+			break
+		}
+	}
+	if pick == nil {
+		return nil
+	}
+	return map[string]any{
+		"seriesId":          pick.SeriesID,
+		"status":            pick.Status,
+		"startScheduled":    pick.StartScheduled,
+		"tournamentName":    pick.TournamentName,
+		"tournamentLogoUrl": pick.TournamentLogoUrl,
+		"formatShort":       pick.FormatShort,
+		"bestOf":            pick.BestOf,
+		"teams":             pick.Teams,
+		"seriesScore":       pick.SeriesScore,
+		"streamUrl":         pick.StreamUrl,
+	}
 }

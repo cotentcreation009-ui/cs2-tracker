@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -551,6 +552,7 @@ func normalizeSchedule(n centralNode) MatchState {
 		ms.TournamentName = n.Tournament.Name
 		ms.TournamentLogoUrl = realLogo(n.Tournament.LogoUrl)
 	}
+	ms.StreamUrl = watchURL(ms.TournamentName)
 	for _, t := range n.Teams {
 		if t.BaseInfo == nil {
 			continue
@@ -567,6 +569,37 @@ func normalizeSchedule(n centralNode) MatchState {
 		})
 	}
 	return ms
+}
+
+// twitchChannels maps tournament organizers to their main Counter-Strike
+// Twitch channel. Curated: only channels we are confident about — anything
+// else falls back to a Twitch search, which reliably surfaces the live
+// broadcast without ever linking a dead channel.
+var twitchChannels = []struct{ needle, channel string }{
+	{"intel extreme masters", "esl_csgo"},
+	{"iem", "esl_csgo"},
+	{"esl", "esl_csgo"},
+	{"esea", "esea"},
+	{"blast", "blastpremier"},
+	{"pgl", "pgl"},
+	{"elisa", "elisaesports"},
+}
+
+// watchURL resolves a "where do I watch this" link from the tournament name.
+// GRID's Open Access tier carries no broadcast field, so this is best-effort
+// routing (organizer channel, else Twitch search) rather than an official
+// stream claim — the UI labels the search fallback accordingly.
+func watchURL(tournament string) string {
+	t := strings.ToLower(strings.TrimSpace(tournament))
+	if t == "" {
+		return ""
+	}
+	for _, e := range twitchChannels {
+		if strings.Contains(t, e.needle) {
+			return "https://www.twitch.tv/" + e.channel
+		}
+	}
+	return "https://www.twitch.tv/search?term=" + url.QueryEscape(tournament)
 }
 
 // realLogo drops GRID's generic placeholder logo URLs (…/generic) so the UI
@@ -612,6 +645,10 @@ func mergeSchedule(dst *MatchState, sched MatchState) {
 	dst.TournamentID = sched.TournamentID
 	dst.TournamentName = sched.TournamentName
 	dst.TournamentLogoUrl = sched.TournamentLogoUrl
+	if dst.StreamUrl == "" {
+		// backfill only — never clobber a richer link set elsewhere (mock data)
+		dst.StreamUrl = sched.StreamUrl
+	}
 	if len(sched.Teams) > 0 {
 		dst.Teams = sched.Teams
 	}
