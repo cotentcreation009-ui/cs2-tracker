@@ -20,6 +20,9 @@ export interface PlayerTendencies {
   zoneSamples: number; // frames that classified into a zone (0 on uncalibrated maps)
   ct: { a: number; b: number; mid: number }; // occupancy share by side (0..1, A/B/Mid only)
   t: { a: number; b: number; mid: number };
+  // fake defuses: started a defuse, aborted it, and survived the next second —
+  // a deliberate bait, not a death. Wave-2 parses only (needs defuse_abort).
+  fakeDefuses: number;
 }
 
 type Zoned = "a" | "b" | "mid" | null;
@@ -48,6 +51,7 @@ export function computeTendencies(
   const nMate = new Array(N).fill(0);
   const rotations = new Array(N).fill(0);
   const roundsSeen = new Array(N).fill(0);
+  const fakeDef = new Array(N).fill(0);
   const ct = Array.from({ length: N }, () => ({ a: 0, b: 0, mid: 0, n: 0 }));
   const tt = Array.from({ length: N }, () => ({ a: 0, b: 0, mid: 0, n: 0 }));
 
@@ -118,6 +122,16 @@ export function computeTendencies(
       }
     }
     for (const i of seenThisRound) roundsSeen[i]++;
+
+    // fake defuses (wave-2 parses): a defuse_abort by a player who then
+    // SURVIVED the next second — an abort caused by getting shot is not a bait
+    for (const b of rd.bomb ?? []) {
+      if (b.k !== "defuse_abort" || b.p == null || b.p <= 0) continue;
+      const i = b.p - 1;
+      if (i < 0 || i >= N) continue;
+      const diedRightAfter = (rd.kills ?? []).some((k) => k.v === i && k.t >= b.t && k.t <= b.t + 1);
+      if (!diedRightAfter) fakeDef[i]++;
+    }
   }
 
   // percentile rank of a value within the set of players who have data
@@ -149,6 +163,7 @@ export function computeTendencies(
       zoneSamples: ct[i].n + tt[i].n,
       ct: share(ct[i]),
       t: share(tt[i]),
+      fakeDefuses: fakeDef[i],
     });
   }
   return out;
@@ -199,6 +214,11 @@ export function playstyleSummary(p: PlayerInsight, t?: PlayerTendencies): string
     if (ecoPct <= 0.12) lines.push("Economy: disciplined — rarely ecos, buys when the team buys.");
     else if (ecoPct >= 0.4) lines.push("Economy: saves a lot — ecos / half-buys frequently.");
     if (forcePct >= 0.3) lines.push("Economy: force-buys often — aggressive with money.");
+  }
+
+  // --- bomb craft (wave-2 parses) ---
+  if (t && t.fakeDefuses >= 2) {
+    lines.push(`Bomb craft: fakes the defuse — ${t.fakeDefuses} deliberate defuse baits this match.`);
   }
 
   // --- entry / opening-duel outcome ---

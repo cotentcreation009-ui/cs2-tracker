@@ -66,6 +66,8 @@ export function cheatMoments(
   const out: CheatMoment[] = [];
 
   rounds.forEach((r, roundIdx) => {
+    // bot-controlled round for this player — the aim isn't theirs to judge
+    if (r.bots?.includes(playerIdx)) return;
     const st = r.stats?.find((s) => s.i === playerIdx);
     // round-level tells (shared by every kill the player got this round)
     const roundTags: string[] = [];

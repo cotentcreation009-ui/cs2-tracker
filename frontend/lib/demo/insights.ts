@@ -447,13 +447,18 @@ export function computeInsights(meta: ReplayMeta, rounds: ReplayRound[]): Insigh
       a.utilDmg += s.utilDmg ?? 0;
       a.flashed += s.flashed ?? 0;
       a.flashDur += s.flashDur ?? 0;
-      a.aimN += s.aimN ?? 0;
-      a.rctMs += s.rctMs ?? 0;
-      a.preaim += s.preaim ?? 0;
-      a.snap += s.snap ?? 0;
-      a.shots += s.shots ?? 0;
-      a.hits += s.hits ?? 0;
-      a.hsHits += s.hsHits ?? 0;
+      // aim-quality tells: skip rounds where this player's slot was
+      // bot-controlled — that aim belongs to a mixed human/bot context, and
+      // the CheatMeter must not judge a human on it
+      if (!r.bots?.includes(s.i)) {
+        a.aimN += s.aimN ?? 0;
+        a.rctMs += s.rctMs ?? 0;
+        a.preaim += s.preaim ?? 0;
+        a.snap += s.snap ?? 0;
+        a.shots += s.shots ?? 0;
+        a.hits += s.hits ?? 0;
+        a.hsHits += s.hsHits ?? 0;
+      }
       a.buys[classifyBuy(s.equip ?? 0, r.n).key]++;
     }
 

@@ -69,6 +69,10 @@ type ReplayRound struct {
 	Bomb      []ReplayBomb       `json:"bomb"`
 	Chat      []ReplayChat       `json:"chat,omitempty"` // in-game chat sent during the round
 	Stats     []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
+	// Player indices whose slot was taken over by a bot at some point this
+	// round (casual/wingman disconnects). Aim tells from these rounds describe
+	// the BOT, not the human — cheat analysis must exclude them.
+	Bots []int `json:"bots,omitempty"`
 }
 
 // ReplayChat is one in-game chat message. GOTV demos generally record only
@@ -111,6 +115,9 @@ type ReplayPlayerStat struct {
 	Shots  int `json:"shots,omitempty"`
 	Hits   int `json:"hits,omitempty"`
 	HsHits int `json:"hsHits,omitempty"`
+	// Of Hits, bullets that struck a leg (left or right). Leg-shot share
+	// separates panic sprayers from head-level holders (wave-2 parses only).
+	LegHits int `json:"legHits,omitempty"`
 	// Team-inflicted (same-team victims, self excluded): flashes that blinded a
 	// teammate, total teammate blind seconds, and damage dealt to teammates.
 	TeamFlashed  int     `json:"tf,omitempty"`
@@ -174,6 +181,13 @@ type ReplayKill struct {
 	// It is corroborating context (strong on wallbang/through-smoke kills),
 	// NOT standalone wall-tracking evidence.
 	Unseen bool `json:"us,omitempty"`
+	// Killer movement/stance at the kill (wave-2 parses only; all omitted on
+	// older parses). Vel is horizontal speed in game units/s (250 ≈ full run,
+	// 0 omitted — stationary and old-parse look alike, so probe cr/sc/vel
+	// across the demo before trusting absence).
+	Vel    int32 `json:"vel,omitempty"`
+	Crouch bool  `json:"cr,omitempty"` // killer was ducking
+	Scoped bool  `json:"sc,omitempty"` // killer was scoped (AWP/scout/auto discipline)
 }
 
 type ReplayNade struct {
@@ -195,7 +209,7 @@ type ReplayNade struct {
 
 type ReplayBomb struct {
 	T    float64 `json:"t"` // seconds since round start
-	Kind string  `json:"k"` // plant_start | plant | defuse_start | defuse | explode
+	Kind string  `json:"k"` // plant_start | plant | plant_abort | defuse_start | defuse | defuse_abort | drop | pickup | explode
 	X    int32   `json:"x"`
 	Y    int32   `json:"y"`
 	Z    int32   `json:"z,omitempty"`    // height (game units)
@@ -229,9 +243,14 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onKill)
 	p.RegisterEventHandler(rc.onBombPlantBegin)
 	p.RegisterEventHandler(rc.onBombPlanted)
+	p.RegisterEventHandler(rc.onBombPlantAborted)
 	p.RegisterEventHandler(rc.onBombDefuseStart)
 	p.RegisterEventHandler(rc.onBombDefused)
+	p.RegisterEventHandler(rc.onBombDefuseAborted)
+	p.RegisterEventHandler(rc.onBombDropped)
+	p.RegisterEventHandler(rc.onBombPickup)
 	p.RegisterEventHandler(rc.onBombExplode)
+	p.RegisterEventHandler(rc.onBotTakenOver)
 	p.RegisterEventHandler(rc.onProjectileThrow)
 	p.RegisterEventHandler(rc.onSmoke)
 	p.RegisterEventHandler(rc.onInferno)
@@ -332,7 +351,16 @@ type replayCollector struct {
 	// entity with an id we've never seen. pickedSeen dedupes per player+weapon.
 	droppedW   map[string]bool
 	pickedSeen map[string]bool
+
+	// per-frame movement tracking: CS2 pawns don't network m_vecVelocity, so
+	// speed comes from position deltas between consecutive frames. velPrev is
+	// the last frame's position+time per player; velNow the speed derived from
+	// the most recent delta — read by onKill for the killer's speed at the kill.
+	velPrev map[uint64]velSample
+	velNow  map[uint64]float64
 }
+
+type velSample struct{ x, y, t float64 }
 
 type throwOrigin struct {
 	x, y, z int32
@@ -439,6 +467,8 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.nadeSeen = map[int]float64{}
 	rc.droppedW = map[string]bool{}
 	rc.pickedSeen = map[string]bool{}
+	rc.velPrev = map[uint64]velSample{} // reset so a round-start teleport can't read as speed
+	rc.velNow = map[uint64]float64{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -495,6 +525,7 @@ func (rc *replayCollector) onFrameDone(events.FrameDone) {
 	// position cadence stamped them up to a second late and understated every
 	// reaction by 0–1000 ms (biasing the card tile and the CheatMeter factors).
 	rc.scanSpotted(gs)
+	rc.trackSpeed(gs)
 
 	tick := float64(gs.IngameTick())
 	if tick-rc.lastCap < rc.capEvery {
@@ -621,6 +652,11 @@ func (rc *replayCollector) onKill(e events.Kill) {
 	if e.Killer != nil {
 		kp := e.Killer.Position()
 		k.Kx, k.Ky, k.Kz = i32(kp.X), i32(kp.Y), zi(kp.Z)
+		// movement/stance context: horizontal speed (vertical falls are not
+		// "moving" in the accuracy sense), duck state, scope state
+		k.Vel = rc.horizSpeed(e.Killer)
+		k.Crouch = e.Killer.IsDucking()
+		k.Scoped = e.Killer.IsScoped()
 	}
 	// real assist (enemy of the victim), stored +1 so 0 = none survives omitempty
 	if e.Assister != nil && e.Victim != nil && e.Assister.Team != e.Victim.Team {
@@ -723,6 +759,47 @@ func (rc *replayCollector) onBombDefused(e events.BombDefused) {
 func (rc *replayCollector) onBombExplode(e events.BombExplode) {
 	x, y, z := rc.bombXYZ()
 	rc.addBomb("explode", x, y, z, e.Player, e.Site, false)
+}
+func (rc *replayCollector) onBombPlantAborted(e events.BombPlantAborted) {
+	if e.Player != nil {
+		p := e.Player.Position()
+		rc.addBomb("plant_abort", i32(p.X), i32(p.Y), zi(p.Z), e.Player, events.BomsiteUnknown, false)
+	}
+}
+
+// A defuse_start followed by defuse_abort with the defuser still alive is the
+// "fake defuse" read; aborted-by-death needs no extra event (the kill is there).
+func (rc *replayCollector) onBombDefuseAborted(e events.BombDefuseAborted) {
+	x, y, z := rc.bombXYZ()
+	rc.addBomb("defuse_abort", x, y, z, e.Player, events.BomsiteUnknown, false)
+}
+func (rc *replayCollector) onBombDropped(e events.BombDropped) {
+	x, y, z := rc.bombXYZ()
+	rc.addBomb("drop", x, y, z, e.Player, events.BomsiteUnknown, false)
+}
+func (rc *replayCollector) onBombPickup(e events.BombPickup) {
+	if e.Player != nil {
+		p := e.Player.Position()
+		rc.addBomb("pickup", i32(p.X), i32(p.Y), zi(p.Z), e.Player, events.BomsiteUnknown, false)
+	}
+}
+
+// onBotTakenOver marks the taker for the round: any aim data they produce from
+// here on is the bot's, and cheat analysis must skip this round for them.
+func (rc *replayCollector) onBotTakenOver(e events.BotTakenOver) {
+	if rc.cur == nil || e.Taker == nil {
+		return
+	}
+	i := rc.playerIndex(e.Taker)
+	if i < 0 {
+		return
+	}
+	for _, b := range rc.cur.Bots {
+		if b == i {
+			return
+		}
+	}
+	rc.cur.Bots = append(rc.cur.Bots, i)
 }
 
 // onProjectileThrow records where each grenade was released, so the detonation
@@ -1049,6 +1126,9 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		if e.HitGroup == events.HitGroupHead {
 			s.HsHits++
 		}
+		if e.HitGroup == events.HitGroupLeftLeg || e.HitGroup == events.HitGroupRightLeg {
+			s.LegHits++
+		}
 	}
 }
 
@@ -1185,6 +1265,37 @@ func (rc *replayCollector) onChat(e events.ChatMessage) {
 		Text: txt,
 		All:  e.IsChatAll,
 	})
+}
+
+// trackSpeed derives each alive player's horizontal speed from position deltas
+// between consecutive demo frames (CS2 pawns don't network m_vecVelocity).
+// Runs every frame, ahead of the capture throttle, so onKill reads a
+// tick-fresh value.
+func (rc *replayCollector) trackSpeed(gs dem.GameState) {
+	now := rc.p.CurrentTime().Seconds()
+	for _, pl := range gs.Participants().Playing() {
+		if pl == nil || pl.SteamID64 == 0 || !pl.IsAlive() {
+			continue
+		}
+		pos := pl.Position()
+		if prev, ok := rc.velPrev[pl.SteamID64]; ok {
+			dt := now - prev.t
+			// dt gates: same-tick duplicates (0) and long gaps (freeze seams,
+			// mid-round joins) would both produce garbage speeds
+			if dt > 0 && dt < 0.5 {
+				rc.velNow[pl.SteamID64] = math.Hypot(pos.X-prev.x, pos.Y-prev.y) / dt
+			}
+		}
+		rc.velPrev[pl.SteamID64] = velSample{x: pos.X, y: pos.Y, t: now}
+	}
+}
+
+// horizSpeed is the killer's tracked speed at this instant, 0 when unknown.
+func (rc *replayCollector) horizSpeed(pl *common.Player) int32 {
+	if pl == nil || pl.SteamID64 == 0 || rc.velNow == nil {
+		return 0
+	}
+	return i32(rc.velNow[pl.SteamID64])
 }
 
 func i32(v float64) int32 { return int32(math.Round(v)) }

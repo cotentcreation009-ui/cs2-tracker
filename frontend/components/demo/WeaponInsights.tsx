@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { ReplayMeta, ReplayRound } from "@/lib/demo/types";
+import type { ReplayKill, ReplayMeta, ReplayRound } from "@/lib/demo/types";
 import {
   computeWeaponInsights,
   computeBuyMatrix,
@@ -335,6 +335,7 @@ interface BulletAcc {
   shots: number;
   hits: number;
   hsHits: number;
+  legHits: number;
 }
 
 function accuracyOf(
@@ -344,7 +345,7 @@ function accuracyOf(
   side: "all" | "CT" | "T",
   focus: number | null,
 ): BulletAcc {
-  const acc: BulletAcc = { shots: 0, hits: 0, hsHits: 0 };
+  const acc: BulletAcc = { shots: 0, hits: 0, hsHits: 0, legHits: 0 };
   rounds.forEach((r, idx) => {
     if (roundFilter && !roundFilter(r, idx)) return;
     for (const s of r.stats ?? []) {
@@ -353,6 +354,7 @@ function accuracyOf(
       acc.shots += s.shots ?? 0;
       acc.hits += s.hits ?? 0;
       acc.hsHits += s.hsHits ?? 0;
+      acc.legHits += s.legHits ?? 0;
     }
   });
   return acc;
@@ -645,16 +647,22 @@ const DISTS: { key: DistBand; label: string; test: (m: number) => boolean; title
 ];
 
 // special-kill flag filters (wallbang / through smoke / attacker blind /
-// noscope). Absent on old parses — the chips hide entirely when the scoped
-// kills carry none of these flags, rather than showing dead toggles.
-type SpecialFlag = "wb" | "ts" | "bl" | "ns";
-const SPECIALS: { key: SpecialFlag; label: string; title: string }[] = [
-  { key: "wb", label: "Wallbang", title: "Only wallbang kills — the bullet penetrated an object" },
-  { key: "ts", label: "Smoke", title: "Only kills through smoke" },
-  { key: "bl", label: "Blind", title: "Only kills landed while the attacker was flashed" },
-  { key: "ns", label: "Noscope", title: "Only noscope kills — a scoped weapon fired unscoped" },
+// noscope, plus wave-2 movement context). Absent on old parses — the chips
+// hide entirely when the scoped kills carry none of these flags, rather than
+// showing dead toggles. `motion` entries need the wave-2 vel/cr/sc fields and
+// probe separately, so a pre-wave-2 demo still shows the original four.
+const MOVING_VEL = 170; // u/s — no counter-strafe left this kill (250 ≈ full run)
+type SpecialFlag = "wb" | "ts" | "bl" | "ns" | "mv" | "cr" | "sc";
+const SPECIALS: { key: SpecialFlag; label: string; title: string; motion?: boolean; test: (k: ReplayKill) => boolean }[] = [
+  { key: "wb", label: "Wallbang", title: "Only wallbang kills — the bullet penetrated an object", test: (k) => !!k.wb },
+  { key: "ts", label: "Smoke", title: "Only kills through smoke", test: (k) => !!k.ts },
+  { key: "bl", label: "Blind", title: "Only kills landed while the attacker was flashed", test: (k) => !!k.bl },
+  { key: "ns", label: "Noscope", title: "Only noscope kills — a scoped weapon fired unscoped", test: (k) => !!k.ns },
+  { key: "mv", label: "Moving", title: `Only kills while the killer was running (≥${MOVING_VEL} u/s — no counter-strafe)`, motion: true, test: (k) => (k.vel ?? 0) >= MOVING_VEL },
+  { key: "cr", label: "Crouched", title: "Only kills while the killer was ducking", motion: true, test: (k) => !!k.cr },
+  { key: "sc", label: "Scoped", title: "Only kills while the killer was scoped", motion: true, test: (k) => !!k.sc },
 ];
-const NO_SPECIALS: Record<SpecialFlag, boolean> = { wb: false, ts: false, bl: false, ns: false };
+const NO_SPECIALS: Record<SpecialFlag, boolean> = { wb: false, ts: false, bl: false, ns: false, mv: false, cr: false, sc: false };
 
 const TRADE_WINDOW = 5; // seconds — a kill is "traded" if the killer dies within this
 
@@ -686,11 +694,18 @@ function DuelMap({
   const [specials, setSpecials] = useState<Record<SpecialFlag, boolean>>(NO_SPECIALS);
 
   // whether the scoped kills carry ANY special-kill flags (old parses lack
-  // them) — when none exist we hide the four chips and never apply the filter.
+  // them) — when none exist we hide the chips and never apply the filter.
+  // Motion context (vel/cr/sc) probes the WHOLE demo, not the scoped rounds:
+  // one scoped round of pure standing kills must not hide the chips.
   const hasSpecials = useMemo(() => {
     const scoped = view.scopeRound != null && rounds[view.scopeRound] ? [rounds[view.scopeRound]] : rounds;
     return scoped.some((r) => (r.kills ?? []).some((k) => k.wb || k.ts || k.bl || k.ns));
   }, [rounds, view.scopeRound]);
+  const hasMotion = useMemo(
+    () => rounds.some((r) => (r.kills ?? []).some((k) => (k.vel ?? 0) > 0 || k.cr || k.sc)),
+    [rounds],
+  );
+  const chipOk = (s: (typeof SPECIALS)[number]) => (s.motion ? hasMotion : hasSpecials);
 
   // a weapon picked from the kill/death panels drives the map (its own mode);
   // otherwise the map uses its local mode + class-chip filter.
@@ -723,7 +738,7 @@ function DuelMap({
           if (wm.key !== weaponSel.key) continue;
         } else if (cls !== "all" && wm.cls !== cls) continue;
         if (hsOnly && !k.hs) continue;
-        if (hasSpecials && SPECIALS.some((s) => specials[s.key] && !k[s.key])) continue;
+        if (SPECIALS.some((s) => (s.motion ? hasMotion : hasSpecials) && specials[s.key] && !s.test(k))) continue;
         if (phase === "opening" && k.t !== openT) continue;
         if (phase === "postplant" && (plantT == null || k.t < plantT)) continue;
         if (buy !== "any") {
@@ -765,10 +780,10 @@ function DuelMap({
     }
     const callouts = [...spots.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
     return { pts: out, callouts };
-  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly, specials, hasSpecials]);
+  }, [meta, rounds, proj, zones, view.scopeRound, view.side, view.focusPlayer, activeMode, cls, weaponSel, phase, buy, dist, hsOnly, tradedOnly, specials, hasSpecials, hasMotion]);
 
   const marks = plot.pts;
-  const specialOn = hasSpecials && SPECIALS.some((s) => specials[s.key]);
+  const specialOn = SPECIALS.some((s) => chipOk(s) && specials[s.key]);
   const anyFilter = cls !== "all" || phase !== "any" || buy !== "any" || dist !== "any" || hsOnly || tradedOnly || specialOn;
   const resetFilters = () => {
     setCls("all");
@@ -873,7 +888,7 @@ function DuelMap({
     dist !== "any" ? `${dist} range` : null,
     hsOnly ? "HS" : null,
     tradedOnly ? "traded" : null,
-    ...SPECIALS.filter((s) => hasSpecials && specials[s.key]).map((s) => s.label.toLowerCase()),
+    ...SPECIALS.filter((s) => chipOk(s) && specials[s.key]).map((s) => s.label.toLowerCase()),
   ].filter(Boolean).join(" · ");
 
   return (
@@ -1049,21 +1064,20 @@ function DuelMap({
         >
           Traded
         </button>
-        {hasSpecials &&
-          SPECIALS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              onClick={() => setSpecials((prev) => ({ ...prev, [s.key]: !prev[s.key] }))}
-              aria-pressed={specials[s.key]}
-              title={s.title}
-              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
-                specials[s.key] ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+        {SPECIALS.filter(chipOk).map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => setSpecials((prev) => ({ ...prev, [s.key]: !prev[s.key] }))}
+            aria-pressed={specials[s.key]}
+            title={s.title}
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+              specials[s.key] ? "border-brand/50 bg-brand/15 text-brand" : "border-line text-muted hover:text-ink"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
         {(anyFilter || weaponSel) && (
           <button
             type="button"
@@ -1497,8 +1511,12 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
           tone="offense"
           label="HS hits"
           value={pctOr(acc.hsHits, acc.hits)}
-          hint={acc.hits ? `${acc.hsHits}/${acc.hits} hits to the head` : "no hit data (re-parse)"}
-          title={`Headshot precision — headshot hits ÷ all connecting bullets by ${scopeLabel} (every hit counts, not just the kill shots)`}
+          hint={
+            acc.hits
+              ? `${acc.hsHits}/${acc.hits} to the head${acc.legHits ? ` · ${((acc.legHits / acc.hits) * 100).toFixed(0)}% legs` : ""}`
+              : "no hit data (re-parse)"
+          }
+          title={`Headshot precision — headshot hits ÷ all connecting bullets by ${scopeLabel} (every hit counts, not just the kill shots). Leg share separates head-level holders from panic sprayers.`}
         />
         <StatPill
           tone="offense"
