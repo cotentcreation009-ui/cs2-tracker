@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
+import type { ProNextMatch, ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
-import { validHex } from "./format";
+import { TwitchLink } from "./TwitchLink";
+import { startInfo, validHex } from "./format";
 
 // HLTV-style team page: identity header with a record/form stat strip, the
 // roster with official per-player stats, and the results list (each result
@@ -138,6 +139,8 @@ export function ProTeamClient({ id }: { id: string }) {
         )}
       </div>
 
+      {data.nextMatch ? <NextMatchCard nm={data.nextMatch} tid={id} hex={hex} /> : null}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         {/* roster + stats */}
         <section className="card-2 overflow-hidden p-0 self-start">
@@ -222,6 +225,80 @@ export function ProTeamClient({ id }: { id: string }) {
         <a href="https://liquipedia.net/counterstrike/" target="_blank" rel="noopener noreferrer" className="underline hover:text-muted">Liquipedia</a>{" "}
         (CC&nbsp;BY-SA&nbsp;3.0).
       </p>
+    </div>
+  );
+}
+
+// The team's live or next scheduled series — the single thing a fan checks a
+// team page for. Live: pulsing badge + maps score + watch link; upcoming:
+// countdown + scheduled time. Links to the match detail page.
+function NextMatchCard({ nm, tid, hex }: { nm: ProNextMatch; tid: string; hex: string }) {
+  const live = nm.status === "live";
+  const opp = nm.teams?.find((t) => t.gridId !== tid);
+  const mine = nm.seriesScore?.[tid] ?? 0;
+  const theirs = opp ? (nm.seriesScore?.[opp.gridId] ?? 0) : 0;
+  const when = startInfo(nm.startScheduled);
+  const tag = nm.formatShort || (nm.bestOf ? `Bo${nm.bestOf}` : "");
+  // Stretched-link overlay (not a wrapping <Link>) so the Watch pill can be a
+  // sibling anchor — nested <a> is invalid HTML and trips hydration.
+  return (
+    <div className="group relative flex flex-wrap items-center gap-x-4 gap-y-2 overflow-hidden rounded-2xl border border-line bg-panel2/40 py-3 pl-5 pr-4 transition duration-150 hover:-translate-y-px hover:border-line2 hover:bg-panel2/60">
+      <Link
+        href={`/pro-matches/${nm.seriesId}`}
+        aria-label={`Open the match page vs ${opp?.shortName || opp?.name || "TBD"}`}
+        className="absolute inset-0 z-0 rounded-2xl"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 w-1"
+        style={{ background: live ? "#ff4655" : hex }}
+      />
+
+      <div className="w-24 shrink-0">
+        {live ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#ff4655]">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ff4655] opacity-75 motion-reduce:hidden" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#ff4655]" />
+            </span>
+            Live now
+          </span>
+        ) : (
+          <>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-faint">Next match</div>
+            <div className="truncate text-xs font-semibold text-ink">{when.rel || "scheduled"}</div>
+          </>
+        )}
+      </div>
+
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <span className="text-xs text-faint">vs</span>
+        <TeamLogo name={opp?.shortName || opp?.name} src={opp?.logoUrl} color={opp?.colorPrimary} size={34} />
+        <span className="truncate text-[15px] font-bold text-ink">{opp?.shortName || opp?.name || "TBD"}</span>
+        {live ? (
+          <span className="shrink-0 text-base font-extrabold tabular-nums" title="Maps won so far">
+            <span style={{ color: hex }}>{mine}</span>
+            <span className="mx-1 text-xs font-normal text-faint">–</span>
+            <span className="text-ink">{theirs}</span>
+          </span>
+        ) : null}
+      </div>
+
+      <div className="hidden min-w-0 max-w-[30%] items-center gap-1.5 sm:flex">
+        {nm.tournamentLogoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={nm.tournamentLogoUrl} alt="" loading="lazy" className="h-4 w-4 shrink-0 rounded object-contain opacity-80" />
+        ) : null}
+        <span className="truncate text-xs text-muted">{nm.tournamentName}</span>
+      </div>
+
+      {tag ? <span className="pill shrink-0 border-line text-[10px] text-muted">{tag}</span> : null}
+      {!live && when.abs ? (
+        <span className="shrink-0 text-[11px] tabular-nums text-faint" title="Scheduled start (your local time)">
+          {fmtDate(nm.startScheduled)} · {when.abs}
+        </span>
+      ) : null}
+      {live && nm.streamUrl ? <TwitchLink url={nm.streamUrl} className="relative z-10" /> : null}
     </div>
   );
 }
