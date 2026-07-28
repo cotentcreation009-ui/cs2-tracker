@@ -272,6 +272,16 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 			} else {
 				st.Losses++
 			}
+			if !st.streakDone {
+				if st.Streak == 0 {
+					st.StreakWon = won
+					st.Streak = 1
+				} else if won == st.StreakWon {
+					st.Streak++
+				} else {
+					st.streakDone = true
+				}
+			}
 			st.MarginSum += float64(mine - theirs)
 			st.N++
 			if len(form[tid]) < 5 {
@@ -376,6 +386,17 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 		}
 	}
 
+	// per-team window summaries — the receipts the factor rows cite (raw W-L
+	// behind the weighted form %, current streak)
+	predStats := map[string]map[string]any{}
+	for _, tid := range teamIDs {
+		st := pstats[tid]
+		predStats[tid] = map[string]any{
+			"wins": st.Wins, "losses": st.Losses,
+			"streak": st.Streak, "streakWon": st.StreakWon,
+		}
+	}
+
 	return map[string]any{
 		"teams":      ms.Teams,
 		"form":       form,
@@ -383,6 +404,7 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 		"rosters":    rosters,
 		"maps":       mapsOut,
 		"prediction": pred,
+		"predStats":  predStats,
 		"record":     record,
 	}
 }

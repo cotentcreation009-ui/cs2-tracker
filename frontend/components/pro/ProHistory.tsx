@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { MatchState, ProFormEntry, ProHistory, ProPrediction, ProRosterPlayer, ProTeam } from "./types";
+import type { MatchState, ProFormEntry, ProHistory, ProPredTeamStats, ProPrediction, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
@@ -65,7 +65,15 @@ export function ProHistoryPanel({ id, teams, match }: { id: string; teams: ProTe
       {/* who's favored, and WHY — every factor's inputs are the same numbers
           shown in the cards below it; live matches blend in the scoreboard */}
       {a && b && data.prediction && (
-        <PredictionCard pred={data.prediction} a={a} b={b} maps={data.maps} match={match} record={data.record} />
+        <PredictionCard
+          pred={data.prediction}
+          a={a}
+          b={b}
+          maps={data.maps}
+          match={match}
+          record={data.record}
+          stats={data.predStats}
+        />
       )}
 
       {/* lineups: who's on each team + their recent-series stats */}
@@ -149,12 +157,51 @@ function fmtFactor(key: string, v: number): string {
   }
 }
 
+// Bar colors need to IDENTIFY the two teams: brand colors when they work on a
+// dark card, resolved to distinct fallbacks when a team has no color, the
+// color is too dark to see, or both teams landed on near-identical hues
+// (real case: a missing colorPrimary fell back to the same amber as the
+// opponent's brand, rendering the split bar as one solid color).
+function teamBarColors(aIn?: string, bIn?: string): [string, string] {
+  const usable = (h?: string): string | null => {
+    const v = validHex(h);
+    if (!v) return null;
+    const n = v.replace("#", "");
+    const r = parseInt(n.slice(0, 2), 16);
+    const g = parseInt(n.slice(2, 4), 16);
+    const bl = parseInt(n.slice(4, 6), 16);
+    // relative-luminance floor — near-black brand colors vanish on the card
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl < 46 ? null : v;
+  };
+  const dist = (h1: string, h2: string) => {
+    const p = (h: string, i: number) => parseInt(h.replace("#", "").slice(i, i + 2), 16);
+    return Math.abs(p(h1, 0) - p(h2, 0)) + Math.abs(p(h1, 2) - p(h2, 2)) + Math.abs(p(h1, 4) - p(h2, 4));
+  };
+  const a = usable(aIn) ?? "#5b9dff";
+  let b = usable(bIn) ?? "#e7b53c";
+  if (dist(a, b) < 140) b = dist(a, "#e7b53c") < 140 ? "#38d6ff" : "#e7b53c";
+  return [a, b];
+}
+
+function StreakPill({ st }: { st?: ProPredTeamStats }) {
+  if (!st || st.streak < 2) return null;
+  return (
+    <span
+      className={`rounded px-1 text-[9px] font-bold tabular-nums ${st.streakWon ? "bg-good/15 text-good" : "bg-bad/15 text-bad"}`}
+      title={`current streak: ${st.streak} ${st.streakWon ? "wins" : "losses"} in a row`}
+    >
+      {st.streakWon ? "W" : "L"}{st.streak}
+    </span>
+  );
+}
+
 // The verdict + its reasons. A transparent heuristic (labelled), never shown
-// without the evidence: each factor row carries both teams' actual values, and
-// the panels below are the receipts. Refuses thin data instead of guessing.
-// On LIVE matches the pre-match estimate blends with the scoreboard: each map
-// of advantage is ~decisive (a 1-0 Bo3 lead ≈ 79% historically), the current
-// map's round lead nudges, and pre-match skill still counts but damped.
+// without the evidence: each factor row carries both teams' actual values, the
+// pull bar shows which side it pushes, and the pp chip says how much in
+// context. Refuses thin data instead of guessing. On LIVE matches the
+// pre-match estimate blends with the scoreboard: each map of advantage is
+// ~decisive (a 1-0 Bo3 lead ≈ 79% historically), the current map's round lead
+// nudges, and pre-match skill still counts but damped.
 function PredictionCard({
   pred,
   a,
@@ -162,6 +209,7 @@ function PredictionCard({
   maps,
   match,
   record,
+  stats,
 }: {
   pred: ProPrediction;
   a: ProTeam;
@@ -169,9 +217,9 @@ function PredictionCard({
   maps?: Record<string, { map: string; w: number; l: number }[]>;
   match?: MatchState;
   record?: { model: string; n: number; correct: number } | null;
+  stats?: Record<string, ProPredTeamStats>;
 }) {
-  const aHex = validHex(a.colorPrimary) ?? "#5b9dff";
-  const bHex = validHex(b.colorPrimary) ?? "#e7b53c";
+  const [aHex, bHex] = teamBarColors(a.colorPrimary, b.colorPrimary);
   if (!pred.available) {
     return (
       <div className="card-2 px-4 py-2.5 text-center text-[11px] text-faint">
@@ -224,55 +272,93 @@ function PredictionCard({
           </span>
         </span>
       </div>
-      {/* the verdict bar */}
-      <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-        <span className={`truncate font-bold ${favA ? "" : "opacity-60"}`} style={{ color: aHex }}>
-          {a.shortName || a.name}
+      {/* the verdict: logos, names, streaks and each side's own big number */}
+      <div className="mb-1.5 flex items-center gap-2.5">
+        <TeamLogo name={a.shortName || a.name} src={a.logoUrl} color={a.colorPrimary} size={30} />
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className={`truncate text-sm font-bold ${favA ? "" : "opacity-55"}`} style={{ color: aHex }}>
+            {a.shortName || a.name}
+          </span>
+          <StreakPill st={stats?.[a.gridId]} />
         </span>
-        <span className="shrink-0 text-lg font-extrabold tabular-nums">
-          <span className={favA ? "text-ink" : "text-faint"}>{pa}%</span>
-          <span className="mx-1.5 text-xs font-normal text-faint">vs</span>
-          <span className={favA ? "text-faint" : "text-ink"}>{pb}%</span>
+        <span className={`shrink-0 text-2xl font-extrabold tabular-nums ${favA ? "text-ink" : "text-faint"}`}>{pa}%</span>
+        <span className="min-w-0 flex-1" />
+        <span className={`shrink-0 text-2xl font-extrabold tabular-nums ${favA ? "text-faint" : "text-ink"}`}>{pb}%</span>
+        <span className="flex min-w-0 items-center justify-end gap-1.5">
+          <StreakPill st={stats?.[b.gridId]} />
+          <span className={`truncate text-right text-sm font-bold ${favA ? "opacity-55" : ""}`} style={{ color: bHex }}>
+            {b.shortName || b.name}
+          </span>
         </span>
-        <span className={`truncate text-right font-bold ${favA ? "opacity-60" : ""}`} style={{ color: bHex }}>
-          {b.shortName || b.name}
-        </span>
+        <TeamLogo name={b.shortName || b.name} src={b.logoUrl} color={b.colorPrimary} size={30} />
       </div>
-      <div className="mb-3 flex h-2.5 overflow-hidden rounded-full bg-panel">
-        <div className="h-full rounded-l-full transition-all" style={{ width: `${pa}%`, background: aHex, opacity: 0.85 }} />
-        <div className="h-full rounded-r-full transition-all" style={{ width: `${pb}%`, background: bHex, opacity: 0.85 }} />
+      <div className="relative mb-4 h-3.5 overflow-hidden rounded-full bg-panel">
+        <div className="absolute inset-y-0 left-0 rounded-l-full transition-all" style={{ width: `${pa}%`, background: `linear-gradient(90deg, ${aHex}cc, ${aHex})` }} />
+        <div className="absolute inset-y-0 right-0 rounded-r-full transition-all" style={{ width: `${pb}%`, background: `linear-gradient(90deg, ${bHex}, ${bHex}cc)` }} />
+        {/* the split point, unmistakable even when brand colors are close */}
+        <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white/90 shadow-[0_0_6px_rgba(255,255,255,0.7)] transition-all" style={{ left: `${pa}%` }} />
+        {/* even-odds reference tick */}
+        <div className="absolute inset-y-0 left-1/2 w-px bg-black/40" title="50/50" />
       </div>
-      {/* the reasons — each row: who it favors and by how much, with values */}
-      <div className="mx-auto max-w-xl space-y-1">
+      {/* the reasons — full-width tug-of-war rows: both teams' values at the
+          ends, the pull toward whoever it favors in the middle, and the
+          concrete swing ("+8pp") it adds in context */}
+      <div className="space-y-1.5">
         {(pred.factors ?? []).map((f) => {
           const favors = f.contribution > 0.02 ? "a" : f.contribution < -0.02 ? "b" : null;
+          const stA = stats?.[a.gridId];
+          const stB = stats?.[b.gridId];
+          const receipts = (side: "a" | "b") => {
+            if (f.key !== "form") return null;
+            const st = side === "a" ? stA : stB;
+            return st ? ` · ${st.wins}-${st.losses}` : null;
+          };
+          const ppLabel =
+            Math.abs(f.pp) < 0.5 ? "±0" : `${f.pp > 0 ? "+" : "−"}${Math.abs(f.pp).toFixed(0)}pp`;
           return (
-            <div key={f.key} className="flex items-center gap-2 text-xs" title={f.note}>
+            <div
+              key={f.key}
+              className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-xs transition hover:bg-panel/40"
+              title={f.note}
+            >
+              <span className="w-25 shrink-0 text-muted sm:w-30">{f.label}</span>
               <span
-                className="w-13 shrink-0 truncate text-right tabular-nums"
-                style={{ color: favors === "a" ? aHex : undefined, fontWeight: favors === "a" ? 700 : 400, opacity: favors === "a" ? 1 : 0.65 }}
+                className="w-21 shrink-0 truncate text-right tabular-nums sm:w-24"
+                style={{ color: favors === "a" ? aHex : undefined, fontWeight: favors === "a" ? 700 : 400, opacity: favors === "a" ? 1 : 0.6 }}
               >
                 {fmtFactor(f.key, f.a)}
+                {receipts("a")}
               </span>
-              <span className="w-28 shrink-0 text-center text-muted">{f.label}</span>
-              <span
-                className="w-13 shrink-0 truncate tabular-nums"
-                style={{ color: favors === "b" ? bHex : undefined, fontWeight: favors === "b" ? 700 : 400, opacity: favors === "b" ? 1 : 0.65 }}
-              >
-                {fmtFactor(f.key, f.b)}
-              </span>
-              {/* pull strength toward the favored side */}
-              <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel">
+              <span className="relative hidden h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-panel sm:block">
                 <span className="absolute inset-y-0 left-1/2 w-px bg-line" />
                 <span
-                  className="absolute inset-y-0 rounded-full"
+                  className="absolute inset-y-0"
                   style={{
                     background: f.contribution >= 0 ? aHex : bHex,
-                    opacity: 0.8,
+                    opacity: 0.85,
+                    borderRadius: 99,
                     left: f.contribution >= 0 ? `${50 - Math.min(50, Math.abs(f.contribution) * 55)}%` : "50%",
-                    width: `${Math.min(50, Math.abs(f.contribution) * 55)}%`,
+                    width: `${Math.max(0.6, Math.min(50, Math.abs(f.contribution) * 55))}%`,
                   }}
                 />
+              </span>
+              <span
+                className="w-21 shrink-0 truncate tabular-nums sm:w-24"
+                style={{ color: favors === "b" ? bHex : undefined, fontWeight: favors === "b" ? 700 : 400, opacity: favors === "b" ? 1 : 0.6 }}
+              >
+                {fmtFactor(f.key, f.b)}
+                {receipts("b")}
+              </span>
+              <span
+                className="w-11 shrink-0 text-right text-[10px] font-bold tabular-nums"
+                style={{ color: favors ? (favors === "a" ? aHex : bHex) : "var(--color-faint)" }}
+                title={
+                  favors
+                    ? `this factor moves the estimate ${Math.abs(f.pp).toFixed(1)} percentage points toward ${favors === "a" ? a.shortName || a.name : b.shortName || b.name}`
+                    : "roughly neutral"
+                }
+              >
+                {ppLabel}
               </span>
             </div>
           );
@@ -291,25 +377,41 @@ function PredictionCard({
           cur.n += r.w + r.l;
           byMap.set(r.map, cur);
         }
-        const rows = [...byMap.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 6);
+        const rows = [...byMap.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 8);
         const wr = (r?: { w: number; l: number }) => (r && r.w + r.l > 0 ? r.w / (r.w + r.l) : null);
         return (
-          <div className="mx-auto mt-3 max-w-xl border-t border-line pt-2">
-            <div className="mb-1 text-center text-[9px] font-bold uppercase tracking-wider text-faint">
-              Map records (window)
+          <div className="mt-3.5 border-t border-line pt-2.5">
+            <div className="mb-1.5 flex items-baseline justify-between text-[9px] font-bold uppercase tracking-wider text-faint">
+              <span>Map records · last ~120 days</span>
+              <span className="font-normal normal-case">bars = win rate · bold = better on that map</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 sm:grid-cols-3">
+            <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
               {rows.map(([m, r]) => {
                 const wa = wr(r.a);
                 const wb = wr(r.b);
+                const aBetter = wa != null && (wb == null || wa >= wb);
+                const bBetter = wb != null && (wa == null || wb >= wa);
                 return (
-                  <div key={m} className="flex items-center gap-1.5 text-[11px] tabular-nums">
-                    <span className="min-w-0 flex-1 truncate capitalize text-muted">{m}</span>
-                    <span style={{ color: wa != null && (wb == null || wa >= wb) ? aHex : undefined, opacity: r.a ? 1 : 0.35 }}>
+                  <div
+                    key={m}
+                    className="flex items-center gap-2 text-[11px] tabular-nums"
+                    title={`${m}: ${a.shortName || a.name} ${r.a ? `${r.a.w}-${r.a.l}` : "no games"} · ${b.shortName || b.name} ${r.b ? `${r.b.w}-${r.b.l}` : "no games"}`}
+                  >
+                    <span className="w-16 shrink-0 truncate capitalize text-muted">{m}</span>
+                    <span className="w-8 shrink-0 text-right" style={{ color: aBetter ? aHex : undefined, fontWeight: aBetter ? 700 : 400, opacity: r.a ? 1 : 0.35 }}>
                       {r.a ? `${r.a.w}-${r.a.l}` : "—"}
                     </span>
-                    <span className="text-faint">·</span>
-                    <span style={{ color: wb != null && (wa == null || wb >= wa) ? bHex : undefined, opacity: r.b ? 1 : 0.35 }}>
+                    {/* back-to-back win-rate bars growing outward from the middle */}
+                    <span className="flex h-1.5 min-w-0 flex-1 items-stretch">
+                      <span className="relative flex-1 overflow-hidden rounded-l-full bg-panel">
+                        <span className="absolute inset-y-0 right-0 rounded-l-full" style={{ width: `${(wa ?? 0) * 100}%`, background: aHex, opacity: 0.85 }} />
+                      </span>
+                      <span className="w-px shrink-0 bg-line" />
+                      <span className="relative flex-1 overflow-hidden rounded-r-full bg-panel">
+                        <span className="absolute inset-y-0 left-0 rounded-r-full" style={{ width: `${(wb ?? 0) * 100}%`, background: bHex, opacity: 0.85 }} />
+                      </span>
+                    </span>
+                    <span className="w-8 shrink-0" style={{ color: bBetter ? bHex : undefined, fontWeight: bBetter ? 700 : 400, opacity: r.b ? 1 : 0.35 }}>
                       {r.b ? `${r.b.w}-${r.b.l}` : "—"}
                     </span>
                   </div>

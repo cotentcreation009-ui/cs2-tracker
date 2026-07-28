@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -28,16 +29,24 @@ type predTeamStats struct {
 	WeightSum float64
 	MarginSum float64 // Σ per-series map-score margin (mine − theirs)
 	KD        float64 // roster K/D average (0 when unknown)
+	// current streak (entries arrive newest-first; frozen at the first flip)
+	Streak     int
+	StreakWon  bool
+	streakDone bool
 }
 
 // predFactor is one explainable input: both teams' values plus the signed
 // contribution it adds toward team A in the logistic (positive = favors A).
+// PP is the factor's percentage-point swing IN CONTEXT — how much the final
+// probability would drop if this factor were removed — so "Recent form: +8pp"
+// is a concrete, checkable claim rather than an abstract weight.
 type predFactor struct {
 	Key          string  `json:"key"`
 	Label        string  `json:"label"`
 	A            float64 `json:"a"`
 	B            float64 `json:"b"`
 	Contribution float64 `json:"contribution"`
+	PP           float64 `json:"pp"`
 	Note         string  `json:"note,omitempty"`
 }
 
@@ -97,9 +106,9 @@ func mapPoolFactor(a, b map[string]recWL, picked []string) *predFactor {
 	if shared < minShared || wSum <= 0 {
 		return nil
 	}
-	note := "win rate on the maps both teams played (weighted by sample)"
+	note := fmt.Sprintf("win rate across %d map%s both teams played (weighted by sample)", shared, plural(shared))
 	if len(pickedSet) > 0 {
-		note = "win rate on THIS series' maps (weighted by sample)"
+		note = fmt.Sprintf("win rate on THIS series' %d map%s (weighted by sample)", shared, plural(shared))
 	}
 	return &predFactor{
 		Key: "mappool", Label: "Map pool", A: aSum / wSum, B: bSum / wSum,
@@ -113,6 +122,13 @@ func mapPoolFactor(a, b map[string]recWL, picked []string) *predFactor {
 func predWeight(i int) float64 { return math.Pow(0.89, float64(i)) }
 
 func clampF(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
 
 // buildPrediction turns the two teams' window aggregates + head-to-head wins
 // into the probability + factor breakdown. a/b follow ms.Teams order.
@@ -169,8 +185,15 @@ func buildPrediction(a, b predTeamStats, h2hWinsA, h2hWinsB int, mapPool *predFa
 		x += fKD.Contribution
 	}
 
+	// Certainty cap: a hand-tuned heuristic has no business claiming more than
+	// ~90% before a series starts — upsets are the sport.
+	x = clampF(x, -2.2, 2.2)
 	p.Available = true
 	p.PA = 1 / (1 + math.Exp(-x))
+	// per-factor swing in context: P(with everything) − P(without this factor)
+	for i := range factors {
+		factors[i].PP = (p.PA - 1/(1+math.Exp(-(x-factors[i].Contribution)))) * 100
+	}
 	p.Factors = factors
 	return p
 }
