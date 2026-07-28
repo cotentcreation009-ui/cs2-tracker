@@ -3,6 +3,7 @@ import type { MatchState } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { LiveBadge } from "./LiveBadge";
 import { RoundStrip } from "./RoundStrip";
+import { PointPill } from "./PointPill";
 import { clockLabel, formatTag, liveMap, mapsWon, sideHex, validHex } from "./format";
 import { TwitchLink } from "./TwitchLink";
 
@@ -61,11 +62,11 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
   const heroAColor = lm ? sideHex(aSide) : undefined;
   const heroBColor = lm ? sideHex(bSide) : undefined;
 
+  // The detail link is a stretched overlay (last in DOM so it paints above the
+  // card's relative sections) rather than a wrapping <Link> — the Watch pill is
+  // an anchor, and nested <a> is invalid HTML that trips hydration.
   return (
-    <Link
-      href={`/pro-matches/${match.seriesId}`}
-      className="group relative block overflow-hidden rounded-2xl border border-line bg-panel2/40 p-5 shadow-lg ring-1 ring-[#ff4655]/10 transition duration-200 hover:-translate-y-0.5 hover:border-line2 hover:ring-[#ff4655]/25"
-    >
+    <div className="group relative block overflow-hidden rounded-2xl border border-line bg-panel2/40 p-5 shadow-lg ring-1 ring-[#ff4655]/10 transition duration-200 hover:-translate-y-0.5 hover:border-line2 hover:ring-[#ff4655]/25">
       {/* team-colour ambient glows */}
       <span aria-hidden className="pointer-events-none absolute -left-20 -top-24 h-52 w-52 rounded-full opacity-[0.18] blur-3xl" style={{ background: aColor }} />
       <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-52 w-52 rounded-full opacity-[0.18] blur-3xl" style={{ background: bColor }} />
@@ -86,6 +87,7 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
           <span className="truncate text-xs font-medium text-muted">{match.tournamentName ?? "Pro match"}</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <PointPill match={match} map={lm} />
           {formatTag(match) ? <span className="pill border-line text-[10px] text-muted">{formatTag(match)}</span> : null}
           <LiveBadge />
         </div>
@@ -150,9 +152,15 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
           ) : (
             <span />
           )}
-          {match.streamUrl ? <TwitchLink url={match.streamUrl} /> : null}
+          {match.streamUrl ? <TwitchLink url={match.streamUrl} className="relative z-10" /> : null}
         </div>
       ) : null}
-    </Link>
+
+      <Link
+        href={`/pro-matches/${match.seriesId}`}
+        aria-label={`${a?.shortName || a?.name || "TBD"} vs ${b?.shortName || b?.name || "TBD"} — live match page`}
+        className="absolute inset-0 rounded-2xl"
+      />
+    </div>
   );
 }

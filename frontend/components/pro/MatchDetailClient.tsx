@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import type { MatchState, ProMap, ProMapPlayer, ProTeam } from "./types";
 import { usePoll, useNow } from "./usePoll";
 import { TeamLogo } from "./TeamLogo";
@@ -8,7 +9,8 @@ import { LiveBadge } from "./LiveBadge";
 import { RoundStrip } from "./RoundStrip";
 import { TwitchLink } from "./TwitchLink";
 import { ProHistoryPanel } from "./ProHistory";
-import { agoShort, clockLabel, formatTag, mapsWon, sideHex, validHex } from "./format";
+import { PointPill } from "./PointPill";
+import { agoShort, clockLabel, formatTag, liveMap, mapsWon, pointState, sideHex, validHex } from "./format";
 
 const POLL_MS = 10_000;
 
@@ -29,6 +31,30 @@ export function MatchDetailClient({
 }) {
   const { data, error, loading } = usePoll<MatchState>(`/api/pro-matches/${id}`, POLL_MS, { initialData });
   const now = useNow(1000);
+
+  // Live score in the tab title, so the match reads at a glance from another
+  // tab. Restored to the page's own title when the match ends or on unmount.
+  const baseTitle = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (baseTitle.current == null) baseTitle.current = document.title;
+    if (!data || data.status !== "live") {
+      if (baseTitle.current) document.title = baseTitle.current;
+      return;
+    }
+    const ta = data.teams?.[0];
+    const tb = data.teams?.[1];
+    if (!ta || !tb) return;
+    const lm = liveMap(data);
+    const ra = lm ? (lm.scoreByTeam?.[ta.gridId] ?? 0) : mapsWon(data, ta.gridId);
+    const rb = lm ? (lm.scoreByTeam?.[tb.gridId] ?? 0) : mapsWon(data, tb.gridId);
+    const pt = pointState(data, lm);
+    const urgent = pt ? (pt.kind === "match" ? " · MATCH POINT" : " · MAP POINT") : "";
+    document.title = `🔴 ${ta.shortName || ta.name} ${ra}–${rb} ${tb.shortName || tb.name}${urgent} | StatRun`;
+    return () => {
+      if (baseTitle.current) document.title = baseTitle.current;
+    };
+  }, [data]);
 
   if (loading && !data) return <DetailSkeleton />;
 
@@ -99,11 +125,19 @@ export function MatchDetailClient({
               <span className="pill border-line bg-panel text-[10px] uppercase tracking-wider text-muted">Final</span>
             ) : (
               <>
-                {countdown(m.startScheduled, now) ? (
-                  <span className="pill border-brand/40 bg-brand/10 text-[11px] font-semibold tabular-nums text-brand" title={startAbs ? `Starts ${startAbs}` : undefined}>
-                    {countdown(m.startScheduled, now)}
-                  </span>
-                ) : null}
+                {(() => {
+                  const cd = countdown(m.startScheduled, now);
+                  if (!cd) return null;
+                  return cd === "delayed" ? (
+                    <span className="pill border-mid/40 bg-mid/10 text-[11px] font-semibold text-mid" title={startAbs ? `Was scheduled for ${startAbs}` : undefined}>
+                      Delayed
+                    </span>
+                  ) : (
+                    <span className="pill border-brand/40 bg-brand/10 text-[11px] font-semibold tabular-nums text-brand" title={startAbs ? `Starts ${startAbs}` : undefined}>
+                      {cd}
+                    </span>
+                  );
+                })()}
                 <span className="pill border-line bg-panel text-[10px] uppercase tracking-wider text-brand">Upcoming</span>
               </>
             )}
@@ -128,7 +162,11 @@ export function MatchDetailClient({
         <div className="relative mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-4">
           <span className="text-xs text-muted">
             {formatBlurb(m)}
-            {isUpcoming && startAbs ? ` · starts ${startAbs}` : ""}
+            {isUpcoming && startAbs
+              ? countdown(m.startScheduled, now) === "delayed"
+                ? ` · was scheduled for ${startAbs} — likely waiting on the previous series; this page flips to live automatically`
+                : ` · starts ${startAbs}`
+              : ""}
             {isFinished && startAbs ? ` · played ${startAbs}` : ""}
           </span>
           <span className="flex items-center gap-2">
@@ -176,12 +214,14 @@ export function MatchDetailClient({
   );
 }
 
-// Live countdown to an upcoming match's scheduled start.
+// Live countdown to an upcoming match's scheduled start. Returns "delayed"
+// once the slot is >15 minutes past with the match still not live.
 function countdown(iso: string | undefined, now: number): string {
   if (!iso) return "";
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return "";
   let s = Math.floor((t - now) / 1000);
+  if (s <= -900) return "delayed";
   if (s <= 0) return "starting soon";
   const d = Math.floor(s / 86400);
   s -= d * 86400;
@@ -275,6 +315,7 @@ function MapRow({
           {isLive ? (
             <>
               {map.currentRound ? <span className="text-[11px] tabular-nums text-faint">Round {map.currentRound}{clock ? ` · ${clock}` : ""}</span> : null}
+              <PointPill match={match} map={map} />
               <LiveBadge />
             </>
           ) : isDone ? (
