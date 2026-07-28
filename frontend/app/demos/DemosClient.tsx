@@ -28,6 +28,7 @@ import {
 } from "@/lib/demo/store";
 import { hasCalibration, radarImage } from "@/lib/maps/calibration";
 import { mapLabel } from "@/lib/format";
+import { YourForm } from "@/components/demo/YourForm";
 
 // sessionStorage key remembering the most recently analyzed demo, so its
 // library card can wear a NEW badge (cards of re-parsed matches all share the
@@ -493,6 +494,9 @@ export function DemosClient() {
           {error}
         </div>
       )}
+
+      {/* identity + form trends — appears once the library can say who you are */}
+      {list.length >= 2 && <YourForm summaries={list} />}
 
       {/* library */}
       <section>
