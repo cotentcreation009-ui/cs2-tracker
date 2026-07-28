@@ -274,12 +274,14 @@ function UtilTimeline({
   i,
   scope,
   onPick,
+  onCollapse,
 }: {
   rounds: ReplayRound[];
   meta: ReplayMeta;
   i: number;
   scope: number | null;
   onPick: (ri: number) => void;
+  onCollapse: () => void;
 }) {
   if (rounds.length < 2) return null;
   return (
@@ -298,6 +300,14 @@ function UtilTimeline({
           </span>
           <span className="text-muted">click a round to scope every tab to it</span>
         </span>
+        <button
+          type="button"
+          onClick={onCollapse}
+          title="Collapse — gives the throw map the height back"
+          className="shrink-0 text-[10px] text-faint transition hover:text-ink"
+        >
+          ▴ hide
+        </button>
       </div>
       <div className="scroll-slim flex flex-wrap justify-center gap-1 lg:flex-nowrap lg:overflow-x-auto lg:pb-0.5">
         {rounds.map((r, ri) => {
@@ -689,7 +699,24 @@ export default function UtilityBreakdown({
   const [throwIdx, setThrowIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [teamPin, setTeamPin] = useState<number | null>(null); // index into executes
+  const [mapFull, setMapFull] = useState(false); // throw map as a viewport overlay
+  const [stripOpen, setStripOpen] = useState(false); // per-round strip, collapsed by default
   const [zones, setZones] = useState<Zone[]>([]);
+
+  // Escape exits the fullscreen map; lock body scroll while it's up
+  useEffect(() => {
+    if (!mapFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMapFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [mapFull]);
 
   const proj = useMemo(() => buildProjection(meta.map, rounds), [meta, rounds]);
 
@@ -1124,17 +1151,33 @@ export default function UtilityBreakdown({
 
   return (
     <div className="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-      {/* per-round utility strip — sits directly under the toolbar's round
-          chips so the round story reads top-down */}
-      {selPlayer && (
-        <UtilTimeline
-          rounds={rounds}
-          meta={meta}
-          i={selPlayer.i}
-          scope={view.scopeRound}
-          onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
-        />
-      )}
+      {/* per-round utility strip — collapsed by default so the throw map (the
+          tab's payoff) gets the vertical room; one click expands the detail */}
+      {selPlayer &&
+        (stripOpen ? (
+          <UtilTimeline
+            rounds={rounds}
+            meta={meta}
+            i={selPlayer.i}
+            scope={view.scopeRound}
+            onPick={(ri) => view.setScopeRound(view.scopeRound === ri ? null : ri)}
+            onCollapse={() => setStripOpen(false)}
+          />
+        ) : (
+          rounds.length >= 2 && (
+            <button
+              type="button"
+              onClick={() => setStripOpen(true)}
+              title="Show the per-round utility strip (numbers thrown, kinds, won/lost — click a round to scope every tab)"
+              className="card-2 flex items-center gap-2 px-3 py-1.5 text-left transition hover:bg-panel/50 lg:shrink-0"
+            >
+              <span className="stat-label">
+                Utility per round · <span className="text-ink">{selPlayer.name}</span>
+              </span>
+              <span className="text-[10px] text-faint">▾ show</span>
+            </button>
+          )
+        ))}
       {/* awards — one slim band, not a row of floating cards */}
       {awards.length > 0 && (
         <div className="card-2 flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5 lg:shrink-0">
@@ -1173,7 +1216,8 @@ export default function UtilityBreakdown({
         </div>
       )}
 
-      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(400px,500px)]">
+      {/* rail slimmed so the throw map — the tab's payoff — gets the width */}
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(330px,390px)] lg:grid-rows-[minmax(0,1fr)] lg:gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
         {/* left: the throw explorer — full-height map, video-player step
             controls on its bottom edge. ◀ ▶ arrow keys step through throws. */}
         <div
@@ -1275,7 +1319,16 @@ export default function UtilityBreakdown({
 
           {pinnedExec || (selPlayer && activeKind && selThrows.length > 0) ? (
             <div className="flex w-full flex-col gap-3 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch">
-            <div className="relative mx-auto w-full max-w-180 self-center lg:mx-0 lg:w-[min(calc(100cqw-17.5rem),calc(100cqh-72px))] lg:max-w-none lg:shrink-0">
+            {/* fullscreen: the WRAPPER (map + transport) becomes a viewport
+                overlay, so stepping/pinning keeps working on the big map */}
+            <div className={mapFull ? "fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-3 backdrop-blur-sm sm:p-4" : "contents"}>
+            <div
+              className={`relative ${
+                mapFull
+                  ? "h-[min(94svh,94vw)] w-[min(94svh,94vw)]"
+                  : "mx-auto w-full max-w-180 self-center lg:mx-0 lg:w-[min(calc(100cqw-14rem),calc(100cqh-64px))] lg:max-w-none lg:shrink-0"
+              }`}
+            >
               <UtilThrowMap map={meta.map} proj={proj} throws={mapThrows} timeline={!!pinnedExec} className="w-full" />
 
               <div className="absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 rounded-b-xl border-t border-line/60 bg-bg/80 px-2.5 py-1.5 backdrop-blur">
@@ -1336,7 +1389,17 @@ export default function UtilityBreakdown({
                     <button type="button" onClick={() => stepThrow(1)} title="Next throw" aria-label="Next throw" className="btn btn-ghost shrink-0 px-2 py-1 text-xs">▶</button>
                   </>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setMapFull((f) => !f)}
+                  title={mapFull ? "Exit fullscreen (Esc)" : "Fullscreen map"}
+                  aria-label={mapFull ? "Exit fullscreen" : "Fullscreen map"}
+                  className="btn btn-ghost shrink-0 px-2 py-1 text-xs"
+                >
+                  {mapFull ? "✕" : "⛶"}
+                </button>
               </div>
+            </div>
             </div>
 
             {/* the throw list lives beside the map: hover previews, click pins */}
