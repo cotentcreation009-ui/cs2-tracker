@@ -49,7 +49,7 @@ function probOf(s: State, t: number, freezeEnd: number): number {
   if (s.defused) return 1;
   if (s.exploded) return 0;
   if (s.aliveT === 0 && !s.planted) return 1; // Ts eliminated, no bomb down
-  if (s.aliveCT === 0 && s.planted) return 0; // nobody left to defuse
+  if (s.aliveCT === 0 && s.aliveT > 0) return 0; // CTs eliminated — T round, plant or not
   if (s.aliveCT === 0 && s.aliveT === 0) return s.planted ? 0 : 1;
 
   // man count is the dominant term; log-ratio adds "5v4 matters less than 2v1"
@@ -97,19 +97,21 @@ export function roundWinProb(meta: ReplayMeta, r: ReplayRound): RoundWinProb {
     equipCT: 0,
     equipT: 0,
   };
+  const equipOf = new Map<number, number>();
   for (const st of r.stats ?? []) {
     const side = sideOf(st.i);
+    equipOf.set(st.i, st.equip ?? 0);
     if (side === "CT") s.equipCT += st.equip ?? 0;
     else if (side === "T") s.equipT += st.equip ?? 0;
   }
 
   // event stream, time-ordered: kills + bomb events
   type Ev =
-    | { t: number; kind: "kill"; killIndex: number; victimSide: "CT" | "T" | "" }
+    | { t: number; kind: "kill"; killIndex: number; victim: number; victimSide: "CT" | "T" | "" }
     | { t: number; kind: "plant" | "defuse" | "explode" };
   const evs: Ev[] = [];
   (r.kills ?? []).forEach((k, killIndex) => {
-    if (k.v >= 0) evs.push({ t: k.t, kind: "kill", killIndex, victimSide: sideOf(k.v) });
+    if (k.v >= 0) evs.push({ t: k.t, kind: "kill", killIndex, victim: k.v, victimSide: sideOf(k.v) });
   });
   for (const b of r.bomb ?? []) {
     if (b.k === "plant" || b.k === "defuse" || b.k === "explode") evs.push({ t: b.t, kind: b.k });
@@ -131,8 +133,16 @@ export function roundWinProb(meta: ReplayMeta, r: ReplayRound): RoundWinProb {
       const ev = evs[ei];
       const before = probOf(s, ev.t, freezeEnd);
       if (ev.kind === "kill") {
-        if (ev.victimSide === "CT") s.aliveCT = Math.max(0, s.aliveCT - 1);
-        else if (ev.victimSide === "T") s.aliveT = Math.max(0, s.aliveT - 1);
+        // the dead take their gear with them — otherwise a shrinking side's
+        // per-living-player equip inflates and fakes a lean for the survivors
+        const eq = equipOf.get(ev.victim) ?? 0;
+        if (ev.victimSide === "CT") {
+          s.aliveCT = Math.max(0, s.aliveCT - 1);
+          s.equipCT = Math.max(0, s.equipCT - eq);
+        } else if (ev.victimSide === "T") {
+          s.aliveT = Math.max(0, s.aliveT - 1);
+          s.equipT = Math.max(0, s.equipT - eq);
+        }
       } else if (ev.kind === "plant") {
         s.planted = true;
         s.plantT = ev.t;

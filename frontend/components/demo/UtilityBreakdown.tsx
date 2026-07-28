@@ -568,6 +568,7 @@ function LobbyUtilTable({
   extrasOf,
   hasTf,
   hasFa,
+  hasStats,
   focusI,
   onFocus,
 }: {
@@ -575,6 +576,7 @@ function LobbyUtilTable({
   extrasOf: (i: number) => UtilExtras;
   hasTf: boolean;
   hasFa: boolean;
+  hasStats: boolean; // per-round stats exist — blank rounds are attestable
   focusI: number | null;
   onFocus: (i: number) => void;
 }) {
@@ -596,7 +598,9 @@ function LobbyUtilTable({
     { key: "dmg", label: "dmg", title: "HP dealt with HE/molotov" },
     { key: "ef", label: "blind", title: "enemies flashed (hover a row for blind seconds)" },
     ...(hasTf ? [{ key: "tf" as const, label: "tm⚠", bad: true, title: "teammates flashed — lower is better" }] : []),
-    { key: "blank", label: "blank", bad: true, title: "rounds with 1+ flash thrown and zero enemies blinded — lower is better" },
+    ...(hasStats
+      ? [{ key: "blank" as const, label: "blank", bad: true, title: "rounds with 1+ flash thrown and zero enemies blinded — lower is better" }]
+      : []),
     { key: "waste", label: "$ lost", bad: true, title: "est. value of grenades still in pocket on death — lower is better" },
     ...(hasFa ? [{ key: "fa" as const, label: "FA", title: "flash assists — teammate kills off their flashes" }] : []),
   ];
@@ -765,7 +769,11 @@ export default function UtilityBreakdown({
         if (thrown <= 1) t.low++;
       }
       for (const [i, nFlash] of flashesBy) {
-        if (nFlash > 0 && ((r.stats ?? []).find((s) => s.i === i)?.flashed ?? 0) === 0) {
+        // a blank round needs a stats entry to ATTEST zero enemies blinded —
+        // on stats-less old parses the ?? 0 fallback would brand every flash
+        // round blank (while the blinded column reads 0), a confident lie
+        const st = (r.stats ?? []).find((s) => s.i === i);
+        if (nFlash > 0 && st && (st.flashed ?? 0) === 0) {
           get(i).blankFlashRounds++;
         }
       }
@@ -800,6 +808,9 @@ export default function UtilityBreakdown({
     () => rounds.some((r) => (r.kills ?? []).some((k) => k.fa && (k.a ?? 0) > 0)),
     [rounds],
   );
+  // per-round stats present at all — without them "blank flash rounds" can't be
+  // attested and that column must not render
+  const hasStats = useMemo(() => rounds.some((r) => (r.stats ?? []).length > 0), [rounds]);
 
   // per-flash victim splits from ReplayNade.vic (new parses), keyed so a
   // UtilThrow (round n + time + thrower) can find its raw nade again
@@ -1430,6 +1441,7 @@ export default function UtilityBreakdown({
               extrasOf={extrasOf}
               hasTf={hasTf}
               hasFa={hasFa}
+              hasStats={hasStats}
               focusI={focusI}
               onFocus={(i) => view.setFocusPlayer(view.focusPlayer === i ? null : i)}
             />

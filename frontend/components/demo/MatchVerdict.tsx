@@ -757,6 +757,13 @@ const STEP_METRIC_LABEL: Record<StepChange["metric"], string> = {
   preaim: "Pre-aim offset",
   accuracy: "Accuracy",
 };
+// per-metric value formatting, shared by the sparklines and the AI prompt —
+// integer-rounding pre-aim degrees would send the model "2→2" for a real step
+const STEP_FMT: Record<StepChange["metric"], (v: number) => string> = {
+  reaction: (v) => `${v.toFixed(0)}ms`,
+  preaim: (v) => `${v.toFixed(1)}°`,
+  accuracy: (v) => `${v.toFixed(0)}%`,
+};
 
 /** One consistency sparkline: a per-round series with the flagged step (if any)
  *  shaded. Single series, so no legend — the row label names it. */
@@ -955,21 +962,21 @@ function CaseFile({
               pts={consist.reaction}
               totalRounds={rounds.length}
               step={consist.step?.metric === "reaction" ? consist.step : null}
-              fmt={(v) => `${v.toFixed(0)}ms`}
+              fmt={STEP_FMT.reaction}
             />
             <Spark
               label="Pre-aim"
               pts={consist.preaim}
               totalRounds={rounds.length}
               step={consist.step?.metric === "preaim" ? consist.step : null}
-              fmt={(v) => `${v.toFixed(1)}°`}
+              fmt={STEP_FMT.preaim}
             />
             <Spark
               label="Accuracy"
               pts={consist.accuracy}
               totalRounds={rounds.length}
               step={consist.step?.metric === "accuracy" ? consist.step : null}
-              fmt={(v) => `${v.toFixed(0)}%`}
+              fmt={STEP_FMT.accuracy}
             />
           </div>
           {consist.step ? (
@@ -1258,7 +1265,7 @@ export default function MatchVerdict({
           : "";
       const step = aimConsistency(rounds, p.i).step;
       const stepBit = step
-        ? `, MID-MATCH STEP: ${STEP_METRIC_LABEL[step.metric].toLowerCase()} ${step.before.toFixed(0)}→${step.after.toFixed(0)} from R${step.atRound}`
+        ? `, MID-MATCH STEP: ${STEP_METRIC_LABEL[step.metric].toLowerCase()} ${STEP_FMT[step.metric](step.before)}→${STEP_FMT[step.metric](step.after)} from R${step.atRound}`
         : "";
       const rotStyle =
         rot && rot.informed > 0 && rot.avgResponseSec != null
