@@ -93,6 +93,20 @@ export interface ReplayPlayerStat {
   tfDur?: number; // total teammate blind seconds dealt (rounded to 0.1s)
   tDmg?: number; // team damage dealt (self-damage excluded)
   wacc?: Record<string, ReplayWeaponAcc>; // per-weapon accuracy, by weapon display name (same firearm gate as shots/hits)
+  // Firing-style buckets (wave-2b parses): shots grouped into bursts (<0.25s
+  // gaps, same weapon) — tap = 1 shot, burst = 2-4, spray = 5+. H = bullets
+  // that dealt enemy damage; firstS/firstH = each burst's OPENING shot only
+  // (first-bullet accuracy, the crosshair-placement stat).
+  fire?: {
+    tapS?: number;
+    tapH?: number;
+    burstS?: number;
+    burstH?: number;
+    sprayS?: number;
+    sprayH?: number;
+    firstS?: number;
+    firstH?: number;
+  };
 }
 
 // One weapon's shots/hits tally inside ReplayPlayerStat.wacc.

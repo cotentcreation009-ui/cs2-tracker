@@ -362,6 +362,83 @@ function accuracyOf(
 
 const pctOr = (num: number, den: number) => (den ? `${((num / den) * 100).toFixed(0)}%` : "—");
 
+// --- firing style (stats.fire, wave-2b parses) -------------------------------
+
+interface FireAgg {
+  tapS: number; tapH: number; burstS: number; burstH: number;
+  sprayS: number; sprayH: number; firstS: number; firstH: number;
+}
+
+function fireStyleOf(
+  meta: ReplayMeta,
+  rounds: ReplayRound[],
+  roundFilter: ((r: ReplayRound, idx: number) => boolean) | undefined,
+  side: "all" | "CT" | "T",
+  focus: number | null,
+): FireAgg {
+  const a: FireAgg = { tapS: 0, tapH: 0, burstS: 0, burstH: 0, sprayS: 0, sprayH: 0, firstS: 0, firstH: 0 };
+  rounds.forEach((r, idx) => {
+    if (roundFilter && !roundFilter(r, idx)) return;
+    for (const s of r.stats ?? []) {
+      if (!s.fire) continue;
+      if (focus != null && s.i !== focus) continue;
+      if (side !== "all" && sideOf(r, s.i, meta) !== side) continue;
+      a.tapS += s.fire.tapS ?? 0;
+      a.tapH += s.fire.tapH ?? 0;
+      a.burstS += s.fire.burstS ?? 0;
+      a.burstH += s.fire.burstH ?? 0;
+      a.sprayS += s.fire.sprayS ?? 0;
+      a.sprayH += s.fire.sprayH ?? 0;
+      a.firstS += s.fire.firstS ?? 0;
+      a.firstH += s.fire.firstH ?? 0;
+    }
+  });
+  return a;
+}
+
+/** Spray-vs-tap read: how the scoped selection commits bullets, with accuracy
+ *  per style and the first-bullet headline. Hidden on pre-wave-2b parses. */
+function TriggerDiscipline({ fire, scopeLabel }: { fire: FireAgg; scopeLabel: string }) {
+  const total = fire.tapS + fire.burstS + fire.sprayS;
+  if (!total) return null;
+  const rows = [
+    { label: "Taps", hint: "single shots", s: fire.tapS, h: fire.tapH, hex: "#46d369" },
+    { label: "Bursts", hint: "2–4 shots", s: fire.burstS, h: fire.burstH, hex: "#38d6ff" },
+    { label: "Sprays", hint: "5+ shots", s: fire.sprayS, h: fire.sprayH, hex: "#e7b53c" },
+  ];
+  return (
+    <div className="card-2 px-5 py-4 lg:px-4 lg:py-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <h3 className="stat-label">Trigger discipline</h3>
+        <span
+          className="text-xs tabular-nums text-muted"
+          title={`Accuracy of each burst's OPENING shot only (${fire.firstH}/${fire.firstS}) — crosshair placement before recoil exists. Compare it to overall accuracy: a big gap means the damage comes from spraying, not placement.`}
+        >
+          first bullet <span className="font-bold text-ink">{pctOr(fire.firstH, fire.firstS)}</span>
+        </span>
+      </div>
+      <div className="mb-2 text-[10px] text-faint">how {scopeLabel} commits bullets — width = share of all bullets</div>
+      <div className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center gap-2 text-xs" title={`${row.s} bullets fired in ${row.label.toLowerCase()} (${row.hint}), ${row.h} connected`}>
+            <span className="w-13 shrink-0 text-muted">{row.label}</span>
+            <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-panel">
+              <span
+                className="bar-grow absolute inset-y-0 left-0 rounded-full"
+                style={{ width: `${Math.max(2, (row.s / total) * 100)}%`, background: row.hex, opacity: 0.75 }}
+              />
+            </span>
+            <span className="w-9 shrink-0 text-right tabular-nums text-faint">{((row.s / total) * 100).toFixed(0)}%</span>
+            <span className="w-13 shrink-0 text-right tabular-nums text-muted" title={`${row.h}/${row.s} bullets connected`}>
+              {pctOr(row.h, row.s)} <span className="text-faint">acc</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- per-weapon accuracy (stats.wacc) ----------------------------------------
 // wacc is keyed by the parser's weapon strings — the very same strings kill
 // events carry — so normalising each key through weaponMeta() lands it on the
@@ -1417,6 +1494,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
   // bullet accuracy — shots/hits/headshot-hits summed from the per-round stats,
   // scoped exactly like the weapon computations above (round · side · focus).
   const acc = useMemo(() => accuracyOf(meta, rounds, roundFilter, view.side, focus), [meta, rounds, roundFilter, view.side, focus]);
+  const fire = useMemo(() => fireStyleOf(meta, rounds, roundFilter, view.side, focus), [meta, rounds, roundFilter, view.side, focus]);
 
   // per-weapon shots/hits (stats.wacc) under the same scope as the offense
   // list — feeds the "% acc" sub-stat on the Arsenal rows (kills lens).
@@ -1571,6 +1649,7 @@ export default function WeaponInsights({ meta, rounds, view }: { meta: ReplayMet
             weaponAcc={weaponAcc}
           />
           <BuyMatrixCard meta={meta} rounds={rounds} view={view} />
+          <TriggerDiscipline fire={fire} scopeLabel={scopeLabel} />
         </div>
 
         {/* right: the map (hero), driven by the shared weapon selection */}
