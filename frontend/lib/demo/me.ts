@@ -1,8 +1,13 @@
-// "This is me" — the library's identity + form-over-time layer. The user marks
-// their steamId once (suggested automatically: their id appears in every demo
-// they save, so the most frequent roster entry across the library is almost
-// certainly them); each saved demo then contributes one compact digest of
-// their performance, cached so trends never re-read every round blob.
+// "This is me" — the library's identity + form-over-time layer.
+//
+// DORMANT: the auto-suggest UI (YourForm on /demos) was pulled by product
+// decision (2026-07-27) — identity should come from real user sign-ins, not a
+// roster-frequency heuristic. The lib + component + tests stay so the sign-in
+// integration can wire straight into them; nothing renders today.
+//
+// The user marks their steamId once; each saved demo then contributes one
+// compact digest of their performance, cached so trends never re-read every
+// round blob.
 
 import type { ReplayMeta, ReplayRound } from "./types";
 import { teamAStarters } from "./score";
