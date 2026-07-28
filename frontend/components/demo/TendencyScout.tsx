@@ -67,7 +67,11 @@ function TeamScoutBand({
         <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T_SOFT }}>
           T packages
         </span>
-        {execs.packages.length === 0 ? (
+        {execs.tRounds === 0 ? (
+          <span className="text-faint">no T rounds in this demo</span>
+        ) : !execs.analyzed ? (
+          <span className="text-faint">no call-out data for this map — executes not analyzed</span>
+        ) : execs.packages.length === 0 ? (
           <span className="text-faint">no rehearsed 3+ nade executes — utility arrives spread out</span>
         ) : (
           execs.packages.map((pk) => (

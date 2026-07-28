@@ -12,7 +12,9 @@ export const revalidate = 3600;
 // page flips them out of noindex) — every completed series becomes inventory.
 async function finishedProMatches(): Promise<MetadataRoute.Sitemap> {
   try {
-    const res = await fetch(`${API_BASE}/api/pro-matches`, {
+    // include=finished: the board itself excludes finished series — without
+    // the param this filter matched nothing, ever (the backend keeps ~48h)
+    const res = await fetch(`${API_BASE}/api/pro-matches?include=finished`, {
       headers: internalHeaders(),
       next: { revalidate: 3600 },
     });

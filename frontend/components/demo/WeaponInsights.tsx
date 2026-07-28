@@ -425,7 +425,7 @@ function TriggerDiscipline({ fire, scopeLabel }: { fire: FireAgg; scopeLabel: st
             <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-panel">
               <span
                 className="bar-grow absolute inset-y-0 left-0 rounded-full"
-                style={{ width: `${Math.max(2, (row.s / total) * 100)}%`, background: row.hex, opacity: 0.75 }}
+                style={{ width: `${row.s ? Math.max(2, (row.s / total) * 100) : 0}%`, background: row.hex, opacity: 0.75 }}
               />
             </span>
             <span className="w-9 shrink-0 text-right tabular-nums text-faint">{((row.s / total) * 100).toFixed(0)}%</span>

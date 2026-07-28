@@ -322,15 +322,21 @@ function EventFeed({
     ds != null && (round.bomb ?? []).some((b) => b.k === "defuse_abort" && b.t >= ds.t && b.t <= time);
   const defusing =
     ds != null && !ended && !dsDead && !dsAborted && time - ds.t < (ds.kit ? DEFUSE_KIT : DEFUSE_BARE) + 1.5;
-  // transient "faked it" notes — a live abort reads for ~4s, then fades
+  // transient "faked it" notes — a live abort reads for ~4s, then fades.
+  // An abort recorded because the actor was SHOT off the bomb is not a fake —
+  // require them to survive the next second (same guard as tendencies.ts).
+  const actorDied = (b: { t: number; p?: number }) =>
+    b.p != null &&
+    b.p > 0 &&
+    (round.kills ?? []).some((k) => k.v === (b.p ?? 0) - 1 && k.t >= b.t - 0.25 && k.t <= b.t + 1);
   const fakeDefuse = plant
     ? (round.bomb ?? [])
-        .filter((b) => b.k === "defuse_abort" && b.t <= time && time - b.t <= 4)
+        .filter((b) => b.k === "defuse_abort" && b.t <= time && time - b.t <= 4 && !actorDied(b))
         .pop()
     : undefined;
   const fakePlant = !plant
     ? (round.bomb ?? [])
-        .filter((b) => b.k === "plant_abort" && b.t <= time && time - b.t <= 4)
+        .filter((b) => b.k === "plant_abort" && b.t <= time && time - b.t <= 4 && !actorDied(b))
         .pop()
     : undefined;
 

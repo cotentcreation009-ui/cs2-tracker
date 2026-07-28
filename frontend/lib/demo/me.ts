@@ -69,10 +69,10 @@ export function suggestMe(
 // One demo's contribution to the trends — everything the form charts need,
 // small enough to cache in localStorage.
 export interface DemoDigest {
-  v: 1;
+  v: 2; // v1 had inverted matchWon for late connectors + ADR 0 on stats-less parses
   kills: number;
   deaths: number;
-  adr: number;
+  adr: number | null; // null when the parse carries no per-round stats
   hsPct: number; // of kills
   reactionMs: number | null; // avg, when the parse carries aim data
   wins: number; // rounds MY team won
@@ -85,11 +85,23 @@ export function demoDigest(meta: ReplayMeta, rounds: ReplayRound[], steamId: str
   const idx = meta.players.findIndex((p) => p.steamId === steamId);
   if (idx < 0) return null;
   const teamA = teamAStarters(rounds);
-  const mineA = teamA.has(idx);
+  // Team membership by ROSTER OVERLAP in the first round the player appears —
+  // raw round-1 membership inverted matchWon for anyone who connected late.
+  let mineA: boolean | null = teamA.size > 0 && teamA.has(idx) ? true : null;
+  if (mineA == null && teamA.size > 0) {
+    for (const r of rounds) {
+      const side = r.ct?.includes(idx) ? "CT" : r.t?.includes(idx) ? "T" : null;
+      if (!side) continue;
+      const aOnCT = (r.ct ?? []).some((i) => teamA.has(i));
+      mineA = (side === "CT") === aOnCT;
+      break;
+    }
+  }
   let kills = 0;
   let deaths = 0;
   let hs = 0;
   let dmg = 0;
+  let statN = 0;
   let rctSum = 0;
   let aimN = 0;
   let played = 0;
@@ -117,6 +129,7 @@ export function demoDigest(meta: ReplayMeta, rounds: ReplayRound[], steamId: str
     }
     const st = (r.stats ?? []).find((s) => s.i === idx);
     if (st) {
+      statN++;
       dmg += st.dmg ?? 0;
       if (!r.bots?.includes(idx)) {
         rctSum += st.rctMs ?? 0;
@@ -125,18 +138,20 @@ export function demoDigest(meta: ReplayMeta, rounds: ReplayRound[], steamId: str
     }
   }
   if (!played) return null;
-  const myWins = mineA ? winsA : winsB;
-  const theirWins = mineA ? winsB : winsA;
+  const myWins = mineA == null ? 0 : mineA ? winsA : winsB;
+  const theirWins = mineA == null ? 0 : mineA ? winsB : winsA;
   return {
-    v: 1,
+    v: 2,
     kills,
     deaths,
-    adr: dmg / played,
+    // null (not 0) when the parse has no per-round stats — a zero would chart
+    // a fake ADR cliff for pre-stats demos, and the cache would keep it
+    adr: statN > 0 ? dmg / played : null,
     hsPct: kills ? (hs / kills) * 100 : 0,
     reactionMs: aimN > 0 ? rctSum / aimN : null,
     wins,
     rounds: played,
-    matchWon: myWins === theirWins ? null : myWins > theirWins,
+    matchWon: mineA == null || myWins === theirWins ? null : myWins > theirWins,
   };
 }
 
@@ -146,7 +161,7 @@ export function loadDigest(demoId: string, steamId: string): DemoDigest | null {
     const raw = localStorage.getItem(digestKey(demoId, steamId));
     if (!raw) return null;
     const j = JSON.parse(raw) as DemoDigest;
-    return j && j.v === 1 ? j : null;
+    return j && j.v === 2 ? j : null; // v1 digests recompute (see DemoDigest.v)
   } catch {
     return null;
   }

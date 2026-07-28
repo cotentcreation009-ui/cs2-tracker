@@ -71,6 +71,24 @@ func statusRank(st string) int {
 	return 1
 }
 
+// Finished returns recently finished series, newest first. The live board
+// excludes them, but they are the sitemap's result-page inventory — without
+// this accessor the "finished" filter downstream matched nothing, ever.
+func (s *Store) Finished() []MatchState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list := make([]MatchState, 0, 8)
+	for _, e := range s.entries {
+		if e.state.Status == "finished" {
+			list = append(list, e.state)
+		}
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		return parseTime(list[i].StartScheduled).After(parseTime(list[j].StartScheduled))
+	})
+	return list
+}
+
 // Get returns a single series by id (including finished ones, so a just-ended
 // match detail page still resolves). ok is false for an unknown id.
 func (s *Store) Get(id string) (MatchState, bool) {
@@ -161,8 +179,9 @@ func (s *Store) dueForStateFetch(now time.Time) []string {
 	return ids
 }
 
-// prune bounds memory: finished series are kept only until they age out of the
-// central window (so the schedule loop can't resurrect them as upcoming), and
+// prune bounds memory: finished series are kept ~48h (they feed the sitemap's
+// result-page inventory; upsertSchedule preserves their status, so a finished
+// entry inside the central window can't be resurrected as upcoming), and
 // upcoming series that fall off the schedule are dropped. Live series are kept
 // regardless (a match that started >4h ago drops out of Central but is still on).
 func (s *Store) prune(now time.Time) {
@@ -173,7 +192,7 @@ func (s *Store) prune(now time.Time) {
 		case "live":
 			// keep
 		case "finished":
-			if now.Sub(e.lastSeenCentral) > 30*time.Minute {
+			if now.Sub(e.lastSeenCentral) > 48*time.Hour {
 				delete(s.entries, id)
 			}
 		default: // upcoming

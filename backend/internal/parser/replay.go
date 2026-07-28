@@ -394,6 +394,10 @@ type replayCollector struct {
 	// WeaponFire (game-event order is not guaranteed) so the join still lands.
 	bursts     map[int]*fireBurst
 	pendingHit map[int]float64
+	// per-bullet dedupe for hit counters: one wallbang bullet damaging two
+	// stacked victims fires two PlayerHurt events — Hits must count BULLETS
+	// (matching the fire-style buckets), or accuracy can exceed 100%.
+	lastHit map[int]lastHitMark
 
 	// pre-sight tracking (per round): ~4 Hz samples of each enemy pair's
 	// crosshair offset while the victim is NOT visible to the would-be killer.
@@ -418,6 +422,11 @@ type velSample struct{ x, y, t float64 }
 type fireShot struct {
 	t   float64
 	hit bool
+}
+
+type lastHitMark struct {
+	t float64
+	w string
 }
 
 type fireBurst struct {
@@ -535,6 +544,7 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.velNow = map[uint64]float64{}
 	rc.bursts = map[int]*fireBurst{}
 	rc.pendingHit = map[int]float64{}
+	rc.lastHit = map[int]lastHitMark{}
 	rc.trkBuf = map[uint64]map[uint64][]trkSample{}
 	rc.trkLast = map[uint64]map[uint64]float64{}
 	rc.seenEnd = map[uint64]map[uint64]float64{}
@@ -819,8 +829,16 @@ func (rc *replayCollector) onKill(e events.Kill) {
 		// spent pinned to the occluded, moving victim. The window ends at the
 		// CURRENT visibility episode's start, so post-sight aim (legit) never
 		// counts.
+		// The window ends at the CURRENT visibility episode's start — but only
+		// when the pair is visible right now. On an occluded kill of a
+		// previously-spotted victim (fight → retreat behind wall → wallbang),
+		// the stale episode start would push the window before the buffer's 8s
+		// retention and the score would silently never fire on exactly the
+		// through-wall kills it exists for; the 1.5s seenEnd grace already
+		// keeps legit post-sight extrapolation out of the buffer.
 		end := rc.rt()
-		if st, ok := rc.spotT[e.Victim.SteamID64][e.Killer.SteamID64]; ok {
+		if st, ok := rc.spotT[e.Victim.SteamID64][e.Killer.SteamID64]; ok &&
+			rc.spotted[e.Victim.SteamID64] != nil && rc.spotted[e.Victim.SteamID64][e.Killer.SteamID64] {
 			end = st
 		}
 		// Three gates make a sample count, each killing a legit explanation:
@@ -941,8 +959,10 @@ func (rc *replayCollector) onBombPlantAborted(e events.BombPlantAborted) {
 	}
 }
 
-// A defuse_start followed by defuse_abort with the defuser still alive is the
-// "fake defuse" read; aborted-by-death needs no extra event (the kill is there).
+// A defuse_abort with the defuser still ALIVE is the "fake defuse" read.
+// NOTE: demoinfocs also emits this event when the defuser is killed off the
+// bomb — consumers must cross-check the kill feed (±1s) before calling it a
+// fake (the feed and tendencies both do).
 func (rc *replayCollector) onBombDefuseAborted(e events.BombDefuseAborted) {
 	x, y, z := rc.bombXYZ()
 	rc.addBomb("defuse_abort", x, y, z, e.Player, events.BomsiteUnknown, false)
@@ -1295,13 +1315,28 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		}
 	}
 	if isFirearm(e.Weapon) {
-		s.Hits++
-		s.wacc(e.Weapon.String()).H++
-		if e.HitGroup == events.HitGroupHead {
-			s.HsHits++
+		ai := rc.playerIndex(e.Attacker)
+		now := rc.rt()
+		w := e.Weapon.String()
+		// One BULLET can hurt two stacked victims through penetration (two
+		// PlayerHurt events, same attacker+weapon+tick). Hits counts bullets —
+		// the first victim also decides the hit group — so the second event
+		// must not double-count (accuracy could exceed 100% and disagree with
+		// the fire-style buckets, which are per-bullet by construction).
+		lh, dup := rc.lastHit[ai], false
+		if ai >= 0 {
+			dup = lh.w == w && now-lh.t <= 0.02 && lh.w != ""
+			rc.lastHit[ai] = lastHitMark{t: now, w: w}
 		}
-		if e.HitGroup == events.HitGroupLeftLeg || e.HitGroup == events.HitGroupRightLeg {
-			s.LegHits++
+		if !dup {
+			s.Hits++
+			s.wacc(w).H++
+			if e.HitGroup == events.HitGroupHead {
+				s.HsHits++
+			}
+			if e.HitGroup == events.HitGroupLeftLeg || e.HitGroup == events.HitGroupRightLeg {
+				s.LegHits++
+			}
 		}
 		// Join the hit back to the bullet that caused it — the SAME-TICK
 		// WeaponFire (hitscan). Event order within the tick is not guaranteed:
@@ -1309,8 +1344,6 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		// hurt arrives first, buffer it for onWeaponFire to consume. A spray's
 		// ~0.1s cycle sits outside the tolerance, so a continuation bullet can
 		// never mark its predecessor. Idempotent for multi-victim penetration.
-		ai := rc.playerIndex(e.Attacker)
-		now := rc.rt()
 		if b := rc.bursts[ai]; b != nil && len(b.shots) > 0 && now-b.lastT <= 0.02 {
 			b.shots[len(b.shots)-1].hit = true
 		} else if ai >= 0 {

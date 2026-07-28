@@ -128,6 +128,22 @@ export async function deleteMatch(id: string): Promise<void> {
   tx.objectStore(ROUNDS).delete(id);
   await done(tx);
   db.close();
+  // Sweep this demo's derived localStorage caches (form digests, opponent
+  // sightings) — orphaned keys otherwise accumulate forever and eventually
+  // hit quota, silently killing all caching.
+  if (typeof localStorage !== "undefined") {
+    try {
+      const prefixes = [`statrun:digest:${id}:`, `statrun:oppo:${id}:`];
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && prefixes.some((p) => k.startsWith(p))) doomed.push(k);
+      }
+      for (const k of doomed) localStorage.removeItem(k);
+    } catch {
+      /* quota / private mode */
+    }
+  }
 }
 
 // ---- export / import -------------------------------------------------------

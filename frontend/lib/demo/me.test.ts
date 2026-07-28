@@ -57,6 +57,29 @@ describe("demoDigest", () => {
     expect(demoDigest(meta, [rd({})], "999")).toBeNull();
   });
 
+  it("resolves late connectors' team by roster overlap, not round-1 membership", () => {
+    const m3 = {
+      ...meta,
+      players: [
+        { steamId: "111", name: "Me", team: "CT" as const },
+        { steamId: "222", name: "Mate", team: "CT" as const },
+        { steamId: "333", name: "Foe", team: "T" as const },
+      ],
+    };
+    // I'm absent in round 1 (teamA = {1}); I join round 2 on CT beside a
+    // team-A player. Both rounds go to team A — my matchWon must be true.
+    const rounds = [
+      rd({ ct: [1], t: [2] }),
+      rd({ ct: [0, 1], t: [2] }),
+    ];
+    expect(demoDigest(m3, rounds, "111")!.matchWon).toBe(true);
+  });
+
+  it("charts no ADR at all (null, not 0) for stats-less old parses", () => {
+    const d = demoDigest(meta, [rd({}), rd({ winner: "T" })], "111")!;
+    expect(d.adr).toBeNull();
+  });
+
   it("skips bot-controlled rounds' aim data but keeps the rest", () => {
     const rounds = [
       rd({ bots: [0], stats: [{ i: 0, dmg: 50, rctMs: 100, aimN: 1 }] }),

@@ -54,42 +54,54 @@ function saveCached(demoId: string, steamId: string, s: OpponentSighting): void 
 /**
  * Every OTHER saved demo this steamId appears in, with their meter + stat line
  * from that game. Sorted oldest → newest so the series reads left to right.
- * Cache-first; only cache misses load a demo's rounds and run the pipeline.
+ * Cache-first; a cache miss loads that demo's rounds ONCE and caches a
+ * sighting for EVERY player in it (the pipeline is the cost — one run serves
+ * all ten suspects instead of re-running per case file). `shouldContinue`
+ * lets the caller abandon the loop when the case file unmounts or switches.
  */
-export async function opponentHistory(steamId: string, excludeDemoId: string): Promise<OpponentSighting[]> {
+export async function opponentHistory(
+  steamId: string,
+  excludeDemoId: string,
+  shouldContinue: () => boolean = () => true,
+): Promise<OpponentSighting[]> {
   if (!steamId || steamId.startsWith("sample-")) return [];
   const all = await listMatches().catch(() => []);
   const out: OpponentSighting[] = [];
   for (const s of all) {
+    if (!shouldContinue()) break;
     if (s.id === excludeDemoId) continue;
     if (!s.meta.players?.some((p) => p.steamId === steamId)) continue;
     const hit = loadCached(s.id, steamId);
     if (hit) {
-      out.push(hit);
+      // the summary bits are mutable (rename) — refresh them as we serve
+      out.push({ ...hit, demoName: s.name, savedAt: s.savedAt });
       continue;
     }
     const m = await getMatch(s.id).catch(() => null);
     if (!m) continue;
     const insights = computeInsights(m.summary.meta, m.rounds);
-    const p = insights.players.find((x) => x.steamId === steamId);
-    if (!p) continue;
     const rot = analyzeRotations(m.summary.meta, m.rounds);
-    const cheat = demoCheat(p, rot.available ? (rot.byPlayer.get(p.i) ?? null) : null);
-    const sighting: OpponentSighting = {
-      demoId: s.id,
-      demoName: s.name,
-      savedAt: s.savedAt,
-      map: s.meta.map,
-      name: p.name,
-      kills: p.kills,
-      deaths: p.deaths,
-      adr: p.adr,
-      cheatScore: cheat.score,
-      cheatBand: cheat.band,
-      confidence: cheat.confidence,
-    };
-    saveCached(s.id, steamId, sighting);
-    out.push(sighting);
+    for (const p of insights.players) {
+      if (!p.steamId || p.steamId.startsWith("sample-")) continue;
+      const cheat = demoCheat(p, rot.available ? (rot.byPlayer.get(p.i) ?? null) : null);
+      const sighting: OpponentSighting = {
+        demoId: s.id,
+        demoName: s.name,
+        savedAt: s.savedAt,
+        map: s.meta.map,
+        name: p.name,
+        kills: p.kills,
+        deaths: p.deaths,
+        adr: p.adr,
+        cheatScore: cheat.score,
+        cheatBand: cheat.band,
+        confidence: cheat.confidence,
+      };
+      saveCached(s.id, p.steamId, sighting);
+      if (p.steamId === steamId) out.push(sighting);
+    }
+    // yield between heavy demos so the case-file UI stays responsive
+    await new Promise((r) => setTimeout(r, 0));
   }
   return out.sort((a, b) => a.savedAt - b.savedAt);
 }

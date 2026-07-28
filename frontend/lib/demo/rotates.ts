@@ -255,6 +255,12 @@ function firstRelevantInfo(
   };
 
   for (const b of r.bomb ?? []) {
+    // Only SITE-REVEALING bomb events are information. Wave-2a parses also
+    // record drop/pickup (C4 ownership changes — freezetime handoffs at T
+    // spawn, carrier deaths); those reveal nothing about a site, and counting
+    // them collapsed teamInfo to ~round start, silently killing every
+    // blind-rotate verdict on fresh parses.
+    if (b.k === "drop" || b.k === "pickup") continue;
     const what =
       b.k === "plant" ? "bomb planted" : b.k === "plant_start" ? "plant started" : "bomb action";
     consider(b.t, "bomb", b.site ? `${what} at ${b.site}` : what, b.x, b.y, b.z);
