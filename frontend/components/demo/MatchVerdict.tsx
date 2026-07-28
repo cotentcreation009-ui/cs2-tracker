@@ -18,6 +18,8 @@ import {
   type TriggerKind,
 } from "@/lib/demo/rotates";
 import { AccountCheck } from "@/components/demo/AccountCheck";
+import { opponentHistory, type OpponentSighting } from "@/lib/demo/opponents";
+import { mapLabel } from "@/lib/format";
 import { cachedAccountScores, fetchAccountScores, getAiRead, setAiRead } from "@/lib/demo/accountStore";
 import type { DemoView } from "@/components/demo/MatchToolbar";
 import { buildProjection, type Projection } from "@/lib/demo/projection";
@@ -838,6 +840,76 @@ function EvidenceExplorer({
 }
 
 // ── the case file for one selected suspect ─────────────────────────────────
+// "Seen before" — this steamId's track record across the OTHER demos in the
+// library: one suspicious game reads very differently when the same player ran
+// a 70% meter three weeks ago too. Cache-first (lib/demo/opponents).
+function SeenBefore({
+  steamId,
+  demoId,
+  currentScore,
+  currentBand,
+}: {
+  steamId: string;
+  demoId: string;
+  currentScore: number;
+  currentBand: keyof typeof BAND_HEX;
+}) {
+  const [rows, setRows] = useState<OpponentSighting[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setRows(null);
+    void opponentHistory(steamId, demoId).then((r) => {
+      if (alive) setRows(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [steamId, demoId]);
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-line bg-panel/30 px-3 py-2 lg:shrink-0">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="stat-label">Seen before · {rows.length} other demo{rows.length === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-1" title="CheatMeter per demo, oldest → newest · ● = this demo">
+          {rows.map((r) => (
+            <span
+              key={r.demoId}
+              className="h-2 w-2 rounded-full"
+              style={{ background: BAND_HEX[r.cheatBand as keyof typeof BAND_HEX] ?? "#7f8ea3", opacity: 0.9 }}
+              title={`${new Date(r.savedAt).toLocaleDateString()} · ${r.cheatScore.toFixed(0)}%`}
+            />
+          ))}
+          <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/60" style={{ background: BAND_HEX[currentBand] }} title={`this demo · ${currentScore.toFixed(0)}%`} />
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {rows.slice(-4).map((r) => (
+          <Link
+            key={r.demoId}
+            href={`/demos/${r.demoId}?tab=verdict`}
+            className="flex items-center gap-2 rounded px-1 py-0.5 text-[11px] transition hover:bg-panel/60"
+            title={`open ${r.demoName}`}
+          >
+            <span className="w-16 shrink-0 tabular-nums text-faint">{new Date(r.savedAt).toLocaleDateString()}</span>
+            <span className="w-16 shrink-0 truncate capitalize text-muted">{mapLabel(r.map)}</span>
+            <span className="min-w-0 flex-1 truncate text-faint">
+              {r.kills}-{r.deaths} · {r.adr.toFixed(0)} ADR
+              {r.name && <span className="text-faint"> · as “{r.name}”</span>}
+            </span>
+            <span
+              className="shrink-0 font-bold tabular-nums"
+              style={{ color: BAND_HEX[r.cheatBand as keyof typeof BAND_HEX] ?? "#7f8ea3" }}
+              title={r.confidence < 0.6 ? "low-confidence read (older parse)" : undefined}
+            >
+              {r.cheatScore.toFixed(0)}%
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const STEP_METRIC_LABEL: Record<StepChange["metric"], string> = {
   reaction: "Reaction time",
   preaim: "Pre-aim offset",
@@ -1033,6 +1105,11 @@ function CaseFile({
           </div>
         )}
       </div>
+
+      {/* cross-demo track record for this steamId (skips the sample demo) */}
+      {!sampleId && (
+        <SeenBefore steamId={p.steamId} demoId={demoId} currentScore={cheat.score} currentBand={cheat.band} />
+      )}
 
       {/* consistency — the toggle signature. Legit aim wanders around a personal
           mean; a sharp sustained mid-match improvement is worth a manual look. */}
