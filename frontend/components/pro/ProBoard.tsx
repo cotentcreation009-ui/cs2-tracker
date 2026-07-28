@@ -6,19 +6,30 @@ import { usePoll, useNow } from "./usePoll";
 import { agoShort } from "./format";
 import { LiveMatchCard } from "./LiveMatchCard";
 import { UpcomingRow } from "./UpcomingRow";
+import { ResultRow } from "./ResultRow";
 
 const POLL_MS = 10_000;
 
 export function ProBoard() {
+  // include=finished: recently finished series (kept ~48h server-side) power
+  // the Recent results section — without it results simply vanish off the site
   const { data, error, loading } = usePoll<ProMatchesResponse>(
-    "/api/pro-matches",
+    "/api/pro-matches?include=finished",
     POLL_MS,
   );
   const now = useNow(1000);
 
-  const { live, upcomingGroups } = useMemo(() => {
+  const { live, upcomingGroups, finished } = useMemo(() => {
     const matches = data?.matches ?? [];
     const live = matches.filter((m) => m.status === "live");
+    const finished = matches
+      .filter((m) => m.status === "finished" && (m.teams?.length ?? 0) === 2)
+      .sort(
+        (x, y) =>
+          new Date(y.liveUpdatedAt ?? y.startScheduled ?? 0).getTime() -
+          new Date(x.liveUpdatedAt ?? x.startScheduled ?? 0).getTime(),
+      )
+      .slice(0, 12);
     const upcoming = matches
       .filter((m) => m.status === "upcoming")
       .sort(
@@ -39,7 +50,7 @@ export function ProBoard() {
         byEvent.set(label, { label, logo: m.tournamentLogoUrl, items: [m] });
       }
     }
-    return { live, upcomingGroups: [...byEvent.values()] };
+    return { live, upcomingGroups: [...byEvent.values()], finished };
   }, [data]);
 
   return (
@@ -103,7 +114,18 @@ export function ProBoard() {
             </section>
           )}
 
-          {live.length === 0 && upcomingGroups.length === 0 && <NoMatches />}
+          {finished.length > 0 && (
+            <section className="space-y-3">
+              <SectionHeading label="Recent results" count={finished.length} />
+              <div className="space-y-2">
+                {finished.map((m) => (
+                  <ResultRow key={m.seriesId} match={m} now={now} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {live.length === 0 && upcomingGroups.length === 0 && finished.length === 0 && <NoMatches />}
         </>
       )}
     </div>
