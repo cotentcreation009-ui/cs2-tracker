@@ -91,12 +91,36 @@ export interface ProRosterPlayer {
   winPct: number;
 }
 
+// One explainable prediction input: both teams' values and the signed pull it
+// adds toward teams[0] (positive = favors the first team).
+export interface ProPredFactor {
+  key: "form" | "h2h" | "margin" | "lineup" | string;
+  label: string;
+  a: number;
+  b: number;
+  contribution: number;
+  note?: string;
+}
+
+// Pre-match win estimate — a transparent heuristic over the SAME evidence the
+// history panel shows (form, head-to-head, margins, lineup K/D). Refuses to
+// produce a number on thin data (available=false + reason).
+export interface ProPrediction {
+  available: boolean;
+  reason?: string;
+  pA: number; // P(teams[0] wins the series)
+  factors?: ProPredFactor[];
+  seriesN: [number, number];
+  model: string;
+}
+
 export interface ProHistory {
   enabled?: boolean;
   teams?: ProTeam[];
   form?: Record<string, ProFormEntry[]>; // by gridId
   h2h?: ProH2HEntry[];
   rosters?: Record<string, ProRosterPlayer[]>; // by gridId
+  prediction?: ProPrediction;
 }
 
 // The pro-team page (/pro-matches/team/[id]).

@@ -210,6 +210,10 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 	form := map[string][]formEntry{}
 	h2hSeen := map[string]bool{}
 	var h2h []h2hEntry
+	// prediction inputs — collected over the FULL finished list (the form
+	// display below caps at 5, the model should not)
+	pstats := map[string]*predTeamStats{teamIDs[0]: {}, teamIDs[1]: {}}
+	h2hWins := map[string]int{}
 
 	for _, tid := range teamIDs {
 		for _, ps := range recent[tid] {
@@ -245,6 +249,18 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 					theirs = rt.Score
 				}
 			}
+			// prediction inputs: recency-weighted (the list is newest-first)
+			st := pstats[tid]
+			w := predWeight(st.N)
+			st.WeightSum += w
+			if won {
+				st.Wins++
+				st.Weighted += w
+			} else {
+				st.Losses++
+			}
+			st.MarginSum += float64(mine - theirs)
+			st.N++
 			if len(form[tid]) < 5 {
 				form[tid] = append(form[tid], formEntry{
 					SeriesID: ps.ID, Date: ps.StartTime, Won: won,
@@ -260,6 +276,9 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 					sb[rt.GridID] = rt.Score
 				}
 				h2h = append(h2h, h2hEntry{SeriesID: ps.ID, Date: ps.StartTime, WinnerID: winner, ScoreByTeam: sb})
+				if winner != "" {
+					h2hWins[winner]++
+				}
 			}
 		}
 	}
@@ -276,6 +295,18 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 	for _, tid := range teamIDs {
 		agg := aggregateTeamPlayers(recent[tid], ms.SeriesID, tid, resultOf)
 		rosters[tid] = buildPlayerRows(s, ctx, cl, rosterOf[tid], agg, "LAST_3_MONTHS", 7)
+		// lineup K/D for the prediction: mean over published-roster players
+		// with real data (unknown lineups leave KD at 0 → factor omitted)
+		sum, n := 0.0, 0
+		for _, pr := range rosters[tid] {
+			if pr.InRoster && pr.Maps > 0 && pr.KD > 0 {
+				sum += pr.KD
+				n++
+			}
+		}
+		if n >= 3 {
+			pstats[tid].KD = sum / float64(n)
+		}
 	}
 
 	return map[string]any{
@@ -283,6 +314,10 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 		"form":    form,
 		"h2h":     h2h,
 		"rosters": rosters,
+		"prediction": buildPrediction(
+			*pstats[teamIDs[0]], *pstats[teamIDs[1]],
+			h2hWins[teamIDs[0]], h2hWins[teamIDs[1]],
+		),
 	}
 }
 

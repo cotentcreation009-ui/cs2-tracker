@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProFormEntry, ProHistory, ProRosterPlayer, ProTeam } from "./types";
+import type { ProFormEntry, ProHistory, ProPrediction, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
@@ -59,6 +59,10 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
   return (
     <section className="space-y-3">
       <SectionTitle />
+
+      {/* who's favored, and WHY — every factor's inputs are the same numbers
+          shown in the cards below it */}
+      {a && b && data.prediction && <PredictionCard pred={data.prediction} a={a} b={b} />}
 
       {/* lineups: who's on each team + their recent-series stats */}
       {(data.rosters?.[a?.gridId ?? ""]?.length || data.rosters?.[b?.gridId ?? ""]?.length) ? (
@@ -124,6 +128,108 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
 
 // HLTV-style lineup: a photo card per player (photo, name, K/D + maps),
 // starters first; extra stand-ins and no-data roster players fold into chips.
+// per-factor value formatting — the same numbers the evidence cards show
+function fmtFactor(key: string, v: number): string {
+  switch (key) {
+    case "form":
+      return `${(v * 100).toFixed(0)}%`;
+    case "h2h":
+      return `${v.toFixed(0)} win${v === 1 ? "" : "s"}`;
+    case "margin":
+      return `${v >= 0 ? "+" : ""}${v.toFixed(1)}`; // avg map margin (unit in tooltip)
+    case "lineup":
+      return v.toFixed(2);
+    default:
+      return v.toFixed(2);
+  }
+}
+
+// The verdict + its reasons. A transparent heuristic (labelled), never shown
+// without the evidence: each factor row carries both teams' actual values, and
+// the panels below are the receipts. Refuses thin data instead of guessing.
+function PredictionCard({ pred, a, b }: { pred: ProPrediction; a: ProTeam; b: ProTeam }) {
+  const aHex = validHex(a.colorPrimary) ?? "#5b9dff";
+  const bHex = validHex(b.colorPrimary) ?? "#e7b53c";
+  if (!pred.available) {
+    return (
+      <div className="card-2 px-4 py-2.5 text-center text-[11px] text-faint">
+        No win estimate — {pred.reason ?? "insufficient data"} ({pred.seriesN[0]} vs {pred.seriesN[1]} finished
+        series tracked).
+      </div>
+    );
+  }
+  const pa = Math.round(pred.pA * 100);
+  const pb = 100 - pa;
+  const favA = pred.pA >= 0.5;
+  return (
+    <div className="card-2 p-4">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <span className="stat-label">Win estimate</span>
+        <span className="text-[10px] text-faint" title={`model ${pred.model} — a hand-weighted read over the evidence below, not a trained model and not betting advice`}>
+          heuristic · from {pred.seriesN[0]} + {pred.seriesN[1]} recent series
+        </span>
+      </div>
+      {/* the verdict bar */}
+      <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+        <span className={`truncate font-bold ${favA ? "" : "opacity-60"}`} style={{ color: aHex }}>
+          {a.shortName || a.name}
+        </span>
+        <span className="shrink-0 text-lg font-extrabold tabular-nums">
+          <span className={favA ? "text-ink" : "text-faint"}>{pa}%</span>
+          <span className="mx-1.5 text-xs font-normal text-faint">vs</span>
+          <span className={favA ? "text-faint" : "text-ink"}>{pb}%</span>
+        </span>
+        <span className={`truncate text-right font-bold ${favA ? "opacity-60" : ""}`} style={{ color: bHex }}>
+          {b.shortName || b.name}
+        </span>
+      </div>
+      <div className="mb-3 flex h-2.5 overflow-hidden rounded-full bg-panel">
+        <div className="h-full rounded-l-full transition-all" style={{ width: `${pa}%`, background: aHex, opacity: 0.85 }} />
+        <div className="h-full rounded-r-full transition-all" style={{ width: `${pb}%`, background: bHex, opacity: 0.85 }} />
+      </div>
+      {/* the reasons — each row: who it favors and by how much, with values */}
+      <div className="mx-auto max-w-xl space-y-1">
+        {(pred.factors ?? []).map((f) => {
+          const favors = f.contribution > 0.02 ? "a" : f.contribution < -0.02 ? "b" : null;
+          return (
+            <div key={f.key} className="flex items-center gap-2 text-xs" title={f.note}>
+              <span
+                className="w-13 shrink-0 truncate text-right tabular-nums"
+                style={{ color: favors === "a" ? aHex : undefined, fontWeight: favors === "a" ? 700 : 400, opacity: favors === "a" ? 1 : 0.65 }}
+              >
+                {fmtFactor(f.key, f.a)}
+              </span>
+              <span className="w-28 shrink-0 text-center text-muted">{f.label}</span>
+              <span
+                className="w-13 shrink-0 truncate tabular-nums"
+                style={{ color: favors === "b" ? bHex : undefined, fontWeight: favors === "b" ? 700 : 400, opacity: favors === "b" ? 1 : 0.65 }}
+              >
+                {fmtFactor(f.key, f.b)}
+              </span>
+              {/* pull strength toward the favored side */}
+              <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel">
+                <span className="absolute inset-y-0 left-1/2 w-px bg-line" />
+                <span
+                  className="absolute inset-y-0 rounded-full"
+                  style={{
+                    background: f.contribution >= 0 ? aHex : bHex,
+                    opacity: 0.8,
+                    left: f.contribution >= 0 ? `${50 - Math.min(50, Math.abs(f.contribution) * 55)}%` : "50%",
+                    width: `${Math.min(50, Math.abs(f.contribution) * 55)}%`,
+                  }}
+                />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-center text-[10px] text-faint">
+        every input is shown in the panels below · last ~120 days · estimate, not betting advice
+      </p>
+    </div>
+  );
+}
+
 function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer[] }) {
   const hex = validHex(team.colorPrimary) ?? "#8a93a5";
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
