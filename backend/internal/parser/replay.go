@@ -199,6 +199,16 @@ type ReplayKill struct {
 	// It is corroborating context (strong on wallbang/through-smoke kills),
 	// NOT standalone wall-tracking evidence.
 	Unseen bool `json:"us,omitempty"`
+	// Pre-sight tracking score (wave-2b): of the ~4 Hz samples in the 6 s
+	// before the victim became visible to the killer (or before the kill, when
+	// never visible), the percentage where the killer's crosshair stayed
+	// within 15° of the MOVING, occluded victim. A crosshair that follows a
+	// target through geometry is the aim-side radar tell. Stationary victims
+	// don't count (holding an angle isn't tracking), samples within 1.5 s of
+	// losing sight don't count (extrapolating a peek is legit), and at least
+	// 8 samples (~2 s) are required. Stored +1 so a true 0% survives
+	// omitempty: trk=1 means 0%, trk=101 means 100%.
+	Trk int32 `json:"trk,omitempty"`
 	// Killer movement/stance at the kill (wave-2 parses only; all omitted on
 	// older parses). Vel is horizontal speed in game units/s (250 ≈ full run,
 	// 0 omitted — stationary and old-parse look alike, so probe cr/sc/vel
@@ -384,6 +394,23 @@ type replayCollector struct {
 	// WeaponFire (game-event order is not guaranteed) so the join still lands.
 	bursts     map[int]*fireBurst
 	pendingHit map[int]float64
+
+	// pre-sight tracking (per round): ~4 Hz samples of each enemy pair's
+	// crosshair offset while the victim is NOT visible to the would-be killer.
+	// trkBuf: victim -> killer -> recent samples (pruned to the last 8 s);
+	// trkLast: last sample time per pair; seenEnd: when the pair's visibility
+	// last ENDED (falling edge) — samples within 1.5 s of it are legit
+	// extrapolation, not tracking.
+	trkBuf  map[uint64]map[uint64][]trkSample
+	trkLast map[uint64]map[uint64]float64
+	seenEnd map[uint64]map[uint64]float64
+}
+
+type trkSample struct {
+	t    float64
+	off  float32 // crosshair offset to the occluded victim, degrees
+	dist float32 // killer→victim distance, game units
+	brg  float32 // bearing killer→victim (world yaw, degrees) — for sweep rate
 }
 
 type velSample struct{ x, y, t float64 }
@@ -508,6 +535,9 @@ func (rc *replayCollector) onRoundStart(events.RoundStart) {
 	rc.velNow = map[uint64]float64{}
 	rc.bursts = map[int]*fireBurst{}
 	rc.pendingHit = map[int]float64{}
+	rc.trkBuf = map[uint64]map[uint64][]trkSample{}
+	rc.trkLast = map[uint64]map[uint64]float64{}
+	rc.seenEnd = map[uint64]map[uint64]float64{}
 	for _, pl := range rc.p.GameState().Participants().Playing() {
 		i := rc.playerIndex(pl)
 		if i < 0 {
@@ -628,9 +658,70 @@ func (rc *replayCollector) scanSpotted(gs dem.GameState) {
 			if seen && !was {
 				rc.setSpot(v.SteamID64, k.SteamID64, now, aimOffsetDeg(k, v))
 			}
+			if !seen && was {
+				// falling edge — extrapolating the peek is legit for a while
+				if rc.seenEnd[v.SteamID64] == nil {
+					rc.seenEnd[v.SteamID64] = map[uint64]float64{}
+				}
+				rc.seenEnd[v.SteamID64][k.SteamID64] = now
+			}
 			rc.setSpotted(v.SteamID64, k.SteamID64, seen)
+			// pre-sight tracking sample (~4 Hz per pair): only while occluded,
+			// past the extrapolation grace, and with the victim actually moving
+			if !seen {
+				rc.sampleTracking(v, k, now)
+			}
 		}
 	}
+}
+
+// sampleTracking appends one occluded-crosshair sample for (victim v, enemy k)
+// when the pair is due (0.25 s cadence), the victim is moving (> 60 u/s —
+// pinning a STATIONARY hidden player could be angle-holding), and the last
+// sighting ended more than 1.5 s ago. The buffer holds ~8 s per pair.
+func (rc *replayCollector) sampleTracking(v, k *common.Player, now float64) {
+	if rc.trkLast[v.SteamID64] == nil {
+		rc.trkLast[v.SteamID64] = map[uint64]float64{}
+	}
+	if now-rc.trkLast[v.SteamID64][k.SteamID64] < 0.25 {
+		return
+	}
+	rc.trkLast[v.SteamID64][k.SteamID64] = now
+	if se, ok := rc.seenEnd[v.SteamID64][k.SteamID64]; ok && now-se < 1.5 {
+		return
+	}
+	if rc.velNow[v.SteamID64] <= 60 {
+		return
+	}
+	if rc.trkBuf[v.SteamID64] == nil {
+		rc.trkBuf[v.SteamID64] = map[uint64][]trkSample{}
+	}
+	buf := rc.trkBuf[v.SteamID64][k.SteamID64]
+	// prune anything older than the 8 s horizon
+	cut := 0
+	for cut < len(buf) && buf[cut].t < now-8 {
+		cut++
+	}
+	buf = buf[cut:]
+	kp, vp := k.Position(), v.Position()
+	buf = append(buf, trkSample{
+		t:    now,
+		off:  float32(aimOffsetDeg(k, v)),
+		dist: float32(math.Hypot(vp.X-kp.X, vp.Y-kp.Y)),
+		brg:  float32(math.Atan2(vp.Y-kp.Y, vp.X-kp.X) * 180 / math.Pi),
+	})
+	rc.trkBuf[v.SteamID64][k.SteamID64] = buf
+}
+
+// wrapDeg maps an angle difference into (-180, 180].
+func wrapDeg(d float64) float64 {
+	for d > 180 {
+		d -= 360
+	}
+	for d <= -180 {
+		d += 360
+	}
+	return d
 }
 
 func (rc *replayCollector) setSpotted(v, k uint64, val bool) {
@@ -722,6 +813,44 @@ func (rc *replayCollector) onKill(e events.Kill) {
 			k.Unseen = true
 		} else if _, ever := m[e.Killer.SteamID64]; !ever {
 			k.Unseen = true
+		}
+		// Pre-sight tracking score: how much of the window BEFORE the victim
+		// became visible (or before an unseen kill) the killer's crosshair
+		// spent pinned to the occluded, moving victim. The window ends at the
+		// CURRENT visibility episode's start, so post-sight aim (legit) never
+		// counts.
+		end := rc.rt()
+		if st, ok := rc.spotT[e.Victim.SteamID64][e.Killer.SteamID64]; ok {
+			end = st
+		}
+		// Three gates make a sample count, each killing a legit explanation:
+		// beyond footstep audio (~1100u — you can track what you can HEAR),
+		// and the victim's bearing SWEEPING (≥ trkSweepDeg/s — a static
+		// crosshair trivially "contains" someone approaching a watched angle;
+		// only a crosshair that TURNS with a hidden target is tracking).
+		// On = pinned inside trkPinDeg while sweeping. Calibrated on real MM
+		// demos so legit play produces near-zero high scores.
+		buf := rc.trkBuf[e.Victim.SteamID64][e.Killer.SteamID64]
+		n, on := 0, 0
+		for i := 1; i < len(buf); i++ {
+			s, prev := buf[i], buf[i-1]
+			if s.t < end-6 || s.t > end-0.05 || s.dist <= trkMinDist {
+				continue
+			}
+			dt := s.t - prev.t
+			if dt <= 0 || dt > 0.6 { // gap — no rate available
+				continue
+			}
+			if math.Abs(wrapDeg(float64(s.brg-prev.brg)))/dt < trkSweepDeg {
+				continue
+			}
+			n++
+			if s.off < trkPinDeg {
+				on++
+			}
+		}
+		if n >= 8 {
+			k.Trk = 1 + int32(math.Round(100*float64(on)/float64(n)))
 		}
 	}
 	// Aim tells for the killer: if the victim had become visible to them, how
@@ -1189,6 +1318,16 @@ func (rc *replayCollector) onPlayerHurt(e events.PlayerHurt) {
 		}
 	}
 }
+
+// Pre-sight tracking gates (see ReplayKill.Trk). trkMinDist ≈ the audible
+// footstep radius — closer than this, "tracking" a hidden runner is just ears.
+// trkPinDeg is a tight pin, not a general facing; both calibrated on real MM
+// demos so legit play produces near-zero high scores.
+const (
+	trkMinDist  = 1100 // game units
+	trkPinDeg   = 8    // degrees
+	trkSweepDeg = 5    // degrees/second of victim bearing sweep
+)
 
 // burstGap is the inter-shot silence that ends a burst. Auto fire cycles at
 // ~90-150 ms, so consecutive spray bullets stay inside the gap while a
