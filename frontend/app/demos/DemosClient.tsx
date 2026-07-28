@@ -193,11 +193,16 @@ export function DemosClient() {
       try {
         const demos = parseImportPayload(JSON.parse(await file.text()));
         const saved = await importMatches(demos);
-        if (saved.length) markNew(saved[saved.length - 1].id);
-        await refresh();
+        // badge the NEWEST imported match — library exports arrive newest-first,
+        // so the last array element would be the card at the BOTTOM of the grid
+        if (saved.length) markNew(saved.reduce((a, b) => (b.savedAt > a.savedAt ? b : a)).id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't import that file.");
       } finally {
+        // refresh unconditionally: a partial import (quota hit on demo k of N)
+        // has already committed k−1 demos — the list must show the true state,
+        // or a natural retry duplicates them
+        await refresh();
         setImportBusy(false);
       }
     },
@@ -619,7 +624,9 @@ export function DemosClient() {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
                       <span className="tabular-nums">{m.meta.rounds} rounds</span>
                       <span className="tabular-nums">
-                        {m.meta.players.length} players
+                        {/* optional-chained: one legacy junk record must never
+                            crash the whole library page (Delete lives here) */}
+                        {m.meta.players?.length ?? 0} players
                       </span>
                       <span>{new Date(m.savedAt).toLocaleDateString()}</span>
                       {!calibrated && (

@@ -68,6 +68,15 @@ describe("roundWinProb", () => {
     // all Ts dead, no plant → CT won
     const wipe = rd({ kills: [5, 6, 7, 8, 9].map((v, i) => kill(20 + i, v)) });
     expect(pAt(roundWinProb(meta, wipe), 30)).toBe(1);
+    // all CTs dead, no plant → T won instantly (the mirrored pin), and the
+    // curve must STAY at 0 — the clock term must not drift it back toward CT
+    const ctWipe = rd({ kills: [0, 1, 2, 3, 4].map((v, i) => kill(20 + i, v)) });
+    const wpW = roundWinProb(meta, ctWipe);
+    expect(pAt(wpW, 30)).toBe(0);
+    expect(pAt(wpW, 100)).toBe(0);
+    // the round-deciding kill lands exactly on 0 — no residual CT probability
+    const last = wpW.swings[wpW.swings.length - 1];
+    expect(last.delta).toBeLessThan(0);
     // defuse → 1, explode → 0
     const def = rd({ bomb: [{ t: 40, k: "plant", x: 0, y: 0 }, { t: 60, k: "defuse", x: 0, y: 0 }] });
     expect(pAt(roundWinProb(meta, def), 61)).toBe(1);
@@ -86,5 +95,19 @@ describe("roundWinProb", () => {
   it("a quiet clock leans CT when nothing happens", () => {
     const wp = roundWinProb(meta, rd());
     expect(pAt(wp, 110)).toBeGreaterThan(pAt(wp, 20));
+  });
+
+  it("dead players take their equipment with them — equal buys stay near even", () => {
+    // both teams on identical $5k-per-player buys; CT loses 4 players.
+    // If the pool kept dividing by the shrinking alive count, the lone CT
+    // would look $25k-rich vs $5k Ts and fake a CT lean.
+    const stats = Array.from({ length: 10 }, (_, i) => ({ i, equip: 5000 }));
+    const kills = [0, 1, 2, 3].map((v, i) => kill(20 + i, v));
+    const withEquip = rd({ stats, kills } as never);
+    const without = rd({ kills });
+    const pe = pAt(roundWinProb(meta, withEquip), 30);
+    const p0 = pAt(roundWinProb(meta, without), 30);
+    // identical economies must not move the estimate vs no-equip-data at all
+    expect(Math.abs(pe - p0)).toBeLessThan(0.005);
   });
 });

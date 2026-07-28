@@ -76,17 +76,21 @@ export async function listMatches(): Promise<MatchSummary[]> {
 
 // Go marshals empty slices as JSON null, so coerce every round's arrays to []
 // (and nade thrower to a number) once on load — keeps the replay viewer and all
-// analysis views null-safe no matter how sparse a round is.
-function normalizeRound(r: ReplayRound): ReplayRound {
+// analysis views null-safe no matter how sparse a round is. arr() also shields
+// against non-array junk (a hand-edited import stored before validation
+// existed): wrong-typed fields become empty instead of crashing every open.
+function normalizeRound(r: ReplayRound | null | undefined): ReplayRound {
+  const x = (r ?? {}) as ReplayRound;
+  const arr = <T,>(v: T[] | undefined | null): T[] => (Array.isArray(v) ? v : []);
   return {
-    ...r,
-    ct: r.ct ?? [],
-    t: r.t ?? [],
-    frames: r.frames ?? [],
-    kills: r.kills ?? [],
-    nades: (r.nades ?? []).map((n) => ({ ...n, by: n.by ?? -1 })),
-    bomb: r.bomb ?? [],
-    stats: r.stats ?? [],
+    ...x,
+    ct: arr(x.ct),
+    t: arr(x.t),
+    frames: arr(x.frames),
+    kills: arr(x.kills),
+    nades: arr(x.nades).map((n) => ({ ...n, by: n.by ?? -1 })),
+    bomb: arr(x.bomb),
+    stats: arr(x.stats),
   };
 }
 
@@ -178,20 +182,28 @@ export async function exportLibrary(): Promise<ExportedLibrary> {
  * Pure — no IndexedDB — so it is unit-testable and runs before any write.
  */
 export function parseImportPayload(json: unknown): { name: string; savedAt: number; meta: ReplayMeta; rounds: ReplayRound[] }[] {
+  // Everything here is persisted verbatim into IndexedDB and rendered by every
+  // tab afterwards — one junk record that passes would crash the library or a
+  // match page on EVERY visit, so shapes are validated per entry, not per file.
+  const isPlayers = (p: unknown): p is ReplayMeta["players"] =>
+    Array.isArray(p) &&
+    p.every((e) => !!e && typeof e === "object" && typeof (e as { name?: unknown }).name === "string");
   const isMeta = (m: unknown): m is ReplayMeta => {
     const x = m as ReplayMeta | null;
-    return !!x && typeof x.map === "string" && Array.isArray(x.players) && typeof x.rounds === "number";
+    return !!x && typeof x.map === "string" && isPlayers(x.players) && typeof x.rounds === "number";
   };
+  const isRounds = (r: unknown): r is ReplayRound[] =>
+    Array.isArray(r) && r.every((e) => !!e && typeof e === "object" && !Array.isArray(e));
   const one = (d: unknown, fallbackName: string) => {
     const x = d as Partial<ExportedMatch> | null;
-    if (!x || !isMeta(x.meta) || !Array.isArray(x.rounds)) {
-      throw new Error("Not a StatRun demo export — missing meta/rounds.");
+    if (!x || !isMeta(x.meta) || !isRounds(x.rounds)) {
+      throw new Error("Not a StatRun demo export — missing or malformed meta/rounds.");
     }
     return {
       name: typeof x.name === "string" && x.name.trim() ? x.name : fallbackName,
       savedAt: typeof x.savedAt === "number" ? x.savedAt : Date.now(),
       meta: x.meta,
-      rounds: x.rounds as ReplayRound[],
+      rounds: x.rounds,
     };
   };
   const j = json as { kind?: string; demos?: unknown[]; map?: string; roundData?: unknown } | null;
@@ -203,12 +215,21 @@ export function parseImportPayload(json: unknown): { name: string; savedAt: numb
   if (j.kind === "statrun-demo") return [one(j, "Imported demo")];
   // raw parser payload (…dem.replay.json): {map, tickRate, frameHz, players, rounds, roundData}
   if (typeof j.map === "string" && Array.isArray(j.roundData)) {
-    const r = j as unknown as ReplayMeta & { roundData: ReplayRound[] };
+    const r = j as unknown as ReplayMeta & { roundData: unknown };
+    if (!isPlayers(r.players) || !isRounds(r.roundData)) {
+      throw new Error("Parser payload is incomplete — missing players or malformed round data.");
+    }
     return [
       {
         name: `Imported · ${r.map.replace(/^de_/, "")}`,
         savedAt: Date.now(),
-        meta: { map: r.map, tickRate: r.tickRate, frameHz: r.frameHz, players: r.players, rounds: r.rounds },
+        meta: {
+          map: r.map,
+          tickRate: typeof r.tickRate === "number" ? r.tickRate : 64,
+          frameHz: typeof r.frameHz === "number" ? r.frameHz : 1,
+          players: r.players,
+          rounds: typeof r.rounds === "number" ? r.rounds : r.roundData.length,
+        },
         rounds: r.roundData,
       },
     ];

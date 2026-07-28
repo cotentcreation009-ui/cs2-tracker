@@ -55,10 +55,14 @@ function bestStep(points: SeriesPoint[], improveSign: 1 | -1): Omit<StepChange, 
       ((a.length - 1) * std(a, ma) ** 2 + (b.length - 1) * std(b, mb) ** 2) /
         Math.max(1, a.length + b.length - 2),
     );
-    if (pooled < 1e-6) continue; // flat series — no meaningful step
     const diff = (mb - ma) * improveSign;
     if (diff <= 0) continue; // only improvements are suspicious
-    const score = diff / pooled;
+    // Zero variance with a real diff is the PERFECT two-level step (quantized
+    // accuracy can produce it) — skipping it would miss the sharpest possible
+    // toggle. Floor sigma at 2% of the level instead, so a clean step scores
+    // huge while a 0.4%-on-flat wobble still can't sneak past the threshold.
+    const floor = Math.max(1e-6, 0.02 * (Math.abs(ma) + Math.abs(mb)) / 2);
+    const score = diff / Math.max(pooled, floor);
     if (score >= MIN_SCORE && (!best || score > best.score)) {
       best = { atRound: points[k].round, before: ma, after: mb, score };
     }

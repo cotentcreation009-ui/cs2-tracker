@@ -166,6 +166,12 @@ export function StrategyMap({
     return offRef.current;
   };
 
+  // the image effect below runs on [meta] only, so its onload closure would
+  // capture a stale redraw — layer/side/moment changes made while the radar
+  // PNG downloads would be repainted away when it arrives. The ref always
+  // points at the latest redraw instead.
+  const redrawRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     let alive = true;
     imgOk.current = false;
@@ -174,7 +180,7 @@ export function StrategyMap({
       if (!alive) return;
       imgRef.current = img;
       imgOk.current = true;
-      redraw();
+      redrawRef.current();
     };
     img.onerror = () => {
       if (alive) imgOk.current = false;
@@ -382,6 +388,7 @@ export function StrategyMap({
   }, [rounds, active, side, scopeRound, focusPlayer, spreadMult, toPx, sideOfRound, setups, meta]);
 
   useEffect(() => {
+    redrawRef.current = redraw;
     redraw();
   }, [redraw]);
 

@@ -70,6 +70,28 @@ describe("aimConsistency", () => {
     expect(aimConsistency(rounds, 0).step).toBeNull();
   });
 
+  it("flags a PERFECT noise-free step at the right round (zero pooled sigma)", () => {
+    // quantized accuracy can be exactly constant on both sides of a toggle —
+    // the sharpest possible step must not be skipped or misplaced
+    const rounds = [20, 20, 20, 20, 20, 20, 60, 60, 60, 60, 60, 60].map((acc, i) =>
+      round(i + 1, { shots: 20, hits: (acc / 100) * 20 }),
+    );
+    const c = aimConsistency(rounds, 0);
+    expect(c.step).not.toBeNull();
+    expect(c.step!.metric).toBe("accuracy");
+    expect(c.step!.atRound).toBe(7);
+    expect(c.step!.before).toBeCloseTo(20);
+    expect(c.step!.after).toBeCloseTo(60);
+  });
+
+  it("a tiny wobble on a flat series never flags", () => {
+    // 20% constant, then 20.4% constant — zero variance but a meaningless diff
+    const rounds = [500, 500, 500, 500, 502, 502, 502, 502].map((hits, i) =>
+      round(i + 1, { shots: 2500, hits }),
+    );
+    expect(aimConsistency(rounds, 0).step).toBeNull();
+  });
+
   it("picks accuracy steps too (rising = suspicious)", () => {
     const rounds = Array.from({ length: 14 }, (_, i) => {
       const acc = i < 7 ? 20 + (i % 3) * 2 : 55 + (i % 3) * 2; // % roughly doubles

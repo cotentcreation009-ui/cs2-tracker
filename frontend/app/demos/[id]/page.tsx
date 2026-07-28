@@ -1291,7 +1291,22 @@ export default function ReplayPage() {
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist: number; mx: number; my: number } | null>(null);
 
+  // rebuild pinch baselines from the CURRENT first two tracked pointers —
+  // used at pinch start and whenever the finger pair changes mid-gesture
+  const initPinch = () => {
+    const [a, b] = [...pointersRef.current.values()];
+    const ia = toInternal(a.x, a.y);
+    const ib = toInternal(b.x, b.y);
+    pinchRef.current = {
+      dist: Math.max(1, Math.hypot(ia.x - ib.x, ia.y - ib.y)),
+      mx: (ia.x + ib.x) / 2,
+      my: (ia.y + ib.y) / 2,
+    };
+  };
   const onCanvasDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // right/ctrl-click opens the context menu, which swallows the pointerup and
+    // would stick the drag + leak the pointer entry (same guard as the scrub bar)
+    if (e.button !== 0) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1301,17 +1316,11 @@ export default function ReplayPage() {
     if (pointersRef.current.size === 2) {
       // pinch begins — a two-finger gesture is never a pan or a select
       dragRef.current = null;
-      const [a, b] = [...pointersRef.current.values()];
-      const ia = toInternal(a.x, a.y);
-      const ib = toInternal(b.x, b.y);
-      pinchRef.current = {
-        dist: Math.max(1, Math.hypot(ia.x - ib.x, ia.y - ib.y)),
-        mx: (ia.x + ib.x) / 2,
-        my: (ia.y + ib.y) / 2,
-      };
+      initPinch();
       setHoverBlip(null);
       return;
     }
+    if (pointersRef.current.size > 2) return; // extra contacts (palm) join silently
     movedRef.current = false; // fresh gesture — a stale pinch flag must not eat the next tap
     const v = vpRef.current;
     dragRef.current = { cx: e.clientX, cy: e.clientY, ox: v.ox, oy: v.oy, moved: false };
@@ -1389,7 +1398,13 @@ export default function ReplayPage() {
     } catch {
       /* not captured */
     }
-    if (pinchRef.current && pointersRef.current.size < 2) {
+    if (pinchRef.current) {
+      if (pointersRef.current.size >= 2) {
+        // an original pinch finger lifted but 2+ remain — rebase on the new
+        // pair, or the next move's dist/mid ratio would be arbitrary (lurch)
+        initPinch();
+        return;
+      }
       pinchRef.current = null;
       movedRef.current = true; // the gesture was a pinch, not a select tap
     }
@@ -1405,6 +1420,14 @@ export default function ReplayPage() {
     pinchRef.current = null;
     dragRef.current = null;
     setHoverBlip(null);
+  };
+  // capture lost without an up/cancel reaching us (context menu, focus steal):
+  // drop the entry so a leaked pointer can't turn a later single-finger touch
+  // into a phantom pinch. Fires redundantly after our own release — harmless.
+  const onCanvasLostCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    dragRef.current = null;
   };
   const onCanvasLeave = () => {
     dragRef.current = null;
@@ -1438,6 +1461,18 @@ export default function ReplayPage() {
   useEffect(() => {
     focusRef.current = focusPlayer;
   }, [focusPlayer]);
+
+  // the canvas unmounts on tab switch; a finger still held at that moment gets
+  // its pointerup delivered elsewhere, and the stale entry would turn every
+  // later single-finger touch into a phantom pinch — clear all gesture state
+  useEffect(() => {
+    return () => {
+      pointersRef.current.clear();
+      pinchRef.current = null;
+      dragRef.current = null;
+      movedRef.current = false;
+    };
+  }, [tab]);
 
   // the hover tooltip only updates on mousemove — drop it when playback,
   // zoom/pan or a round change would otherwise leave it showing stale data
@@ -1487,17 +1522,31 @@ export default function ReplayPage() {
     const qt = q.get("tab");
     // hasOwnProperty — a plain `in` accepts Object.prototype keys ("toString")
     if (qt && Object.prototype.hasOwnProperty.call(TAB_ICON, qt)) setTab(qt as Tab);
+    // `r` = a real workspace-wide round scope; `pr` = merely the round the
+    // replay was paused in, unscoped. Restoring `pr` as a scope would silently
+    // flip every other tab to single-round data after a refresh.
     const r = num("r");
     const hasRound = Number.isFinite(r) && r >= 1 && r <= rounds.length;
     if (hasRound) setScopeRound(r - 1);
+    const pr = num("pr");
+    const hasPaused = !hasRound && Number.isFinite(pr) && pr >= 1 && pr <= rounds.length;
+    if (hasPaused) {
+      setRoundIdx(pr - 1);
+      roundRef.current = pr - 1;
+    }
     const p = num("p");
     if (Number.isFinite(p) && p >= 0 && p < meta.players.length) setFocusPlayer(p);
     const t = num("t");
     if (Number.isFinite(t) && t > 0) {
-      // same path as "watch this moment": scope the round, then seek once loaded
-      pendingJumpRound.current = hasRound ? r - 1 : 0;
-      if (!hasRound) setScopeRound(0);
-      setJump({ round: hasRound ? r - 1 : 0, time: t });
+      // same path as "watch this moment": land in the right round (scoped via
+      // `r`, or just the replay's local round via `pr`), then seek once loaded
+      const target = hasRound ? r - 1 : hasPaused ? pr - 1 : 0;
+      pendingJumpRound.current = target;
+      if (!hasRound && !hasPaused) {
+        setRoundIdx(0);
+        roundRef.current = 0;
+      }
+      setJump({ round: target, time: t });
     }
   }, [loading, meta, rounds.length]);
 
@@ -1510,9 +1559,11 @@ export default function ReplayPage() {
       const put = (k: string, v: string | null) => (v == null ? q.delete(k) : q.set(k, v));
       put("tab", tab === "replay" ? null : tab);
       // the playhead is only worth a link while paused mid-round — and it MUST
-      // carry its round, even unscoped, or the restore lands in round 1
+      // carry its round. `r` is reserved for a real scope; an unscoped paused
+      // round travels as `pr` so a refresh can't promote it to a workspace scope.
       const tOut = !playing && time > 1 ? String(Math.floor(time)) : null;
-      put("r", scopeRound != null ? String(scopeRound + 1) : tOut != null ? String(roundIdx + 1) : null);
+      put("r", scopeRound != null ? String(scopeRound + 1) : null);
+      put("pr", scopeRound == null && tOut != null ? String(roundIdx + 1) : null);
       put("p", focusPlayer != null ? String(focusPlayer) : null);
       put("t", tOut);
       const qs = q.toString();
@@ -1535,7 +1586,10 @@ export default function ReplayPage() {
     };
     cv.addEventListener("wheel", onWheel, { passive: false });
     return () => cv.removeEventListener("wheel", onWheel);
-  }, [toInternal, zoomAt, tab]);
+    // `loading` matters: the first run happens before the canvas exists (the
+    // component early-returns while loading), and every other dep is stable —
+    // without it the listener never attaches on a fresh page load
+  }, [toInternal, zoomAt, tab, loading]);
 
   if (loading) return <div className="card px-5 py-6 text-sm text-muted">Loading replay…</div>;
   if (!meta || !round)
@@ -1791,7 +1845,7 @@ export default function ReplayPage() {
               visible — nothing overlays map pixels. Side columns are fr-based
               so they absorb the leftover width beside the square. */}
           <div className="min-w-0 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:@container-size">
-        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-104px))] lg:max-w-none">
+        <div className="relative mx-auto w-full max-w-180 lg:mx-0 lg:w-[min(100cqw,calc(100cqh-112px))] lg:max-w-none">
         {/* canvas + its overlays get their own box so overlays anchor to the
             map, not to the wrapper (which sub-lg also contains the transport) */}
         <div className="relative">
@@ -1803,6 +1857,7 @@ export default function ReplayPage() {
             onPointerMove={onCanvasMove}
             onPointerUp={onCanvasUp}
             onPointerCancel={onCanvasCancel}
+            onLostPointerCapture={onCanvasLostCapture}
             onPointerLeave={onCanvasLeave}
             onClick={onCanvasClick}
             // touch-action: unzoomed, a single finger still scrolls the page
@@ -1898,7 +1953,9 @@ export default function ReplayPage() {
         {/* transport bar — a slim strip BELOW the map spanning the full
             column (theater-mode style): never covers map pixels, and its
             controls row always has room no matter how small the height-bound
-            radar gets. The radar math reserves its ~104px. */}
+            radar gets. The radar math reserves 112px for it: ~70px controls +
+            32px win-prob ribbon + gap — if this card grows, bump the
+            calc(100cqh-112px) above with it or the pane overflows. */}
         <div className="card mx-auto mt-3 w-full max-w-180 px-3.5 py-2.5 lg:mt-0 lg:w-full lg:max-w-none lg:px-3 lg:py-1.5">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 lg:min-w-0 lg:flex-nowrap">
             <div className="flex shrink-0 items-center gap-1">

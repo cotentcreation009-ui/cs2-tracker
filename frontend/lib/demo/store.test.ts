@@ -42,8 +42,31 @@ describe("parseImportPayload", () => {
   it("rejects garbage with a human message", () => {
     expect(() => parseImportPayload(null)).toThrow(/JSON object/);
     expect(() => parseImportPayload({ hello: 1 })).toThrow(/Unrecognized/);
-    expect(() => parseImportPayload({ kind: "statrun-demo", meta: { map: 3 }, rounds })).toThrow(/missing meta/);
+    expect(() => parseImportPayload({ kind: "statrun-demo", meta: { map: 3 }, rounds })).toThrow(/malformed meta/);
     expect(() => parseImportPayload({ kind: "statrun-library", demos: [] })).toThrow(/no demos/);
-    expect(() => parseImportPayload({ kind: "statrun-library", demos: [{ bad: true }] })).toThrow(/missing meta/);
+    expect(() => parseImportPayload({ kind: "statrun-library", demos: [{ bad: true }] })).toThrow(/malformed meta/);
+  });
+
+  it("rejects junk that would persist and crash pages later", () => {
+    // null / non-object player entries would crash MatchToolbar on open
+    expect(() =>
+      parseImportPayload({ kind: "statrun-demo", meta: { ...meta, players: [null] }, rounds }),
+    ).toThrow(/malformed/);
+    expect(() =>
+      parseImportPayload({ kind: "statrun-demo", meta: { ...meta, players: [7] }, rounds }),
+    ).toThrow(/malformed/);
+    // null round items would make the saved match fail to open forever
+    expect(() => parseImportPayload({ kind: "statrun-demo", meta, rounds: [null] })).toThrow(/malformed/);
+    expect(() => parseImportPayload({ kind: "statrun-demo", meta, rounds: [1, 2] })).toThrow(/malformed/);
+    // raw parser payload without players would brick the /demos library page
+    expect(() => parseImportPayload({ map: "de_dust2", roundData: [] })).toThrow(/incomplete/);
+    expect(() => parseImportPayload({ map: "de_dust2", players: [null], roundData: rounds })).toThrow(/incomplete/);
+  });
+
+  it("fills raw-payload defaults instead of storing undefined meta numbers", () => {
+    const out = parseImportPayload({ map: "de_nuke", players: meta.players, roundData: rounds });
+    expect(out[0].meta.rounds).toBe(2); // derived from roundData.length
+    expect(out[0].meta.tickRate).toBe(64);
+    expect(out[0].meta.frameHz).toBe(1);
   });
 });
