@@ -254,15 +254,12 @@ function PredictionCard({
         <span className="flex items-center gap-2 text-[10px] text-faint">
           {live && (
             <>
-              <span title="the pre-match read, before any of this series was played">
-                pre-match <span className="font-semibold text-muted">{Math.round(pred.pA * 100)}%</span>
-              </span>
               <span className="tabular-nums" title="series score folded into the estimate — each map of advantage is nearly decisive">
                 maps {live.ma}–{live.mb}
               </span>
               {live.lead !== 0 && live.mapName && (
                 <span className="tabular-nums" title="round lead on the live map, folded in lightly">
-                  {live.lead > 0 ? "+" : ""}{live.lead} on {live.mapName}
+                  {(live.lead > 0 ? a.shortName || a.name : b.shortName || b.name)} +{Math.abs(live.lead)} on {live.mapName}
                 </span>
               )}
             </>
@@ -292,7 +289,7 @@ function PredictionCard({
         </span>
         <TeamLogo name={b.shortName || b.name} src={b.logoUrl} color={b.colorPrimary} size={30} />
       </div>
-      <div className="relative mb-4 h-3.5 overflow-hidden rounded-full bg-panel">
+      <div className={`relative h-3.5 overflow-hidden rounded-full bg-panel ${live ? "mb-1.5" : "mb-4"}`}>
         <div className="absolute inset-y-0 left-0 rounded-l-full transition-all" style={{ width: `${pa}%`, background: `linear-gradient(90deg, ${aHex}cc, ${aHex})` }} />
         <div className="absolute inset-y-0 right-0 rounded-r-full transition-all" style={{ width: `${pb}%`, background: `linear-gradient(90deg, ${bHex}, ${bHex}cc)` }} />
         {/* the split point, unmistakable even when brand colors are close */}
@@ -300,6 +297,28 @@ function PredictionCard({
         {/* even-odds reference tick */}
         <div className="absolute inset-y-0 left-1/2 w-px bg-black/40" title="50/50" />
       </div>
+
+      {/* live matches keep the PRE-MATCH read fully visible per team — the
+          before/after of the scoreboard is the story ("12% underdog, now 40%") */}
+      {live && (
+        <div
+          className="mb-4 flex items-center gap-2 text-[11px]"
+          title="the estimate BEFORE this series started — form, head-to-head, map pool and lineups only; the big bar above folds in the live scoreboard"
+        >
+          <span className="w-18 shrink-0 text-[9px] font-bold uppercase tracking-wider text-faint">Pre-match</span>
+          <span className="shrink-0 font-semibold tabular-nums" style={{ color: aHex, opacity: pred.pA >= 0.5 ? 1 : 0.6 }}>
+            {Math.round(pred.pA * 100)}%
+          </span>
+          <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel">
+            <span className="absolute inset-y-0 left-0 rounded-l-full" style={{ width: `${pred.pA * 100}%`, background: aHex, opacity: 0.5 }} />
+            <span className="absolute inset-y-0 right-0 rounded-r-full" style={{ width: `${(1 - pred.pA) * 100}%`, background: bHex, opacity: 0.5 }} />
+            <span className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white/60" style={{ left: `${pred.pA * 100}%` }} />
+          </span>
+          <span className="shrink-0 font-semibold tabular-nums" style={{ color: bHex, opacity: pred.pA < 0.5 ? 1 : 0.6 }}>
+            {Math.round((1 - pred.pA) * 100)}%
+          </span>
+        </div>
+      )}
       {/* the reasons — full-width tug-of-war rows: both teams' values at the
           ends, the pull toward whoever it favors in the middle, and the
           concrete swing ("+8pp") it adds in context */}
