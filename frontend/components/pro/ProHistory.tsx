@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProFormEntry, ProHistory, ProPrediction, ProRosterPlayer, ProTeam } from "./types";
+import type { MatchState, ProFormEntry, ProHistory, ProPrediction, ProRosterPlayer, ProTeam } from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
@@ -10,7 +10,7 @@ import { validHex } from "./format";
 
 // Recent form + head-to-head, loaded lazily (after the live scoreboard) from
 // /api/pro-matches/{id}/history so it never blocks the live data.
-export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] }) {
+export function ProHistoryPanel({ id, teams, match }: { id: string; teams: ProTeam[]; match?: MatchState }) {
   const [data, setData] = useState<ProHistory | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "empty" | "error">("loading");
 
@@ -25,8 +25,10 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
         const anyForm = Object.values(d.form ?? {}).some((f) => f.length > 0);
         const anyH2H = (d.h2h ?? []).length > 0;
         const anyRoster = Object.values(d.rosters ?? {}).some((r) => r.length > 0);
+        const anyPred = !!d.prediction?.available;
+        const anyMaps = Object.values(d.maps ?? {}).some((m) => m.length > 0);
         setData(d);
-        setState(anyForm || anyH2H || anyRoster ? "ready" : "empty");
+        setState(anyForm || anyH2H || anyRoster || anyPred || anyMaps ? "ready" : "empty");
       } catch {
         if (alive) setState("error");
       }
@@ -61,8 +63,10 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
       <SectionTitle />
 
       {/* who's favored, and WHY — every factor's inputs are the same numbers
-          shown in the cards below it */}
-      {a && b && data.prediction && <PredictionCard pred={data.prediction} a={a} b={b} />}
+          shown in the cards below it; live matches blend in the scoreboard */}
+      {a && b && data.prediction && (
+        <PredictionCard pred={data.prediction} a={a} b={b} maps={data.maps} match={match} record={data.record} />
+      )}
 
       {/* lineups: who's on each team + their recent-series stats */}
       {(data.rosters?.[a?.gridId ?? ""]?.length || data.rosters?.[b?.gridId ?? ""]?.length) ? (
@@ -132,6 +136,7 @@ export function ProHistoryPanel({ id, teams }: { id: string; teams: ProTeam[] })
 function fmtFactor(key: string, v: number): string {
   switch (key) {
     case "form":
+    case "mappool":
       return `${(v * 100).toFixed(0)}%`;
     case "h2h":
       return `${v.toFixed(0)} win${v === 1 ? "" : "s"}`;
@@ -147,7 +152,24 @@ function fmtFactor(key: string, v: number): string {
 // The verdict + its reasons. A transparent heuristic (labelled), never shown
 // without the evidence: each factor row carries both teams' actual values, and
 // the panels below are the receipts. Refuses thin data instead of guessing.
-function PredictionCard({ pred, a, b }: { pred: ProPrediction; a: ProTeam; b: ProTeam }) {
+// On LIVE matches the pre-match estimate blends with the scoreboard: each map
+// of advantage is ~decisive (a 1-0 Bo3 lead ≈ 79% historically), the current
+// map's round lead nudges, and pre-match skill still counts but damped.
+function PredictionCard({
+  pred,
+  a,
+  b,
+  maps,
+  match,
+  record,
+}: {
+  pred: ProPrediction;
+  a: ProTeam;
+  b: ProTeam;
+  maps?: Record<string, { map: string; w: number; l: number }[]>;
+  match?: MatchState;
+  record?: { model: string; n: number; correct: number } | null;
+}) {
   const aHex = validHex(a.colorPrimary) ?? "#5b9dff";
   const bHex = validHex(b.colorPrimary) ?? "#e7b53c";
   if (!pred.available) {
@@ -158,15 +180,48 @@ function PredictionCard({ pred, a, b }: { pred: ProPrediction; a: ProTeam; b: Pr
       </div>
     );
   }
-  const pa = Math.round(pred.pA * 100);
+
+  // live blend: logit(pre-match)×0.55 + 1.35 per net map + 0.11 per net round
+  const live = (() => {
+    if (!match || match.status !== "live") return null;
+    const need = Math.ceil((match.bestOf ?? 3) / 2);
+    const ma = match.seriesScore?.[a.gridId] ?? 0;
+    const mb = match.seriesScore?.[b.gridId] ?? 0;
+    if (ma >= need || mb >= need) return null; // decided — the scoreboard says it
+    const cur = (match.maps ?? []).find((m) => m.started && !m.finished);
+    const lead = cur ? (cur.scoreByTeam?.[a.gridId] ?? 0) - (cur.scoreByTeam?.[b.gridId] ?? 0) : 0;
+    const pPre = Math.min(0.98, Math.max(0.02, pred.pA));
+    const x = 0.55 * Math.log(pPre / (1 - pPre)) + 1.35 * (ma - mb) + 0.11 * lead;
+    return { p: 1 / (1 + Math.exp(-x)), ma, mb, lead, mapName: cur?.mapName };
+  })();
+
+  const shownP = live ? live.p : pred.pA;
+  const pa = Math.round(shownP * 100);
   const pb = 100 - pa;
-  const favA = pred.pA >= 0.5;
+  const favA = shownP >= 0.5;
   return (
     <div className="card-2 p-4">
-      <div className="mb-2 flex items-baseline justify-between gap-2">
-        <span className="stat-label">Win estimate</span>
-        <span className="text-[10px] text-faint" title={`model ${pred.model} — a hand-weighted read over the evidence below, not a trained model and not betting advice`}>
-          heuristic · from {pred.seriesN[0]} + {pred.seriesN[1]} recent series
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="stat-label">{live ? "Live win estimate" : "Win estimate"}</span>
+        <span className="flex items-center gap-2 text-[10px] text-faint">
+          {live && (
+            <>
+              <span title="the pre-match read, before any of this series was played">
+                pre-match <span className="font-semibold text-muted">{Math.round(pred.pA * 100)}%</span>
+              </span>
+              <span className="tabular-nums" title="series score folded into the estimate — each map of advantage is nearly decisive">
+                maps {live.ma}–{live.mb}
+              </span>
+              {live.lead !== 0 && live.mapName && (
+                <span className="tabular-nums" title="round lead on the live map, folded in lightly">
+                  {live.lead > 0 ? "+" : ""}{live.lead} on {live.mapName}
+                </span>
+              )}
+            </>
+          )}
+          <span title={`model ${pred.model} — a hand-weighted read over the evidence below, not a trained model and not betting advice`}>
+            heuristic · from {pred.seriesN[0]} + {pred.seriesN[1]} recent series
+          </span>
         </span>
       </div>
       {/* the verdict bar */}
@@ -223,8 +278,58 @@ function PredictionCard({ pred, a, b }: { pred: ProPrediction; a: ProTeam; b: Pr
           );
         })}
       </div>
+      {/* map-pool receipts: each team's per-map record over the window */}
+      {(() => {
+        const am = maps?.[a.gridId] ?? [];
+        const bm = maps?.[b.gridId] ?? [];
+        if (!am.length && !bm.length) return null;
+        const byMap = new Map<string, { a?: { w: number; l: number }; b?: { w: number; l: number }; n: number }>();
+        for (const r of am) byMap.set(r.map, { a: r, n: r.w + r.l });
+        for (const r of bm) {
+          const cur = byMap.get(r.map) ?? { n: 0 };
+          cur.b = r;
+          cur.n += r.w + r.l;
+          byMap.set(r.map, cur);
+        }
+        const rows = [...byMap.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 6);
+        const wr = (r?: { w: number; l: number }) => (r && r.w + r.l > 0 ? r.w / (r.w + r.l) : null);
+        return (
+          <div className="mx-auto mt-3 max-w-xl border-t border-line pt-2">
+            <div className="mb-1 text-center text-[9px] font-bold uppercase tracking-wider text-faint">
+              Map records (window)
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 sm:grid-cols-3">
+              {rows.map(([m, r]) => {
+                const wa = wr(r.a);
+                const wb = wr(r.b);
+                return (
+                  <div key={m} className="flex items-center gap-1.5 text-[11px] tabular-nums">
+                    <span className="min-w-0 flex-1 truncate capitalize text-muted">{m}</span>
+                    <span style={{ color: wa != null && (wb == null || wa >= wb) ? aHex : undefined, opacity: r.a ? 1 : 0.35 }}>
+                      {r.a ? `${r.a.w}-${r.a.l}` : "—"}
+                    </span>
+                    <span className="text-faint">·</span>
+                    <span style={{ color: wb != null && (wa == null || wb >= wa) ? bHex : undefined, opacity: r.b ? 1 : 0.35 }}>
+                      {r.b ? `${r.b.w}-${r.b.l}` : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
       <p className="mt-2 text-center text-[10px] text-faint">
         every input is shown in the panels below · last ~120 days · estimate, not betting advice
+        {record && record.n >= 5 && (
+          <span title="pre-match calls are recorded once, before the series starts, and graded when it finishes — the model can't revise a call after the fact">
+            {" "}· model record{" "}
+            <span className="font-semibold text-muted">
+              {record.correct}–{record.n - record.correct}
+            </span>{" "}
+            ({Math.round((record.correct / record.n) * 100)}%)
+          </span>
+        )}
       </p>
     </div>
   );

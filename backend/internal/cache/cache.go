@@ -82,8 +82,10 @@ func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", ste
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).
 func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent2:" + teamID }
 
-// ProSeriesResultKey caches a series' outcome (maps won per team).
-func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult2:" + seriesID }
+// ProSeriesResultKey caches a series' outcome (maps won per team + per-map
+// games). v3: per-map games added for the prediction map-pool factor — the
+// bump repopulates entries so map data doesn't wait out a 12h TTL.
+func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult3:" + seriesID }
 
 // ProTeamRosterKey caches a team's current player nicknames.
 func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID }

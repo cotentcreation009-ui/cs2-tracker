@@ -169,8 +169,9 @@ export function MatchDetailClient({
         </div>
       ) : null}
 
-      {/* recent form + head-to-head, loaded lazily below the live data */}
-      {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} /> : null}
+      {/* recent form + head-to-head, loaded lazily below the live data —
+          `match` keeps the win estimate live-blended as the poll updates */}
+      {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} match={m} /> : null}
     </div>
   );
 }

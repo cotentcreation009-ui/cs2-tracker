@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -35,12 +36,21 @@ type PlayerLine struct {
 	Deaths  int    `json:"deaths"`
 }
 
+// ResultGame is one finished map inside a series result: which map, who won,
+// and the round score per team — the map-pool evidence for predictions.
+type ResultGame struct {
+	Map         string         `json:"map"` // normalized: "mirage", "inferno", …
+	WinnerID    string         `json:"winnerId,omitempty"`
+	ScoreByTeam map[string]int `json:"scoreByTeam,omitempty"`
+}
+
 // SeriesResult is the outcome of a (finished) series — maps won per team,
-// plus per-player lines and the series' total round count (for KPR).
+// plus per-player lines, per-map games and the series' total round count.
 type SeriesResult struct {
 	Finished bool               `json:"finished"`
 	Rounds   int                `json:"rounds"`
 	Teams    []SeriesResultTeam `json:"teams"`
+	Games    []ResultGame       `json:"games,omitempty"` // finished maps only (absent on pre-mappool cache entries)
 }
 
 func teamRecentQuery(titleID string) string {
@@ -63,9 +73,17 @@ const seriesResultQuery = `query SeriesResult($id: ID!) {
     finished
     teams { id name score won }
     games { started finished
+      map { name }
       teams { id score players { name kills deaths killAssistsReceived } } }
   }
 }`
+
+// NormMapName folds GRID map spellings onto one key: "de_mirage"/"Mirage" →
+// "mirage". Empty stays empty (older data without map info).
+func NormMapName(n string) string {
+	n = strings.ToLower(strings.TrimSpace(n))
+	return strings.TrimPrefix(n, "de_")
+}
 
 // RecentSeriesForTeam returns a team's most-recent past series (DESC) within
 // [gte, lte]. Schedule/identity only — no results.
@@ -156,7 +174,10 @@ func (c *Client) SeriesResult(ctx context.Context, id string) (*SeriesResult, er
 				Games []struct {
 					Started  bool `json:"started"`
 					Finished bool `json:"finished"`
-					Teams    []struct {
+					Map      *struct {
+						Name string `json:"name"`
+					} `json:"map"`
+					Teams []struct {
 						ID      string `json:"id"`
 						Score   int    `json:"score"`
 						Players []struct {
@@ -184,6 +205,20 @@ func (c *Client) SeriesResult(ctx context.Context, id string) (*SeriesResult, er
 	for _, g := range ss.Games {
 		if !g.Started {
 			continue
+		}
+		// per-map record (finished maps with a known name only — the map-pool
+		// evidence; a CS2 map can't tie, so top score decides the winner)
+		if g.Finished && g.Map != nil && NormMapName(g.Map.Name) != "" && len(g.Teams) >= 2 {
+			rg := ResultGame{Map: NormMapName(g.Map.Name), ScoreByTeam: map[string]int{}}
+			best := -1
+			for _, gt := range g.Teams {
+				rg.ScoreByTeam[gt.ID] = gt.Score
+				if gt.Score > best {
+					best = gt.Score
+					rg.WinnerID = gt.ID
+				}
+			}
+			res.Games = append(res.Games, rg)
 		}
 		for _, gt := range g.Teams {
 			res.Rounds += gt.Score

@@ -1,6 +1,12 @@
 package api
 
-import "math"
+import (
+	"context"
+	"math"
+	"time"
+
+	"github.com/cs2tracker/server/internal/grid"
+)
 
 // Pre-match win prediction — a TRANSPARENT heuristic, not a trained model.
 // Every input is a number the response also SHOWS (recent results, direct
@@ -44,7 +50,63 @@ type prediction struct {
 	Model     string       `json:"model"`   // versioned so the UI can label it
 }
 
-const predModel = "heuristic-v1"
+const predModel = "heuristic-v2" // v2: + map-pool factor over shared/picked maps
+
+// recWL is a per-map win/loss record.
+type recWL struct{ W, L int }
+
+// mapPoolFactor compares the two teams map by map. Only maps BOTH teams have
+// >=2 recorded plays on count (a 1-0 map record is noise), each weighted by
+// the smaller sample. When the series' picked maps are known (live/decided
+// vetoes), only those maps count — a much stronger claim, noted as such.
+// Returns nil when there's no honest basis for the comparison.
+func mapPoolFactor(a, b map[string]recWL, picked []string) *predFactor {
+	pickedSet := map[string]bool{}
+	for _, m := range picked {
+		if m != "" {
+			pickedSet[m] = true
+		}
+	}
+	var wSum, diffSum, aSum, bSum float64
+	shared := 0
+	for m, ra := range a {
+		rb, ok := b[m]
+		if !ok {
+			continue
+		}
+		if len(pickedSet) > 0 && !pickedSet[m] {
+			continue
+		}
+		na, nb := ra.W+ra.L, rb.W+rb.L
+		if na < 2 || nb < 2 {
+			continue
+		}
+		w := math.Min(float64(na), float64(nb))
+		wra := float64(ra.W) / float64(na)
+		wrb := float64(rb.W) / float64(nb)
+		wSum += w
+		diffSum += w * (wra - wrb)
+		aSum += w * wra
+		bSum += w * wrb
+		shared++
+	}
+	minShared := 2
+	if len(pickedSet) > 0 {
+		minShared = 1 // a known pick is meaningful on its own
+	}
+	if shared < minShared || wSum <= 0 {
+		return nil
+	}
+	note := "win rate on the maps both teams played (weighted by sample)"
+	if len(pickedSet) > 0 {
+		note = "win rate on THIS series' maps (weighted by sample)"
+	}
+	return &predFactor{
+		Key: "mappool", Label: "Map pool", A: aSum / wSum, B: bSum / wSum,
+		Contribution: 0.7 * clampF((diffSum/wSum)*2, -1, 1),
+		Note:         note,
+	}
+}
 
 // recency weight for the i-th most recent series (i=0 newest). Halves roughly
 // every 6 series — last month's form matters far more than 3 months ago.
@@ -54,7 +116,8 @@ func clampF(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 
 // buildPrediction turns the two teams' window aggregates + head-to-head wins
 // into the probability + factor breakdown. a/b follow ms.Teams order.
-func buildPrediction(a, b predTeamStats, h2hWinsA, h2hWinsB int) prediction {
+// mapPool is optional (nil when no honest map comparison exists).
+func buildPrediction(a, b predTeamStats, h2hWinsA, h2hWinsB int, mapPool *predFactor) prediction {
 	p := prediction{Model: predModel, SeriesN: [2]int{a.N, b.N}}
 	if a.N < 3 || b.N < 3 {
 		p.Reason = "not enough finished series in the tracked window to call it"
@@ -90,6 +153,10 @@ func buildPrediction(a, b predTeamStats, h2hWinsA, h2hWinsB int) prediction {
 
 	factors := []predFactor{fForm, fH2H, fMargin}
 	x := fForm.Contribution + fH2H.Contribution + fMargin.Contribution
+	if mapPool != nil {
+		factors = append(factors, *mapPool)
+		x += mapPool.Contribution
+	}
 
 	// roster skill nudge — only when BOTH lineups have K/D data
 	if a.KD > 0 && b.KD > 0 {
@@ -106,4 +173,39 @@ func buildPrediction(a, b predTeamStats, h2hWinsA, h2hWinsB int) prediction {
 	p.PA = 1 / (1 + math.Exp(-x))
 	p.Factors = factors
 	return p
+}
+
+// reconcileProPredictions resolves pending ledger entries against finished
+// series results — lazy and best-effort, piggybacked on /history traffic and
+// throttled per process. Bounded at 10 lookups per run (the resolver is the
+// same cached series-result path the history panel uses).
+func (s *Server) reconcileProPredictions(ctx context.Context, resultOf func(string) *grid.SeriesResult) {
+	s.predReconMu.Lock()
+	if time.Since(s.predReconAt) < 5*time.Minute {
+		s.predReconMu.Unlock()
+		return
+	}
+	s.predReconAt = time.Now()
+	s.predReconMu.Unlock()
+	rows, err := s.db.ListUnresolvedProPredictions(ctx, 10)
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		res := resultOf(r.SeriesID)
+		if res == nil || !res.Finished {
+			continue
+		}
+		winner := ""
+		for _, t := range res.Teams {
+			if t.Won {
+				winner = t.GridID
+			}
+		}
+		if winner == "" {
+			continue
+		}
+		correct := (winner == r.TeamAID) == (r.PA >= 0.5)
+		_ = s.db.ResolveProPrediction(ctx, r.SeriesID, winner, correct)
+	}
 }

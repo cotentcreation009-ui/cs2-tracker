@@ -214,6 +214,7 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 	// display below caps at 5, the model should not)
 	pstats := map[string]*predTeamStats{teamIDs[0]: {}, teamIDs[1]: {}}
 	h2hWins := map[string]int{}
+	mapRec := map[string]map[string]recWL{teamIDs[0]: {}, teamIDs[1]: {}}
 
 	for _, tid := range teamIDs {
 		for _, ps := range recent[tid] {
@@ -250,6 +251,18 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 				}
 			}
 			// prediction inputs: recency-weighted (the list is newest-first)
+			for _, rg := range res.Games {
+				if _, played := rg.ScoreByTeam[tid]; !played || rg.Map == "" {
+					continue
+				}
+				rec := mapRec[tid][rg.Map]
+				if rg.WinnerID == tid {
+					rec.W++
+				} else {
+					rec.L++
+				}
+				mapRec[tid][rg.Map] = rec
+			}
 			st := pstats[tid]
 			w := predWeight(st.N)
 			st.WeightSum += w
@@ -309,15 +322,68 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 		}
 	}
 
+	// map-pool comparison: restricted to THIS series' maps when the picks are
+	// known (live/decided vetoes) — a stronger, clearly-labelled claim
+	var picked []string
+	for _, mp := range ms.Maps {
+		if n := grid.NormMapName(mp.MapName); n != "" {
+			picked = append(picked, n)
+		}
+	}
+	mapPool := mapPoolFactor(mapRec[teamIDs[0]], mapRec[teamIDs[1]], picked)
+
+	// per-map records as evidence rows (sorted by most-played, per team)
+	mapsOut := map[string][]map[string]any{}
+	for _, tid := range teamIDs {
+		type row struct {
+			m    string
+			w, l int
+		}
+		var rows []row
+		for m, r := range mapRec[tid] {
+			rows = append(rows, row{m, r.W, r.L})
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			ni, nj := rows[i].w+rows[i].l, rows[j].w+rows[j].l
+			if ni != nj {
+				return ni > nj
+			}
+			return rows[i].m < rows[j].m
+		})
+		for _, r := range rows {
+			mapsOut[tid] = append(mapsOut[tid], map[string]any{"map": r.m, "w": r.w, "l": r.l})
+		}
+	}
+
+	pred := buildPrediction(
+		*pstats[teamIDs[0]], *pstats[teamIDs[1]],
+		h2hWins[teamIDs[0]], h2hWins[teamIDs[1]],
+		mapPool,
+	)
+
+	// prediction ledger: record the FIRST pre-match call for upcoming series
+	// (append-once — the record can't be revised), lazily resolve pending
+	// outcomes, and surface the model's honest track record.
+	var record any
+	if s.db != nil {
+		if pred.Available && ms.Status == "upcoming" && len(ms.Teams) >= 2 {
+			_ = s.db.InsertProPrediction(ctx, ms.SeriesID, pred.Model, pred.PA,
+				ms.Teams[0].GridID, ms.Teams[1].GridID, ms.Teams[0].Name, ms.Teams[1].Name)
+		}
+		s.reconcileProPredictions(ctx, resultOf)
+		if rec, err := s.db.GetProPredictionRecord(ctx, predModel); err == nil && rec.N > 0 {
+			record = rec
+		}
+	}
+
 	return map[string]any{
-		"teams":   ms.Teams,
-		"form":    form,
-		"h2h":     h2h,
-		"rosters": rosters,
-		"prediction": buildPrediction(
-			*pstats[teamIDs[0]], *pstats[teamIDs[1]],
-			h2hWins[teamIDs[0]], h2hWins[teamIDs[1]],
-		),
+		"teams":      ms.Teams,
+		"form":       form,
+		"h2h":        h2h,
+		"rosters":    rosters,
+		"maps":       mapsOut,
+		"prediction": pred,
+		"record":     record,
 	}
 }
 

@@ -59,6 +59,11 @@ type Store interface {
 	GetDemoData(ctx context.Context, id string) (data []byte, mapName string, err error)
 	CountDemoJobsSince(ctx context.Context, t time.Time) (int, error)
 	CountDemoJobsByIPSince(ctx context.Context, ip string, t time.Time) (int, error)
+	// Pro-match prediction ledger (append-once pre-match calls + lazy outcomes).
+	InsertProPrediction(ctx context.Context, seriesID, model string, pA float64, aID, bID, aName, bName string) error
+	ListUnresolvedProPredictions(ctx context.Context, limit int) ([]db.ProPredictionRow, error)
+	ResolveProPrediction(ctx context.Context, seriesID, winnerID string, correct bool) error
+	GetProPredictionRecord(ctx context.Context, model string) (db.ProPredictionRecord, error)
 	Ping(ctx context.Context) error
 }
 
@@ -78,6 +83,10 @@ type Server struct {
 	// reports disabled (and Start is a no-op) when no GRID key/mock is configured,
 	// so the /api/pro-matches endpoint simply returns {"enabled":false,...}.
 	proMatches *grid.Poller
+	// prediction-ledger reconciliation throttle (once per few minutes per
+	// process — resolution is lazy, piggybacked on /history traffic)
+	predReconMu sync.Mutex
+	predReconAt time.Time
 	// lp resolves pro-player photos from Liquipedia (rate-limited, cache-heavy).
 	lp *liquipedia.Client
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
