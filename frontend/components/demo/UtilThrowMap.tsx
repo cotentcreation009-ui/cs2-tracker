@@ -10,14 +10,20 @@ import { KIND_COLOR } from "./RadarMap";
 // viewport-locked pane, so 1024 (the radar source resolution) keeps it crisp.
 const SIZE = 1024;
 
-// Effect radius as a fraction of the radar, per grenade kind.
-const BLOOM_R: Record<string, number> = {
-  smoke: 0.082,
-  molotov: 0.062,
-  inferno: 0.062,
-  he: 0.055,
-  flash: 0.05,
-  decoy: 0.042,
+// Real CS2 effect footprints in GAME UNITS, converted through the map
+// projection per throw so a smoke drawn on the radar covers what it covers in
+// game (a fixed fraction of the radar drew smokes ~3× too wide on standard
+// maps, swallowing whole call-outs). Smoke cloud radius ≈ 144u; a molotov
+// pool ≈ 120u; HE's visible shockwave ~170u (damage falls to zero at ~350u);
+// flash/decoy are point events with a small nominal footprint.
+const EFFECT_R: Record<string, number> = {
+  smoke: 144,
+  molotov: 120,
+  inferno: 120,
+  incgrenade: 120,
+  he: 170,
+  flash: 130,
+  decoy: 100,
 };
 
 const easeOutQuad = (k: number) => 1 - (1 - k) * (1 - k);
@@ -66,6 +72,7 @@ interface Item {
   o: { x: number; y: number };
   l: { x: number; y: number };
   c: { x: number; y: number }; // bezier control (arc apex)
+  r: number; // effect radius in canvas px — the real footprint, projected
   start: number; // when this throw begins in the loop
   land: number; // when it lands (start + travel, or start if no origin)
 }
@@ -223,6 +230,18 @@ export function UtilThrowMap({
       return r ? { x: r.x * SIZE, y: r.y * SIZE } : { x: SIZE / 2, y: SIZE / 2 };
     };
 
+    // effect radius in canvas px: project the landing and a point one real
+    // effect-radius away, measure the difference. The local differential keeps
+    // this correct on split-level radars (Nuke insets draw at their own scale)
+    // and on uncalibrated auto-scaled maps alike.
+    const effectPx = (t: UtilThrow): number => {
+      const worldR = EFFECT_R[t.kind] ?? 130;
+      const a = proj.project(t.x, t.y, t.z);
+      const b = proj.project(t.x + worldR, t.y, t.z);
+      if (a && b) return Math.max(7, Math.abs(b.x - a.x) * SIZE);
+      return SIZE * (worldR / 5000); // ~typical competitive-map span
+    };
+
     // precompute per-throw geometry + timing
     const items: Item[] = throws.map((t, i) => {
       // origin === landing means the origin couldn't be resolved (legacy demo)
@@ -242,6 +261,7 @@ export function UtilThrowMap({
         o,
         l,
         c,
+        r: effectPx(t),
         start,
         land: start + (hasOrigin ? TRAVEL : 0),
       };
@@ -264,7 +284,7 @@ export function UtilThrowMap({
 
     // ---- kind-specific landing effects --------------------------------------
     const drawSmoke = (ctx: CanvasRenderingContext2D, it: Item, e: number, a: number) => {
-      const R = BLOOM_R.smoke * SIZE * easeOutCubic(Math.min(1, e / 1.1));
+      const R = it.r * easeOutCubic(Math.min(1, e / 1.1));
       const pulse = 0.93 + 0.07 * Math.sin(e * 1.6 + it.start * 7);
       const ramp = Math.min(1, e / 0.3);
       for (let j = 0; j < 6; j++) {
@@ -289,7 +309,7 @@ export function UtilThrowMap({
     };
 
     const drawFire = (ctx: CanvasRenderingContext2D, it: Item, e: number, a: number) => {
-      const R = BLOOM_R.molotov * SIZE * easeOutCubic(Math.min(1, e / 0.8));
+      const R = it.r * easeOutCubic(Math.min(1, e / 0.8));
       // burning pool
       const g = ctx.createRadialGradient(it.l.x, it.l.y, 0, it.l.x, it.l.y, R);
       g.addColorStop(0, hexA("#ffb347", 0.32 * a));
@@ -315,7 +335,7 @@ export function UtilThrowMap({
       const D = 0.5; // burst duration
       if (e < D) {
         const k = e / D;
-        const R = BLOOM_R.flash * SIZE * (0.5 + 0.9 * easeOutCubic(k));
+        const R = it.r * (0.5 + 0.9 * easeOutCubic(k));
         // rays
         ctx.strokeStyle = hexA("#ffffff", (1 - k) * 0.85 * a);
         ctx.lineWidth = 2.5;
@@ -338,7 +358,7 @@ export function UtilThrowMap({
         // fading pop ring
         const k = (e - D) / (1.4 - D);
         ctx.beginPath();
-        ctx.arc(it.l.x, it.l.y, BLOOM_R.flash * SIZE * 0.8, 0, Math.PI * 2);
+        ctx.arc(it.l.x, it.l.y, it.r * 0.8, 0, Math.PI * 2);
         ctx.strokeStyle = hexA(it.color, (1 - k) * 0.4 * a);
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -349,7 +369,7 @@ export function UtilThrowMap({
       const D = 0.55;
       if (e < D) {
         const k = e / D;
-        const R = BLOOM_R.he * SIZE * easeOutCubic(k);
+        const R = it.r * easeOutCubic(k);
         // shockwave ring
         ctx.beginPath();
         ctx.arc(it.l.x, it.l.y, R, 0, Math.PI * 2);
@@ -358,7 +378,7 @@ export function UtilThrowMap({
         ctx.stroke();
         // core flash
         if (k < 0.35) {
-          dot(ctx, it.l.x, it.l.y, BLOOM_R.he * SIZE * 0.3 * (1 - k / 0.35), "#ffe08a", 0.9 * a);
+          dot(ctx, it.l.x, it.l.y, it.r * 0.3 * (1 - k / 0.35), "#ffe08a", 0.9 * a);
         }
       } else if (e < 1.2) {
         const k = (e - D) / (1.2 - D);
@@ -370,7 +390,7 @@ export function UtilThrowMap({
       // repeating radar pings
       const p = (e % 0.9) / 0.9;
       ctx.beginPath();
-      ctx.arc(it.l.x, it.l.y, BLOOM_R.decoy * SIZE * p, 0, Math.PI * 2);
+      ctx.arc(it.l.x, it.l.y, it.r * p, 0, Math.PI * 2);
       ctx.strokeStyle = hexA(it.color, (1 - p) * 0.55 * a);
       ctx.lineWidth = 2;
       ctx.stroke();
