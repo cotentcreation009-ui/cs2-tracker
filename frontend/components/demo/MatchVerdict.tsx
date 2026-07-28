@@ -310,12 +310,34 @@ function EvidenceMap({
               const vpts = trace.victim
                 .map((s) => P(s.x, s.y, s.z))
                 .filter((q): q is { x: number; y: number } => q != null);
-              const vline = vpts.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+              // split at inset jumps: on Nuke/Vertigo the two levels are
+              // separate radar regions — one polyline across them draws a
+              // nonsense diagonal. A >15-viewBox-unit hop between consecutive
+              // 1 Hz samples can only be a level change.
+              const segs: { x: number; y: number }[][] = [];
+              let cur: { x: number; y: number }[] = [];
+              for (const q of vpts) {
+                const prev = cur[cur.length - 1];
+                if (prev && Math.hypot(q.x - prev.x, q.y - prev.y) > 15) {
+                  if (cur.length > 1) segs.push(cur);
+                  cur = [];
+                }
+                cur.push(q);
+              }
+              if (cur.length > 1) segs.push(cur);
               return (
                 <>
-                  {vpts.length > 1 && (
-                    <polyline points={vline} fill="none" stroke="#ff5c5c" strokeWidth="1" strokeDasharray="1.6 1.6" opacity="0.8" />
-                  )}
+                  {segs.map((seg, si) => (
+                    <polyline
+                      key={si}
+                      points={seg.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ")}
+                      fill="none"
+                      stroke="#ff5c5c"
+                      strokeWidth="1"
+                      strokeDasharray="1.6 1.6"
+                      opacity="0.8"
+                    />
+                  ))}
                   {trace.killer.map((s, i) => {
                     const q = P(s.x, s.y, s.z);
                     if (!q) return null;
@@ -858,7 +880,9 @@ function SeenBefore({
   useEffect(() => {
     let alive = true;
     setRows(null);
-    void opponentHistory(steamId, demoId).then((r) => {
+    // shouldContinue lets the pipeline loop stop the moment this case file
+    // unmounts or the suspect changes — no wasted multi-demo re-analysis
+    void opponentHistory(steamId, demoId, () => alive).then((r) => {
       if (alive) setRows(r);
     });
     return () => {

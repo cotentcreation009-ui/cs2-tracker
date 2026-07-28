@@ -4,8 +4,24 @@
 // rosters (A = teamAStarters), followed across the halftime swap.
 
 import type { ReplayMeta, ReplayRound } from "./types";
-import { teamAStarters } from "./score";
 import { classifyPosition, type Zone } from "@/lib/maps/zones";
+
+// Team A = the CT starters, from the FIRST round with a usable roster (a demo
+// whose first stored round has an empty ct list must not collapse both teams
+// into one bucket). Empty set = teams unresolvable; callers return empty reads.
+function starters(rounds: ReplayRound[]): Set<number> {
+  const r = rounds.find((x) => (x.ct?.length ?? 0) > 0);
+  return new Set(r?.ct ?? []);
+}
+
+// Which team does a player on `side` this round belong to? Resolved via the
+// ROUND's roster overlap with team A (halftime- and late-joiner-proof: a
+// player who connected after round 1 is judged by who they play WITH, not by
+// their own round-1 membership).
+function teamOf(r: ReplayRound, side: "CT" | "T", teamA: Set<number>): "a" | "b" {
+  const aOnCT = (r.ct ?? []).some((i) => teamA.has(i));
+  return (side === "CT") === aOnCT ? "a" : "b";
+}
 
 export interface TradePair {
   avenged: number; // player index who died
@@ -23,17 +39,20 @@ const TRADE_WINDOW = 5; // seconds
 
 /** Who avenges whom, per starting team. */
 export function tradePairs(meta: ReplayMeta, rounds: ReplayRound[]): { a: TeamTrades; b: TeamTrades } {
-  const teamA = teamAStarters(rounds);
+  const teamA = starters(rounds);
   const mk = (): TeamTrades => ({ pairs: [], traded: 0, deaths: 0 });
   const out = { a: mk(), b: mk() };
+  if (teamA.size === 0) return out; // no usable roster — no team reads
   const pairCount = { a: new Map<string, TradePair>(), b: new Map<string, TradePair>() };
 
   for (const r of rounds) {
     const kills = (r.kills ?? []).filter((k) => k.v >= 0);
-    const sideSet = (i: number) => (r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null);
+    const sideSet = (i: number): "CT" | "T" | null =>
+      r.ct?.includes(i) ? "CT" : r.t?.includes(i) ? "T" : null;
     kills.forEach((k, idx) => {
-      if (k.k < 0 || sideSet(k.k) == null || sideSet(k.v) == null || sideSet(k.k) === sideSet(k.v)) return;
-      const team = teamA.has(k.v) ? "a" : "b";
+      const vSide = sideSet(k.v);
+      if (k.k < 0 || sideSet(k.k) == null || vSide == null || sideSet(k.k) === vSide) return;
+      const team = teamOf(r, vSide, teamA);
       out[team].deaths++;
       // avenged: a TEAMMATE of the victim kills this killer within the window
       for (let j = idx + 1; j < kills.length; j++) {
@@ -67,6 +86,7 @@ export interface ExecPackage {
 export interface TeamExecs {
   packages: ExecPackage[]; // sorted by count desc
   tRounds: number; // T-side rounds played (denominator)
+  analyzed: boolean; // call-out zones were available — "no packages" means something
 }
 
 const normKind = (k: string) => (k === "inferno" || k === "incgrenade" ? "molotov" : k);
@@ -82,24 +102,35 @@ export function execPackages(
   rounds: ReplayRound[],
   zones: Zone[],
 ): { a: TeamExecs; b: TeamExecs } {
-  const teamA = teamAStarters(rounds);
-  const out = { a: { packages: [], tRounds: 0 } as TeamExecs, b: { packages: [], tRounds: 0 } as TeamExecs };
+  const teamA = starters(rounds);
+  const analyzed = zones.length > 0;
+  const out = {
+    a: { packages: [], tRounds: 0, analyzed } as TeamExecs,
+    b: { packages: [], tRounds: 0, analyzed } as TeamExecs,
+  };
+  if (teamA.size === 0) return out; // no usable roster — no team reads
   const acc = { a: new Map<string, ExecPackage>(), b: new Map<string, ExecPackage>() };
 
   for (const r of rounds) {
     const roster = r.t ?? [];
     if (!roster.length) continue;
-    const team = roster.filter((i) => teamA.has(i)).length >= roster.length / 2 ? "a" : "b";
+    const team = teamOf(r, "T", teamA);
     out[team].tRounds++;
     if (!zones.length) continue;
     const nades = (r.nades ?? []).filter((n) => n.by >= 0 && roster.includes(n.by)).sort((x, y) => x.t - y.t);
     if (nades.length < 3) continue;
-    // tightest 3-nade burst start, then absorb everything within 12s of it
+    // the DENSEST 12s window of 3+ nades — anchoring on the first qualifying
+    // cluster would let an early 3-nade map-control clump hide the round's
+    // real 4-nade execute later. Ties go to the later window (the execute).
     let start = -1;
+    let bestCount = 0;
     for (let i = 0; i + 2 < nades.length; i++) {
-      if (nades[i + 2].t - nades[i].t <= 12) {
+      let count = 0;
+      for (let j = i; j < nades.length && nades[j].t - nades[i].t <= 12; j++) count++;
+      // >= keeps ties on the LATER window
+      if (count >= 3 && count >= bestCount) {
+        bestCount = count;
         start = i;
-        break;
       }
     }
     if (start < 0) continue;

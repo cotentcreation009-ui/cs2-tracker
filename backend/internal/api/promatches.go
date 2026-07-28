@@ -35,15 +35,20 @@ func cachedTTL[T any](s *Server, ctx context.Context, key string, ttl time.Durat
 }
 
 // handleProMatches serves the live pro-match board: LIVE first, then UPCOMING;
-// finished series excluded. When the GRID feature is disabled (no key and no
-// mock) it reports {"enabled":false,"matches":[]} so the frontend hides the
-// panel and nothing breaks pre-setup. The list is edge-cached ~5s.
+// finished series excluded — unless ?include=finished, which appends the
+// recently finished series (the sitemap's result-page inventory). When the
+// GRID feature is disabled (no key and no mock) it reports
+// {"enabled":false,"matches":[]} so the frontend hides the panel and nothing
+// breaks pre-setup. The list is edge-cached ~5s.
 func (s *Server) handleProMatches(w http.ResponseWriter, r *http.Request) {
 	if s.proMatches == nil || !s.proMatches.Store().Enabled() {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "matches": []any{}})
 		return
 	}
 	list, updatedAt := s.proMatches.Store().Board()
+	if r.URL.Query().Get("include") == "finished" {
+		list = append(list, s.proMatches.Store().Finished()...)
+	}
 	if list == nil {
 		list = []grid.MatchState{}
 	}

@@ -3,6 +3,7 @@ import { API_BASE, internalHeaders } from "@/lib/api";
 import { SITE_NAME } from "@/lib/site";
 import type { MatchState } from "@/components/pro/types";
 import { MatchDetailClient } from "@/components/pro/MatchDetailClient";
+import { JsonLd } from "@/components/JsonLd";
 
 // Detail = a server shell (for per-match metadata + an instant first paint) that
 // hands off to a self-polling client. The initial fetch uses a short revalidate
@@ -62,8 +63,10 @@ export async function generateMetadata({
   const tourney = m?.tournamentName ? ` — ${m.tournamentName}` : "";
   // Finished series are durable, substantial content (final score, per-map
   // results, round breakdowns) — they index and accumulate as inventory.
-  // Live/upcoming pages stay noindex: thin, volatile, near-duplicate.
-  if (m?.status === "finished" && vs) {
+  // Live/upcoming pages stay noindex: thin, volatile, near-duplicate. The
+  // finalScore gate also keeps out ghost results: cancelled series with no
+  // state data get status "finished" but have nothing to show.
+  if (m?.status === "finished" && vs && finalScore(m) != null) {
     const score = finalScore(m);
     const maps = mapLines(m);
     const title = `${vs}${score ? ` ${score}` : ""}${tourney} — CS2 result | ${SITE_NAME}`;
@@ -97,7 +100,7 @@ export default async function ProMatchDetailPage({
   const initial = await fetchMatch(id);
   const vs = versus(initial);
   const ld =
-    initial?.status === "finished" && vs
+    initial?.status === "finished" && vs && finalScore(initial) != null
       ? {
           "@context": "https://schema.org",
           "@type": "SportsEvent",
@@ -114,10 +117,9 @@ export default async function ProMatchDetailPage({
       : null;
   return (
     <>
-      {ld && (
-        // structured data for finished (indexable) results
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
-      )}
+      {/* structured data for finished (indexable) results — JsonLd escapes
+          "<" so a GRID-fed team name can never break out of the script tag */}
+      {ld && <JsonLd data={ld} />}
       <MatchDetailClient id={id} initialData={initial} />
     </>
   );

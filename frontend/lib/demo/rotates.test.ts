@@ -138,6 +138,30 @@ describe("analyzeRotations", () => {
     expect(p0!.x).toBeGreaterThan(0);
   });
 
+  it("ignores freezetime bomb drop/pickup rows — ownership changes are not info", () => {
+    // identical blind-correct scenario, plus wave-2a drop/pickup rows at round
+    // start (T-spawn handoffs). They must NOT collapse teamInfo to t≈2 and
+    // flip the verdict to informed.
+    const r1 = round(
+      1,
+      cast({
+        0: move(B, A, 40, 56),
+        5: tCommitToA(28, 36),
+        6: tCommitToA(28, 36),
+        7: tCommitToA(28, 36),
+        8: tCommitToA(28, 36),
+        9: tCommitToA(28, 36),
+      }),
+      { bomb: [{ t: 2.5, k: "drop", x: 0, y: 0 }, { t: 4.1, k: "pickup", x: 0, y: 0 }, PLANT_A] },
+    );
+    const r2 = round(2, cast({}), { bomb: [PLANT_B] });
+    const rep = analyzeRotations(meta, [r1, r2]);
+    expect(rep.available).toBe(true);
+    const p0 = rep.byPlayer.get(0);
+    expect(p0!.blindCorrect).toBe(1);
+    expect(p0!.events[0].verdict).toBe("blind-correct");
+  });
+
   it("marks the same rotate informed when a kill preceded it", () => {
     const r1 = round(
       1,
