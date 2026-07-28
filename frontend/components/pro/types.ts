@@ -94,12 +94,21 @@ export interface ProRosterPlayer {
 // One explainable prediction input: both teams' values and the signed pull it
 // adds toward teams[0] (positive = favors the first team).
 export interface ProPredFactor {
-  key: "form" | "h2h" | "margin" | "lineup" | string;
+  key: "form" | "h2h" | "margin" | "lineup" | "mappool" | string;
   label: string;
   a: number;
   b: number;
   contribution: number;
+  pp: number; // percentage-point swing in context (+ = toward teams[0])
   note?: string;
+}
+
+// Per-team window summary behind the factor rows (raw W-L, current streak).
+export interface ProPredTeamStats {
+  wins: number;
+  losses: number;
+  streak: number;
+  streakWon: boolean;
 }
 
 // Pre-match win estimate — a transparent heuristic over the SAME evidence the
@@ -129,6 +138,7 @@ export interface ProHistory {
   rosters?: Record<string, ProRosterPlayer[]>; // by gridId
   maps?: Record<string, ProMapRecord[]>; // by gridId — the map-pool receipts
   prediction?: ProPrediction;
+  predStats?: Record<string, ProPredTeamStats>; // by gridId
   // the model's own resolved track record (append-once pre-match calls,
   // reconciled after series finish) — the system grading itself in public
   record?: { model: string; n: number; correct: number } | null;

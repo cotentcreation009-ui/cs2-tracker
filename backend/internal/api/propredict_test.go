@@ -51,6 +51,22 @@ func TestPredictionFormDominates(t *testing.T) {
 	}
 }
 
+func TestPredictionCertaintyCapAndPP(t *testing.T) {
+	// everything stacked one way — the estimate must still respect the cap
+	hot := mk([]bool{true, true, true, true, true, true, true, true, true, true}, 2, 1.3)
+	cold := mk([]bool{false, false, false, false, false, false, false, false, false, false}, -2, 0.8)
+	p := buildPrediction(hot, cold, 3, 0, &predFactor{Key: "mappool", Label: "Map pool", A: 0.9, B: 0.2, Contribution: 0.7})
+	if p.PA > 0.902 {
+		t.Fatalf("pre-match certainty must cap ~90%%, got %.3f", p.PA)
+	}
+	// per-factor pp swings are populated and signed toward the favored side
+	for _, f := range p.Factors {
+		if f.Contribution > 0.05 && f.PP <= 0 {
+			t.Fatalf("factor %s favors A but pp=%.2f", f.Key, f.PP)
+		}
+	}
+}
+
 func TestPredictionThinDataRefuses(t *testing.T) {
 	a := mk([]bool{true, true}, 1, 0)
 	b := mk([]bool{false, false, false, false}, 0, 0)
