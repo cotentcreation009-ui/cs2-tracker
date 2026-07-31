@@ -82,7 +82,18 @@ const seriesResultQuery = `query SeriesResult($id: ID!) {
 // "mirage". Empty stays empty (older data without map info).
 func NormMapName(n string) string {
 	n = strings.ToLower(strings.TrimSpace(n))
-	return strings.TrimPrefix(n, "de_")
+	n = strings.TrimPrefix(n, "de_")
+	n = strings.TrimPrefix(n, "cs_")
+	// some events report "default-ancient" style names — keep the real map
+	n = strings.TrimPrefix(n, "default-")
+	n = strings.TrimPrefix(n, "default_")
+	// GRID placeholders for a map that was never recorded are NOT maps: they
+	// polluted map records ("Default-Map 1-0") and the map-pool factor
+	switch n {
+	case "map", "default", "tba", "tbd", "unknown", "n/a":
+		return ""
+	}
+	return n
 }
 
 // RecentSeriesForTeam returns a team's most-recent past series (DESC) within

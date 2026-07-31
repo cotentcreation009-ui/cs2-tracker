@@ -853,6 +853,9 @@ func prettyMap(raw string) string {
 		return "Dust2"
 	case "cbble":
 		return "Cobblestone"
+	case "map", "default", "tba", "tbd", "unknown", "n/a":
+		// GRID placeholder, not a map — blank it so the UI says "TBD"
+		return ""
 	default:
 		return strings.ToUpper(s[:1]) + s[1:]
 	}
