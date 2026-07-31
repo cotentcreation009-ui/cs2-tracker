@@ -96,6 +96,26 @@ func NormMapName(n string) string {
 	return n
 }
 
+// activeDuty is the current competitive map pool (normalized names). Update
+// on Valve rotations — last change 2026-07: Cache in, Overpass out. History
+// on out-of-pool maps is real data but irrelevant to upcoming series, so map
+// records and the prediction's map-pool factor skip it (filtered at
+// consumption, not in the cached results, so a rotation needs no cache bump).
+var activeDuty = map[string]bool{
+	"ancient": true,
+	"anubis":  true,
+	"cache":   true,
+	"dust2":   true,
+	"inferno": true,
+	"mirage":  true,
+	"nuke":    true,
+	"train":   true,
+}
+
+// ActiveDuty reports whether a NormMapName-normalized map is in the current
+// competitive pool.
+func ActiveDuty(norm string) bool { return activeDuty[norm] }
+
 // RecentSeriesForTeam returns a team's most-recent past series (DESC) within
 // [gte, lte]. Schedule/identity only — no results.
 func (c *Client) RecentSeriesForTeam(ctx context.Context, teamID, gte, lte string) ([]PastSeries, error) {
