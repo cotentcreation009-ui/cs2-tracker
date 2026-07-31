@@ -377,6 +377,21 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 		}
 	}
 
+	// contract hygiene: every per-team key is present and a JSON array — a nil
+	// slice marshals to null (real case: GRID has never tracked one team, e.g.
+	// an open-qualifier roster), and `null.length` crashed the history panel.
+	for _, tid := range teamIDs {
+		if rosters[tid] == nil {
+			rosters[tid] = []proPlayerRow{}
+		}
+		if form[tid] == nil {
+			form[tid] = []formEntry{}
+		}
+		if mapsOut[tid] == nil {
+			mapsOut[tid] = []map[string]any{}
+		}
+	}
+
 	pred := buildPrediction(
 		*pstats[teamIDs[0]], *pstats[teamIDs[1]],
 		h2hWins[teamIDs[0]], h2hWins[teamIDs[1]],

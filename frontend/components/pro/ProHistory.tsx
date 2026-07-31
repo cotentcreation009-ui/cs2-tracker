@@ -22,11 +22,15 @@ export function ProHistoryPanel({ id, teams, match }: { id: string; teams: ProTe
         if (!res.ok) throw new Error(`status ${res.status}`);
         const d = (await res.json()) as ProHistory;
         if (!alive) return;
-        const anyForm = Object.values(d.form ?? {}).some((f) => f.length > 0);
+        // Per-team values can be JSON null (Go marshals a nil slice as null
+        // when GRID has never tracked a team — real case: an open-qualifier
+        // roster). `.length` on null threw here and the catch hid the WHOLE
+        // panel, discarding the other team's perfectly good history.
+        const anyForm = Object.values(d.form ?? {}).some((f) => (f?.length ?? 0) > 0);
         const anyH2H = (d.h2h ?? []).length > 0;
-        const anyRoster = Object.values(d.rosters ?? {}).some((r) => r.length > 0);
+        const anyRoster = Object.values(d.rosters ?? {}).some((r) => (r?.length ?? 0) > 0);
         const anyPred = !!d.prediction?.available;
-        const anyMaps = Object.values(d.maps ?? {}).some((m) => m.length > 0);
+        const anyMaps = Object.values(d.maps ?? {}).some((m) => (m?.length ?? 0) > 0);
         setData(d);
         setState(anyForm || anyH2H || anyRoster || anyPred || anyMaps ? "ready" : "empty");
       } catch {
