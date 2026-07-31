@@ -262,9 +262,11 @@ func (s *Server) buildMatchHistory(ctx context.Context, ms grid.MatchState) map[
 					theirs = rt.Score
 				}
 			}
-			// prediction inputs: recency-weighted (the list is newest-first)
+			// prediction inputs: recency-weighted (the list is newest-first);
+			// out-of-pool maps (e.g. Overpass post-rotation) carry no signal
+			// for a series that can't be played on them
 			for _, rg := range res.Games {
-				if _, played := rg.ScoreByTeam[tid]; !played || rg.Map == "" {
+				if _, played := rg.ScoreByTeam[tid]; !played || rg.Map == "" || !grid.ActiveDuty(rg.Map) {
 					continue
 				}
 				rec := mapRec[tid][rg.Map]

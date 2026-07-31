@@ -25,6 +25,21 @@ func TestNormMapNamePlaceholders(t *testing.T) {
 	}
 }
 
+// The map-pool filter: current active duty in, rotated-out maps out.
+// 2026-07 rotation: Cache replaced Overpass.
+func TestActiveDuty(t *testing.T) {
+	for _, m := range []string{"ancient", "anubis", "cache", "dust2", "inferno", "mirage", "nuke", "train"} {
+		if !ActiveDuty(m) {
+			t.Errorf("ActiveDuty(%q) = false, want true", m)
+		}
+	}
+	for _, m := range []string{"overpass", "vertigo", "cbble", ""} {
+		if ActiveDuty(m) {
+			t.Errorf("ActiveDuty(%q) = true, want false", m)
+		}
+	}
+}
+
 func TestPrettyMapPlaceholders(t *testing.T) {
 	cases := map[string]string{
 		"de_dust2":        "Dust2",
