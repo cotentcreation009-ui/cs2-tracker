@@ -102,6 +102,192 @@ export function resolvePlayerSteamId(nick: string): Promise<string | null> {
   })();
 }
 
+// ---- Player identity cards (infobox wikitext) ------------------------------
+// Browser-side fallback for /api/pro-matches/player-card — same reason as
+// photos: Liquipedia 429s the VM's datacenter IP, visitor IPs are fine.
+// Batched: one revisions query fetches wikitext for up to 50 pages, parsed
+// into {name, country, role, …} locally. CC BY-SA 3.0, attributed in the UI.
+
+export interface LpPlayerCard {
+  found: boolean;
+  name?: string;
+  country?: string;
+  countryCode?: string;
+  role?: string;
+  birthDate?: string;
+  team?: string;
+}
+
+const CARD_PREFIX = "lp:card1:";
+
+export function resolvePlayerCard(nick: string): Promise<LpPlayerCard | null> {
+  const key = nick.toLowerCase();
+  try {
+    const raw = localStorage.getItem(CARD_PREFIX + key);
+    if (raw) {
+      const v = JSON.parse(raw) as { c: LpPlayerCard | null; t: number };
+      const ttl = v.c?.found ? HIT_TTL_MS : MISS_TTL_MS;
+      if (typeof v.t === "number" && Date.now() - v.t <= ttl) return Promise.resolve(v.c);
+    }
+  } catch {
+    // fall through to a live lookup
+  }
+  const existing = cardInflight.get(key);
+  if (existing) return existing;
+  const p = new Promise<LpPlayerCard | null>((resolve) => {
+    cardPending.push({ nick, resolve });
+    if (cardTimer == null) cardTimer = setTimeout(flushCardBatch, BATCH_WAIT_MS);
+  });
+  cardInflight.set(key, p);
+  void p.finally(() => cardInflight.delete(key));
+  return p;
+}
+
+type CardPending = { nick: string; resolve: (c: LpPlayerCard | null) => void };
+let cardPending: CardPending[] = [];
+let cardTimer: ReturnType<typeof setTimeout> | null = null;
+const cardInflight = new Map<string, Promise<LpPlayerCard | null>>();
+
+function writeCardCache(nick: string, c: LpPlayerCard | null): void {
+  try {
+    localStorage.setItem(CARD_PREFIX + nick.toLowerCase(), JSON.stringify({ c, t: Date.now() }));
+  } catch {
+    // uncached is fine
+  }
+}
+
+function flushCardBatch(): void {
+  cardTimer = null;
+  const batch = cardPending.splice(0, MAX_TITLES);
+  if (batch.length === 0) return;
+  batchChain = batchChain.then(() => execCardBatch(batch)).catch(() => {});
+  if (cardPending.length > 0) cardTimer = setTimeout(flushCardBatch, 0);
+}
+
+async function execCardBatch(batch: CardPending[]): Promise<void> {
+  const byNick = new Map<string, CardPending[]>();
+  for (const b of batch) {
+    const k = b.nick.toLowerCase();
+    const arr = byNick.get(k) ?? [];
+    arr.push(b);
+    byNick.set(k, arr);
+  }
+  const nicks = [...byNick.values()].map((arr) => arr[0].nick);
+  try {
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+      redirects: "1",
+      titles: nicks.join("|"),
+      prop: "revisions",
+      rvprop: "content",
+      rvslots: "main",
+    });
+    const res = await pacedFetch(`${API}?${params}`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const d = (await res.json()) as {
+      query?: {
+        redirects?: { from?: string; to?: string }[];
+        pages?: { title?: string; missing?: boolean; revisions?: { slots?: { main?: { content?: string } } }[] }[];
+      };
+    };
+    // map each requested nick to its (possibly redirected) page title
+    const redirect = new Map<string, string>();
+    for (const r of d.query?.redirects ?? []) {
+      if (r.from && r.to) redirect.set(r.from.toLowerCase(), r.to.toLowerCase());
+    }
+    const byTitle = new Map<string, string>();
+    for (const p of d.query?.pages ?? []) {
+      if (!p.title || p.missing) continue;
+      const text = p.revisions?.[0]?.slots?.main?.content ?? "";
+      if (text) byTitle.set(p.title.toLowerCase(), text);
+    }
+    for (const [k, arr] of byNick) {
+      const title = redirect.get(k) ?? k;
+      const text = byTitle.get(title) ?? byTitle.get(k) ?? "";
+      const card = text ? parseInfobox(text) : { found: false };
+      writeCardCache(arr[0].nick, card);
+      for (const b of arr) b.resolve(card);
+    }
+  } catch {
+    // network/429 — resolve null without caching so a later view retries
+    for (const arr of byNick.values()) for (const b of arr) b.resolve(null);
+  }
+}
+
+// JS port of the backend's tolerant "Infobox player" parser.
+function parseInfobox(wikitext: string): LpPlayerCard {
+  const start = wikitext.search(/\{\{Infobox\s+player/i);
+  if (start < 0) return { found: false };
+  const window = wikitext.slice(start, start + 8000);
+  const fields = new Map<string, string>();
+  for (const lineRaw of window.split("\n")) {
+    const line = lineRaw.trim();
+    if (!line.startsWith("|")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const key = line.slice(1, eq).trim().toLowerCase();
+    const val = line.slice(eq + 1).trim();
+    if (key && val && !fields.has(key)) fields.set(key, val);
+  }
+  const clean = (s?: string): string =>
+    (s ?? "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<ref[^>]*>[\s\S]*?<\/ref>|<ref[^/>]*\/>|<[^>]+>/g, "")
+      .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, "$1")
+      .replace(/\{\{[^{}]*\}\}/g, "")
+      .replace(/'''|''|[{}]/g, "")
+      .replace(/^\|+|\|+$/g, "")
+      .trim()
+      .slice(0, 80);
+  const country = clean(fields.get("country") ?? fields.get("nationality"));
+  const birthRaw = fields.get("birth_date") ?? fields.get("birthdate") ?? fields.get("birth") ?? "";
+  const bm = /(\d{4})[|-](\d{1,2})[|-](\d{1,2})/.exec(birthRaw);
+  return {
+    found: true,
+    name: clean(fields.get("romanized_name")) || clean(fields.get("name")),
+    country,
+    countryCode: LP_ISO[country.toLowerCase()] ?? "",
+    role: foldRole(clean(fields.get("role") ?? fields.get("roles"))),
+    birthDate: bm ? `${bm[1]}-${bm[2].padStart(2, "0")}-${bm[3].padStart(2, "0")}` : undefined,
+    team: clean(fields.get("team")) || undefined,
+  };
+}
+
+function foldRole(r: string): string {
+  switch (r.toLowerCase()) {
+    case "": return "";
+    case "awp": case "awper": case "sniper": return "AWPer";
+    case "igl": case "in-game leader": case "in game leader": case "captain": return "IGL";
+    case "rifler": return "Rifler";
+    case "coach": case "head coach": return "Coach";
+    case "entry fragger": case "entry": return "Entry";
+    case "support": return "Support";
+    case "lurker": return "Lurker";
+    default: return r.slice(0, 24);
+  }
+}
+
+const LP_ISO: Record<string, string> = {
+  argentina: "AR", australia: "AU", austria: "AT", belarus: "BY", belgium: "BE",
+  "bosnia and herzegovina": "BA", brazil: "BR", bulgaria: "BG", canada: "CA",
+  chile: "CL", china: "CN", croatia: "HR", "czech republic": "CZ", czechia: "CZ",
+  denmark: "DK", estonia: "EE", finland: "FI", france: "FR", germany: "DE",
+  greece: "GR", hungary: "HU", iceland: "IS", india: "IN", indonesia: "ID",
+  israel: "IL", italy: "IT", japan: "JP", jordan: "JO", kazakhstan: "KZ",
+  kosovo: "XK", latvia: "LV", lithuania: "LT", malaysia: "MY", mexico: "MX",
+  mongolia: "MN", montenegro: "ME", morocco: "MA", netherlands: "NL",
+  "new zealand": "NZ", "north macedonia": "MK", norway: "NO", peru: "PE",
+  poland: "PL", portugal: "PT", romania: "RO", russia: "RU", serbia: "RS",
+  singapore: "SG", slovakia: "SK", slovenia: "SI", "south africa": "ZA",
+  "south korea": "KR", spain: "ES", sweden: "SE", switzerland: "CH",
+  taiwan: "TW", thailand: "TH", turkey: "TR", ukraine: "UA",
+  "united kingdom": "GB", "united states": "US", uruguay: "UY",
+  uzbekistan: "UZ", vietnam: "VN",
+};
+
 export function invalidatePlayerPhoto(nick: string): void {
   try {
     localStorage.removeItem(CACHE_PREFIX + nick.toLowerCase());

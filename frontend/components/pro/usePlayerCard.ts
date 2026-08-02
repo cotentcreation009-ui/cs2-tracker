@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { resolvePlayerCard } from "@/lib/liquipediaClient";
 
 // A player's Liquipedia identity card (CC BY-SA 3.0 — attributed wherever it
 // renders). Resolved lazily per nickname; the backend caches for 14 days and
@@ -51,17 +52,23 @@ export function usePlayerCard(nick?: string): PlayerCard | null {
     let alive = true;
     let p = inflight.get(k);
     if (!p) {
+      // Backend first (Redis-cached, one Liquipedia hit per player per
+      // fortnight site-wide). When it has nothing — which includes the VM's
+      // datacenter IP being 429-blocked by Liquipedia, the reason photos
+      // resolve in the browser — fall back to the browser-side batched
+      // resolver on the visitor's own IP.
       p = fetch(`/api/pro-matches/player-card/${encodeURIComponent(nick!.trim())}`)
         .then((r) => (r.ok ? (r.json() as Promise<PlayerCard>) : null))
-        .then((d) => {
-          const v = d && d.found ? d : null;
+        .catch(() => null)
+        .then(async (d) => {
+          let v: PlayerCard | null = d && d.found ? d : null;
+          if (!v) {
+            const lp = await resolvePlayerCard(nick!.trim()).catch(() => null);
+            if (lp?.found) v = lp;
+          }
           cache.set(k, v);
           inflight.delete(k);
           return v;
-        })
-        .catch(() => {
-          inflight.delete(k);
-          return null;
         });
       inflight.set(k, p);
     }
