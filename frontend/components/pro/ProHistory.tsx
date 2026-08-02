@@ -6,6 +6,7 @@ import type { MatchState, ProFormEntry, ProHistory, ProPredTeamStats, ProPredict
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
+import { ageFrom, countryChip, usePlayerCard } from "./usePlayerCard";
 import { teamBarColors, validHex } from "./format";
 
 // Recent form + head-to-head, loaded lazily (after the live scoreboard) from
@@ -459,49 +460,16 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
       </Link>
       {cards.length > 0 ? (
         <div className="grid grid-cols-5 gap-2 p-3">
-          {cards.map((p) => {
-            const has = p.src !== "";
-            const n = p.src === "grid" ? p.maps : p.series;
-            const clickable = !!p.id;
-            const isOpen = !!p.id && p.id === openId;
-            return (
-              <button
-                key={p.nick}
-                type="button"
-                disabled={!clickable}
-                onClick={() => setOpenId(isOpen ? null : (p.id ?? null))}
-                title={clickable ? `${p.nick} — click for form over time` : undefined}
-                className={`min-w-0 rounded-lg text-left transition ${clickable ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"} ${isOpen ? "ring-1" : ""}`}
-                style={isOpen ? { boxShadow: `0 0 0 1px ${hex}66` } : undefined}
-              >
-                <PlayerAvatar nick={p.nick} hex={hex} shape="card" />
-                <p className="mt-1.5 truncate text-center text-xs font-bold text-ink" title={p.nick}>
-                  {p.nick}
-                </p>
-                <p className="text-center text-xs tabular-nums leading-tight">
-                  {has ? (
-                    <>
-                      <span className={`font-bold ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</span>
-                      <span className="text-faint"> K/D</span>
-                    </>
-                  ) : (
-                    <span className="text-faint">— K/D</span>
-                  )}
-                </p>
-                <p
-                  className="truncate text-center text-[10px] tabular-nums leading-tight text-faint"
-                  title={has ? `Across the ${n} maps GRID tracked for ${p.nick} in the last 3 months${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} average kills per map` : ""}` : "No GRID-tracked matches in the last 3 months"}
-                >
-                  {has ? `${n} maps${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}` : "no data yet"}
-                </p>
-                {clickable ? (
-                  <p className={`text-center text-[9px] leading-tight ${isOpen ? "" : "text-faint/70"}`} style={isOpen ? { color: hex } : undefined}>
-                    {isOpen ? "▲ close" : "▾ more stats"}
-                  </p>
-                ) : null}
-              </button>
-            );
-          })}
+          {cards.map((p) => (
+            <LineupPlayerCard
+              key={p.nick}
+              p={p}
+              hex={hex}
+              kdColor={kdColor}
+              isOpen={!!p.id && p.id === openId}
+              onToggle={() => setOpenId(p.id && p.id !== openId ? p.id : null)}
+            />
+          ))}
         </div>
       ) : (
         <p className="px-4 py-4 text-center text-[11px] text-faint">No tracked stats yet for this lineup.</p>
@@ -522,9 +490,78 @@ function LineupCard({ team, players }: { team: ProTeam; players: ProRosterPlayer
         </div>
       ) : null}
       <p className="border-t border-line/40 px-4 py-1.5 text-[9px] leading-snug text-faint">
-        Stats: official GRID aggregates over the last 3 months of tracked pro play — map counts reflect GRID&apos;s event coverage, not every match played · Photos: Liquipedia (CC BY-SA 3.0)
+        Stats: official GRID aggregates over the last 3 months of tracked pro play — map counts reflect GRID&apos;s event coverage, not every match played · Photos &amp; bios: Liquipedia (CC BY-SA 3.0)
       </p>
     </div>
+  );
+}
+
+// One player card in the lineup grid, enriched with the Liquipedia identity
+// card when it resolves: flag beside the nick, role line, real name + age in
+// the tooltip. Renders identically (minus those) until the card arrives.
+function LineupPlayerCard({
+  p,
+  hex,
+  kdColor,
+  isOpen,
+  onToggle,
+}: {
+  p: ProRosterPlayer;
+  hex: string;
+  kdColor: (v: number) => string;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const card = usePlayerCard(p.nick);
+  const cc = countryChip(card?.countryCode);
+  const age = ageFrom(card?.birthDate);
+  const has = p.src !== "";
+  const n = p.src === "grid" ? p.maps : p.series;
+  const clickable = !!p.id;
+  const who = [card?.name, card?.country, age != null ? `${age}y` : ""].filter(Boolean).join(" · ");
+  return (
+    <button
+      type="button"
+      disabled={!clickable}
+      onClick={onToggle}
+      title={`${p.nick}${who ? ` — ${who}` : ""}${clickable ? " · click for form over time" : ""}`}
+      className={`min-w-0 rounded-lg text-left transition ${clickable ? "cursor-pointer hover:-translate-y-0.5" : "cursor-default"} ${isOpen ? "ring-1" : ""}`}
+      style={isOpen ? { boxShadow: `0 0 0 1px ${hex}66` } : undefined}
+    >
+      <PlayerAvatar nick={p.nick} hex={hex} shape="card" />
+      <p className="mt-1.5 truncate text-center text-xs font-bold text-ink" title={p.nick}>
+        {p.nick}
+      </p>
+      {cc || card?.role ? (
+        <p className="flex items-center justify-center gap-1 text-[9px] leading-tight">
+          {cc ? (
+            <span className="rounded border border-line px-0.5 font-bold tracking-wider text-faint" title={card?.country}>{cc}</span>
+          ) : null}
+          {card?.role ? <span className="truncate uppercase tracking-wider text-faint">{card.role}</span> : null}
+        </p>
+      ) : null}
+      <p className="text-center text-xs tabular-nums leading-tight">
+        {has ? (
+          <>
+            <span className={`font-bold ${kdColor(p.kd)}`}>{p.kd.toFixed(2)}</span>
+            <span className="text-faint"> K/D</span>
+          </>
+        ) : (
+          <span className="text-faint">— K/D</span>
+        )}
+      </p>
+      <p
+        className="truncate text-center text-[10px] tabular-nums leading-tight text-faint"
+        title={has ? `Across the ${n} maps GRID tracked for ${p.nick} in the last 3 months${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} average kills per map` : ""}` : "No GRID-tracked matches in the last 3 months"}
+      >
+        {has ? `${n} maps${p.src === "grid" && p.avgKills > 0 ? ` · ${p.avgKills.toFixed(1)} AK` : ""}` : "no data yet"}
+      </p>
+      {clickable ? (
+        <p className={`text-center text-[9px] leading-tight ${isOpen ? "" : "text-faint/70"}`} style={isOpen ? { color: hex } : undefined}>
+          {isOpen ? "▲ close" : "▾ more stats"}
+        </p>
+      ) : null}
+    </button>
   );
 }
 

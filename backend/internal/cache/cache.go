@@ -97,6 +97,10 @@ func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail2:
 // ProPlayerImgKey caches a pro player's Liquipedia photo bytes by nickname.
 func ProPlayerImgKey(nick string) string { return "cs2:pro:pimg:" + strings.ToLower(nick) }
 
+// ProPlayerCardKey caches a pro player's Liquipedia identity card (real name,
+// country, role) by nickname.
+func ProPlayerCardKey(nick string) string { return "cs2:pro:pcard:" + strings.ToLower(nick) }
+
 // ProPlayerStatsKey caches a player's official GRID aggregates per window.
 func ProPlayerStatsKey(playerID, window string) string {
 	return "cs2:pro:pstats2:" + playerID + ":" + window

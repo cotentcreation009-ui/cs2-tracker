@@ -7,6 +7,7 @@ import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
 import { TwitchLink } from "./TwitchLink";
+import { countryChip, usePlayerCard } from "./usePlayerCard";
 import { startInfo, validHex } from "./format";
 
 // HLTV-style team page: identity header with a record/form stat strip, the
@@ -221,7 +222,7 @@ export function ProTeamClient({ id }: { id: string }) {
       <p className="text-[11px] leading-snug text-faint">
         Player stats are GRID&apos;s official aggregates over the last year of tracked pro play
         (players without official data fall back to recent-series aggregates). Click a result to
-        open the full match breakdown with per-map scoreboards. Player photos from{" "}
+        open the full match breakdown with per-map scoreboards. Player photos &amp; bios from{" "}
         <a href="https://liquipedia.net/counterstrike/" target="_blank" rel="noopener noreferrer" className="underline hover:text-muted">Liquipedia</a>{" "}
         (CC&nbsp;BY-SA&nbsp;3.0).
       </p>
@@ -321,6 +322,7 @@ function RosterRow({
   const diff = p.kills - p.deaths;
   const clickable = !!p.id;
   const kdColor = (v: number) => (v >= 1.1 ? "text-good" : v < 0.95 ? "text-bad" : "text-ink");
+  const card = usePlayerCard(p.nick);
   return (
     <>
     <tr
@@ -332,7 +334,21 @@ function RosterRow({
         <span className="flex items-center gap-2.5">
           <span className={`w-3 shrink-0 text-right text-[10px] font-bold tabular-nums ${rank === 1 ? "" : "text-faint"}`} style={rank === 1 ? { color: hex } : undefined}>{rank}</span>
           <PlayerAvatar nick={p.nick} hex={hex} size={48} />
-          <span className="truncate text-[15px] font-semibold text-ink">{p.nick}</span>
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5">
+              {countryChip(card?.countryCode) ? (
+                <span className="shrink-0 rounded border border-line px-1 text-[8px] font-bold leading-4 tracking-wider text-faint" title={card?.country}>
+                  {countryChip(card?.countryCode)}
+                </span>
+              ) : null}
+              <span className="truncate text-[15px] font-semibold text-ink">{p.nick}</span>
+            </span>
+            {card?.name || card?.role ? (
+              <span className="block truncate text-[10px] leading-tight text-faint">
+                {[card?.name, card?.role].filter(Boolean).join(" · ")}
+              </span>
+            ) : null}
+          </span>
           {clickable ? (
             <svg viewBox="0 0 24 24" className={`h-3 w-3 shrink-0 text-faint transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
               <path d="M6 9l6 6 6-6" />
