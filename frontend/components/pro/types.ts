@@ -41,6 +41,7 @@ export interface ProMapTeam {
   side?: string; // "CT" | "T"
   score: number;
   won?: boolean;
+  money?: number; // liquid cash — the buy-state signal
   netWorth?: number;
   players?: ProMapPlayer[];
 }

@@ -99,6 +99,7 @@ type MapTeam struct {
 	Side     string      `json:"side,omitempty"` // "CT" | "T"
 	Score    int         `json:"score"`          // rounds won on this map
 	Won      bool        `json:"won,omitempty"`
+	Money    int         `json:"money,omitempty"` // liquid cash — the buy-state signal
 	NetWorth int         `json:"netWorth,omitempty"`
 	Players  []MapPlayer `json:"players,omitempty"`
 }
@@ -224,6 +225,7 @@ type ssGameTeam struct {
 	Won      bool       `json:"won"`
 	Kills    int        `json:"kills"`
 	Deaths   int        `json:"deaths"`
+	Money    int        `json:"money"`
 	NetWorth int        `json:"netWorth"`
 	Players  []ssPlayer `json:"players"`
 }
@@ -762,7 +764,7 @@ func normalizeMaps(games []ssGame) []MapState {
 				if t.ID == "" {
 					continue
 				}
-				mt := MapTeam{GridID: t.ID, Side: normalizeSide(t.Side), Score: t.Score, Won: t.Won, NetWorth: t.NetWorth}
+				mt := MapTeam{GridID: t.ID, Side: normalizeSide(t.Side), Score: t.Score, Won: t.Won, Money: t.Money, NetWorth: t.NetWorth}
 				for _, pl := range t.Players {
 					if pl.Name == "" {
 						continue

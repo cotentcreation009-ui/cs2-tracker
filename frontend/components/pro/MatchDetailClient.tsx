@@ -10,6 +10,7 @@ import { RoundStrip } from "./RoundStrip";
 import { TwitchLink } from "./TwitchLink";
 import { ProHistoryPanel } from "./ProHistory";
 import { PointPill } from "./PointPill";
+import { GameLog } from "./GameLog";
 import { agoShort, clockLabel, formatTag, liveMap, mapsWon, pointState, sideHex, validHex } from "./format";
 
 const POLL_MS = 10_000;
@@ -207,6 +208,9 @@ export function MatchDetailClient({
         </div>
       ) : null}
 
+      {/* round-by-round log with live economy — everything the poll gives us */}
+      <GameLog match={m} />
+
       {/* recent form + head-to-head, loaded lazily below the live data —
           `match` keeps the win estimate live-blended as the poll updates */}
       {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} match={m} /> : null}
@@ -351,8 +355,8 @@ function MapRow({
       {/* per-team player scoreboards */}
       {hasBoards ? (
         <div className="mt-4 grid gap-3 border-t border-line/60 pt-4 lg:grid-cols-2">
-          <TeamScoreboard team={a} side={aSide} score={aScore} players={teamA?.players} won={!!aMapWon} />
-          <TeamScoreboard team={b} side={bSide} score={bScore} players={teamB?.players} won={!!bMapWon} />
+          <TeamScoreboard team={a} side={aSide} score={aScore} players={teamA?.players} won={!!aMapWon} money={isLive ? teamA?.money : undefined} />
+          <TeamScoreboard team={b} side={bSide} score={bScore} players={teamB?.players} won={!!bMapWon} money={isLive ? teamB?.money : undefined} />
         </div>
       ) : emptyBoards && isDone ? (
         <p className="mt-3 border-t border-line/60 pt-3 text-xs text-faint">
@@ -371,12 +375,14 @@ function TeamScoreboard({
   score,
   players,
   won,
+  money,
 }: {
   team?: ProTeam;
   side?: string;
   score: number;
   players?: ProMapPlayer[];
   won: boolean;
+  money?: number;
 }) {
   const hex = validHex(team?.colorPrimary) ?? "#8a93a5";
   const rows = [...(players ?? [])].sort((x, y) => y.kills - x.kills);
@@ -401,7 +407,14 @@ function TeamScoreboard({
             <span className="rounded border px-1 text-[9px] font-bold" style={{ color: sHex, borderColor: `${sHex}55` }}>{s}</span>
           ) : null}
         </div>
-        <span className="shrink-0 text-sm font-bold tabular-nums" style={{ color: won ? "var(--color-good)" : undefined }}>{score}</span>
+        <span className="flex shrink-0 items-center gap-2">
+          {money && money > 0 ? (
+            <span className="text-[10px] tabular-nums text-faint" title="Team bank — spendable cash right now">
+              ${money >= 10_000 ? `${(money / 1000).toFixed(1)}k` : money.toLocaleString()} bank
+            </span>
+          ) : null}
+          <span className="text-sm font-bold tabular-nums" style={{ color: won ? "var(--color-good)" : undefined }}>{score}</span>
+        </span>
       </div>
       <table className="w-full text-xs">
         <thead>
