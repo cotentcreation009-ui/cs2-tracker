@@ -82,39 +82,39 @@ export function PlayerStatsDrawer({
   return (
     <div className="overflow-hidden">
       <div className="flex items-center gap-2.5 border-b border-line/40 px-4 py-2">
-        <PlayerAvatar nick={nick} hex={hex} size={card ? 32 : 26} />
-        <span className="min-w-0">
-          <span className="flex items-center gap-2">
-            <span className="text-sm font-bold text-ink">{nick}</span>
-            <span className="text-[10px] uppercase tracking-wider text-faint">form over time</span>
-          </span>
-          {card ? (
-            // Liquipedia identity line (CC BY-SA, attributed in the card footer)
-            <span className="flex items-center gap-1.5 text-[10px] leading-tight text-faint">
-              {countryChip(card.countryCode) ? (
-                <span className="rounded border border-line px-1 text-[8px] font-bold tracking-wider" title={card.country}>
-                  {countryChip(card.countryCode)}
-                </span>
-              ) : null}
-              <span className="truncate">
-                {[
-                  card.name,
-                  card.country,
-                  ageFrom(card.birthDate) != null ? `${ageFrom(card.birthDate)} years` : "",
-                  card.role,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </span>
-          ) : null}
-        </span>
+        <PlayerAvatar nick={nick} hex={hex} size={26} />
+        <span className="text-sm font-bold text-ink">{nick}</span>
+        <span className="text-[10px] uppercase tracking-wider text-faint">form over time</span>
         {year ? (
           <span className="ml-auto shrink-0 text-[10px] tabular-nums text-faint" title="Best single-map kill count in the last 12 months">
             peak <span className="font-bold text-ink">{year.maxKills}</span> kills · one map
           </span>
         ) : null}
       </div>
+      {card ? (
+        // Liquipedia identity row (CC BY-SA, attributed in the card footer) —
+        // deliberately its own strip: a faint one-liner here got overlooked
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line/40 bg-panel/30 px-4 py-2">
+          {card.name ? <span className="text-xs font-semibold text-ink">{card.name}</span> : null}
+          {countryChip(card.countryCode) || card.country ? (
+            <span className="inline-flex items-center gap-1 rounded-md border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-muted">
+              {countryChip(card.countryCode) ? (
+                <span className="font-bold tracking-wider" style={{ color: hex }}>{countryChip(card.countryCode)}</span>
+              ) : null}
+              {card.country}
+            </span>
+          ) : null}
+          {ageFrom(card.birthDate) != null ? (
+            <span className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted">
+              {ageFrom(card.birthDate)} years
+            </span>
+          ) : null}
+          {card.role ? (
+            <span className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-muted">{card.role}</span>
+          ) : null}
+          <span className="ml-auto text-[9px] text-faint">via Liquipedia</span>
+        </div>
+      ) : null}
       <table className="w-full text-xs">
         <thead>
           <tr className="text-[9px] uppercase tracking-wider text-faint">
