@@ -60,3 +60,15 @@ export function flag(country?: string): string {
     ...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
   );
 }
+
+/** CS2 Premier rating tier color — the in-game 5k brackets follow the item
+ * rarity scale: grey <5k, light blue, blue, purple, pink, red, gold 30k+. */
+export function premierHex(rating: number): string {
+  if (rating >= 30000) return "#ffd700"; // gold
+  if (rating >= 25000) return "#eb4b4b"; // red
+  if (rating >= 20000) return "#d32ce6"; // pink
+  if (rating >= 15000) return "#8847ff"; // purple
+  if (rating >= 10000) return "#4b69ff"; // blue
+  if (rating >= 5000) return "#5e98d9"; // light blue
+  return "#b0c3d9"; // grey
+}

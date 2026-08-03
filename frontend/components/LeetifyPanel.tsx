@@ -1,7 +1,7 @@
 import type { LeetifyProfile } from "@/lib/types";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { RatingRadar } from "@/components/RatingRadar";
-import { tierColor } from "@/lib/format";
+import { premierHex, tierColor } from "@/lib/format";
 
 function Bar({ label, value }: { label: string; value: number }) {
   const pct = Math.max(0, Math.min(value, 100));
@@ -25,15 +25,20 @@ function Mini({
   label,
   value,
   valueClass = "",
+  valueHex,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  valueHex?: string;
 }) {
   return (
     <div className="rounded-lg border border-line bg-panel px-3 py-2">
       <div className="stat-label">{label}</div>
-      <div className={`mt-0.5 text-sm font-semibold tabular-nums ${valueClass}`}>
+      <div
+        className={`mt-0.5 text-sm font-semibold tabular-nums ${valueClass}`}
+        style={valueHex ? { color: valueHex } : undefined}
+      >
         {value}
       </div>
     </div>
@@ -156,10 +161,10 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         <Mini label="Matches" value={p.total_matches.toLocaleString("en-US")} />
         <Mini label="Win rate" value={`${(p.winrate * 100).toFixed(1)}%`} />
         {r.premier != null && r.premier > 0 && (
-          <Mini label="Premier" value={r.premier.toLocaleString("en-US")} />
+          <Mini label="Premier" value={r.premier.toLocaleString("en-US")} valueHex={premierHex(r.premier)} />
         )}
         {p.peak_premier != null && p.peak_premier > (r.premier ?? 0) && (
-          <Mini label="Peak Premier" value={p.peak_premier.toLocaleString("en-US")} />
+          <Mini label="Peak Premier" value={p.peak_premier.toLocaleString("en-US")} valueHex={premierHex(p.peak_premier)} />
         )}
       </div>
 

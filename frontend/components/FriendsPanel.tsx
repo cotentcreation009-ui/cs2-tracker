@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { kdColor } from "@/lib/format";
+import { kdColor, premierHex } from "@/lib/format";
 
 // FriendsPanel — the "Friends" peek. Leetify's recent_teammates gives the ≤5
 // players this account queues with most; the backend resolves each one's
@@ -134,9 +134,11 @@ function RankBadge({ r }: { r: FriendRow }) {
     );
   }
   if (r.premier) {
+    // Valve's Premier tier color for the bracket (grey→light blue→blue→purple→pink→red→gold)
     return (
       <span
-        className="inline-flex items-center rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-bold text-brand"
+        className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold"
+        style={{ background: `${premierHex(r.premier)}22`, color: premierHex(r.premier) }}
         title={`Premier rating ${r.premier.toLocaleString()}`}
       >
         Premier {r.premier.toLocaleString()}

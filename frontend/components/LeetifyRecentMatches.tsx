@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
-import { mapLabel, timeAgo } from "@/lib/format";
+import { mapLabel, premierHex, timeAgo } from "@/lib/format";
 import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
 
 // Queue identity: Premier and Competitive both arrive as data_source
@@ -55,11 +55,13 @@ function rankAfter(m: LeetifyRecentMatch): { label: string; value: string } | nu
   return null;
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, valueHex }: { label: string; value: string; valueHex?: string }) {
   return (
     <div className="rounded-md border border-line bg-panel px-2.5 py-1.5">
       <div className="stat-label">{label}</div>
-      <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
+      <div className="mt-0.5 text-sm font-semibold tabular-nums" style={valueHex ? { color: valueHex } : undefined}>
+        {value}
+      </div>
     </div>
   );
 }
@@ -182,6 +184,7 @@ export function LeetifyRecentMatches({
                       <Stat
                         label={after.label}
                         value={`${after.value}${delta != null ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}`}
+                        valueHex={after.label === "Premier rating" ? premierHex(m.rank ?? 0) : undefined}
                       />
                     ) : (
                       <Stat label="Queue" value={src.label} />
