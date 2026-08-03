@@ -142,6 +142,10 @@ export interface LeetifyRecentMatch {
   score: number[]; // [team, enemy]
   rank?: number; // FACEIT level / Premier rating / Competitive rank (per rank_type)
   rank_type?: number; // 11 = Premier (rank is the rating), 12 = Competitive
+  kills?: number; // merged from Leetify's legacy endpoint (v3 lacks them)
+  deaths?: number;
+  elo?: number; // FACEIT elo recorded with the game
+  rank_delta?: number | null; // Premier rating / FACEIT elo change vs previous game in that queue
   preaim: number;
   reaction_time_ms: number;
   accuracy_head: number;

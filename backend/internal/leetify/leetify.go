@@ -94,6 +94,8 @@ type Stats struct {
 
 // RecentMatch is one row of Leetify's recent-match list (most recent first).
 // The per-match aim/mechanics fields back the expandable "inspect" row.
+// Kills/Deaths/Elo come from the LEGACY endpoint (v3 doesn't expose them) and
+// are merged in by game id — 0/absent when the legacy fetch had no data.
 type RecentMatch struct {
 	ID            string  `json:"id"`
 	FinishedAt    string  `json:"finished_at"`
@@ -104,6 +106,15 @@ type RecentMatch struct {
 	Score         []int   `json:"score"`
 	Rank          int     `json:"rank"`      // FACEIT level / Premier rating / Competitive rank (per RankType)
 	RankType      int     `json:"rank_type"` // 11 = Premier (Rank is the rating), 12 = Competitive; 0 when absent
+
+	Kills  int `json:"kills,omitempty"`
+	Deaths int `json:"deaths,omitempty"`
+	// Elo is the FACEIT elo recorded with the game (legacy endpoint only).
+	Elo int `json:"elo,omitempty"`
+	// RankDelta is the change vs the player's PREVIOUS listed game in the same
+	// queue: Premier rating points (rank_type 11) or FACEIT elo. Nil when
+	// unknown (first listed game of that queue, or ratings hidden).
+	RankDelta *int `json:"rank_delta,omitempty"`
 
 	Preaim               float64 `json:"preaim"`
 	ReactionTimeMs       float64 `json:"reaction_time_ms"`
@@ -201,6 +212,62 @@ func peakPremier(ms []RecentMatch) int {
 	return peak
 }
 
+// mergeLegacyGames copies the legacy-only per-game fields (kills/deaths,
+// FACEIT elo, and a rank v3 hid) onto v3 rows, matched by game id.
+func mergeLegacyGames(p *Profile, lp *Profile) {
+	byID := map[string]*RecentMatch{}
+	for _, list := range [][]RecentMatch{lp.RecentMatches, lp.FaceitMatches, lp.PremierMatches} {
+		for i := range list {
+			if list[i].ID != "" {
+				byID[list[i].ID] = &list[i]
+			}
+		}
+	}
+	if len(byID) == 0 {
+		return
+	}
+	for _, list := range [][]RecentMatch{p.RecentMatches, p.FaceitMatches, p.PremierMatches} {
+		for i := range list {
+			lg, ok := byID[list[i].ID]
+			if !ok {
+				continue
+			}
+			list[i].Kills = lg.Kills
+			list[i].Deaths = lg.Deaths
+			list[i].Elo = lg.Elo
+			if list[i].Rank == 0 && lg.Rank > 0 {
+				list[i].Rank = lg.Rank
+			}
+		}
+	}
+}
+
+// computeRankDeltas fills RankDelta on a most-recent-first list: for each game
+// the change vs the player's previous listed game in the SAME queue — Premier
+// rating points (rank_type 11) or FACEIT elo. First listed game of a queue
+// (nothing to compare) and hidden ratings stay nil.
+func computeRankDeltas(ms []RecentMatch) {
+	prevPremier, prevElo := 0, 0
+	for i := len(ms) - 1; i >= 0; i-- {
+		m := &ms[i]
+		m.RankDelta = nil
+		switch {
+		case m.RankType == 11 && m.Rank > 0:
+			if prevPremier > 0 {
+				d := m.Rank - prevPremier
+				m.RankDelta = &d
+			}
+			prevPremier = m.Rank
+		case m.DataSource == "faceit" && m.Elo > 0:
+			if prevElo > 0 {
+				d := m.Elo - prevElo
+				m.RankDelta = &d
+			}
+			prevElo = m.Elo
+		}
+	}
+}
+
 func transientStatus(code int) bool {
 	switch code {
 	case http.StatusTooManyRequests, http.StatusBadGateway,
@@ -273,32 +340,32 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
 		p.PeakPremier = peakPremier(p.RecentMatches)
-		// v3 caps its window at 100 matches, so whichever platform a player queues
-		// LESS gets cut off (a FACEIT-heavy player loses their Premier games and
-		// vice versa). When v3 returned a FULL window (more history exists) and
-		// either platform list is short, pull the whole history from the legacy
-		// endpoint to complete BOTH lists (up to the 100-game filter) — plus the
-		// legacy-only K/D + party + all-time peak, a free bonus.
-		if len(p.RecentMatches) >= v3MatchWindow &&
-			(len(p.FaceitMatches) < v3MatchWindow || len(p.PremierMatches) < v3MatchWindow) {
-			if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
-				if len(lp.FaceitMatches) > len(p.FaceitMatches) {
-					p.FaceitMatches = lp.FaceitMatches
-				}
-				if len(lp.PremierMatches) > len(p.PremierMatches) {
-					p.PremierMatches = lp.PremierMatches
-				}
-				if lp.KD > 0 {
-					p.KD = lp.KD
-				}
-				if lp.AvgPartySize > 0 {
-					p.AvgPartySize = lp.AvgPartySize
-				}
-				if lp.PeakPremier > p.PeakPremier {
-					p.PeakPremier = lp.PeakPremier
-				}
+		// The legacy endpoint carries per-game data v3 doesn't (kills/deaths,
+		// FACEIT elo, Premier rating on games where v3 hides it) AND the full
+		// history beyond v3's 100-game window. Fetch it best-effort every time:
+		// merge its per-game fields into the v3 rows by game id, complete the
+		// platform lists, and pick up the legacy-only K/D + party + peak.
+		if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
+			mergeLegacyGames(&p, lp)
+			if len(lp.FaceitMatches) > len(p.FaceitMatches) {
+				p.FaceitMatches = lp.FaceitMatches
+			}
+			if len(lp.PremierMatches) > len(p.PremierMatches) {
+				p.PremierMatches = lp.PremierMatches
+			}
+			if lp.KD > 0 {
+				p.KD = lp.KD
+			}
+			if lp.AvgPartySize > 0 {
+				p.AvgPartySize = lp.AvgPartySize
+			}
+			if lp.PeakPremier > p.PeakPremier {
+				p.PeakPremier = lp.PeakPremier
 			}
 		}
+		computeRankDeltas(p.RecentMatches)
+		computeRankDeltas(p.FaceitMatches)
+		computeRankDeltas(p.PremierMatches)
 		return &p, nil
 	case http.StatusNotFound:
 		// The newer /v3 API doesn't index every account Leetify actually has
@@ -425,9 +492,14 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 			Score:          g.Scores,
 			Rank:           rank,
 			RankType:       g.RankType,
+			Kills:          g.Kills,
+			Deaths:         g.Deaths,
 			Preaim:         g.Preaim,
 			ReactionTimeMs: g.ReactionTime * 1000, // seconds → ms (matches v3)
 			AccuracyHead:   g.AccuracyHead * 100,  // fraction → % (matches v3)
+		}
+		if g.Elo != nil && *g.Elo > 0 {
+			match.Elo = int(*g.Elo)
 		}
 		if len(rm) < maxRecentMatches {
 			rm = append(rm, match)
@@ -462,6 +534,11 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 	p.RecentMatches = rm
 	p.FaceitMatches = faceitRm
 	p.PremierMatches = premierRm
+	// standalone legacy path (v3 404s) still gets deltas; when GetProfile
+	// merges these lists into v3's it recomputes — idempotent either way
+	computeRankDeltas(p.RecentMatches)
+	computeRankDeltas(p.FaceitMatches)
+	computeRankDeltas(p.PremierMatches)
 	ranks := map[string]any{}
 	if lp.RecentGameRatings.Leetify != 0 {
 		// Leetify's overall rating is a small decimal; v3 exposes it ×100 in
