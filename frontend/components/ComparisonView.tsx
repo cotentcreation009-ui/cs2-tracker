@@ -7,7 +7,7 @@ import type {
   PlayerCareer,
   PlayerProfile,
 } from "@/lib/types";
-import { flag } from "@/lib/format";
+import { flag, premierHex } from "@/lib/format";
 
 export interface ComparePlayer {
   profile: PlayerProfile;
@@ -22,6 +22,7 @@ type Row<T> = {
   render?: (x: T) => ReactNode; // custom cell (e.g. form strip) — no bar/verdict
   lowerBetter?: boolean; // e.g. reaction time: a smaller number wins
   noVerdict?: boolean; // count/experience rows excluded from the "leads" tally
+  hex?: (v: number) => string | null; // value color (e.g. Premier tier); best stays bold
 };
 
 const CAREER_ROWS: Row<PlayerCareer>[] = [
@@ -43,7 +44,7 @@ const openingPct = (p: LeetifyProfile) =>
 // standing (ranks) → recent form → overall → skill breakdown.
 const LEETIFY_ROWS: Row<LeetifyProfile>[] = [
   { label: "Leetify rating", get: (p) => p.ranks?.leetify ?? 0, fmt: (v) => v.toFixed(2) },
-  { label: "Premier", get: (p) => p.ranks?.premier ?? 0, fmt: (v) => (v ? v.toLocaleString("en-US") : "—") },
+  { label: "Premier", get: (p) => p.ranks?.premier ?? 0, fmt: (v) => (v ? v.toLocaleString("en-US") : "—"), hex: (v) => (v > 0 ? premierHex(v) : null) },
   { label: "FACEIT ELO", get: (p) => p.ranks?.faceit_elo ?? 0, fmt: (v) => (v ? v.toLocaleString("en-US") : "—") },
   { label: "Recent form", render: (p) => <FormStrip matches={p.recent_matches} /> },
   { label: "Win rate", get: (p) => p.winrate * 100, fmt: (v) => `${v.toFixed(0)}%` },
@@ -290,10 +291,12 @@ function StatGrid<T>({
                     goodness = row.lowerBetter ? scaleMin / v : v / scaleMax;
                   }
                   const pct = Math.max(6, Math.round(goodness * 100));
+                  const tierHex = v != null ? row.hex?.(v) : null;
                   return (
                     <td key={i} className="px-4 py-2.5 align-middle">
                       <div
-                        className={`tabular-nums ${isBest ? "font-bold text-good" : "text-ink"}`}
+                        className={`tabular-nums ${isBest ? "font-bold" : ""} ${tierHex ? "" : isBest ? "text-good" : "text-ink"}`}
+                        style={tierHex ? { color: tierHex } : undefined}
                       >
                         {v != null ? fmt(v) : "—"}
                       </div>

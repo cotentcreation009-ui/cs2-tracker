@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getLeetify, getProfile } from "@/lib/api";
+import { premierHex } from "@/lib/format";
 import type { LeetifyProfile, PlayerProfile } from "@/lib/types";
 
 // A handful of real, verified-live accounts so the landing page is populated
@@ -30,10 +31,11 @@ function flag(cc?: string): string | null {
 
 function headlineStat(
   leetify: LeetifyProfile | null,
-): { label: string; value: string } | null {
+): { label: string; value: string; hex?: string } | null {
   const r = leetify?.ranks;
   if (!r) return null;
-  if (r.premier) return { label: "Premier", value: r.premier.toLocaleString() };
+  if (r.premier)
+    return { label: "Premier", value: r.premier.toLocaleString(), hex: premierHex(r.premier) };
   if (r.faceit) return { label: "FACEIT", value: `Lvl ${r.faceit}` };
   if (r.leetify) return { label: "Leetify", value: r.leetify.toFixed(2) };
   return null;
@@ -105,7 +107,10 @@ export async function FeaturedPlayers() {
               {stat && (
                 <div className="shrink-0 text-right">
                   <div className="stat-label">{stat.label}</div>
-                  <div className="text-sm font-semibold tabular-nums">
+                  <div
+                    className="text-sm font-semibold tabular-nums"
+                    style={stat.hex ? { color: stat.hex } : undefined}
+                  >
                     {stat.value}
                   </div>
                 </div>
