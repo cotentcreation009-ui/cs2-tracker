@@ -62,6 +62,19 @@ function rankAfter(
 const deltaColor = (d: number) => (d > 0 ? "text-good" : d < 0 ? "text-bad" : "text-muted");
 const signedInt = (d: number) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}`;
 
+// Column widths + row padding shared by the header and every row, so the
+// labels always sit over the numbers they describe.
+const ROW_PAD = "gap-1.5 px-2 py-2 sm:gap-3 sm:px-3";
+const COL = {
+  badge: "w-5",
+  map: "w-14 sm:w-20",
+  score: "w-11 sm:w-12",
+  kd: "w-13 sm:w-15",
+  rating: "w-12 sm:w-14",
+  delta: "w-13 sm:w-14",
+  queue: "w-14 sm:w-17",
+};
+
 function Stat({
   label,
   value,
@@ -103,14 +116,46 @@ export function LeetifyRecentMatches({
     <div className="mt-5">
       <div className="stat-label mb-2">Recent matches (Leetify)</div>
       <div className="overflow-hidden rounded-lg border border-line">
+        {/* column headers — four similar-looking numbers per row are
+            unreadable without labels; widths are shared with the rows below
+            via COL so the two can never drift apart */}
+        <div
+          aria-hidden
+          className={`flex items-center border-b border-line bg-panel/60 text-[9px] font-semibold uppercase tracking-wider text-faint ${ROW_PAD}`}
+        >
+          <span className={`${COL.badge} shrink-0`} />
+          <span className={`${COL.map} shrink-0`}>Map</span>
+          <span className={`${COL.score} shrink-0 text-right`}>Score</span>
+          <span className={`${COL.kd} hidden shrink-0 text-right sm:inline`}>K / D</span>
+          <span className={`${COL.rating} shrink-0 text-right`} title="Leetify's rating for the game">
+            Leetify
+          </span>
+          <span
+            className={`${COL.delta} hidden shrink-0 text-right sm:inline`}
+            title="Premier rating / FACEIT elo this game moved you"
+          >
+            Rank ±
+          </span>
+          <span className={`${COL.queue} shrink-0 text-center`}>Queue</span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+            When
+            <span className="w-3.5" />
+          </span>
+        </div>
+
         {matches.map((m, i) => {
           const key = m.id || String(i);
           const won = m.outcome === "win";
           const tie = m.outcome === "tie";
           const isOpen = open === key;
           const src = sourceInfo(m);
-          const hasKD = (m.kills ?? 0) + (m.deaths ?? 0) > 0;
-          const kdDiff = (m.kills ?? 0) - (m.deaths ?? 0);
+          // Go omits zero values, so a genuine 0-kill game arrives with no
+          // `kills` field — default before formatting or the row renders
+          // "undefined-7".
+          const kills = m.kills ?? 0;
+          const deaths = m.deaths ?? 0;
+          const hasKD = kills + deaths > 0;
+          const kdDiff = kills - deaths;
           const delta = m.rank_delta;
           const after = rankAfter(m);
           const afterHex =
@@ -121,7 +166,7 @@ export function LeetifyRecentMatches({
                 type="button"
                 onClick={() => setOpen(isOpen ? null : key)}
                 aria-expanded={isOpen}
-                className="relative flex w-full items-center gap-2 px-2.5 py-2 text-left text-sm transition hover:bg-panel2 sm:gap-3 sm:px-3"
+                className={`relative flex w-full items-center text-left text-sm transition hover:bg-panel2 ${ROW_PAD}`}
               >
                 {/* outcome edge + badge */}
                 <span
@@ -129,7 +174,7 @@ export function LeetifyRecentMatches({
                   className={`absolute inset-y-0 left-0 w-0.5 ${tie ? "bg-mid/50" : won ? "bg-good/50" : "bg-bad/50"}`}
                 />
                 <span
-                  className={`grid h-5 w-5 shrink-0 place-items-center rounded text-[11px] font-bold ${
+                  className={`${COL.badge} grid h-5 shrink-0 place-items-center rounded text-[11px] font-bold ${
                     tie
                       ? "bg-mid/20 text-mid"
                       : won
@@ -139,45 +184,68 @@ export function LeetifyRecentMatches({
                 >
                   {tie ? "T" : won ? "W" : "L"}
                 </span>
-                <span className="w-16 shrink-0 truncate font-medium capitalize sm:w-18">
+                <span className={`${COL.map} shrink-0 truncate font-medium capitalize`}>
                   {mapLabel(m.map_name)}
                 </span>
-                <span className="w-11 shrink-0 whitespace-nowrap tabular-nums text-muted sm:w-12">
-                  {m.score?.length === 2 ? `${m.score[0]}–${m.score[1]}` : ""}
+                {/* rounds use an en dash, K/D a slash — so two "N to N" pairs
+                    never read as the same stat */}
+                <span className={`${COL.score} shrink-0 whitespace-nowrap text-right tabular-nums text-muted`}>
+                  {m.score?.length === 2 ? `${m.score[0]}–${m.score[1]}` : "—"}
                 </span>
+                {/* kills bright, deaths dim — structural, not evaluative, so
+                    the only two colour-coded columns are the ones that judge
+                    the game (Leetify rating and rank movement) */}
                 <span
-                  className={`hidden w-14 shrink-0 tabular-nums sm:inline ${
-                    hasKD ? (kdDiff > 0 ? "text-good" : kdDiff < 0 ? "text-bad" : "text-ink") : "text-faint"
-                  }`}
-                  title={hasKD ? `${m.kills} kills / ${m.deaths} deaths` : "Kills–deaths unavailable for this game"}
+                  className={`${COL.kd} hidden shrink-0 whitespace-nowrap text-right tabular-nums sm:inline`}
+                  title={
+                    hasKD
+                      ? `${kills} kills, ${deaths} deaths (${kdDiff >= 0 ? "+" : "−"}${Math.abs(kdDiff)})`
+                      : "Kills and deaths unavailable for this game"
+                  }
                 >
-                  {hasKD ? `${m.kills}-${m.deaths}` : "—"}
+                  {hasKD ? (
+                    <>
+                      <span className="font-semibold text-ink">{kills}</span>
+                      <span className="mx-0.5 text-faint">/</span>
+                      <span className="text-muted">{deaths}</span>
+                    </>
+                  ) : (
+                    <span className="text-faint">—</span>
+                  )}
                 </span>
                 <span
-                  className={`w-13 shrink-0 tabular-nums ${impactColor(m.leetify_rating)}`}
+                  className={`${COL.rating} shrink-0 text-right tabular-nums ${impactColor(m.leetify_rating)}`}
                   title="Leetify rating for this game"
                 >
                   {signed(m.leetify_rating)}
                 </span>
                 <span
-                  className={`hidden w-14 shrink-0 tabular-nums sm:inline ${
+                  className={`${COL.delta} hidden shrink-0 text-right tabular-nums sm:inline ${
                     delta != null ? deltaColor(delta) : "text-faint/50"
                   }`}
                   title={
                     delta != null && after
                       ? `${after.label}: ${(m.rank_before ?? 0).toLocaleString()} → ${after.value}`
-                      : after
-                        ? `${after.label} ${after.value} — no change recorded for this game`
-                        : undefined
+                      : after?.ladder
+                        ? `${after.label} ${after.value} — Leetify didn't record the change for this game`
+                        : after
+                          ? `${after.label} ${after.value} — this queue has no rating points`
+                          : undefined
                   }
                 >
-                  {delta != null ? signedInt(delta) : ""}
+                  {delta != null ? signedInt(delta) : "—"}
                 </span>
-                <span className={`pill inline-flex shrink-0 border text-[10px] font-semibold ${src.cls}`}>
-                  {src.label}
+                <span className={`${COL.queue} shrink-0 text-center`}>
+                  <span
+                    className={`inline-flex w-full justify-center rounded-full border px-1 py-0.5 text-[10px] font-semibold ${src.cls}`}
+                  >
+                    {src.label}
+                  </span>
                 </span>
-                <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-faint">
-                  {timeAgo(m.finished_at)}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-faint sm:gap-2">
+                  {/* "1d" on phones, "1d ago" once there's room */}
+                  <span className="sm:hidden">{timeAgo(m.finished_at).replace(" ago", "")}</span>
+                  <span className="hidden sm:inline">{timeAgo(m.finished_at)}</span>
                   <svg
                     className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`}
                     viewBox="0 0 24 24"
@@ -210,7 +278,7 @@ export function LeetifyRecentMatches({
                         value={
                           delta != null ? (
                             <span className="text-[13px]">
-                              <span className="font-normal text-faint">
+                              <span className="font-normal text-muted">
                                 {(m.rank_before ?? 0).toLocaleString()}
                               </span>
                               <span className="mx-1 text-faint">→</span>
@@ -227,7 +295,7 @@ export function LeetifyRecentMatches({
                               {signedInt(delta)}
                             </span>
                           ) : after.ladder ? (
-                            <span className="text-faint">no change recorded</span>
+                            <span className="text-faint">change not recorded</span>
                           ) : null
                         }
                       />
