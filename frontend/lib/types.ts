@@ -145,7 +145,11 @@ export interface LeetifyRecentMatch {
   kills?: number; // merged from Leetify's legacy endpoint (v3 lacks them)
   deaths?: number;
   elo?: number; // FACEIT elo recorded with the game
-  rank_delta?: number | null; // Premier rating / FACEIT elo change vs previous game in that queue
+  // rank/elo is the value AFTER the game; rank_before is what the player
+  // carried in. Both absent unless the preceding game in that queue was also
+  // rated, so a change never spans games Leetify left unrated.
+  rank_before?: number;
+  rank_delta?: number | null; // Premier rating / FACEIT elo change caused by this game
   preaim: number;
   reaction_time_ms: number;
   accuracy_head: number;

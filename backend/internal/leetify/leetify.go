@@ -111,10 +111,15 @@ type RecentMatch struct {
 	Deaths int `json:"deaths,omitempty"`
 	// Elo is the FACEIT elo recorded with the game (legacy endpoint only).
 	Elo int `json:"elo,omitempty"`
-	// RankDelta is the change vs the player's PREVIOUS listed game in the same
-	// queue: Premier rating points (rank_type 11) or FACEIT elo. Nil when
-	// unknown (first listed game of that queue, or ratings hidden).
-	RankDelta *int `json:"rank_delta,omitempty"`
+	// RankBefore / RankDelta describe the rating movement this game caused.
+	// Rank is the rating AFTER the game (verified: the newest rated Premier
+	// game equals the profile's current rating), so RankBefore is the rating
+	// carried out of the immediately preceding game in the same queue and
+	// RankDelta is their difference — Premier rating points (rank_type 11) or
+	// FACEIT elo. Both are zero/nil unless that preceding game is ALSO rated,
+	// so a delta never silently spans games whose rating Leetify didn't record.
+	RankBefore int  `json:"rank_before,omitempty"`
+	RankDelta  *int `json:"rank_delta,omitempty"`
 
 	Preaim               float64 `json:"preaim"`
 	ReactionTimeMs       float64 `json:"reaction_time_ms"`
@@ -242,29 +247,44 @@ func mergeLegacyGames(p *Profile, lp *Profile) {
 	}
 }
 
-// computeRankDeltas fills RankDelta on a most-recent-first list: for each game
-// the change vs the player's previous listed game in the SAME queue — Premier
-// rating points (rank_type 11) or FACEIT elo. First listed game of a queue
-// (nothing to compare) and hidden ratings stay nil.
+// rankedQueue returns the queue a game's rating belongs to and the rating it
+// left the player on ("" when the game carries no comparable rating).
+func rankedQueue(m *RecentMatch) (string, int) {
+	switch {
+	case m.RankType == 11: // Premier — Rank is the CS Rating
+		return "premier", m.Rank
+	case m.DataSource == "faceit": // FACEIT — Rank is the LEVEL, Elo is the number that moves
+		return "faceit", m.Elo
+	}
+	return "", 0
+}
+
+// computeRankDeltas fills RankBefore/RankDelta on a most-recent-first list by
+// walking it oldest-first and tracking, per queue, the rating the previous
+// game in that queue ended on. Leetify records the rating for most but not all
+// games; when it's missing the chain is deliberately broken (prev = 0) so a
+// later game never reports a swing that actually accumulated over several
+// games. Competitive (rank_type 12) has no numeric ladder and is skipped.
 func computeRankDeltas(ms []RecentMatch) {
-	prevPremier, prevElo := 0, 0
+	prev := map[string]int{}
 	for i := len(ms) - 1; i >= 0; i-- {
 		m := &ms[i]
+		m.RankBefore = 0
 		m.RankDelta = nil
-		switch {
-		case m.RankType == 11 && m.Rank > 0:
-			if prevPremier > 0 {
-				d := m.Rank - prevPremier
-				m.RankDelta = &d
-			}
-			prevPremier = m.Rank
-		case m.DataSource == "faceit" && m.Elo > 0:
-			if prevElo > 0 {
-				d := m.Elo - prevElo
-				m.RankDelta = &d
-			}
-			prevElo = m.Elo
+		q, after := rankedQueue(m)
+		if q == "" {
+			continue
 		}
+		if after > 0 {
+			if before := prev[q]; before > 0 {
+				d := after - before
+				m.RankBefore = before
+				m.RankDelta = &d
+			}
+		}
+		// unrated game (after == 0) resets the chain — the next rated game
+		// has nothing trustworthy to compare against
+		prev[q] = after
 	}
 }
 

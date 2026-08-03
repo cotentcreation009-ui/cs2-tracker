@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, premierHex, timeAgo } from "@/lib/format";
 import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
@@ -42,26 +42,44 @@ const impactColor = (n: number) =>
 // 0). A 0 here means "hidden", so show a dash rather than "0.0%".
 const dash = (v: number, fmt: (n: number) => string) => (v > 0 ? fmt(v) : "—");
 
-// "Rating after this game" context for the elo-delta chip + expanded stat.
-function rankAfter(m: LeetifyRecentMatch): { label: string; value: string } | null {
+// The ladder number this game moved, if any. `value` is the rating AFTER the
+// game; `ladder` marks the ones that carry a before→after movement (Premier
+// rating and FACEIT elo) as opposed to static context (level, comp rank).
+function rankAfter(
+  m: LeetifyRecentMatch,
+): { label: string; value: string; ladder: boolean } | null {
   if (m.rank_type === 11 && (m.rank ?? 0) > 0)
-    return { label: "Premier rating", value: (m.rank ?? 0).toLocaleString() };
+    return { label: "Premier rating", value: (m.rank ?? 0).toLocaleString(), ladder: true };
   if (m.data_source === "faceit" && (m.elo ?? 0) > 0)
-    return { label: "FACEIT elo", value: (m.elo ?? 0).toLocaleString() };
+    return { label: "FACEIT elo", value: (m.elo ?? 0).toLocaleString(), ladder: true };
   if (m.data_source === "faceit" && (m.rank ?? 0) > 0)
-    return { label: "FACEIT level", value: String(m.rank) };
+    return { label: "FACEIT level", value: String(m.rank), ladder: false };
   if (m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18)
-    return { label: "Comp rank", value: COMP_RANKS[(m.rank ?? 1) - 1] };
+    return { label: "Comp rank", value: COMP_RANKS[(m.rank ?? 1) - 1], ladder: false };
   return null;
 }
 
-function Stat({ label, value, valueHex }: { label: string; value: string; valueHex?: string }) {
+const deltaColor = (d: number) => (d > 0 ? "text-good" : d < 0 ? "text-bad" : "text-muted");
+const signedInt = (d: number) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}`;
+
+function Stat({
+  label,
+  value,
+  valueHex,
+  sub,
+}: {
+  label: string;
+  value: ReactNode;
+  valueHex?: string;
+  sub?: ReactNode;
+}) {
   return (
     <div className="rounded-md border border-line bg-panel px-2.5 py-1.5">
       <div className="stat-label">{label}</div>
       <div className="mt-0.5 text-sm font-semibold tabular-nums" style={valueHex ? { color: valueHex } : undefined}>
         {value}
       </div>
+      {sub ? <div className="mt-0.5 text-[10px] leading-tight tabular-nums">{sub}</div> : null}
     </div>
   );
 }
@@ -95,6 +113,8 @@ export function LeetifyRecentMatches({
           const kdDiff = (m.kills ?? 0) - (m.deaths ?? 0);
           const delta = m.rank_delta;
           const after = rankAfter(m);
+          const afterHex =
+            after?.label === "Premier rating" ? premierHex(m.rank ?? 0) : undefined;
           return (
             <div key={key} className={i % 2 ? "bg-panel/40" : ""}>
               <button
@@ -140,16 +160,18 @@ export function LeetifyRecentMatches({
                   {signed(m.leetify_rating)}
                 </span>
                 <span
-                  className={`hidden w-12 shrink-0 tabular-nums sm:inline ${
-                    delta != null ? (delta > 0 ? "text-good" : delta < 0 ? "text-bad" : "text-muted") : "text-faint/50"
+                  className={`hidden w-14 shrink-0 tabular-nums sm:inline ${
+                    delta != null ? deltaColor(delta) : "text-faint/50"
                   }`}
                   title={
                     delta != null && after
-                      ? `${after.label} change vs your previous game (${after.value} after this one)`
-                      : undefined
+                      ? `${after.label}: ${(m.rank_before ?? 0).toLocaleString()} → ${after.value}`
+                      : after
+                        ? `${after.label} ${after.value} — no change recorded for this game`
+                        : undefined
                   }
                 >
-                  {delta != null ? `${delta > 0 ? "+" : ""}${delta}` : ""}
+                  {delta != null ? signedInt(delta) : ""}
                 </span>
                 <span className={`pill inline-flex shrink-0 border text-[10px] font-semibold ${src.cls}`}>
                   {src.label}
@@ -183,8 +205,31 @@ export function LeetifyRecentMatches({
                     {after ? (
                       <Stat
                         label={after.label}
-                        value={`${after.value}${delta != null ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}`}
-                        valueHex={after.label === "Premier rating" ? premierHex(m.rank ?? 0) : undefined}
+                        // before → after is the whole point: where the game
+                        // started you and where it left you
+                        value={
+                          delta != null ? (
+                            <span className="text-[13px]">
+                              <span className="font-normal text-faint">
+                                {(m.rank_before ?? 0).toLocaleString()}
+                              </span>
+                              <span className="mx-1 text-faint">→</span>
+                              <span style={afterHex ? { color: afterHex } : undefined}>{after.value}</span>
+                            </span>
+                          ) : (
+                            after.value
+                          )
+                        }
+                        valueHex={delta == null ? afterHex : undefined}
+                        sub={
+                          delta != null ? (
+                            <span className={`font-semibold ${deltaColor(delta)}`}>
+                              {signedInt(delta)}
+                            </span>
+                          ) : after.ladder ? (
+                            <span className="text-faint">no change recorded</span>
+                          ) : null
+                        }
                       />
                     ) : (
                       <Stat label="Queue" value={src.label} />
@@ -229,8 +274,9 @@ export function LeetifyRecentMatches({
         })}
       </div>
       <p className="mt-1.5 text-[10px] text-faint">
-        Rating changes compare each game to your previous game in the same queue — Premier rating
-        points or FACEIT elo. K-D per game via Leetify.
+        The ± column is the Premier rating / FACEIT elo this game moved you (open a row for the
+        before → after). Leetify doesn&apos;t record a rating on every game; where it&apos;s missing
+        the change is left blank rather than spanning several games. K-D per game via Leetify.
       </p>
     </div>
   );
