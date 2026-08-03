@@ -9,6 +9,7 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -88,6 +89,12 @@ func resolve(ctx context.Context, job queue.Job, workDir string, maxBytes int64,
 // downloadTimeout bounds a single remote demo fetch end to end.
 const downloadTimeout = 5 * time.Minute
 
+// downloadAttempts is how many times a demo transfer may be re-opened after
+// the remote drops it mid-stream. Valve's replay hosts reset long transfers
+// routinely, and a demo is tens to hundreds of MB, so one reset used to fail
+// the whole job.
+const downloadAttempts = 4
+
 // isPublicIP rejects loopback, private (RFC1918/ULA), link-local (including the
 // 169.254.169.254 cloud-metadata endpoint), unspecified, and carrier-grade-NAT
 // addresses — the ranges an SSRF would target.
@@ -163,6 +170,114 @@ func decompressor(rawURL string, body io.Reader) (io.Reader, func(), error) {
 	}
 }
 
+// transient reports whether a transfer failure is worth re-opening: the remote
+// closing the socket (RST/EPIPE), a truncated body, or a stalled read.
+func transient(err error) bool {
+	if err == nil || errors.Is(err, io.EOF) {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	// http2/transport wrappers don't always expose a typed cause
+	s := err.Error()
+	return strings.Contains(s, "connection reset by peer") ||
+		strings.Contains(s, "unexpected EOF") ||
+		strings.Contains(s, "broken pipe")
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/float64(1<<20))
+	default:
+		return fmt.Sprintf("%.0f KB", float64(n)/float64(1<<10))
+	}
+}
+
+// resumeBody streams a remote response and, when the connection drops partway
+// through, silently re-opens it with a Range request and continues where it
+// left off. It wraps the COMPRESSED bytes, so the decompressor above it sees
+// one uninterrupted stream and never has to restart.
+type resumeBody struct {
+	ctx    context.Context
+	url    string
+	body   io.ReadCloser
+	off    int64 // compressed bytes already handed to the caller
+	tries  int
+	failed error // last transport error, for the user-facing message
+}
+
+func (r *resumeBody) Read(p []byte) (int, error) {
+	for {
+		n, err := r.body.Read(p)
+		if n > 0 {
+			r.off += int64(n)
+			// Defer any error to the next Read (allowed by io.Reader) so the
+			// bytes we did get are never dropped.
+			return n, nil
+		}
+		if err == nil {
+			return 0, nil
+		}
+		if errors.Is(err, io.EOF) {
+			return 0, io.EOF
+		}
+		if !transient(err) || r.tries >= downloadAttempts {
+			r.failed = err
+			return 0, err
+		}
+		r.tries++
+		if reErr := r.reopen(); reErr != nil {
+			r.failed = err
+			return 0, err // report the original network failure, not the retry's
+		}
+	}
+}
+
+func (r *resumeBody) reopen() error {
+	_ = r.body.Close()
+	select {
+	case <-r.ctx.Done():
+		return r.ctx.Err()
+	case <-time.After(time.Duration(r.tries) * 500 * time.Millisecond):
+	}
+	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", r.off))
+	resp, err := safeClient.Do(req)
+	if err != nil {
+		return err
+	}
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		r.body = resp.Body
+		return nil
+	case http.StatusOK:
+		// Host ignored the Range header and restarted the file — skip what we
+		// already wrote so the stream stays continuous.
+		if _, err := io.CopyN(io.Discard, resp.Body, r.off); err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
+		r.body = resp.Body
+		return nil
+	default:
+		_ = resp.Body.Close()
+		return fmt.Errorf("resume status %d", resp.StatusCode)
+	}
+}
+
+func (r *resumeBody) Close() error { return r.body.Close() }
+
 func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -186,7 +301,8 @@ func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (stri
 	}
 	defer out.Close()
 
-	src, closeDec, err := decompressor(rawURL, resp.Body)
+	rb := &resumeBody{ctx: ctx, url: rawURL, body: resp.Body}
+	src, closeDec, err := decompressor(rawURL, rb)
 	if err != nil {
 		_ = os.Remove(out.Name())
 		return "", err
@@ -199,6 +315,13 @@ func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (stri
 	n, err := io.Copy(out, src)
 	if err != nil {
 		_ = os.Remove(out.Name())
+		// Raw socket errors embed our container's internal IP and mean nothing
+		// to a player ("read tcp 172.18.0.6:36862->34.126.230.235:80: read:
+		// connection reset by peer"), so say what actually happened instead.
+		if transient(err) || rb.failed != nil {
+			return "", fmt.Errorf("demosource: the demo host closed the connection after %s and %d retries — this is usually temporary, try again in a moment",
+				humanBytes(rb.off), rb.tries)
+		}
 		return "", fmt.Errorf("demosource: write demo: %w", err)
 	}
 	if maxBytes > 0 && n > maxBytes {
