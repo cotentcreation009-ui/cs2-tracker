@@ -652,7 +652,6 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 	}
 
 	var payload struct {
-		TeamScores  []int `json:"teamScores"`
 		PlayerStats []struct {
 			Steam64ID   string  `json:"steam64Id"`
 			Name        string  `json:"name"`
@@ -670,6 +669,13 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			Multi4K     int     `json:"multi4k"`
 			Multi5K     int     `json:"multi5k"`
 			Survived    float64 `json:"roundsSurvivedPercentage"` // 0..1 fraction
+			// per-side rounds WON by this player's team — summed, this IS the
+			// team's score, attributed to the right team by construction
+			// (the top-level teamScores array's order does not reliably match
+			// initialTeamNumber: real case read "13–1 win" on the row while
+			// the board said the opponents got 13)
+			CTRoundsWon int `json:"ctRoundsWon"`
+			TRoundsWon  int `json:"tRoundsWon"`
 		} `json:"playerStats"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -685,19 +691,13 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 	for _, p := range payload.PlayerStats {
 		t, ok := byTeam[p.TeamNumber]
 		if !ok {
-			// teamScores indexes by 2/3 order (2 → [0], 3 → [1]); tolerate
-			// other numberings by falling back to appearance order
-			score := 0
-			idx := p.TeamNumber - 2
-			if idx < 0 || idx >= len(payload.TeamScores) {
-				idx = len(teamNums)
-			}
-			if idx >= 0 && idx < len(payload.TeamScores) {
-				score = payload.TeamScores[idx]
-			}
-			t = &ScoreTeam{Score: score}
+			t = &ScoreTeam{}
 			byTeam[p.TeamNumber] = t
 			teamNums = append(teamNums, p.TeamNumber)
+		}
+		// every player on a team should agree; max() shrugs off a zeroed row
+		if s := p.CTRoundsWon + p.TRoundsWon; s > t.Score {
+			t.Score = s
 		}
 		row := ScoreRow{
 			Name:    p.Name,
