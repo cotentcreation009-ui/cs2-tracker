@@ -83,6 +83,12 @@ func ProfileKey(steamID uint64) string {
 func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:v2:%d", steamID) }
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
 
+// LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
+// (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
+func LeetifyGameKey(gameID string, steamID uint64) string {
+	return fmt.Sprintf("cs2:leetify:game:%s:%d", strings.ToLower(gameID), steamID)
+}
+
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).
 func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent2:" + teamID }
 

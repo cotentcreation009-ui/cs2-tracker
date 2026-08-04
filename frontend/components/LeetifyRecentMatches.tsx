@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, premierHex, timeAgo } from "@/lib/format";
+import { radarImage } from "@/lib/maps/calibration";
 import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
 
 // Queue identity: Premier and Competitive both arrive as data_source
@@ -183,13 +184,13 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   // no ladder number for this game: FACEIT level, a Competitive skill group,
   // or a queue with no rating at all
   const level = isFaceit ? (m.rank ?? 0) : 0;
-  const comp = m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18 ? (m.rank ?? 1) - 1 : -1;
+  const comp = m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18 ? (m.rank ?? 0) : 0;
   return (
     <span className="flex items-center justify-end">
       {level > 0 ? (
         <RatingBadge text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
-      ) : comp >= 0 ? (
-        <RatingBadge text={COMP_SHORT[comp]} hex="#38d6ff" title={COMP_RANKS[comp]} />
+      ) : comp > 0 ? (
+        <CompRankBadge rank={comp} className="h-4.5 w-auto" />
       ) : (
         <span
           className="shrink-0 rounded bg-line/40 px-1 py-px text-[10px] font-bold text-faint"
@@ -199,6 +200,26 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
         </span>
       )}
     </span>
+  );
+}
+
+// The actual in-game Competitive skill-group badge (Silver 1 → Global Elite),
+// falling back to the abbreviation plate if the asset is missing.
+function CompRankBadge({ rank, className = "" }: { rank: number; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  if (rank < 1 || rank > 18) return null;
+  if (broken) return <RatingBadge text={COMP_SHORT[rank - 1]} hex="#38d6ff" title={COMP_RANKS[rank - 1]} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/ranks/comp/${rank}.svg`}
+      alt={COMP_RANKS[rank - 1]}
+      title={COMP_RANKS[rank - 1]}
+      loading="lazy"
+      draggable={false}
+      onError={() => setBroken(true)}
+      className={`shrink-0 ${className}`}
+    />
   );
 }
 
@@ -224,16 +245,33 @@ function mapCode(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function MapBadge({ name }: { name: string }) {
-  const hue = mapHue(name);
+// Real map icon (same logo → radar → monogram fallback chain as the stats
+// page) so the map column matches the rest of the site.
+function MapBadge({ map }: { map: string }) {
+  const [stage, setStage] = useState(0); // 0 = logo, 1 = radar, 2 = monogram
+  const name = mapLabel(map);
+  if (stage >= 2) {
+    const hue = mapHue(name);
+    return (
+      <span
+        aria-hidden
+        className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[8px] font-extrabold"
+        style={{ background: `color-mix(in srgb, ${hue} 14%, transparent)`, color: hue, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${hue} 35%, transparent)` }}
+      >
+        {mapCode(name)}
+      </span>
+    );
+  }
   return (
-    <span
-      aria-hidden
-      className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[8px] font-extrabold"
-      style={{ background: `color-mix(in srgb, ${hue} 14%, transparent)`, color: hue, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${hue} 35%, transparent)` }}
-    >
-      {mapCode(name)}
-    </span>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={stage === 0 ? radarImage(map).replace(/radar\.png$/, "logo.png") : radarImage(map)}
+      alt=""
+      loading="lazy"
+      draggable={false}
+      onError={() => setStage((s) => s + 1)}
+      className={`h-5 w-5 shrink-0 rounded-md border border-line/50 bg-panel2/70 ${stage === 0 ? "object-contain p-px" : "object-cover"}`}
+    />
   );
 }
 
@@ -290,6 +328,204 @@ const COL = {
   // fits the longest wordmark ("WINGMAN") with its dot at both breakpoints
   queue: "w-16 sm:w-21",
 };
+
+// One player's deep line for one game (ADR / KAST / HLTV-style rating /
+// assists / MVPs / multi-kills), fetched from Leetify's per-game scoreboard
+// the first time a row expands — the profile feed simply doesn't carry these.
+interface ScoreRow {
+  name: string;
+  steam_id?: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  adr: number;
+  rating: number;
+  hs_pct: number;
+  me?: boolean;
+}
+
+interface GameDeep {
+  found?: boolean;
+  adr?: number;
+  kast_pct?: number;
+  rating?: number;
+  assists?: number;
+  mvps?: number;
+  multi_2k?: number;
+  multi_3k?: number;
+  multi_4k?: number;
+  multi_5k?: number;
+  scoreboard?: { score: number; players: ScoreRow[] }[];
+}
+
+const deepCache = new Map<string, GameDeep | null>();
+const deepInflight = new Map<string, Promise<GameDeep | null>>();
+
+function useGameDeep(steamId: string, gameId?: string): GameDeep | null | undefined {
+  const k = gameId ?? "";
+  const [deep, setDeep] = useState<GameDeep | null | undefined>(
+    k && deepCache.has(k) ? deepCache.get(k) : undefined,
+  );
+  useEffect(() => {
+    if (!k) {
+      setDeep(null);
+      return;
+    }
+    if (deepCache.has(k)) {
+      setDeep(deepCache.get(k));
+      return;
+    }
+    let alive = true;
+    let p = deepInflight.get(k);
+    if (!p) {
+      p = fetch(`/api/profiles/${encodeURIComponent(steamId)}/leetify-game/${encodeURIComponent(k)}`)
+        .then((r) => (r.ok ? (r.json() as Promise<GameDeep>) : null))
+        .then((d) => {
+          const v = d && d.found ? d : null;
+          deepCache.set(k, v);
+          deepInflight.delete(k);
+          return v;
+        })
+        .catch(() => {
+          deepInflight.delete(k);
+          return null;
+        });
+      deepInflight.set(k, p);
+    }
+    p.then((v) => {
+      if (alive) setDeep(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [k, steamId]);
+  return deep;
+}
+
+// The full 10-player board for the expanded game: viewer's team first (their
+// row highlighted), every player linking to their own StatRun profile.
+function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie: boolean }) {
+  const teams = deep.scoreboard ?? [];
+  if (teams.length !== 2) return null;
+  const ratingCls = (v: number) => (v >= 1.1 ? "text-good" : v < 0.9 ? "text-bad" : "text-ink");
+  return (
+    <div className="mt-2.5 grid gap-2 lg:grid-cols-2">
+      {teams.map((t, ti) => (
+        <div key={ti} className="overflow-hidden rounded-md border border-line/60">
+          <div className="flex items-center justify-between border-b border-line/60 bg-panel/50 px-2.5 py-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+              {ti === 0 ? "Your team" : "Opponents"}
+            </span>
+            <span
+              className={`text-xs font-bold tabular-nums ${
+                tie ? "text-mid" : (ti === 0) === won ? "text-good" : "text-bad"
+              }`}
+            >
+              {t.score}
+            </span>
+          </div>
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-[8px] uppercase tracking-wider text-faint">
+                <th className="px-2.5 py-1 text-left font-semibold">Player</th>
+                <th className="w-7 py-1 text-right font-semibold" title="Kills">K</th>
+                <th className="w-7 py-1 text-right font-semibold" title="Deaths">D</th>
+                <th className="w-7 py-1 text-right font-semibold" title="Assists">A</th>
+                <th className="w-9 py-1 text-right font-semibold" title="Average damage per round">ADR</th>
+                <th className="w-10 py-1 pr-2.5 text-right font-semibold" title="HLTV-style rating (via Leetify)">RTG</th>
+              </tr>
+            </thead>
+            <tbody>
+              {t.players.map((p, pi) => (
+                <tr key={pi} className={`border-t border-line/30 ${p.me ? "bg-brand/10" : ""}`}>
+                  <td className="max-w-0 truncate px-2.5 py-1">
+                    {p.steam_id ? (
+                      <a
+                        href={`/profiles/${p.steam_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted"}`}
+                        title={`${p.name} — open their StatRun profile`}
+                      >
+                        {p.name}
+                      </a>
+                    ) : (
+                      <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name}</span>
+                    )}
+                    {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
+                  </td>
+                  <td className="py-1 text-right tabular-nums text-ink">{p.kills}</td>
+                  <td className="py-1 text-right tabular-nums text-muted">{p.deaths}</td>
+                  <td className="py-1 text-right tabular-nums text-muted">{p.assists}</td>
+                  <td className="py-1 text-right tabular-nums text-muted">{p.adr.toFixed(0)}</td>
+                  <td className={`py-1 pr-2.5 text-right font-semibold tabular-nums ${ratingCls(p.rating)}`}>
+                    {p.rating.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The extra tiles the deep fetch unlocks. `undefined` deep = still loading →
+// pulse placeholders so the grid doesn't jump when they land.
+function DeepStatTiles({ deep }: { deep: GameDeep | null | undefined }) {
+  if (deep === undefined) {
+    return (
+      <>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-13 animate-pulse rounded-md border border-line/40 bg-panel/40" aria-hidden />
+        ))}
+      </>
+    );
+  }
+  if (deep === null) return null;
+  const multis = [
+    deep.multi_2k ? `${deep.multi_2k}×2K` : "",
+    deep.multi_3k ? `${deep.multi_3k}×3K` : "",
+    deep.multi_4k ? `${deep.multi_4k}×4K` : "",
+    deep.multi_5k ? `${deep.multi_5k}×ACE` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <>
+      <Stat label="Rating" value={(deep.rating ?? 0).toFixed(2)} valueHex={(deep.rating ?? 0) >= 1.1 ? "var(--color-good)" : (deep.rating ?? 0) < 0.9 ? "var(--color-bad)" : undefined} />
+      <Stat label="ADR" value={(deep.adr ?? 0).toFixed(0)} />
+      <Stat label="KAST" value={`${(deep.kast_pct ?? 0).toFixed(0)}%`} />
+      <Stat label="Assists" value={String(deep.assists ?? 0)} />
+      <Stat label="MVPs" value={`★ ${deep.mvps ?? 0}`} />
+      {multis ? <Stat label="Multi-kills" value={multis} /> : null}
+    </>
+  );
+}
+
+// Mounted only while a row is expanded, so the deep fetch happens exactly when
+// the panel is first opened (then never again, thanks to the module cache).
+function DeepStats({ steamId, gameId }: { steamId: string; gameId?: string }) {
+  const deep = useGameDeep(steamId, gameId);
+  return <DeepStatTiles deep={deep} />;
+}
+
+// Same shared fetch, rendered below the tiles: the full game scoreboard.
+function DeepScoreboard({
+  steamId,
+  gameId,
+  won,
+  tie,
+}: {
+  steamId: string;
+  gameId?: string;
+  won: boolean;
+  tie: boolean;
+}) {
+  const deep = useGameDeep(steamId, gameId);
+  if (!deep) return null;
+  return <MiniScoreboard deep={deep} won={won} tie={tie} />;
+}
 
 function Stat({
   label,
@@ -406,7 +642,7 @@ export function LeetifyRecentMatches({
                   {tie ? "T" : won ? "W" : "L"}
                 </span>
                 <span className={`${COL.map} flex shrink-0 items-center gap-1.5`}>
-                  <MapBadge name={mapLabel(m.map_name)} />
+                  <MapBadge map={m.map_name} />
                   <span className="truncate font-medium capitalize">{mapLabel(m.map_name)}</span>
                 </span>
                 {/* the score wears the outcome colour — win green, loss red */}
@@ -484,6 +720,7 @@ export function LeetifyRecentMatches({
                           : "—"
                       }
                     />
+                    <DeepStats steamId={steamId} gameId={m.id} />
                     {after ? (
                       <Stat
                         label={after.label}
@@ -497,6 +734,12 @@ export function LeetifyRecentMatches({
                               </span>
                               <span className="mx-1 text-faint">→</span>
                               <span style={afterHex ? { color: afterHex } : undefined}>{after.value}</span>
+                            </span>
+                          ) : m.rank_type === 12 ? (
+                            // the in-game badge, with the full skill-group name
+                            <span className="flex items-center gap-1.5">
+                              <CompRankBadge rank={m.rank ?? 0} className="h-5 w-auto" />
+                              <span className="truncate text-xs">{after.value}</span>
                             </span>
                           ) : (
                             after.value
@@ -529,6 +772,7 @@ export function LeetifyRecentMatches({
                       value={dash(m.reaction_time_ms, (v) => `${v.toFixed(0)} ms`)}
                     />
                   </div>
+                  <DeepScoreboard steamId={steamId} gameId={m.id} won={won} tie={tie} />
                   {m.id && (
                     <div className="mt-2.5 flex flex-wrap items-center gap-3">
                       <AnalyzeDemoButton

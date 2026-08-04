@@ -270,6 +270,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/weapons", s.handleWeapons)
 				r.Get("/maps", s.handleMaps)
 				r.Get("/leetify", s.handleLeetify)
+				r.Get("/leetify-game/{gameId}", s.handleLeetifyGameStats)
 				r.Get("/teammates", s.handleLeetifyTeammates)
 				r.Get("/faceit", s.handleFaceit)
 				r.Get("/steam-stats", s.handleSteamStats)

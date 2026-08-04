@@ -16,6 +16,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -574,6 +575,161 @@ func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
 		}
 	}
 	return p
+}
+
+// GameStats is the curated per-player slice of Leetify's per-game payload
+// (legacy /api/games/{id}): the numbers the recent-match list can't carry from
+// the profile feed — real ADR (their dpr), KAST, the HLTV-style rating,
+// assists, MVPs and multi-kill counts. Fetched on demand when a row expands
+// and cached hard by the caller — a finished game never changes.
+type GameStats struct {
+	Found       bool    `json:"found"`
+	ADR         float64 `json:"adr,omitempty"`
+	KASTPct     float64 `json:"kast_pct,omitempty"`
+	Rating      float64 `json:"rating,omitempty"` // HLTV-style rating, computed by Leetify
+	Kills       int     `json:"kills,omitempty"`
+	Deaths      int     `json:"deaths,omitempty"`
+	Assists     int     `json:"assists,omitempty"`
+	MVPs        int     `json:"mvps,omitempty"`
+	Multi2K     int     `json:"multi_2k,omitempty"`
+	Multi3K     int     `json:"multi_3k,omitempty"`
+	Multi4K     int     `json:"multi_4k,omitempty"`
+	Multi5K     int     `json:"multi_5k,omitempty"`
+	SurvivedPct float64 `json:"survived_pct,omitempty"`
+	// Scoreboard is the full 10-player board, the viewer's team first, each
+	// team's players sorted by rating.
+	Scoreboard []ScoreTeam `json:"scoreboard,omitempty"`
+}
+
+// ScoreTeam is one side of a game's scoreboard.
+type ScoreTeam struct {
+	Score   int        `json:"score"`
+	Players []ScoreRow `json:"players"`
+}
+
+// ScoreRow is one player's line on a game's scoreboard.
+type ScoreRow struct {
+	Name    string  `json:"name"`
+	SteamID string  `json:"steam_id,omitempty"`
+	Kills   int     `json:"kills"`
+	Deaths  int     `json:"deaths"`
+	Assists int     `json:"assists"`
+	ADR     float64 `json:"adr"`
+	Rating  float64 `json:"rating"`
+	HSPct   float64 `json:"hs_pct"`
+	Me      bool    `json:"me,omitempty"`
+}
+
+// GetGameStats fetches one game's scoreboard and returns the row for steam64.
+// Found=false (no error) when the game exists but that player isn't on it.
+func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64) (*GameStats, error) {
+	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetify game stats: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, ErrNotFound
+	default:
+		return nil, fmt.Errorf("leetify game stats: unexpected status %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		TeamScores  []int `json:"teamScores"`
+		PlayerStats []struct {
+			Steam64ID   string  `json:"steam64Id"`
+			Name        string  `json:"name"`
+			TeamNumber  int     `json:"initialTeamNumber"` // 2 / 3
+			DPR         float64 `json:"dpr"`
+			KAST        float64 `json:"kast"` // 0..1 fraction
+			HLTVRating  float64 `json:"hltvRating"`
+			HSP         float64 `json:"hsp"` // 0..1 fraction
+			TotalKills  int     `json:"totalKills"`
+			TotalDeaths int     `json:"totalDeaths"`
+			Assists     int     `json:"totalAssists"`
+			MVPs        int     `json:"mvps"`
+			Multi2K     int     `json:"multi2k"`
+			Multi3K     int     `json:"multi3k"`
+			Multi4K     int     `json:"multi4k"`
+			Multi5K     int     `json:"multi5k"`
+			Survived    float64 `json:"roundsSurvivedPercentage"` // 0..1 fraction
+		} `json:"playerStats"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("leetify game stats: decode: %w", err)
+	}
+	sid := strconv.FormatUint(steam64, 10)
+
+	// full board: teamNumber → rows; the viewer's team renders first
+	byTeam := map[int]*ScoreTeam{}
+	teamNums := []int{}
+	myTeam := 0
+	out := &GameStats{}
+	for _, p := range payload.PlayerStats {
+		t, ok := byTeam[p.TeamNumber]
+		if !ok {
+			// teamScores indexes by 2/3 order (2 → [0], 3 → [1]); tolerate
+			// other numberings by falling back to appearance order
+			score := 0
+			idx := p.TeamNumber - 2
+			if idx < 0 || idx >= len(payload.TeamScores) {
+				idx = len(teamNums)
+			}
+			if idx >= 0 && idx < len(payload.TeamScores) {
+				score = payload.TeamScores[idx]
+			}
+			t = &ScoreTeam{Score: score}
+			byTeam[p.TeamNumber] = t
+			teamNums = append(teamNums, p.TeamNumber)
+		}
+		row := ScoreRow{
+			Name:    p.Name,
+			SteamID: p.Steam64ID,
+			Kills:   p.TotalKills,
+			Deaths:  p.TotalDeaths,
+			Assists: p.Assists,
+			ADR:     p.DPR,
+			Rating:  p.HLTVRating,
+			HSPct:   p.HSP * 100,
+		}
+		if p.Steam64ID == sid {
+			row.Me = true
+			myTeam = p.TeamNumber
+			out.Found = true
+			out.ADR = p.DPR
+			out.KASTPct = p.KAST * 100
+			out.Rating = p.HLTVRating
+			out.Kills = p.TotalKills
+			out.Deaths = p.TotalDeaths
+			out.Assists = p.Assists
+			out.MVPs = p.MVPs
+			out.Multi2K = p.Multi2K
+			out.Multi3K = p.Multi3K
+			out.Multi4K = p.Multi4K
+			out.Multi5K = p.Multi5K
+			out.SurvivedPct = p.Survived * 100
+		}
+		t.Players = append(t.Players, row)
+	}
+	// viewer's team first, then the rest in appearance order; rating sorts rows
+	sort.SliceStable(teamNums, func(i, j int) bool {
+		return teamNums[i] == myTeam && teamNums[j] != myTeam
+	})
+	for _, tn := range teamNums {
+		t := byTeam[tn]
+		sort.SliceStable(t.Players, func(i, j int) bool { return t.Players[i].Rating > t.Players[j].Rating })
+		out.Scoreboard = append(out.Scoreboard, *t)
+	}
+	return out, nil
 }
 
 // GameDetails is the tiny slice of Leetify's per-match payload we need to turn
