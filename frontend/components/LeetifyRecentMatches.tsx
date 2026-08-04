@@ -28,6 +28,109 @@ const COMP_RANKS = [
   "Master Guardian 1", "Master Guardian 2", "Master Guardian Elite", "Distinguished Master Guardian",
   "Legendary Eagle", "Legendary Eagle Master", "Supreme Master First Class", "Global Elite",
 ];
+// the in-game abbreviations, for the narrow rank column
+const COMP_SHORT = [
+  "S1", "S2", "S3", "S4", "SE", "SEM",
+  "GN1", "GN2", "GN3", "GNM",
+  "MG1", "MG2", "MGE", "DMG",
+  "LE", "LEM", "SMFC", "GE",
+];
+
+const FACEIT_HEX = "#ff8a50";
+
+// One rating badge, tinted with its own tier colour — a Premier rating that
+// crosses a bracket mid-run genuinely changes colour, exactly as in game.
+function RankChip({
+  text,
+  hex,
+  dim = false,
+  title,
+}: {
+  text: string;
+  hex: string;
+  dim?: boolean;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className={`shrink-0 rounded px-1 py-px text-[10px] font-bold tabular-nums ${dim ? "opacity-65" : ""}`}
+      style={{ background: `${hex}1f`, color: hex, boxShadow: `inset 0 0 0 1px ${hex}3d` }}
+    >
+      {text}
+    </span>
+  );
+}
+
+// The rank column: where the game started you → where it left you, then the
+// change itself. Games Leetify never rated show a neutral placeholder rather
+// than an empty cell, so the column always reads as a column.
+function RankCell({ m }: { m: LeetifyRecentMatch }) {
+  const delta = m.rank_delta;
+  const isPremier = m.rank_type === 11;
+  const isFaceit = m.data_source === "faceit";
+  const before = m.rank_before ?? 0;
+  const after = isPremier ? (m.rank ?? 0) : isFaceit ? (m.elo ?? 0) : 0;
+  const hexOf = (v: number) => (isPremier ? premierHex(v) : FACEIT_HEX);
+  const ladderName = isPremier ? "Premier rating" : "FACEIT elo";
+
+  // the delta always occupies the same slot so every row's ± lines up
+  const deltaSlot =
+    delta != null ? (
+      <span className={`w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums ${deltaColor(delta)}`}>
+        {signedInt(delta)}
+      </span>
+    ) : (
+      <span className="w-10 shrink-0" />
+    );
+
+  if ((isPremier || isFaceit) && after > 0) {
+    return (
+      <span className="flex items-center justify-end gap-1">
+        {delta != null && before > 0 ? (
+          <>
+            <RankChip text={before.toLocaleString()} hex={hexOf(before)} dim title={`${ladderName} before this game`} />
+            <span aria-hidden className="shrink-0 text-[10px] text-faint">
+              →
+            </span>
+          </>
+        ) : null}
+        <RankChip
+          text={after.toLocaleString()}
+          hex={hexOf(after)}
+          title={
+            delta != null
+              ? `${ladderName}: ${before.toLocaleString()} → ${after.toLocaleString()}`
+              : `${ladderName} after this game — Leetify didn't record the change`
+          }
+        />
+        {deltaSlot}
+      </span>
+    );
+  }
+
+  // no ladder number for this game: FACEIT level, a Competitive skill group,
+  // or a queue with no rating at all
+  const level = isFaceit ? (m.rank ?? 0) : 0;
+  const comp = m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18 ? (m.rank ?? 1) - 1 : -1;
+  return (
+    <span className="flex items-center justify-end gap-1">
+      {level > 0 ? (
+        <RankChip text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
+      ) : comp >= 0 ? (
+        <RankChip text={COMP_SHORT[comp]} hex="#38d6ff" title={COMP_RANKS[comp]} />
+      ) : (
+        <span
+          className="shrink-0 rounded bg-line/40 px-1 py-px text-[10px] font-bold text-faint"
+          title="No rating recorded for this game"
+        >
+          —
+        </span>
+      )}
+      {deltaSlot}
+    </span>
+  );
+}
 
 // Per-game leetify_rating arrives as a raw fraction (0.0434); Leetify's own
 // site displays it x100 ("+4.34"), matching the overall ranks.leetify scale.
@@ -71,7 +174,8 @@ const COL = {
   score: "w-11 sm:w-12",
   kd: "w-13 sm:w-15",
   rating: "w-12 sm:w-14",
-  delta: "w-13 sm:w-14",
+  // fits "25,730 → 26,160  +430" — before badge, arrow, after badge, change
+  delta: "sm:w-38",
   queue: "w-14 sm:w-17",
 };
 
@@ -132,9 +236,9 @@ export function LeetifyRecentMatches({
           </span>
           <span
             className={`${COL.delta} hidden shrink-0 text-right sm:inline`}
-            title="Premier rating / FACEIT elo this game moved you"
+            title="Premier rating / FACEIT elo before and after this game, and the change"
           >
-            Rank ±
+            Rank before → after
           </span>
           <span className={`${COL.queue} shrink-0 text-center`}>Queue</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
@@ -219,21 +323,8 @@ export function LeetifyRecentMatches({
                 >
                   {signed(m.leetify_rating)}
                 </span>
-                <span
-                  className={`${COL.delta} hidden shrink-0 text-right tabular-nums sm:inline ${
-                    delta != null ? deltaColor(delta) : "text-faint/50"
-                  }`}
-                  title={
-                    delta != null && after
-                      ? `${after.label}: ${(m.rank_before ?? 0).toLocaleString()} → ${after.value}`
-                      : after?.ladder
-                        ? `${after.label} ${after.value} — Leetify didn't record the change for this game`
-                        : after
-                          ? `${after.label} ${after.value} — this queue has no rating points`
-                          : undefined
-                  }
-                >
-                  {delta != null ? signedInt(delta) : "—"}
+                <span className={`${COL.delta} hidden shrink-0 sm:block`}>
+                  <RankCell m={m} />
                 </span>
                 <span className={`${COL.queue} shrink-0 text-center`}>
                   <span
@@ -342,9 +433,11 @@ export function LeetifyRecentMatches({
         })}
       </div>
       <p className="mt-1.5 text-[10px] text-faint">
-        The ± column is the Premier rating / FACEIT elo this game moved you (open a row for the
-        before → after). Leetify doesn&apos;t record a rating on every game; where it&apos;s missing
-        the change is left blank rather than spanning several games. K-D per game via Leetify.
+        Rank shows the Premier rating / FACEIT elo you carried into the game → what you left with,
+        and the change. Badges carry the in-game tier colour, so a rating crossing a bracket
+        changes colour too. Leetify doesn&apos;t record a rating on every game; those show a single
+        badge or a dash rather than a change stretched across several games. K-D per game via
+        Leetify.
       </p>
     </div>
   );
