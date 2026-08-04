@@ -159,7 +159,7 @@ function PremierPlate({
   return (
     <span
       title={title}
-      className={`relative inline-flex h-4.5 w-16 shrink-0 items-center ${dim ? "opacity-60" : ""}`}
+      className={`relative inline-block h-4.5 w-18 shrink-0 ${dim ? "opacity-60" : ""}`}
     >
       <svg viewBox="0 0 178 64" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
         {/* wings */}
@@ -169,8 +169,11 @@ function PremierPlate({
         <path d="M40 0h138l-12 64H28L40 0Z" fill={hex} opacity="0.13" />
         <path d="M40.9 1h136.3l-11.6 62H29.1L40.9 1Z" fill="none" stroke={hex} strokeOpacity="0.5" strokeWidth="2.4" />
       </svg>
+      {/* number band pinned to the PLATE polygon (x≈40→172 of 178), so the
+          value always sits inside the plate — never on the wings or past the
+          sheared right edge */}
       <span
-        className="relative z-10 w-full pl-4 text-center text-[10.5px] font-extrabold italic leading-none tabular-nums"
+        className="absolute inset-y-0 left-[22%] right-[6%] z-10 flex items-center justify-center text-[10px] font-extrabold italic leading-none tabular-nums"
         style={{ color: hex }}
       >
         {value.toLocaleString()}
@@ -385,8 +388,9 @@ const COL = {
   diff: "md:w-9",
   hs: "lg:w-10",
   rating: "w-12 sm:w-13",
-  // fits "27,853 → 27,974" as two slanted plates with the change over the arrow
-  delta: "sm:w-40",
+  // fits "27,853 → 27,974" as two slanted plates with the change over the
+  // arrow, plus left padding so the wings never crowd the Leetify column
+  delta: "sm:w-45 sm:pl-2.5",
   // fits the longest wordmark ("WINGMAN") with its dot at both breakpoints
   queue: "w-16 sm:w-21",
 };

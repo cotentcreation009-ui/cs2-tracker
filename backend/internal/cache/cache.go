@@ -85,8 +85,10 @@ func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", ste
 
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
+// v2: team scores now derive from per-player rounds-won (the teamScores array
+// mis-attributed sides) — the bump flushes boards cached with swapped scores.
 func LeetifyGameKey(gameID string, steamID uint64) string {
-	return fmt.Sprintf("cs2:leetify:game:%s:%d", strings.ToLower(gameID), steamID)
+	return fmt.Sprintf("cs2:leetify:game:v2:%s:%d", strings.ToLower(gameID), steamID)
 }
 
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).
