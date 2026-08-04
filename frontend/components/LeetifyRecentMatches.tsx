@@ -109,33 +109,41 @@ const COMP_SHORT = [
 
 const FACEIT_HEX = "#ff8a50";
 
-// One rating badge, tinted with its own tier colour — a Premier rating that
-// crosses a bracket mid-run genuinely changes colour, exactly as in game.
-function RankChip({
+// One rating badge in the game's own visual language: a slightly slanted
+// plate, italic bold numerals, and the double-slash mark Premier uses —
+// tinted with the tier colour, which genuinely changes when a rating crosses
+// a bracket mid-pair.
+function RatingBadge({
   text,
   hex,
   dim = false,
+  slashes = false,
   title,
 }: {
   text: string;
   hex: string;
   dim?: boolean;
+  slashes?: boolean;
   title?: string;
 }) {
   return (
     <span
       title={title}
-      className={`shrink-0 rounded px-1 py-px text-[10px] font-bold tabular-nums ${dim ? "opacity-65" : ""}`}
-      style={{ background: `${hex}1f`, color: hex, boxShadow: `inset 0 0 0 1px ${hex}3d` }}
+      className={`inline-block shrink-0 -skew-x-6 rounded-[3px] px-1 py-px ${dim ? "opacity-60" : ""}`}
+      style={{ background: `${hex}17`, boxShadow: `inset 0 0 0 1px ${hex}45` }}
     >
-      {text}
+      <span className="inline-block skew-x-6 text-[10.5px] font-extrabold italic leading-4 tabular-nums" style={{ color: hex }}>
+        {slashes ? <span className="mr-0.5 opacity-60">{"//"}</span> : null}
+        {text}
+      </span>
     </span>
   );
 }
 
-// The rank column: where the game started you → where it left you, then the
-// change itself. Games Leetify never rated show a neutral placeholder rather
-// than an empty cell, so the column always reads as a column.
+// The rank column, laid out like the game's own match history: the rating you
+// carried in, the change stacked over a small arrow, and the rating you left
+// with. Games Leetify never rated keep a neutral placeholder so the column
+// always reads as a column.
 function RankCell({ m }: { m: LeetifyRecentMatch }) {
   const delta = m.rank_delta;
   const isPremier = m.rank_type === 11;
@@ -145,37 +153,29 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   const hexOf = (v: number) => (isPremier ? premierHex(v) : FACEIT_HEX);
   const ladderName = isPremier ? "Premier rating" : "FACEIT elo";
 
-  // the delta always occupies the same slot so every row's ± lines up
-  const deltaSlot =
-    delta != null ? (
-      <span className={`w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums ${deltaColor(delta)}`}>
-        {signedInt(delta)}
-      </span>
-    ) : (
-      <span className="w-10 shrink-0" />
-    );
-
   if ((isPremier || isFaceit) && after > 0) {
     return (
-      <span className="flex items-center justify-end gap-1">
+      <span
+        className="flex items-center justify-end gap-1"
+        title={
+          delta != null
+            ? `${ladderName}: ${before.toLocaleString()} → ${after.toLocaleString()} (${signedInt(delta)})`
+            : `${ladderName} after this game — Leetify didn't record the change`
+        }
+      >
         {delta != null && before > 0 ? (
           <>
-            <RankChip text={before.toLocaleString()} hex={hexOf(before)} dim title={`${ladderName} before this game`} />
-            <span aria-hidden className="shrink-0 text-[10px] text-faint">
-              →
+            <RatingBadge text={before.toLocaleString()} hex={hexOf(before)} slashes={isPremier} dim />
+            {/* the change rides above the arrow, like the in-game history */}
+            <span className="flex w-8 shrink-0 flex-col items-center gap-px leading-none">
+              <span className={`text-[9px] font-bold tabular-nums ${deltaColor(delta)}`}>{signedInt(delta)}</span>
+              <svg viewBox="0 0 16 6" className="h-1.5 w-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+                <path d="M1 3h13m0 0-2.4-2M14 3l-2.4 2" />
+              </svg>
             </span>
           </>
         ) : null}
-        <RankChip
-          text={after.toLocaleString()}
-          hex={hexOf(after)}
-          title={
-            delta != null
-              ? `${ladderName}: ${before.toLocaleString()} → ${after.toLocaleString()}`
-              : `${ladderName} after this game — Leetify didn't record the change`
-          }
-        />
-        {deltaSlot}
+        <RatingBadge text={after.toLocaleString()} hex={hexOf(after)} slashes={isPremier} />
       </span>
     );
   }
@@ -185,11 +185,11 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   const level = isFaceit ? (m.rank ?? 0) : 0;
   const comp = m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18 ? (m.rank ?? 1) - 1 : -1;
   return (
-    <span className="flex items-center justify-end gap-1">
+    <span className="flex items-center justify-end">
       {level > 0 ? (
-        <RankChip text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
+        <RatingBadge text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
       ) : comp >= 0 ? (
-        <RankChip text={COMP_SHORT[comp]} hex="#38d6ff" title={COMP_RANKS[comp]} />
+        <RatingBadge text={COMP_SHORT[comp]} hex="#38d6ff" title={COMP_RANKS[comp]} />
       ) : (
         <span
           className="shrink-0 rounded bg-line/40 px-1 py-px text-[10px] font-bold text-faint"
@@ -198,7 +198,41 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
           —
         </span>
       )}
-      {deltaSlot}
+    </span>
+  );
+}
+
+// Deterministic per-map hues so the map column scans by colour before it's
+// read — the classic pool gets hand-picked tones, anything else derives one.
+const MAP_HUES: Record<string, string> = {
+  mirage: "#e8b04c", inferno: "#e8734c", dust2: "#d9c27a", nuke: "#7aa3d9",
+  ancient: "#6cbf7a", anubis: "#4cc9c0", overpass: "#7ac292", vertigo: "#8a7dff",
+  train: "#9aa7b8", cache: "#b8c96e", office: "#9cc1ff", italy: "#c9856e",
+};
+
+function mapHue(name: string): string {
+  if (MAP_HUES[name]) return MAP_HUES[name];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h} 45% 62%)`;
+}
+
+// "D2" for dust2, "MI" for mirage, "SD" for shortdust — a compact monogram.
+function mapCode(name: string): string {
+  const m = /^(.*?)(\d)$/.exec(name);
+  if (m && m[1]) return (m[1][0] + m[2]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function MapBadge({ name }: { name: string }) {
+  const hue = mapHue(name);
+  return (
+    <span
+      aria-hidden
+      className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[8px] font-extrabold"
+      style={{ background: `color-mix(in srgb, ${hue} 14%, transparent)`, color: hue, boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${hue} 35%, transparent)` }}
+    >
+      {mapCode(name)}
     </span>
   );
 }
@@ -239,14 +273,20 @@ const signedInt = (d: number) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.ab
 // Column widths + row padding shared by the header and every row, so the
 // labels always sit over the numbers they describe.
 const ROW_PAD = "gap-1.5 px-2 py-2 sm:gap-3 sm:px-3";
+// Column reveal by breakpoint: phones get map/score/impact/queue; ≥sm adds the
+// rank pair; ≥md splits out K, D and +/−; ≥lg adds HS%. Everything hidden from
+// a narrow row still appears in the expanded panel.
 const COL = {
   badge: "w-5",
-  map: "w-14 sm:w-20",
+  map: "w-16 sm:w-24",
   score: "w-11 sm:w-12",
-  kd: "w-13 sm:w-15",
-  rating: "w-12 sm:w-14",
-  // fits "25,730 → 26,160  +430" — before badge, arrow, after badge, change
-  delta: "sm:w-38",
+  k: "md:w-7",
+  d: "md:w-7",
+  diff: "md:w-9",
+  hs: "lg:w-10",
+  rating: "w-12 sm:w-13",
+  // fits "27,853 → 27,974" as two slanted plates with the change over the arrow
+  delta: "sm:w-40",
   // fits the longest wordmark ("WINGMAN") with its dot at both breakpoints
   queue: "w-16 sm:w-21",
 };
@@ -303,7 +343,10 @@ export function LeetifyRecentMatches({
           <span className={`${COL.badge} shrink-0`} />
           <span className={`${COL.map} shrink-0`}>Map</span>
           <span className={`${COL.score} shrink-0 text-right`}>Score</span>
-          <span className={`${COL.kd} hidden shrink-0 text-right sm:inline`}>K / D</span>
+          <span className={`${COL.k} hidden shrink-0 text-right md:inline`} title="Kills">K</span>
+          <span className={`${COL.d} hidden shrink-0 text-right md:inline`} title="Deaths">D</span>
+          <span className={`${COL.diff} hidden shrink-0 text-right md:inline`} title="Kill − death difference">+/−</span>
+          <span className={`${COL.hs} hidden shrink-0 text-right lg:inline`} title="Headshot accuracy">HS%</span>
           <span className={`${COL.rating} shrink-0 text-right`} title="Leetify's rating for the game">
             Leetify
           </span>
@@ -362,34 +405,33 @@ export function LeetifyRecentMatches({
                 >
                   {tie ? "T" : won ? "W" : "L"}
                 </span>
-                <span className={`${COL.map} shrink-0 truncate font-medium capitalize`}>
-                  {mapLabel(m.map_name)}
+                <span className={`${COL.map} flex shrink-0 items-center gap-1.5`}>
+                  <MapBadge name={mapLabel(m.map_name)} />
+                  <span className="truncate font-medium capitalize">{mapLabel(m.map_name)}</span>
                 </span>
-                {/* rounds use an en dash, K/D a slash — so two "N to N" pairs
-                    never read as the same stat */}
-                <span className={`${COL.score} shrink-0 whitespace-nowrap text-right tabular-nums text-muted`}>
+                {/* the score wears the outcome colour — win green, loss red */}
+                <span
+                  className={`${COL.score} shrink-0 whitespace-nowrap text-right font-semibold tabular-nums ${
+                    tie ? "text-mid" : won ? "text-good" : "text-bad"
+                  }`}
+                >
                   {m.score?.length === 2 ? `${m.score[0]}–${m.score[1]}` : "—"}
                 </span>
-                {/* kills bright, deaths dim — structural, not evaluative, so
-                    the only two colour-coded columns are the ones that judge
-                    the game (Leetify rating and rank movement) */}
+                <span className={`${COL.k} hidden shrink-0 text-right font-semibold tabular-nums text-ink md:inline`}>
+                  {hasKD ? kills : <span className="font-normal text-faint">—</span>}
+                </span>
+                <span className={`${COL.d} hidden shrink-0 text-right tabular-nums text-muted md:inline`}>
+                  {hasKD ? deaths : <span className="text-faint">—</span>}
+                </span>
                 <span
-                  className={`${COL.kd} hidden shrink-0 whitespace-nowrap text-right tabular-nums sm:inline`}
-                  title={
-                    hasKD
-                      ? `${kills} kills, ${deaths} deaths (${kdDiff >= 0 ? "+" : "−"}${Math.abs(kdDiff)})`
-                      : "Kills and deaths unavailable for this game"
-                  }
+                  className={`${COL.diff} hidden shrink-0 text-right tabular-nums md:inline ${
+                    hasKD ? (kdDiff > 0 ? "text-good" : kdDiff < 0 ? "text-bad" : "text-faint") : "text-faint"
+                  }`}
                 >
-                  {hasKD ? (
-                    <>
-                      <span className="font-semibold text-ink">{kills}</span>
-                      <span className="mx-0.5 text-faint">/</span>
-                      <span className="text-muted">{deaths}</span>
-                    </>
-                  ) : (
-                    <span className="text-faint">—</span>
-                  )}
+                  {hasKD ? `${kdDiff > 0 ? "+" : kdDiff < 0 ? "−" : ""}${Math.abs(kdDiff)}` : "—"}
+                </span>
+                <span className={`${COL.hs} hidden shrink-0 text-right tabular-nums text-muted lg:inline`}>
+                  {m.accuracy_head > 0 ? `${m.accuracy_head.toFixed(0)}%` : <span className="text-faint">—</span>}
                 </span>
                 <span
                   className={`${COL.rating} shrink-0 text-right tabular-nums ${impactColor(m.leetify_rating)}`}
