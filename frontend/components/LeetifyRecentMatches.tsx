@@ -7,18 +7,89 @@ import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
 
 // Queue identity: Premier and Competitive both arrive as data_source
 // "matchmaking" — rank_type is what actually distinguishes them (11 = Premier,
-// 12 = Competitive), so labels/colors key off that first.
-function sourceInfo(m: LeetifyRecentMatch): { label: string; cls: string } {
-  if (m.rank_type === 11)
-    return { label: "Premier", cls: "border-[#8a7dff]/40 bg-[#8a7dff]/10 text-[#b8a5ff]" };
-  if (m.data_source === "faceit")
-    return { label: "FACEIT", cls: "border-[#ff5500]/40 bg-[#ff5500]/10 text-[#ff8a50]" };
-  if (m.rank_type === 12)
-    return { label: "Comp", cls: "border-brand/40 bg-brand/10 text-brand" };
+// 12 = Competitive), so labels/colors key off that first. Rendered as a small
+// colour-keyed wordmark (dot + small caps), not a boxed pill — a border around
+// the same word on every row was pure noise.
+function sourceInfo(m: LeetifyRecentMatch): { label: string; hex: string } {
+  if (m.rank_type === 11) return { label: "Premier", hex: "#b8a5ff" };
+  if (m.data_source === "faceit") return { label: "FACEIT", hex: "#ff8a50" };
+  if (m.rank_type === 12) return { label: "Comp", hex: "#38d6ff" };
   if (m.data_source === "matchmaking_wingman" || m.data_source === "wingman")
-    return { label: "Wingman", cls: "border-line bg-panel text-muted" };
+    return { label: "Wingman", hex: "#8a93a5" };
   const fallback: Record<string, string> = { matchmaking: "MM", renown: "Renown", esportal: "Esportal" };
-  return { label: fallback[m.data_source] || m.data_source, cls: "border-line bg-panel text-muted" };
+  return { label: fallback[m.data_source] || m.data_source, hex: "#8a93a5" };
+}
+
+// The at-a-glance read of the whole window, so the table opens with a story
+// instead of a wall of rows: record, K/D, net rating movement, average impact.
+function WindowSummary({ matches }: { matches: LeetifyRecentMatch[] }) {
+  let w = 0;
+  let l = 0;
+  let t = 0;
+  let kills = 0;
+  let deaths = 0;
+  let netPremier = 0;
+  let premierN = 0;
+  let netElo = 0;
+  let eloN = 0;
+  let impact = 0;
+  for (const m of matches) {
+    if (m.outcome === "win") w++;
+    else if (m.outcome === "loss") l++;
+    else t++;
+    kills += m.kills ?? 0;
+    deaths += m.deaths ?? 0;
+    if (m.rank_delta != null) {
+      if (m.rank_type === 11) {
+        netPremier += m.rank_delta;
+        premierN++;
+      } else if (m.data_source === "faceit") {
+        netElo += m.rank_delta;
+        eloN++;
+      }
+    }
+    impact += m.leetify_rating;
+  }
+  const kd = deaths > 0 ? kills / deaths : 0;
+  const avgImpact = matches.length ? (impact / matches.length) * 100 : 0;
+  const item = (label: string, value: ReactNode) => (
+    <span className="flex items-baseline gap-1.5">
+      <span className="stat-label">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{value}</span>
+    </span>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-line bg-panel/30 px-3 py-2">
+      {item(
+        "Record",
+        <>
+          <span className="text-good">{w}W</span>
+          <span className="mx-0.5 text-faint">·</span>
+          <span className="text-bad">{l}L</span>
+          {t > 0 ? (
+            <>
+              <span className="mx-0.5 text-faint">·</span>
+              <span className="text-mid">{t}T</span>
+            </>
+          ) : null}
+        </>,
+      )}
+      {kd > 0 ? item("K/D", <span className={kd >= 1.1 ? "text-good" : kd < 0.95 ? "text-bad" : "text-ink"}>{kd.toFixed(2)}</span>) : null}
+      {premierN > 0
+        ? item(
+            "Premier net",
+            <span className={deltaColor(netPremier)}>{signedInt(netPremier)}</span>,
+          )
+        : null}
+      {eloN > 0
+        ? item("FACEIT net", <span className={deltaColor(netElo)}>{signedInt(netElo)}</span>)
+        : null}
+      {matches.length > 0
+        ? item("Avg impact", <span className={impactColor(avgImpact / 100)}>{`${avgImpact >= 0 ? "+" : ""}${avgImpact.toFixed(2)}`}</span>)
+        : null}
+      <span className="ml-auto text-[10px] text-faint">last {matches.length} games</span>
+    </div>
+  );
 }
 
 // Valve's 18 competitive skill groups (rank_type 12's rank value).
@@ -176,7 +247,8 @@ const COL = {
   rating: "w-12 sm:w-14",
   // fits "25,730 → 26,160  +430" — before badge, arrow, after badge, change
   delta: "sm:w-38",
-  queue: "w-14 sm:w-17",
+  // fits the longest wordmark ("WINGMAN") with its dot at both breakpoints
+  queue: "w-16 sm:w-21",
 };
 
 function Stat({
@@ -219,13 +291,14 @@ export function LeetifyRecentMatches({
   return (
     <div className="mt-5">
       <div className="stat-label mb-2">Recent matches (Leetify)</div>
-      <div className="overflow-hidden rounded-lg border border-line">
+      <div className="overflow-hidden rounded-xl border border-line bg-panel2/20">
+        <WindowSummary matches={matches} />
         {/* column headers — four similar-looking numbers per row are
             unreadable without labels; widths are shared with the rows below
             via COL so the two can never drift apart */}
         <div
           aria-hidden
-          className={`flex items-center border-b border-line bg-panel/60 text-[9px] font-semibold uppercase tracking-wider text-faint ${ROW_PAD}`}
+          className={`flex items-center border-b border-line bg-panel/40 text-[9px] font-semibold uppercase tracking-[0.14em] text-faint ${ROW_PAD}`}
         >
           <span className={`${COL.badge} shrink-0`} />
           <span className={`${COL.map} shrink-0`}>Map</span>
@@ -240,13 +313,14 @@ export function LeetifyRecentMatches({
           >
             Rank before → after
           </span>
-          <span className={`${COL.queue} shrink-0 text-center`}>Queue</span>
+          <span className={`${COL.queue} shrink-0`}>Queue</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
             When
             <span className="w-3.5" />
           </span>
         </div>
 
+        <div className="divide-y divide-line/30">
         {matches.map((m, i) => {
           const key = m.id || String(i);
           const won = m.outcome === "win";
@@ -265,17 +339,17 @@ export function LeetifyRecentMatches({
           const afterHex =
             after?.label === "Premier rating" ? premierHex(m.rank ?? 0) : undefined;
           return (
-            <div key={key} className={i % 2 ? "bg-panel/40" : ""}>
+            <div key={key} className={isOpen ? "bg-panel/30" : ""}>
               <button
                 type="button"
                 onClick={() => setOpen(isOpen ? null : key)}
                 aria-expanded={isOpen}
-                className={`relative flex w-full items-center text-left text-sm transition hover:bg-panel2 ${ROW_PAD}`}
+                className={`group relative flex w-full items-center text-left text-sm transition hover:bg-panel/60 ${ROW_PAD}`}
               >
                 {/* outcome edge + badge */}
                 <span
                   aria-hidden
-                  className={`absolute inset-y-0 left-0 w-0.5 ${tie ? "bg-mid/50" : won ? "bg-good/50" : "bg-bad/50"}`}
+                  className={`absolute inset-y-1 left-0 w-0.75 rounded-r-full ${tie ? "bg-mid/70" : won ? "bg-good/70" : "bg-bad/70"}`}
                 />
                 <span
                   className={`${COL.badge} grid h-5 shrink-0 place-items-center rounded text-[11px] font-bold ${
@@ -326,9 +400,16 @@ export function LeetifyRecentMatches({
                 <span className={`${COL.delta} hidden shrink-0 sm:block`}>
                   <RankCell m={m} />
                 </span>
-                <span className={`${COL.queue} shrink-0 text-center`}>
+                {/* colour-keyed wordmark: tiny dot + small caps, no box */}
+                <span className={`${COL.queue} flex shrink-0 items-center gap-1.5`}>
                   <span
-                    className={`inline-flex w-full justify-center rounded-full border px-1 py-0.5 text-[10px] font-semibold ${src.cls}`}
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ background: src.hex, boxShadow: `0 0 6px ${src.hex}66` }}
+                  />
+                  <span
+                    className="truncate text-[9px] font-bold uppercase tracking-[0.08em]"
+                    style={{ color: src.hex }}
                   >
                     {src.label}
                   </span>
@@ -351,7 +432,7 @@ export function LeetifyRecentMatches({
               </button>
 
               {isOpen && (
-                <div className="border-t border-line bg-bg/40 px-3 py-3">
+                <div className="border-t border-line/60 bg-linear-to-b from-panel/40 to-transparent px-3 py-3">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <Stat
                       label="K-D"
@@ -431,6 +512,7 @@ export function LeetifyRecentMatches({
             </div>
           );
         })}
+        </div>
       </div>
       <p className="mt-1.5 text-[10px] text-faint">
         Rank shows the Premier rating / FACEIT elo you carried into the game → what you left with,
