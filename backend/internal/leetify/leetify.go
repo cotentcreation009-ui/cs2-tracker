@@ -248,14 +248,22 @@ func mergeLegacyGames(p *Profile, lp *Profile) {
 	}
 }
 
-// rankedQueue returns the queue a game's rating belongs to and the rating it
+// rankedQueue returns the ladder a game's rating belongs to and the rating it
 // left the player on ("" when the game carries no comparable rating).
+// Competitive skill groups are PER MAP in CS2, so each map is its own ladder —
+// a Dust2 rank change must never be computed against a Vertigo game.
 func rankedQueue(m *RecentMatch) (string, int) {
 	switch {
 	case m.RankType == 11: // Premier — Rank is the CS Rating
 		return "premier", m.Rank
 	case m.DataSource == "faceit": // FACEIT — Rank is the LEVEL, Elo is the number that moves
 		return "faceit", m.Elo
+	case m.RankType == 12: // Competitive skill group (0/out-of-range = unranked → breaks the chain)
+		v := 0
+		if m.Rank >= 1 && m.Rank <= 18 {
+			v = m.Rank
+		}
+		return "comp:" + strings.ToLower(m.MapName), v
 	}
 	return "", 0
 }

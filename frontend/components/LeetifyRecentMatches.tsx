@@ -141,6 +141,44 @@ function RatingBadge({
   );
 }
 
+// The Premier rating plate drawn like the in-game asset: two angled wing
+// slashes, then the sheared plate carrying the number — geometry traced from
+// the game's own premier_rating_bg.svg (178×64 with a 12°-ish shear), tinted
+// with the tier colour of the rating it holds.
+function PremierPlate({
+  value,
+  hex,
+  dim = false,
+  title,
+}: {
+  value: number;
+  hex: string;
+  dim?: boolean;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className={`relative inline-flex h-4.5 w-16 shrink-0 items-center ${dim ? "opacity-60" : ""}`}
+    >
+      <svg viewBox="0 0 178 64" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
+        {/* wings */}
+        <path d="M12 0h9L9 64H0L12 0Z" fill={hex} />
+        <path d="M27 0h7L22 64h-7L27 0Z" fill={hex} opacity="0.45" />
+        {/* plate */}
+        <path d="M40 0h138l-12 64H28L40 0Z" fill={hex} opacity="0.13" />
+        <path d="M40.9 1h136.3l-11.6 62H29.1L40.9 1Z" fill="none" stroke={hex} strokeOpacity="0.5" strokeWidth="2.4" />
+      </svg>
+      <span
+        className="relative z-10 w-full pl-4 text-center text-[10.5px] font-extrabold italic leading-none tabular-nums"
+        style={{ color: hex }}
+      >
+        {value.toLocaleString()}
+      </span>
+    </span>
+  );
+}
+
 // The rank column, laid out like the game's own match history: the rating you
 // carried in, the change stacked over a small arrow, and the rating you left
 // with. Games Leetify never rated keep a neutral placeholder so the column
@@ -154,6 +192,17 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   const hexOf = (v: number) => (isPremier ? premierHex(v) : FACEIT_HEX);
   const ladderName = isPremier ? "Premier rating" : "FACEIT elo";
 
+  // the change rides above a small arrow, like the in-game match history
+  const deltaArrow =
+    delta != null ? (
+      <span className="flex w-8 shrink-0 flex-col items-center gap-px leading-none">
+        <span className={`text-[9px] font-bold tabular-nums ${deltaColor(delta)}`}>{signedInt(delta)}</span>
+        <svg viewBox="0 0 16 6" className="h-1.5 w-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+          <path d="M1 3h13m0 0-2.4-2M14 3l-2.4 2" />
+        </svg>
+      </span>
+    ) : null;
+
   if ((isPremier || isFaceit) && after > 0) {
     return (
       <span
@@ -166,17 +215,19 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
       >
         {delta != null && before > 0 ? (
           <>
-            <RatingBadge text={before.toLocaleString()} hex={hexOf(before)} slashes={isPremier} dim />
-            {/* the change rides above the arrow, like the in-game history */}
-            <span className="flex w-8 shrink-0 flex-col items-center gap-px leading-none">
-              <span className={`text-[9px] font-bold tabular-nums ${deltaColor(delta)}`}>{signedInt(delta)}</span>
-              <svg viewBox="0 0 16 6" className="h-1.5 w-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-                <path d="M1 3h13m0 0-2.4-2M14 3l-2.4 2" />
-              </svg>
-            </span>
+            {isPremier ? (
+              <PremierPlate value={before} hex={hexOf(before)} dim />
+            ) : (
+              <RatingBadge text={before.toLocaleString()} hex={hexOf(before)} dim />
+            )}
+            {deltaArrow}
           </>
         ) : null}
-        <RatingBadge text={after.toLocaleString()} hex={hexOf(after)} slashes={isPremier} />
+        {isPremier ? (
+          <PremierPlate value={after} hex={hexOf(after)} />
+        ) : (
+          <RatingBadge text={after.toLocaleString()} hex={hexOf(after)} />
+        )}
       </span>
     );
   }
@@ -185,12 +236,23 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   // or a queue with no rating at all
   const level = isFaceit ? (m.rank ?? 0) : 0;
   const comp = m.rank_type === 12 && (m.rank ?? 0) >= 1 && (m.rank ?? 0) <= 18 ? (m.rank ?? 0) : 0;
+  const compBefore = m.rank_type === 12 && before >= 1 && before <= 18 ? before : 0;
   return (
-    <span className="flex items-center justify-end">
+    <span className="flex items-center justify-end gap-1">
       {level > 0 ? (
         <RatingBadge text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
       ) : comp > 0 ? (
-        <CompRankBadge rank={comp} className="h-4.5 w-auto" />
+        // rank moved → before badge, change over the arrow, after badge —
+        // the same format as Premier/FACEIT; unchanged ranks keep one badge
+        delta != null && delta !== 0 && compBefore > 0 ? (
+          <>
+            <CompRankBadge rank={compBefore} className="h-6 w-auto opacity-60" />
+            {deltaArrow}
+            <CompRankBadge rank={comp} className="h-6 w-auto" />
+          </>
+        ) : (
+          <CompRankBadge rank={comp} className="h-6 w-auto" />
+        )
       ) : (
         <span
           className="shrink-0 rounded bg-line/40 px-1 py-px text-[10px] font-bold text-faint"
@@ -402,70 +464,102 @@ function useGameDeep(steamId: string, gameId?: string): GameDeep | null | undefi
   return deep;
 }
 
-// The full 10-player board for the expanded game: viewer's team first (their
-// row highlighted), every player linking to their own StatRun profile.
+// The full 10-player board for the expanded game: viewer's team first with a
+// W/L chip and outcome-tinted header, players sorted by rating, the match's
+// top player starred, an ADR bar under each damage number, and every name
+// linking to its own StatRun profile.
 function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie: boolean }) {
   const teams = deep.scoreboard ?? [];
   if (teams.length !== 2) return null;
   const ratingCls = (v: number) => (v >= 1.1 ? "text-good" : v < 0.9 ? "text-bad" : "text-ink");
+  const all = teams.flatMap((t) => t.players);
+  const maxAdr = Math.max(1, ...all.map((p) => p.adr));
+  const best = all.reduce((a, b) => (b.rating > a.rating ? b : a), all[0]);
   return (
     <div className="mt-2.5 grid gap-2 lg:grid-cols-2">
-      {teams.map((t, ti) => (
-        <div key={ti} className="overflow-hidden rounded-md border border-line/60">
-          <div className="flex items-center justify-between border-b border-line/60 bg-panel/50 px-2.5 py-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
-              {ti === 0 ? "Your team" : "Opponents"}
-            </span>
-            <span
-              className={`text-xs font-bold tabular-nums ${
-                tie ? "text-mid" : (ti === 0) === won ? "text-good" : "text-bad"
-              }`}
-            >
-              {t.score}
-            </span>
-          </div>
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="text-[8px] uppercase tracking-wider text-faint">
-                <th className="px-2.5 py-1 text-left font-semibold">Player</th>
-                <th className="w-7 py-1 text-right font-semibold" title="Kills">K</th>
-                <th className="w-7 py-1 text-right font-semibold" title="Deaths">D</th>
-                <th className="w-7 py-1 text-right font-semibold" title="Assists">A</th>
-                <th className="w-9 py-1 text-right font-semibold" title="Average damage per round">ADR</th>
-                <th className="w-10 py-1 pr-2.5 text-right font-semibold" title="HLTV-style rating (via Leetify)">RTG</th>
-              </tr>
-            </thead>
-            <tbody>
-              {t.players.map((p, pi) => (
-                <tr key={pi} className={`border-t border-line/30 ${p.me ? "bg-brand/10" : ""}`}>
-                  <td className="max-w-0 truncate px-2.5 py-1">
-                    {p.steam_id ? (
-                      <a
-                        href={`/profiles/${p.steam_id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted"}`}
-                        title={`${p.name} — open their StatRun profile`}
-                      >
-                        {p.name}
-                      </a>
-                    ) : (
-                      <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name}</span>
-                    )}
-                    {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
-                  </td>
-                  <td className="py-1 text-right tabular-nums text-ink">{p.kills}</td>
-                  <td className="py-1 text-right tabular-nums text-muted">{p.deaths}</td>
-                  <td className="py-1 text-right tabular-nums text-muted">{p.assists}</td>
-                  <td className="py-1 text-right tabular-nums text-muted">{p.adr.toFixed(0)}</td>
-                  <td className={`py-1 pr-2.5 text-right font-semibold tabular-nums ${ratingCls(p.rating)}`}>
-                    {p.rating.toFixed(2)}
-                  </td>
+      {teams.map((t, ti) => {
+        const teamWon = !tie && (ti === 0) === won;
+        const outcome = tie ? "T" : teamWon ? "W" : "L";
+        const outCls = tie ? "bg-mid/20 text-mid" : teamWon ? "bg-good/20 text-good" : "bg-bad/20 text-bad";
+        const hair = tie ? "#e7b53c" : teamWon ? "var(--color-good)" : "var(--color-bad)";
+        return (
+          <div key={ti} className="relative overflow-hidden rounded-lg border border-line/60 bg-panel2/20">
+            {/* outcome hairline */}
+            <span aria-hidden className="absolute inset-x-0 top-0 h-px opacity-70" style={{ backgroundImage: `linear-gradient(90deg, ${hair}, transparent 70%)` }} />
+            <div className="flex items-center justify-between border-b border-line/60 bg-panel/40 px-2.5 py-1.5">
+              <span className="flex items-center gap-1.5">
+                <span className={`grid h-4 w-4 place-items-center rounded text-[9px] font-bold ${outCls}`}>{outcome}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                  {ti === 0 ? "Your team" : "Opponents"}
+                </span>
+              </span>
+              <span
+                className={`text-sm font-extrabold tabular-nums ${
+                  tie ? "text-mid" : teamWon ? "text-good" : "text-bad"
+                }`}
+              >
+                {t.score}
+              </span>
+            </div>
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-[8px] uppercase tracking-wider text-faint">
+                  <th className="px-2.5 py-1 text-left font-semibold">Player</th>
+                  <th className="w-7 py-1 text-right font-semibold" title="Kills">K</th>
+                  <th className="w-7 py-1 text-right font-semibold" title="Deaths">D</th>
+                  <th className="w-7 py-1 text-right font-semibold" title="Assists">A</th>
+                  <th className="w-10 py-1 text-right font-semibold" title="Average damage per round">ADR</th>
+                  <th className="hidden w-9 py-1 text-right font-semibold sm:table-cell" title="Headshot %">HS%</th>
+                  <th className="w-10 py-1 pr-2.5 text-right font-semibold" title="HLTV-style rating (via Leetify)">RTG</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ))}
+              </thead>
+              <tbody>
+                {t.players.map((p, pi) => (
+                  <tr
+                    key={pi}
+                    className={`group/srow border-t border-line/30 transition-colors hover:bg-panel/40 ${p.me ? "bg-brand/10" : ""}`}
+                  >
+                    <td className="relative max-w-0 truncate px-2.5 py-1.5">
+                      {p.me ? <span aria-hidden className="absolute inset-y-0.5 left-0 w-0.5 rounded-r-full bg-brand/80" /> : null}
+                      {p === best ? (
+                        <span className="mr-1 text-[9px] text-mid" title="Match MVP — highest rating in the game">★</span>
+                      ) : null}
+                      {p.steam_id ? (
+                        <a
+                          href={`/profiles/${p.steam_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted group-hover/srow:text-ink"}`}
+                          title={`${p.name} — open their StatRun profile`}
+                        >
+                          {p.name || "—"}
+                        </a>
+                      ) : (
+                        <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name || "—"}</span>
+                      )}
+                      {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
+                    </td>
+                    <td className="py-1.5 text-right font-semibold tabular-nums text-ink">{p.kills}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted">{p.deaths}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted">{p.assists}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted">
+                      {p.adr.toFixed(0)}
+                      <span className="mt-0.5 block h-0.5 w-full overflow-hidden rounded-full bg-line/30" aria-hidden>
+                        <span className="block h-full rounded-full bg-brand/50" style={{ width: `${Math.max(4, Math.round((p.adr / maxAdr) * 100))}%` }} />
+                      </span>
+                    </td>
+                    <td className="hidden py-1.5 text-right tabular-nums text-muted sm:table-cell">
+                      {p.hs_pct > 0 ? `${p.hs_pct.toFixed(0)}%` : "—"}
+                    </td>
+                    <td className={`py-1.5 pr-2.5 text-right font-semibold tabular-nums ${ratingCls(p.rating)}`}>
+                      {p.rating.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -554,6 +648,16 @@ function Stat({
  * rows: queue chip (Premier/Comp/FACEIT), score, K-D, per-game Leetify rating,
  * Premier-rating/FACEIT-elo change, and an expandable per-match stat panel.
  */
+// Queue bucket for filtering — mirrors sourceInfo's classification.
+function queueOf(m: LeetifyRecentMatch): "premier" | "faceit" | "comp" | "other" {
+  if (m.rank_type === 11) return "premier";
+  if (m.data_source === "faceit") return "faceit";
+  if (m.rank_type === 12) return "comp";
+  return "other";
+}
+
+const LIMIT_OPTIONS = [20, 50, 100, 150, 0]; // 0 = all
+
 export function LeetifyRecentMatches({
   matches,
   steamId,
@@ -562,13 +666,71 @@ export function LeetifyRecentMatches({
   steamId: string;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [queue, setQueue] = useState<"all" | "premier" | "faceit" | "comp" | "other">("all");
+  const [limit, setLimit] = useState(0);
   if (matches.length === 0) return null;
+
+  // queue filter first, then the count window — "last 50 Premier games"
+  const byQueue = queue === "all" ? matches : matches.filter((m) => queueOf(m) === queue);
+  const filtered = limit > 0 ? byQueue.slice(0, limit) : byQueue;
+
+  const counts: Record<string, number> = { all: matches.length, premier: 0, faceit: 0, comp: 0, other: 0 };
+  for (const m of matches) counts[queueOf(m)]++;
+  const QUEUE_TABS: { key: typeof queue; label: string; hex?: string }[] = [
+    { key: "all", label: "All" },
+    { key: "premier", label: "Premier", hex: "#b8a5ff" },
+    { key: "faceit", label: "FACEIT", hex: FACEIT_HEX },
+    { key: "comp", label: "Comp", hex: "#38d6ff" },
+    { key: "other", label: "Other" },
+  ];
 
   return (
     <div className="mt-5">
       <div className="stat-label mb-2">Recent matches (Leetify)</div>
       <div className="overflow-hidden rounded-xl border border-line bg-panel2/20">
-        <WindowSummary matches={matches} />
+        {/* filters: which queue, and how far back */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-panel/20 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-1">
+            {QUEUE_TABS.filter((t) => t.key === "all" || counts[t.key] > 0).map((t) => {
+              const active = queue === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setQueue(t.key)}
+                  aria-pressed={active}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                    active ? "bg-panel2 text-ink" : "text-muted hover:bg-panel/60 hover:text-ink"
+                  }`}
+                  style={active && t.hex ? { color: t.hex, boxShadow: `inset 0 0 0 1px ${t.hex}55` } : undefined}
+                >
+                  {t.label}
+                  <span className={`ml-1 tabular-nums ${active ? "opacity-70" : "text-faint"}`}>{counts[t.key]}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="ml-auto flex items-center gap-1" title="How many of the most recent games to show">
+            <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-faint">Last</span>
+            {LIMIT_OPTIONS.filter((n) => n === 0 || n < byQueue.length).map((n) => {
+              const active = limit === n;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setLimit(n)}
+                  aria-pressed={active}
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums transition ${
+                    active ? "bg-panel2 text-ink" : "text-muted hover:bg-panel/60 hover:text-ink"
+                  }`}
+                >
+                  {n === 0 ? "All" : n}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <WindowSummary matches={filtered} />
         {/* column headers — four similar-looking numbers per row are
             unreadable without labels; widths are shared with the rows below
             via COL so the two can never drift apart */}
@@ -600,7 +762,7 @@ export function LeetifyRecentMatches({
         </div>
 
         <div className="divide-y divide-line/30">
-        {matches.map((m, i) => {
+        {filtered.map((m, i) => {
           const key = m.id || String(i);
           const won = m.outcome === "win";
           const tie = m.outcome === "tie";
@@ -727,7 +889,19 @@ export function LeetifyRecentMatches({
                         // before → after is the whole point: where the game
                         // started you and where it left you
                         value={
-                          delta != null ? (
+                          m.rank_type === 12 ? (
+                            // the in-game badges; both when the rank moved
+                            <span className="flex items-center gap-1.5">
+                              {delta != null && delta !== 0 && (m.rank_before ?? 0) >= 1 ? (
+                                <>
+                                  <CompRankBadge rank={m.rank_before ?? 0} className="h-5 w-auto opacity-60" />
+                                  <span className="text-xs text-faint">→</span>
+                                </>
+                              ) : null}
+                              <CompRankBadge rank={m.rank ?? 0} className="h-6 w-auto" />
+                              <span className="truncate text-xs">{after.value}</span>
+                            </span>
+                          ) : delta != null ? (
                             <span className="text-[13px]">
                               <span className="font-normal text-muted">
                                 {(m.rank_before ?? 0).toLocaleString()}
@@ -735,19 +909,19 @@ export function LeetifyRecentMatches({
                               <span className="mx-1 text-faint">→</span>
                               <span style={afterHex ? { color: afterHex } : undefined}>{after.value}</span>
                             </span>
-                          ) : m.rank_type === 12 ? (
-                            // the in-game badge, with the full skill-group name
-                            <span className="flex items-center gap-1.5">
-                              <CompRankBadge rank={m.rank ?? 0} className="h-5 w-auto" />
-                              <span className="truncate text-xs">{after.value}</span>
-                            </span>
                           ) : (
                             after.value
                           )
                         }
                         valueHex={delta == null ? afterHex : undefined}
                         sub={
-                          delta != null ? (
+                          m.rank_type === 12 ? (
+                            delta != null && delta !== 0 && (m.rank_before ?? 0) >= 1 ? (
+                              <span className={`font-semibold ${deltaColor(delta)}`}>
+                                ranked {delta > 0 ? "up" : "down"} from {COMP_RANKS[(m.rank_before ?? 1) - 1]}
+                              </span>
+                            ) : null
+                          ) : delta != null ? (
                             <span className={`font-semibold ${deltaColor(delta)}`}>
                               {signedInt(delta)}
                             </span>
