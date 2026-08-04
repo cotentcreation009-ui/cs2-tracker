@@ -16,7 +16,7 @@ func TestComputeRankDeltas(t *testing.T) {
 		{RankType: 11, Rank: 18100},                 // 2: -50 vs 18150
 		{DataSource: "faceit", Rank: 10, Elo: 2100}, // 3: first rated faceit
 		{RankType: 11, Rank: 18150},                 // 4: first rated premier
-		{RankType: 12, Rank: 15},                    // 5: competitive — never
+		{RankType: 12, Rank: 15, MapName: "de_nuke"}, // 5: first comp game on Nuke
 		{RankType: 11, Rank: 0},                     // 6: rating not recorded
 		{RankType: 11, Rank: 17800},                 // 7: chain broken by [6]
 	}
@@ -56,6 +56,37 @@ func TestComputeRankDeltasDoesNotSpanUnratedGames(t *testing.T) {
 	}
 	if ms[0].RankBefore != 0 {
 		t.Errorf("RankBefore = %d, want 0", ms[0].RankBefore)
+	}
+}
+
+// Competitive skill groups are per map: a rank-up computes against the
+// previous comp game ON THE SAME MAP, never across maps, and an unranked
+// (rank 0) comp game on that map breaks the chain.
+func TestComputeRankDeltasCompArePerMap(t *testing.T) {
+	ms := []RecentMatch{ // most recent first
+		{RankType: 12, Rank: 15, MapName: "de_dust2"},   // 0: +1 vs [2] (same map)
+		{RankType: 12, Rank: 11, MapName: "de_vertigo"}, // 1: first Vertigo comp
+		{RankType: 12, Rank: 14, MapName: "de_dust2"},   // 2: ±0 vs [4]
+		{RankType: 12, Rank: 0, MapName: "de_mirage"},   // 3: unranked Mirage
+		{RankType: 12, Rank: 14, MapName: "de_dust2"},   // 4: first Dust2 comp
+		{RankType: 12, Rank: 16, MapName: "de_mirage"},  // 5: chain broken by [3]
+	}
+	computeRankDeltas(ms)
+	wantDelta := []*int{ip(1), nil, ip(0), nil, nil, nil}
+	wantBefore := []int{14, 0, 14, 0, 0, 0}
+	for i := range ms {
+		got, want := ms[i].RankDelta, wantDelta[i]
+		switch {
+		case want == nil && got != nil:
+			t.Errorf("ms[%d].RankDelta = %d, want nil", i, *got)
+		case want != nil && got == nil:
+			t.Errorf("ms[%d].RankDelta = nil, want %d", i, *want)
+		case want != nil && got != nil && *want != *got:
+			t.Errorf("ms[%d].RankDelta = %d, want %d", i, *got, *want)
+		}
+		if ms[i].RankBefore != wantBefore[i] {
+			t.Errorf("ms[%d].RankBefore = %d, want %d", i, ms[i].RankBefore, wantBefore[i])
+		}
 	}
 }
 
