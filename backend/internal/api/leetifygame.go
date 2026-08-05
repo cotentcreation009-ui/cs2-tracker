@@ -12,8 +12,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Leetify game ids are UUIDs; accept nothing broader before building a URL.
-var gameIDRe = regexp.MustCompile(`^[0-9a-fA-F-]{8,40}$`)
+// Leetify's per-game endpoint only serves UUID game ids. Accounts that fall
+// back to their LEGACY profile feed carry old-format ids like
+// "0f8e4cbd285ff241-1a539d", which that endpoint 400s — recognise them here
+// and answer found:false immediately instead of hammering upstream.
+var gameIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var legacyIDRe = regexp.MustCompile(`^[0-9a-zA-Z-]{8,40}$`)
 
 // handleLeetifyGameStats serves one player's deep scoreboard line (ADR, KAST,
 // HLTV-style rating, assists, MVPs, multi-kills) for one Leetify game —
@@ -28,6 +32,12 @@ func (s *Server) handleLeetifyGameStats(w http.ResponseWriter, r *http.Request) 
 	}
 	gameID := chi.URLParam(r, "gameId")
 	if !gameIDRe.MatchString(gameID) {
+		if legacyIDRe.MatchString(gameID) {
+			// legacy-format id — upstream has no scoreboard for it, ever
+			w.Header().Set("Cache-Control", "public, max-age=86400, s-maxage=604800")
+			writeJSON(w, http.StatusOK, leetify.GameStats{})
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid game id")
 		return
 	}
