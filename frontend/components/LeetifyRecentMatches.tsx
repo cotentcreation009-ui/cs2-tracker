@@ -149,17 +149,19 @@ function PremierPlate({
   value,
   hex,
   dim = false,
+  compact = false,
   title,
 }: {
   value: number;
   hex: string;
   dim?: boolean;
+  compact?: boolean;
   title?: string;
 }) {
   return (
     <span
       title={title}
-      className={`relative inline-block h-4.5 w-18 shrink-0 ${dim ? "opacity-60" : ""}`}
+      className={`relative inline-block shrink-0 ${compact ? "h-4 w-14" : "h-4.5 w-18"} ${dim ? "opacity-60" : ""}`}
     >
       <svg viewBox="0 0 178 64" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
         {/* wings */}
@@ -173,7 +175,7 @@ function PremierPlate({
           value always sits inside the plate — never on the wings or past the
           sheared right edge */}
       <span
-        className="absolute inset-y-0 left-[22%] right-[6%] z-10 flex items-center justify-center text-[10px] font-extrabold italic leading-none tabular-nums"
+        className={`absolute inset-y-0 left-[22%] right-[6%] z-10 flex items-center justify-center font-extrabold italic leading-none tabular-nums ${compact ? "text-[8.5px]" : "text-[10px]"}`}
         style={{ color: hex }}
       >
         {value.toLocaleString()}
@@ -424,6 +426,10 @@ interface ScoreRow {
   name: string;
   steam_id?: string;
   avatar?: string;
+  rank_type?: number; // 11 = Premier, 12 = Competitive
+  rank_after?: number;
+  rank_before?: number;
+  faceit_level?: number;
   kills: number;
   deaths: number;
   assists: number;
@@ -641,6 +647,25 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                             </span>
                           ) : null}
                         </span>
+                        {/* the player's ladder standing when this was played */}
+                        {(p.faceit_level ?? 0) > 0 ? (
+                          <FaceitLevelBadge level={p.faceit_level!} className="ml-auto h-4 w-auto pl-1" />
+                        ) : p.rank_type === 11 && (p.rank_after ?? 0) > 0 ? (
+                          <span className="ml-auto pl-1">
+                            <PremierPlate
+                              value={p.rank_after!}
+                              hex={premierHex(p.rank_after!)}
+                              compact
+                              title={
+                                p.rank_before
+                                  ? `Premier rating: ${p.rank_before.toLocaleString()} → ${p.rank_after!.toLocaleString()} this game`
+                                  : "Premier rating at match time"
+                              }
+                            />
+                          </span>
+                        ) : p.rank_type === 12 && (p.rank_after ?? 0) >= 1 && (p.rank_after ?? 0) <= 18 ? (
+                          <CompRankBadge rank={p.rank_after!} className="ml-auto h-4 w-auto pl-1" />
+                        ) : null}
                       </span>
                     </td>
                     <td className="py-1.5 text-right font-semibold tabular-nums text-ink">{p.kills}</td>

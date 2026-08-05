@@ -645,6 +645,14 @@ type ScoreRow struct {
 	Leaver bool `json:"leaver,omitempty"`
 	Party  int  `json:"party,omitempty"` // 1..n — players sharing a number queued together; 0 = solo
 	Me     bool `json:"me,omitempty"`
+	// the player's ladder standing AT MATCH TIME, from the game's own
+	// matchmakingGameStats / faceitGameStats blocks: Premier rating or comp
+	// skill group (with the pre-game value when the game changed it), or the
+	// FACEIT level. Zero when the lobby was unrated.
+	RankType    int `json:"rank_type,omitempty"` // 11 = Premier, 12 = Competitive
+	RankAfter   int `json:"rank_after,omitempty"`
+	RankBefore  int `json:"rank_before,omitempty"`
+	FaceitLevel int `json:"faceit_level,omitempty"`
 }
 
 // GetGameStats fetches one game's scoreboard and returns the row for steam64.
@@ -675,6 +683,17 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			Party     int    `json:"party"`
 			Steam64ID string `json:"steam64Id"`
 		} `json:"parties"`
+		MMStats []struct {
+			Steam64ID   string `json:"steam64Id"`
+			Rank        int    `json:"rank"`
+			OldRank     int    `json:"oldRank"`
+			RankType    int    `json:"rankType"`
+			RankChanged bool   `json:"rankChanged"`
+		} `json:"matchmakingGameStats"`
+		FaceitStats []struct {
+			Steam64ID  string `json:"steam64Id"`
+			FaceitRank int    `json:"faceitRank"`
+		} `json:"faceitGameStats"`
 		PlayerStats []struct {
 			Steam64ID   string  `json:"steam64Id"`
 			Name        string  `json:"name"`
@@ -733,6 +752,17 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 		partyNum[pt.Steam64ID] = partyIdx[pt.Party]
 	}
 
+	// per-player ladder standing at match time
+	type mmRank struct{ rank, oldRank, rankType int }
+	mmOf := map[string]mmRank{}
+	for _, m := range payload.MMStats {
+		mmOf[m.Steam64ID] = mmRank{m.Rank, m.OldRank, m.RankType}
+	}
+	levelOf := map[string]int{}
+	for _, f := range payload.FaceitStats {
+		levelOf[f.Steam64ID] = f.FaceitRank
+	}
+
 	// full board: teamNumber → rows; the viewer's team renders first
 	byTeam := map[int]*ScoreTeam{}
 	teamNums := []int{}
@@ -772,6 +802,14 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			Leaver:     p.IsLeaver,
 			Party:      partyNum[p.Steam64ID],
 		}
+		if mm, ok := mmOf[p.Steam64ID]; ok && mm.rank > 0 {
+			row.RankType = mm.rankType
+			row.RankAfter = mm.rank
+			if mm.oldRank > 0 && mm.oldRank != mm.rank {
+				row.RankBefore = mm.oldRank
+			}
+		}
+		row.FaceitLevel = levelOf[p.Steam64ID]
 		if p.Steam64ID == sid {
 			row.Me = true
 			myTeam = p.TeamNumber
