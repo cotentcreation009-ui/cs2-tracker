@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-// The CS2 skin-inventory showcase: total value up top, the most valuable
-// items as rarity-lit cards, then the rarity spread and category breakdown.
-// Fetched when the panel first opens; Steam-side results are cached hard so
-// repeat opens cost nothing.
+// The CS2 skin-inventory showcase: total value up top, then the collection
+// itself — filterable by category and by whether an item carries a market
+// price. Fetched when the panel first opens; Steam-side results are cached
+// hard so repeat opens cost nothing.
 
 interface InvItem {
   name: string;
@@ -19,6 +19,8 @@ interface InvItem {
   souvenir?: boolean;
   count: number;
   price?: number;
+  marketable?: boolean;
+  tradable?: boolean;
 }
 
 interface InvView {
@@ -55,6 +57,44 @@ const usd = (v: number) =>
   v >= 1000
     ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
     : `$${v.toFixed(2)}`;
+
+// Why an item carries no value. An unpriced item is usually not a gap in our
+// data — it's an item no market will carry, and saying so is more useful than
+// a dash. Steam tells us which kind of "no" it is.
+function priceGap(it: InvItem): { short: string; long: string } | null {
+  if (it.price) return null;
+  if (!it.marketable) {
+    return {
+      short: "Not sellable",
+      long: "Steam doesn't allow this item on the Community Market, so no market price exists for it.",
+    };
+  }
+  return {
+    short: "No listings",
+    long: "Sellable, but nobody has one listed on Skinport right now, so there's no price to quote.",
+  };
+}
+
+type PriceFilter = "all" | "priced" | "unpriced";
+type SortKey = "value" | "rarity" | "name";
+
+// Rarity runs low to high; sorting by it should put the Covert knife first, so
+// anything unrecognised sinks rather than floats.
+const RARITY_ORDER = [
+  "Consumer Grade", "Base Grade", "Industrial Grade", "Mil-Spec Grade", "High Grade",
+  "Restricted", "Distinguished", "Classified", "Exceptional", "Covert", "Superior",
+  "Extraordinary", "Master", "Remarkable", "Exotic", "Contraband",
+];
+const rarityRank = (r?: string) => {
+  const i = RARITY_ORDER.indexOf(r ?? "");
+  return i < 0 ? -1 : i;
+};
+
+const stackValue = (it: InvItem) => (it.price ?? 0) * it.count;
+
+// How many cards to reveal at a time. Inventories run to a thousand entries;
+// painting them all on open makes the panel stutter for no benefit.
+const PAGE = 30;
 
 // "3 hours ago" — how old the snapshot we're showing is.
 function ago(iso?: string): string {
@@ -154,8 +194,6 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
   const items = view.top_items ?? [];
   const rarities = view.rarities ?? [];
   const rarityTotal = rarities.reduce((a, r) => a + r.count, 0);
-  const cats = (view.categories ?? []).slice(0, 8);
-
   const asOf = ago(view.fetched_at);
 
   return (
@@ -223,64 +261,11 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
         ) : null}
       </div>
 
-      {/* the showcase: most valuable items, lit by their rarity */}
       {items.length > 0 ? (
-        <div>
-          <div className="mb-2 flex items-baseline justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-ink">Top items</h3>
-            <span className="text-[10px] text-faint">by stack value</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {items.slice(0, 20).map((it) => {
-              const hue = it.rarity_color || "#8a93a5";
-              const wear = it.exterior ? (WEAR_SHORT[it.exterior] ?? it.exterior) : "";
-              return (
-                <div
-                  key={it.market_hash_name}
-                  className="group relative overflow-hidden rounded-xl border p-2.5 transition duration-150 hover:-translate-y-0.5"
-                  style={{ borderColor: `${hue}40`, background: `linear-gradient(180deg, ${hue}14, transparent 70%)` }}
-                  title={`${it.name}${it.price ? ` — ${usd(it.price)} each` : ""}`}
-                >
-                  <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, ${hue}, transparent)` }} />
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={it.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="mx-auto h-20 w-auto object-contain drop-shadow-md" />
-                  <div className="mt-1.5 min-h-8">
-                    <p className="truncate text-[11px] font-semibold leading-tight text-ink">{it.name.replace(/^StatTrak™ /, "").replace(/^Souvenir /, "")}</p>
-                    <p className="flex items-center gap-1 text-[9px] leading-tight text-faint">
-                      {it.stattrak ? <span className="font-bold text-[#cf6a32]">ST™</span> : null}
-                      {it.souvenir ? <span className="font-bold text-[#ffd700]">SOUV</span> : null}
-                      {wear ? <span>{wear}</span> : null}
-                      {it.count > 1 ? <span>×{it.count}</span> : null}
-                    </p>
-                  </div>
-                  <div className="mt-1 flex items-baseline justify-between">
-                    <span className="text-xs font-bold tabular-nums text-ink">
-                      {it.price ? usd(it.price * it.count) : "—"}
-                    </span>
-                    {it.count > 1 && it.price ? (
-                      <span className="text-[9px] tabular-nums text-faint">{usd(it.price)} ea</span>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <Collection items={items} />
       ) : (
         <p className="px-4 py-8 text-center text-sm text-muted">No items to show.</p>
       )}
-
-      {/* what the inventory is made of */}
-      {cats.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {cats.map((c) => (
-            <span key={c.name} className="rounded-full border border-line bg-panel px-2.5 py-1 text-[11px] text-muted">
-              {c.name} <span className="font-semibold text-ink">{c.count}</span>
-              {c.value > 0 ? <span className="ml-1 tabular-nums text-faint">{usd(c.value)}</span> : null}
-            </span>
-          ))}
-        </div>
-      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-3">
         <p className="text-[10px] leading-snug text-faint">
@@ -296,6 +281,228 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
         >
           Full inventory on Steam ↗
         </a>
+      </div>
+    </div>
+  );
+}
+
+// The collection itself: category tabs across the top, a priced/unpriced
+// switch, a sort, and the grid. All client-side — the whole inventory is
+// already in hand, so filtering costs nothing and never re-hits Steam.
+function Collection({ items }: { items: InvItem[] }) {
+  const [cat, setCat] = useState("all");
+  const [priced, setPriced] = useState<PriceFilter>("all");
+  const [sort, setSort] = useState<SortKey>("value");
+  const [shown, setShown] = useState(PAGE);
+
+  // categories, richest first — the tab row doubles as the breakdown that
+  // used to sit at the bottom as dead chips
+  const cats = useMemo(() => {
+    const m = new Map<string, { name: string; count: number; value: number }>();
+    for (const it of items) {
+      const name = it.type || "Other";
+      const c = m.get(name) ?? { name, count: 0, value: 0 };
+      c.count += it.count;
+      c.value += stackValue(it);
+      m.set(name, c);
+    }
+    return [...m.values()].sort((a, b) => b.value - a.value || b.count - a.count);
+  }, [items]);
+
+  // Counts are of items owned, not of grid entries — a stack of 12 cases is
+  // 12. "All" therefore has to sum the same way the category tabs do, or the
+  // tabs visibly fail to add up to it.
+  const totalOwned = useMemo(() => items.reduce((a, i) => a + i.count, 0), [items]);
+  const unpricedTotal = useMemo(
+    () => items.reduce((a, i) => (i.price ? a : a + i.count), 0),
+    [items],
+  );
+
+  const visible = useMemo(() => {
+    const out = items.filter((it) => {
+      if (cat !== "all" && (it.type || "Other") !== cat) return false;
+      if (priced === "priced" && !it.price) return false;
+      if (priced === "unpriced" && it.price) return false;
+      return true;
+    });
+    out.sort((a, b) => {
+      if (sort === "name") return a.name.localeCompare(b.name);
+      if (sort === "rarity") {
+        const d = rarityRank(b.rarity) - rarityRank(a.rarity);
+        if (d) return d;
+      }
+      return stackValue(b) - stackValue(a) || a.name.localeCompare(b.name);
+    });
+    return out;
+  }, [items, cat, priced, sort]);
+
+  // a filter change should always land you at the top of a fresh page
+  const reset = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setShown(PAGE);
+  };
+
+  return (
+    <div>
+      {/* category tabs — the row scrolls rather than wrapping, so a fade on the
+          right edge shows there is more than the last visible tab */}
+      <div className="relative">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-linear-to-l from-panel2 to-transparent"
+        />
+        <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+          <CatTab active={cat === "all"} onClick={() => reset(setCat)("all")} name="All" count={totalOwned} />
+          {cats.map((c) => (
+            <CatTab
+              key={c.name}
+              active={cat === c.name}
+              onClick={() => reset(setCat)(c.name)}
+              name={c.name}
+              count={c.count}
+              value={c.value}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* priced / unpriced + sort */}
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-lg border border-line bg-panel p-0.5">
+          {(
+            [
+              ["all", "All"],
+              ["priced", "Priced"],
+              ["unpriced", `No price${unpricedTotal ? ` (${unpricedTotal})` : ""}`],
+            ] as [PriceFilter, string][]
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => reset(setPriced)(k)}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                priced === k ? "bg-line/50 text-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5 text-[11px] text-faint">
+          Sort
+          <select
+            value={sort}
+            onChange={(e) => reset(setSort)(e.target.value as SortKey)}
+            className="rounded-md border border-line bg-panel px-2 py-1 text-[11px] font-semibold text-ink"
+          >
+            <option value="value">Value</option>
+            <option value="rarity">Rarity</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
+      </div>
+
+      {/* why these have no price, said once rather than on every card */}
+      {priced === "unpriced" && visible.length > 0 ? (
+        <p className="mt-2 rounded-lg border border-line bg-panel2/40 px-3 py-2 text-[11px] leading-relaxed text-muted">
+          These carry no value because no market will quote one.{" "}
+          <span className="font-semibold text-ink">Not sellable</span>
+          {" means Steam doesn't allow the item on the Community Market at all — service medals, "}
+          {"coins, badges, applied graffiti, name tags and storage units. "}
+          <span className="font-semibold text-ink">No listings</span>
+          {" means it can be sold, but nobody has one listed on Skinport right now."}
+        </p>
+      ) : null}
+
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {visible.slice(0, shown).map((it) => (
+          <ItemCard key={it.market_hash_name} it={it} />
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-muted">Nothing here — try another filter.</p>
+      ) : null}
+
+      {visible.length > shown ? (
+        <div className="mt-3 flex justify-center">
+          <button type="button" onClick={() => setShown((n) => n + PAGE * 2)} className="btn btn-ghost h-8 px-4 text-xs">
+            Show more ({visible.length - shown} left)
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CatTab({
+  active,
+  onClick,
+  name,
+  count,
+  value,
+}: {
+  active: boolean;
+  onClick: () => void;
+  name: string;
+  count: number;
+  value?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-left transition ${
+        active ? "border-brand/50 bg-brand/10" : "border-line bg-panel hover:border-line2"
+      }`}
+    >
+      <span className={`block text-[11px] font-semibold ${active ? "text-ink" : "text-muted"}`}>
+        {name} <span className="tabular-nums text-faint">{count}</span>
+      </span>
+      {value != null && value > 0 ? (
+        <span className="block text-[10px] tabular-nums text-faint">{usd(value)}</span>
+      ) : null}
+    </button>
+  );
+}
+
+function ItemCard({ it }: { it: InvItem }) {
+  const hue = it.rarity_color || "#8a93a5";
+  const wear = it.exterior ? (WEAR_SHORT[it.exterior] ?? it.exterior) : "";
+  const gap = priceGap(it);
+  return (
+    <div
+      className="group relative overflow-hidden rounded-xl border p-2.5 transition duration-150 hover:-translate-y-0.5"
+      style={{ borderColor: `${hue}40`, background: `linear-gradient(180deg, ${hue}14, transparent 70%)` }}
+      title={`${it.name}${it.price ? ` — ${usd(it.price)} each` : gap ? ` — ${gap.long}` : ""}`}
+    >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, ${hue}, transparent)` }} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={it.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="mx-auto h-20 w-auto object-contain drop-shadow-md" />
+      <div className="mt-1.5 min-h-8">
+        <p className="truncate text-[11px] font-semibold leading-tight text-ink">
+          {it.name.replace(/^StatTrak™ /, "").replace(/^Souvenir /, "")}
+        </p>
+        <p className="flex items-center gap-1 text-[9px] leading-tight text-faint">
+          {it.stattrak ? <span className="font-bold text-[#cf6a32]">ST™</span> : null}
+          {it.souvenir ? <span className="font-bold text-[#ffd700]">SOUV</span> : null}
+          {wear ? <span>{wear}</span> : null}
+          {it.count > 1 ? <span>×{it.count}</span> : null}
+        </p>
+      </div>
+      <div className="mt-1 flex items-baseline justify-between gap-1">
+        {gap ? (
+          <span className="truncate text-[10px] font-semibold text-faint" title={gap.long}>
+            {gap.short}
+          </span>
+        ) : (
+          <>
+            <span className="text-xs font-bold tabular-nums text-ink">{usd((it.price ?? 0) * it.count)}</span>
+            {it.count > 1 ? (
+              <span className="text-[9px] tabular-nums text-faint">{usd(it.price ?? 0)} ea</span>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );
