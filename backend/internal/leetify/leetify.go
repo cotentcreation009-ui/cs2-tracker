@@ -712,8 +712,11 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 	}
 	sid := strconv.FormatUint(steam64, 10)
 
-	// party groups: renumber the raw ids to 1..n, keeping only real stacks
-	// (two or more members) so solo players stay unmarked
+	// party groups: renumber the raw ids to 1..n. Leetify OMITS solo players
+	// from the parties array and numbers real parties from ZERO — party 0 is a
+	// genuine stack, not "no party" (verified: a game's party-0 members were
+	// teammates, and a user's full five-stack arrived labeled 0 and lost its
+	// dots when 0 was skipped). Only sub-2-member entries are dropped.
 	partySize := map[int]int{}
 	for _, pt := range payload.Parties {
 		partySize[pt.Party]++
@@ -721,7 +724,7 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 	partyNum := map[string]int{}
 	partyIdx := map[int]int{}
 	for _, pt := range payload.Parties {
-		if pt.Party == 0 || partySize[pt.Party] < 2 {
+		if partySize[pt.Party] < 2 {
 			continue
 		}
 		if _, ok := partyIdx[pt.Party]; !ok {
