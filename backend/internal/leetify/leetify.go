@@ -615,10 +615,12 @@ type ScoreTeam struct {
 	Players []ScoreRow `json:"players"`
 }
 
-// ScoreRow is one player's line on a game's scoreboard.
+// ScoreRow is one player's line on a game's scoreboard. Avatar is filled by
+// the API layer (one bulk Steam summaries call for the whole board).
 type ScoreRow struct {
 	Name    string  `json:"name"`
 	SteamID string  `json:"steam_id,omitempty"`
+	Avatar  string  `json:"avatar,omitempty"`
 	Kills   int     `json:"kills"`
 	Deaths  int     `json:"deaths"`
 	Assists int     `json:"assists"`

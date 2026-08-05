@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -47,6 +49,7 @@ func (s *Server) handleLeetifyGameStats(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				return leetify.GameStats{}, err
 			}
+			s.fillScoreboardAvatars(ctx, gs)
 			return *gs, nil
 		})
 		if err != nil {
@@ -70,4 +73,42 @@ func (s *Server) handleLeetifyGameStats(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Cache-Control", "public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800")
 	writeJSON(w, http.StatusOK, v)
+}
+
+// fillScoreboardAvatars decorates a game's scoreboard with Steam avatars —
+// one bulk summaries call for all ten players, best-effort (no Steam key or a
+// Steam hiccup just leaves the board avatar-less). Cached with the board.
+func (s *Server) fillScoreboardAvatars(ctx context.Context, gs *leetify.GameStats) {
+	if s.steam == nil || len(gs.Scoreboard) == 0 {
+		return
+	}
+	ids := make([]uint64, 0, 10)
+	for _, t := range gs.Scoreboard {
+		for _, p := range t.Players {
+			if id, err := strconv.ParseUint(p.SteamID, 10, 64); err == nil && id > 0 {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sums, err := s.steam.GetPlayerSummaries(ctx, ids...)
+	if err != nil {
+		return
+	}
+	avatar := make(map[string]string, len(sums))
+	for _, su := range sums {
+		if su.AvatarMedium != "" {
+			avatar[strconv.FormatUint(su.SteamID, 10)] = su.AvatarMedium
+		} else if su.Avatar != "" {
+			avatar[strconv.FormatUint(su.SteamID, 10)] = su.Avatar
+		}
+	}
+	for ti := range gs.Scoreboard {
+		for pi := range gs.Scoreboard[ti].Players {
+			p := &gs.Scoreboard[ti].Players[pi]
+			p.Avatar = avatar[p.SteamID]
+		}
+	}
 }

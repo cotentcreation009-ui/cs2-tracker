@@ -401,6 +401,7 @@ const COL = {
 interface ScoreRow {
   name: string;
   steam_id?: string;
+  avatar?: string;
   kills: number;
   deaths: number;
   assists: number;
@@ -489,16 +490,19 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
         return (
           <div key={ti} className="relative overflow-hidden rounded-lg border border-line/60 bg-panel2/20">
             {/* outcome hairline */}
-            <span aria-hidden className="absolute inset-x-0 top-0 h-px opacity-70" style={{ backgroundImage: `linear-gradient(90deg, ${hair}, transparent 70%)` }} />
-            <div className="flex items-center justify-between border-b border-line/60 bg-panel/40 px-2.5 py-1.5">
+            <span aria-hidden className="absolute inset-x-0 top-0 h-px opacity-80" style={{ backgroundImage: `linear-gradient(90deg, ${hair}, transparent 70%)` }} />
+            <div
+              className="flex items-center justify-between border-b border-line/60 px-2.5 py-2"
+              style={{ backgroundImage: `linear-gradient(90deg, color-mix(in srgb, ${hair} 10%, transparent), transparent 65%)` }}
+            >
               <span className="flex items-center gap-1.5">
-                <span className={`grid h-4 w-4 place-items-center rounded text-[9px] font-bold ${outCls}`}>{outcome}</span>
+                <span className={`grid h-4.5 w-4.5 place-items-center rounded text-[10px] font-bold ${outCls}`}>{outcome}</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
                   {ti === 0 ? "Your team" : "Opponents"}
                 </span>
               </span>
               <span
-                className={`text-sm font-extrabold tabular-nums ${
+                className={`text-base font-extrabold leading-none tabular-nums ${
                   tie ? "text-mid" : teamWon ? "text-good" : "text-bad"
                 }`}
               >
@@ -523,24 +527,42 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                     key={pi}
                     className={`group/srow border-t border-line/30 transition-colors hover:bg-panel/40 ${p.me ? "bg-brand/10" : ""}`}
                   >
-                    <td className="relative max-w-0 truncate px-2.5 py-1.5">
+                    <td className="relative max-w-0 px-2.5 py-1.5">
                       {p.me ? <span aria-hidden className="absolute inset-y-0.5 left-0 w-0.5 rounded-r-full bg-brand/80" /> : null}
-                      {p === best ? (
-                        <span className="mr-1 text-[9px] text-mid" title="Match MVP — highest rating in the game">★</span>
-                      ) : null}
-                      {p.steam_id ? (
-                        <a
-                          href={`/profiles/${p.steam_id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted group-hover/srow:text-ink"}`}
-                          title={`${p.name} — open their StatRun profile`}
-                        >
-                          {p.name || "—"}
-                        </a>
-                      ) : (
-                        <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name || "—"}</span>
-                      )}
-                      {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
+                      <span className="flex items-center gap-1.5">
+                        {p.avatar ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={p.avatar}
+                            alt=""
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            className="h-5 w-5 shrink-0 rounded border border-line/60 object-cover"
+                          />
+                        ) : (
+                          <span className="grid h-5 w-5 shrink-0 place-items-center rounded border border-line/60 bg-panel text-[9px] font-bold uppercase text-faint">
+                            {(p.name || "?").slice(0, 1)}
+                          </span>
+                        )}
+                        <span className="min-w-0 truncate">
+                          {p === best ? (
+                            <span className="mr-1 text-[9px] text-mid" title="Match MVP — highest rating in the game">★</span>
+                          ) : null}
+                          {p.steam_id ? (
+                            <a
+                              href={`/profiles/${p.steam_id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted group-hover/srow:text-ink"}`}
+                              title={`${p.name} — open their StatRun profile`}
+                            >
+                              {p.name || "—"}
+                            </a>
+                          ) : (
+                            <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name || "—"}</span>
+                          )}
+                          {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
+                        </span>
+                      </span>
                     </td>
                     <td className="py-1.5 text-right font-semibold tabular-nums text-ink">{p.kills}</td>
                     <td className="py-1.5 text-right tabular-nums text-muted">{p.deaths}</td>
