@@ -23,6 +23,12 @@ interface InvItem {
 
 interface InvView {
   private?: boolean;
+  // Served from our stored snapshot because Steam wouldn't answer — the
+  // numbers are real, just as of fetched_at.
+  stale?: boolean;
+  // We have never managed to read this one and Steam is refusing right now.
+  unavailable?: boolean;
+  retry_after_sec?: number;
   total_value: number;
   priced_items: number;
   item_count: number;
@@ -47,13 +53,31 @@ const usd = (v: number) =>
     ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
     : `$${v.toFixed(2)}`;
 
+// "3 hours ago" — how old the snapshot we're showing is.
+function ago(iso?: string): string {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} minutes ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 export function InventoryPanel({ steamId }: { steamId: string }) {
   const [view, setView] = useState<InvView | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    fetch(`/api/profiles/${encodeURIComponent(steamId)}/inventory`)
+    setState("loading");
+    fetch(`/api/profiles/${encodeURIComponent(steamId)}/inventory`, {
+      cache: attempt > 0 ? "reload" : "default",
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`status ${r.status}`);
         return r.json() as Promise<InvView>;
@@ -70,7 +94,7 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
     return () => {
       alive = false;
     };
-  }, [steamId]);
+  }, [steamId, attempt]);
 
   if (state === "loading") {
     return (
@@ -84,12 +108,32 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
       </div>
     );
   }
-  if (state === "error" || !view) {
+  if (state === "error" || !view || view.unavailable) {
+    const wait = view?.retry_after_sec ?? 0;
+    const when =
+      wait >= 90 ? `about ${Math.round(wait / 60)} minutes` : wait > 0 ? `about a minute` : "a moment";
     return (
-      <p className="px-4 py-10 text-center text-sm text-muted">
-        Couldn&apos;t load the inventory right now — Steam rate-limits inventory reads, so give it
-        a minute and try again.
-      </p>
+      <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+        <p className="text-base font-semibold text-ink">Steam isn&apos;t handing out this one yet</p>
+        <p className="max-w-md text-sm text-muted">
+          Steam limits how often anyone can read inventories, and it&apos;s turned us away for now.
+          Once we get one clean read we keep it, so this only bites the first time. Try again in{" "}
+          {when}.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="btn btn-ghost h-8 px-3 text-xs">
+            Try again
+          </button>
+          <a
+            href={`https://steamcommunity.com/profiles/${steamId}/inventory/#730`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-ghost h-8 px-3 text-xs"
+          >
+            View on Steam ↗
+          </a>
+        </div>
+      </div>
     );
   }
   if (view.private) {
@@ -109,8 +153,18 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
   const rarityTotal = rarities.reduce((a, r) => a + r.count, 0);
   const cats = (view.categories ?? []).slice(0, 8);
 
+  const asOf = ago(view.fetched_at);
+
   return (
     <div className="space-y-4">
+      {view.stale && asOf ? (
+        <p className="rounded-lg border border-line bg-panel2/40 px-3 py-2 text-[11px] text-muted">
+          Steam is throttling inventory reads right now, so this is our last good read from{" "}
+          <span className="font-semibold text-ink">{asOf}</span>. Prices and items may have moved
+          since.
+        </p>
+      ) : null}
+
       {/* headline: what the collection is worth */}
       <div className="relative overflow-hidden rounded-xl border border-line bg-panel2/40 p-4 sm:p-5">
         <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-[#e8b04c] opacity-[0.10] blur-3xl" />
@@ -222,7 +276,7 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
         <p className="text-[10px] leading-snug text-faint">
           Values are market estimates (Skinport suggested prices, USD) — not Steam wallet prices,
           and unpriced items aren&apos;t counted. Inventory data from Steam; shown only for public
-          inventories.
+          inventories{asOf ? <> · read {asOf}</> : null}.
         </p>
         <a
           href={`https://steamcommunity.com/profiles/${steamId}/inventory/#730`}

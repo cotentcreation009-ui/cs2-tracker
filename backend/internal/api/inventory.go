@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,23 +11,108 @@ import (
 	"github.com/cs2tracker/server/internal/steaminv"
 )
 
+// refreshAfter is how old a stored snapshot has to be before we ask Steam
+// again. Inventories change on the scale of days, and Steam's per-IP throttle
+// is the scarce resource here — so a same-day snapshot is served without
+// touching Steam at all.
+const refreshAfter = 6 * time.Hour
+
 // handleInventory serves a player's CS2 skin-inventory showcase: items from
 // Steam's public inventory endpoint, valued via Skinport's bulk price list.
-// Steam rate-limits this endpoint per IP aggressively, so hits cache for
-// ExternalCacheTTL and rate-limit errors fall back to the stale copy
-// transparently (cachedExternal keeps a 24h last-known-good).
+//
+// Steam throttles inventory reads per source IP, and every read the site makes
+// leaves from the same VM — so the fetch is the last resort, not the first
+// move. Order is: hot cache → stored snapshot (if recent enough) → a governed
+// live read. When Steam turns us away we serve the stored snapshot flagged
+// stale rather than failing, and only a player we have never read comes back
+// unavailable — with an honest reason instead of a 500.
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, ok := steamIDParam(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid SteamID64")
 		return
 	}
-	v, _, err := cachedExternal(s, r.Context(), cache.InventoryKey(id),
-		func() (*steaminv.View, error) { return steaminv.Build(r.Context(), s.invHTTP, id) })
+	ctx := r.Context()
+	key := cache.InventoryKey(id)
+
+	if s.cache != nil {
+		var hot steaminv.View
+		if hit, _ := s.cache.GetJSON(ctx, key, &hot); hit {
+			setEdgeCache(w, 10*time.Minute)
+			writeJSON(w, http.StatusOK, &hot)
+			return
+		}
+	}
+
+	// A snapshot we read recently answers without spending Steam budget.
+	snap, snapAt, hasSnap, err := s.db.GetInventorySnapshot(ctx, id)
 	if err != nil {
-		s.serverError(w, "steam inventory", err)
+		s.log.Warn("inventory snapshot read", "steam_id", id, "err", err)
+	}
+	if hasSnap && time.Since(snapAt) < refreshAfter {
+		s.serveSnapshot(w, ctx, key, snap, snapAt, false)
 		return
 	}
+
+	v, err, _ := s.sf.Do(key, func() (any, error) {
+		view, err := steaminv.Build(ctx, s.invHTTP, id)
+		if err != nil {
+			return nil, err
+		}
+		if payload, mErr := json.Marshal(view); mErr == nil {
+			if sErr := s.db.SaveInventorySnapshot(ctx, id, payload); sErr != nil {
+				s.log.Warn("inventory snapshot save", "steam_id", id, "err", sErr)
+			}
+		}
+		if s.cache != nil {
+			_ = s.cache.SetJSONTTL(ctx, key, view, s.cfg.ExternalCacheTTL)
+		}
+		return view, nil
+	})
+	if err != nil {
+		// Whatever went wrong upstream, an older copy beats an error page.
+		if hasSnap {
+			s.serveSnapshot(w, ctx, key, snap, snapAt, true)
+			return
+		}
+		if !errors.Is(err, steaminv.ErrRateLimited) {
+			s.log.Warn("steam inventory", "steam_id", id, "err", err)
+		}
+		retry := int(steaminv.RetryAfter().Round(time.Second).Seconds())
+		if retry == 0 {
+			retry = 60
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, &steaminv.View{
+			Unavailable:   true,
+			RetryAfterSec: retry,
+		})
+		return
+	}
+
 	setEdgeCache(w, 10*time.Minute)
 	writeJSON(w, http.StatusOK, v)
+}
+
+// serveSnapshot answers from the stored copy, stamping it with its true age so
+// the UI can say when it was read. stale marks a snapshot we would have liked
+// to refresh but couldn't.
+func (s *Server) serveSnapshot(w http.ResponseWriter, ctx context.Context, key string, payload []byte, at time.Time, stale bool) {
+	var view steaminv.View
+	if err := json.Unmarshal(payload, &view); err != nil {
+		writeError(w, http.StatusInternalServerError, "inventory snapshot unreadable")
+		return
+	}
+	view.FetchedAt = at.UTC().Format(time.RFC3339)
+	view.Stale = stale
+	if !stale && s.cache != nil {
+		_ = s.cache.SetJSONTTL(ctx, key, &view, s.cfg.ExternalCacheTTL)
+	}
+	// Stale copies get a short edge TTL so a recovered Steam refreshes soon.
+	if stale {
+		setEdgeCache(w, time.Minute)
+	} else {
+		setEdgeCache(w, 10*time.Minute)
+	}
+	writeJSON(w, http.StatusOK, &view)
 }

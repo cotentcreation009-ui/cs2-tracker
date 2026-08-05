@@ -64,6 +64,10 @@ type Store interface {
 	ListUnresolvedProPredictions(ctx context.Context, limit int) ([]db.ProPredictionRow, error)
 	ResolveProPrediction(ctx context.Context, seriesID, winnerID string, correct bool) error
 	GetProPredictionRecord(ctx context.Context, model string) (db.ProPredictionRecord, error)
+	// Durable CS2 inventory snapshots (Steam rate-limits reads, so the last
+	// good copy outlives the cache).
+	GetInventorySnapshot(ctx context.Context, steamID uint64) ([]byte, time.Time, bool, error)
+	SaveInventorySnapshot(ctx context.Context, steamID uint64, payload []byte) error
 	Ping(ctx context.Context) error
 }
 
