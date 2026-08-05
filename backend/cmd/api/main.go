@@ -26,6 +26,9 @@ import (
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// Packages that log without a handle (steaminv's price fetch) join the
+	// same JSON stream rather than writing plain text to stderr.
+	slog.SetDefault(log)
 	if err := run(log); err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)

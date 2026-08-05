@@ -29,6 +29,9 @@ interface InvView {
   // We have never managed to read this one and Steam is refusing right now.
   unavailable?: boolean;
   retry_after_sec?: number;
+  // Too large to read in full — the totals cover what we did read.
+  truncated?: boolean;
+  total_items?: number;
   total_value: number;
   priced_items: number;
   item_count: number;
@@ -177,6 +180,13 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
             <div className="mt-1 text-[11px] text-faint">
               {view.priced_items} of {view.item_count} items priced · market prices via Skinport
             </div>
+            {view.truncated ? (
+              <div className="mt-1 text-[11px] text-muted">
+                Steam caps how much of an inventory it hands over at once, so this covers the first{" "}
+                {view.item_count}
+                {view.total_items ? ` of ${view.total_items}` : ""} items — the real total is higher.
+              </div>
+            ) : null}
           </div>
           <div className="flex gap-5">
             <div>
