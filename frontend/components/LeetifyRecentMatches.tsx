@@ -216,6 +216,8 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
             : `${ladderName} after this game — Leetify didn't record the change`
         }
       >
+        {/* FACEIT rows lead with the real level badge, then the elo movement */}
+        {isFaceit ? <FaceitLevelBadge level={m.rank ?? 0} className="h-4.5 w-auto" /> : null}
         {delta != null && before > 0 ? (
           <>
             {isPremier ? (
@@ -243,7 +245,7 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   return (
     <span className="flex items-center justify-end gap-1">
       {level > 0 ? (
-        <RatingBadge text={`Lvl ${level}`} hex={FACEIT_HEX} title="FACEIT level" />
+        <FaceitLevelBadge level={level} className="h-4.5 w-auto" />
       ) : comp > 0 ? (
         // rank moved → before badge, change over the arrow, after badge —
         // the same format as Premier/FACEIT; unchanged ranks keep one badge
@@ -265,6 +267,26 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
         </span>
       )}
     </span>
+  );
+}
+
+// The real FACEIT level badge (1-10), falling back to a "Lvl N" plate if the
+// asset is missing.
+function FaceitLevelBadge({ level, className = "" }: { level: number; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  if (level < 1 || level > 10) return null;
+  if (broken) return <RatingBadge text={`Lvl ${level}`} hex={FACEIT_HEX} title={`FACEIT level ${level}`} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/ranks/faceit/${level}.svg`}
+      alt={`FACEIT level ${level}`}
+      title={`FACEIT level ${level}`}
+      loading="lazy"
+      draggable={false}
+      onError={() => setBroken(true)}
+      className={`shrink-0 ${className}`}
+    />
   );
 }
 
@@ -926,16 +948,12 @@ export function LeetifyRecentMatches({
                 <span className={`${COL.delta} hidden shrink-0 sm:block`}>
                   <RankCell m={m} />
                 </span>
-                {/* colour-keyed wordmark: tiny dot + small caps, no box */}
-                <span className={`${COL.queue} flex shrink-0 items-center gap-1.5`}>
+                {/* queue wordmark: slanted italic caps in the queue colour —
+                    the same visual language as the rating plates */}
+                <span className={`${COL.queue} flex shrink-0 items-center`}>
                   <span
-                    aria-hidden
-                    className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ background: src.hex, boxShadow: `0 0 6px ${src.hex}66` }}
-                  />
-                  <span
-                    className="truncate text-[9px] font-bold uppercase tracking-[0.08em]"
-                    style={{ color: src.hex }}
+                    className="-skew-x-6 truncate text-[10px] font-extrabold italic uppercase leading-4 tracking-wide"
+                    style={{ color: src.hex, textShadow: `0 0 10px ${src.hex}40` }}
                   >
                     {src.label}
                   </span>
@@ -988,12 +1006,22 @@ export function LeetifyRecentMatches({
                               <span className="truncate text-xs">{after.value}</span>
                             </span>
                           ) : delta != null ? (
-                            <span className="text-[13px]">
-                              <span className="font-normal text-muted">
-                                {(m.rank_before ?? 0).toLocaleString()}
+                            <span className="flex items-center gap-1.5 text-[13px]">
+                              {m.data_source === "faceit" ? (
+                                <FaceitLevelBadge level={m.rank ?? 0} className="h-5 w-auto" />
+                              ) : null}
+                              <span>
+                                <span className="font-normal text-muted">
+                                  {(m.rank_before ?? 0).toLocaleString()}
+                                </span>
+                                <span className="mx-1 text-faint">→</span>
+                                <span style={afterHex ? { color: afterHex } : undefined}>{after.value}</span>
                               </span>
-                              <span className="mx-1 text-faint">→</span>
-                              <span style={afterHex ? { color: afterHex } : undefined}>{after.value}</span>
+                            </span>
+                          ) : after.label === "FACEIT level" ? (
+                            <span className="flex items-center gap-1.5">
+                              <FaceitLevelBadge level={m.rank ?? 0} className="h-5 w-auto" />
+                              <span className="text-xs">Level {m.rank}</span>
                             </span>
                           ) : (
                             after.value
