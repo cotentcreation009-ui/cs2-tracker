@@ -430,6 +430,7 @@ interface ScoreRow {
   rank_after?: number;
   rank_before?: number;
   faceit_level?: number;
+  faceit_elo?: number;
   kills: number;
   deaths: number;
   assists: number;
@@ -649,7 +650,18 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                         </span>
                         {/* the player's ladder standing when this was played */}
                         {(p.faceit_level ?? 0) > 0 ? (
-                          <FaceitLevelBadge level={p.faceit_level!} className="ml-auto h-4 w-auto pl-1" />
+                          <span className="ml-auto flex shrink-0 items-center gap-1 pl-1">
+                            {(p.faceit_elo ?? 0) > 0 ? (
+                              <span
+                                className="text-[9.5px] font-bold tabular-nums"
+                                style={{ color: FACEIT_HEX }}
+                                title="Current FACEIT elo — FACEIT doesn't publish each player's elo at match time"
+                              >
+                                {p.faceit_elo!.toLocaleString()}
+                              </span>
+                            ) : null}
+                            <FaceitLevelBadge level={p.faceit_level!} className="h-4 w-auto" />
+                          </span>
                         ) : p.rank_type === 11 && (p.rank_after ?? 0) > 0 ? (
                           <span className="ml-auto pl-1">
                             <PremierPlate

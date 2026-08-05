@@ -712,6 +712,11 @@ type ScoreRow struct {
 	RankAfter   int `json:"rank_after,omitempty"`
 	RankBefore  int `json:"rank_before,omitempty"`
 	FaceitLevel int `json:"faceit_level,omitempty"`
+	// FaceitPlayerID lets the API layer look up this player's elo; FaceitElo is
+	// filled there (FACEIT publishes only a CURRENT elo per player, never the
+	// value at match time, so the UI labels it as such).
+	FaceitPlayerID string `json:"-"`
+	FaceitElo      int    `json:"faceit_elo,omitempty"`
 }
 
 // GetGameStats fetches one game's scoreboard and returns the row for steam64.
@@ -750,8 +755,9 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			RankChanged bool   `json:"rankChanged"`
 		} `json:"matchmakingGameStats"`
 		FaceitStats []struct {
-			Steam64ID  string `json:"steam64Id"`
-			FaceitRank int    `json:"faceitRank"`
+			Steam64ID      string `json:"steam64Id"`
+			FaceitRank     int    `json:"faceitRank"`
+			FaceitPlayerID string `json:"faceitPlayerId"`
 		} `json:"faceitGameStats"`
 		PlayerStats []struct {
 			Steam64ID   string  `json:"steam64Id"`
@@ -818,8 +824,10 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 		mmOf[m.Steam64ID] = mmRank{m.Rank, m.OldRank, m.RankType}
 	}
 	levelOf := map[string]int{}
+	faceitIDOf := map[string]string{}
 	for _, f := range payload.FaceitStats {
 		levelOf[f.Steam64ID] = f.FaceitRank
+		faceitIDOf[f.Steam64ID] = f.FaceitPlayerID
 	}
 
 	// full board: teamNumber → rows; the viewer's team renders first
@@ -869,6 +877,7 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			}
 		}
 		row.FaceitLevel = levelOf[p.Steam64ID]
+		row.FaceitPlayerID = faceitIDOf[p.Steam64ID]
 		if p.Steam64ID == sid {
 			row.Me = true
 			myTeam = p.TeamNumber
