@@ -408,7 +408,49 @@ interface ScoreRow {
   adr: number;
   rating: number;
   hs_pct: number;
+  kast_pct?: number;
+  impact?: number;
+  mvps?: number;
+  m2k?: number;
+  m3k?: number;
+  m4k?: number;
+  m5k?: number;
+  preaim?: number;
+  reaction_ms?: number;
+  spray_pct?: number;
+  cs_pct?: number;
+  leaver?: boolean;
+  party?: number;
   me?: boolean;
+}
+
+// party group colours — same number = queued together
+const PARTY_HUES = ["#38d6ff", "#e7b53c", "#8a7dff", "#6cbf7a", "#ff8a50", "#d32ce6"];
+
+// The hover breakdown: everything Leetify records per player that has no
+// column — the aim components (there is no per-game aim RATING to show, so
+// the real numbers behind it are shown instead), KAST context, impact, MVPs
+// and multi-kills.
+function playerTooltip(p: ScoreRow): string {
+  const parts: string[] = [];
+  const aim: string[] = [];
+  if ((p.preaim ?? 0) > 0) aim.push(`preaim ${p.preaim!.toFixed(1)}°`);
+  if ((p.reaction_ms ?? 0) > 0) aim.push(`reaction ${p.reaction_ms!.toFixed(0)}ms`);
+  if ((p.spray_pct ?? 0) > 0) aim.push(`spray ${p.spray_pct!.toFixed(0)}%`);
+  if ((p.cs_pct ?? 0) > 0) aim.push(`counter-strafe ${p.cs_pct!.toFixed(0)}%`);
+  if (aim.length) parts.push(`Aim: ${aim.join(" · ")}`);
+  if (p.impact != null) parts.push(`Leetify impact ${signed(p.impact)}`);
+  if ((p.mvps ?? 0) > 0) parts.push(`${p.mvps} MVP${p.mvps === 1 ? "" : "s"}`);
+  const multis = [
+    p.m2k ? `${p.m2k}×2K` : "",
+    p.m3k ? `${p.m3k}×3K` : "",
+    p.m4k ? `${p.m4k}×4K` : "",
+    p.m5k ? `${p.m5k}×ACE` : "",
+  ].filter(Boolean);
+  if (multis.length) parts.push(`Multi-kills: ${multis.join(" ")}`);
+  if (p.party) parts.push(`In a party (group ${p.party})`);
+  if (p.leaver) parts.push("Left the game early");
+  return parts.join("\n");
 }
 
 interface GameDeep {
@@ -518,6 +560,7 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                   <th className="w-7 py-1 text-right font-semibold" title="Assists">A</th>
                   <th className="w-10 py-1 text-right font-semibold" title="Average damage per round">ADR</th>
                   <th className="hidden w-9 py-1 text-right font-semibold sm:table-cell" title="Headshot %">HS%</th>
+                  <th className="hidden w-10 py-1 text-right font-semibold md:table-cell" title="% of rounds with a kill, assist, survival or traded death">KAST</th>
                   <th className="w-10 py-1 pr-2.5 text-right font-semibold" title="HLTV-style rating (via Leetify)">RTG</th>
                 </tr>
               </thead>
@@ -525,6 +568,7 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                 {t.players.map((p, pi) => (
                   <tr
                     key={pi}
+                    title={playerTooltip(p)}
                     className={`group/srow border-t border-line/30 transition-colors hover:bg-panel/40 ${p.me ? "bg-brand/10" : ""}`}
                   >
                     <td className="relative max-w-0 px-2.5 py-1.5">
@@ -561,6 +605,19 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                             <span className={p.me ? "font-bold text-ink" : "font-medium text-muted"}>{p.name || "—"}</span>
                           )}
                           {p.me ? <span className="ml-1 rounded bg-brand/20 px-1 text-[8px] font-bold uppercase text-brand">you</span> : null}
+                          {p.party ? (
+                            <span
+                              aria-hidden
+                              className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                              style={{ background: PARTY_HUES[(p.party - 1) % PARTY_HUES.length] }}
+                              title={`Queued together — same colour = same party`}
+                            />
+                          ) : null}
+                          {p.leaver ? (
+                            <span className="ml-1 rounded bg-bad/15 px-1 text-[8px] font-bold uppercase text-bad" title="Left the game early">
+                              left
+                            </span>
+                          ) : null}
                         </span>
                       </span>
                     </td>
@@ -575,6 +632,9 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                     </td>
                     <td className="hidden py-1.5 text-right tabular-nums text-muted sm:table-cell">
                       {p.hs_pct > 0 ? `${p.hs_pct.toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="hidden py-1.5 text-right tabular-nums text-muted md:table-cell">
+                      {(p.kast_pct ?? 0) > 0 ? `${p.kast_pct!.toFixed(0)}%` : "—"}
                     </td>
                     <td className={`py-1.5 pr-2.5 text-right font-semibold tabular-nums ${ratingCls(p.rating)}`}>
                       {p.rating.toFixed(2)}
