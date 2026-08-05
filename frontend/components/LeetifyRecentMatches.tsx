@@ -712,7 +712,9 @@ function DeepStats({ steamId, gameId }: { steamId: string; gameId?: string }) {
   return <DeepStatTiles deep={deep} />;
 }
 
-// Same shared fetch, rendered below the tiles: the full game scoreboard.
+// Same shared fetch, rendered below the tiles: the full game scoreboard —
+// or an honest note when Leetify has none for this game, so its absence
+// reads as a data boundary rather than something broken.
 function DeepScoreboard({
   steamId,
   gameId,
@@ -725,7 +727,16 @@ function DeepScoreboard({
   tie: boolean;
 }) {
   const deep = useGameDeep(steamId, gameId);
-  if (!deep) return null;
+  if (deep === undefined) return null; // still loading — tiles show the pulse
+  if (deep === null) {
+    return (
+      <p className="mt-2.5 rounded-md border border-line/40 bg-panel/30 px-3 py-2 text-[11px] text-faint">
+        The per-player scoreboard isn&apos;t available for this game — Leetify only exposes it for
+        matches tracked under their current system, and some accounts and older games fall outside
+        that window.
+      </p>
+    );
+  }
   return <MiniScoreboard deep={deep} won={won} tie={tie} />;
 }
 
@@ -1091,8 +1102,9 @@ export function LeetifyRecentMatches({
       <p className="mt-1.5 text-[10px] text-faint">
         Rank shows the Premier rating / FACEIT elo you carried into the game → what you left with,
         and the change. Badges carry the in-game tier colour, so a rating crossing a bracket
-        changes colour too. Leetify doesn&apos;t record a rating on every game; those show a single
-        badge or a dash rather than a change stretched across several games. K-D per game via
+        changes colour too. Ratings come via Leetify, and they don&apos;t receive one for every
+        game — notably, recent FACEIT matches often arrive without elo (FACEIT stopped exposing
+        it), so those show the level badge alone rather than an invented number. K-D per game via
         Leetify.
       </p>
     </div>
