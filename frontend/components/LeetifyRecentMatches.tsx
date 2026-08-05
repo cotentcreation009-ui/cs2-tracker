@@ -560,7 +560,7 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
   const maxAdr = Math.max(1, ...all.map((p) => p.adr));
   const best = all.reduce((a, b) => (b.rating > a.rating ? b : a), all[0]);
   return (
-    <div className="mt-2.5 grid gap-2 lg:grid-cols-2">
+    <div className="mb-2.5 grid gap-2 lg:grid-cols-2">
       {teams.map((t, ti) => {
         const teamWon = !tie && (ti === 0) === won;
         const outcome = tie ? "T" : teamWon ? "W" : "L";
@@ -775,7 +775,7 @@ function DeepScoreboard({
   if (deep === undefined) return null; // still loading — tiles show the pulse
   if (deep === null) {
     return (
-      <p className="mt-2.5 rounded-md border border-line/40 bg-panel/30 px-3 py-2 text-[11px] text-faint">
+      <p className="mb-2.5 rounded-md border border-line/40 bg-panel/30 px-3 py-2 text-[11px] text-faint">
         The per-player scoreboard isn&apos;t available for this game — Leetify only exposes it for
         matches tracked under their current system, and some accounts and older games fall outside
         that window.
@@ -1033,6 +1033,7 @@ export function LeetifyRecentMatches({
 
               {isOpen && (
                 <div className="border-t border-line/60 bg-linear-to-b from-panel/40 to-transparent px-3 py-3">
+                  <DeepScoreboard steamId={steamId} gameId={m.id} won={won} tie={tie} />
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <Stat
                       label="K-D"
@@ -1116,7 +1117,6 @@ export function LeetifyRecentMatches({
                       value={dash(m.reaction_time_ms, (v) => `${v.toFixed(0)} ms`)}
                     />
                   </div>
-                  <DeepScoreboard steamId={steamId} gameId={m.id} won={won} tie={tie} />
                   {m.id && (
                     <div className="mt-2.5 flex flex-wrap items-center gap-3">
                       <AnalyzeDemoButton
