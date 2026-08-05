@@ -84,7 +84,10 @@ func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:v3:%d",
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
 
 // InventoryKey caches a player's aggregated CS2 skin inventory showcase.
-func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:%d", steamID) }
+// v2: the whole item list ships (not the top 60) and items carry tradable, so
+// the panel can filter by category and explain an unpriced item — old entries
+// would filter over a truncated list, so they flush on deploy.
+func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:v2:%d", steamID) }
 
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.

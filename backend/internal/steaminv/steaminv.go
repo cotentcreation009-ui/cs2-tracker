@@ -48,7 +48,12 @@ type Item struct {
 	Souvenir    bool    `json:"souvenir,omitempty"`
 	Count       int     `json:"count"`
 	Price       float64 `json:"price,omitempty"` // per unit, USD (Skinport suggested)
-	Marketable  bool    `json:"marketable,omitempty"`
+	// Marketable and Tradable are why an item can be unpriced: a market price
+	// only exists for something the market will carry. Steam gives us both, so
+	// an item with no price can say which kind of "no" it is rather than
+	// showing a bare dash.
+	Marketable bool `json:"marketable,omitempty"`
+	Tradable   bool `json:"tradable,omitempty"`
 }
 
 // Category is an item-type bucket for the breakdown row.
@@ -311,6 +316,13 @@ var errPrivate = errors.New("steaminv: inventory is private")
 // must not eat the whole site's allowance.
 const maxPages = 4
 
+// maxListed bounds the item grid we ship (distinct entries, not assets — a
+// stack of 40 identical cases is one entry). Measured at ~510 bytes of JSON
+// each, so this is a ~500KB ceiling before compression, and it sits far above
+// what real inventories carry. Aggregates are computed over everything
+// regardless, so a capped grid never distorts the headline value.
+const maxListed = 1000
+
 // fetchPage reads one page of the inventory, starting after cursor when given.
 // Status code alone decides the outcome — Steam's 403 (private) and 429
 // (throttled) bodies are both the literal bytes "null", so the body can never
@@ -424,7 +436,11 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	}
 	pm := prices(ctx, hc)
 
-	items := make([]Item, 0, len(inv.Descriptions))
+	// byName merges the descriptions that share one market_hash_name; order
+	// keeps the first-seen sequence so the result is deterministic before the
+	// value sort below.
+	byName := make(map[string]*Item, len(inv.Descriptions))
+	order := make([]string, 0, len(inv.Descriptions))
 	v := &View{
 		ItemCount:  len(inv.Assets),
 		TotalItems: inv.TotalCount,
@@ -444,6 +460,7 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			IconURL:    iconBase + d.IconURL,
 			Count:      n,
 			Marketable: d.Marketable == 1,
+			Tradable:   d.Tradable == 1,
 			StatTrak:   strings.Contains(d.Name, "StatTrak"),
 			Souvenir:   strings.HasPrefix(d.Name, "Souvenir"),
 		}
@@ -468,8 +485,23 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		if it.Marketable {
 			v.MarketableCount += n
 		}
-		v.DistinctCount++
-		items = append(items, it)
+		// Steam splits one market item across several descriptions when the
+		// copies differ in ways it tracks and we don't (applied stickers, a
+		// name tag, a trade hold). They are the same tradeable good at the same
+		// price, so they become one card carrying the full count — otherwise
+		// the grid shows "Tec-9 | Urban DDPAT x2" twice and React sees two
+		// children under one key.
+		key := it.MarketName
+		if key == "" {
+			key = it.Name
+		}
+		if ex, seen := byName[key]; seen {
+			ex.Count += n
+		} else {
+			cp := it
+			byName[key] = &cp
+			order = append(order, key)
+		}
 
 		cat := it.Type
 		if cat == "" {
@@ -493,9 +525,28 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		}
 	}
 
-	sort.Slice(items, func(i, j int) bool { return items[i].Price*float64(items[i].Count) > items[j].Price*float64(items[j].Count) })
-	if len(items) > 60 {
-		items = items[:60]
+	items := make([]Item, 0, len(order))
+	for _, k := range order {
+		items = append(items, *byName[k])
+	}
+	v.DistinctCount = len(items)
+
+	// Value first, then name, so equal-priced items (and the whole unpriced
+	// tail) come back in a stable order instead of Go's map order — otherwise
+	// every refetch reshuffles the grid.
+	sort.Slice(items, func(i, j int) bool {
+		li, lj := items[i].Price*float64(items[i].Count), items[j].Price*float64(items[j].Count)
+		if li != lj {
+			return li > lj
+		}
+		return items[i].Name < items[j].Name
+	})
+	// The whole inventory ships, not just the top slice: the panel filters by
+	// category and by whether an item is priced, and neither is possible over a
+	// truncated list. The aggregates above are computed across every item, so
+	// the headline value stays correct even if this cap ever bites.
+	if len(items) > maxListed {
+		items = items[:maxListed]
 	}
 	v.TopItems = items
 

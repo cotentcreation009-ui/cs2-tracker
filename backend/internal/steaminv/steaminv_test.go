@@ -142,6 +142,42 @@ func TestBuildPrivateInventory(t *testing.T) {
 	}
 }
 
+// Steam describes one market item more than once when the copies differ in
+// ways it tracks and we don't (stickers, a name tag, a trade hold). Those are
+// the same tradeable good at the same price, so they must land in one entry —
+// otherwise the grid shows the same skin twice and the distinct count lies.
+func TestBuildMergesDuplicateMarketNames(t *testing.T) {
+	const body = `{"assets":[
+	   {"classid":"c1","instanceid":"i1"},{"classid":"c1","instanceid":"i1"},
+	   {"classid":"c1","instanceid":"i2"}],
+	 "descriptions":[
+	   {"classid":"c1","instanceid":"i1","name":"Tec-9 | Urban DDPAT (Field-Tested)",
+	    "market_hash_name":"Tec-9 | Urban DDPAT (Field-Tested)","type":"Pistol","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Pistol"}]},
+	   {"classid":"c1","instanceid":"i2","name":"Tec-9 | Urban DDPAT (Field-Tested)",
+	    "market_hash_name":"Tec-9 | Urban DDPAT (Field-Tested)","type":"Pistol","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Pistol"}]}],
+	 "total_inventory_count":3,"success":1}`
+
+	hc := fixtureServers(t, body, http.StatusOK)
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.TopItems) != 1 {
+		t.Fatalf("got %d entries, want the two descriptions merged into 1: %+v", len(v.TopItems), v.TopItems)
+	}
+	if v.TopItems[0].Count != 3 {
+		t.Errorf("count = %d, want all 3 assets on the merged entry", v.TopItems[0].Count)
+	}
+	if v.DistinctCount != 1 {
+		t.Errorf("distinct = %d, want 1 — it counts market items, not descriptions", v.DistinctCount)
+	}
+	if v.ItemCount != 3 {
+		t.Errorf("item_count = %d, want 3 assets owned", v.ItemCount)
+	}
+}
+
 // Steam clamps a page at 2000 items and hands back a cursor for the rest. A
 // collector's inventory is exactly the case this panel exists for, so stopping
 // at page one would understate the people most likely to look.
