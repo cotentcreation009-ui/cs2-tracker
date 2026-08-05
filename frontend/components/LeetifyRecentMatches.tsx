@@ -120,26 +120,35 @@ function RatingBadge({
   dim = false,
   slashes = false,
   title,
+  wide = false,
 }: {
   text: string;
   hex: string;
   dim?: boolean;
   slashes?: boolean;
   title?: string;
+  // wide gives the badge the same footprint as a PremierPlate, so a FACEIT
+  // row's elo movement carries the same weight as the Premier row under it
+  // instead of reading like a footnote next to it.
+  wide?: boolean;
 }) {
   return (
     <span
       title={title}
       // "before" is secondary, not washed out: keep the numerals legible and
       // signal the difference with a flatter plate instead of global opacity
-      className="inline-block shrink-0 -skew-x-6 rounded-[3px] px-1 py-px"
+      className={`inline-flex shrink-0 -skew-x-6 items-center justify-center rounded-[3px] ${
+        wide ? "h-4.5 w-18" : "px-1 py-px"
+      }`}
       style={{
         background: dim ? `${hex}0f` : `${hex}17`,
         boxShadow: `inset 0 0 0 1px ${hex}${dim ? "33" : "45"}`,
       }}
     >
       <span
-        className="inline-block skew-x-6 text-[10.5px] font-extrabold italic leading-4 tabular-nums"
+        className={`inline-block skew-x-6 font-extrabold italic leading-4 tabular-nums ${
+          wide ? "text-[12px]" : "text-[10.5px]"
+        }`}
         style={{ color: hex, opacity: dim ? 0.85 : 1 }}
       >
         {slashes ? <span className="mr-0.5 opacity-60">{"//"}</span> : null}
@@ -227,13 +236,13 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
         }
       >
         {/* FACEIT rows lead with the real level badge, then the elo movement */}
-        {isFaceit ? <FaceitLevelBadge level={m.rank ?? 0} className="h-4.5 w-auto" /> : null}
+        {isFaceit ? <FaceitLevelBadge level={m.rank ?? 0} className="h-6 w-auto" /> : null}
         {delta != null && before > 0 ? (
           <>
             {isPremier ? (
               <PremierPlate value={before} hex={hexOf(before)} dim />
             ) : (
-              <RatingBadge text={before.toLocaleString()} hex={hexOf(before)} dim />
+              <RatingBadge text={before.toLocaleString()} hex={hexOf(before)} dim wide />
             )}
             {deltaArrow}
           </>
@@ -241,7 +250,7 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
         {isPremier ? (
           <PremierPlate value={after} hex={hexOf(after)} />
         ) : (
-          <RatingBadge text={after.toLocaleString()} hex={hexOf(after)} />
+          <RatingBadge text={after.toLocaleString()} hex={hexOf(after)} wide />
         )}
       </span>
     );
@@ -255,7 +264,7 @@ function RankCell({ m }: { m: LeetifyRecentMatch }) {
   return (
     <span className="flex items-center justify-end gap-1">
       {level > 0 ? (
-        <FaceitLevelBadge level={level} className="h-4.5 w-auto" />
+        <FaceitLevelBadge level={level} className="h-6 w-auto" />
       ) : comp > 0 ? (
         // rank moved → before badge, change over the arrow, after badge —
         // the same format as Premier/FACEIT; unchanged ranks keep one badge
@@ -421,8 +430,10 @@ const COL = {
   hs: "lg:w-10",
   rating: "w-12 sm:w-13",
   // fits "27,853 → 27,974" as two slanted plates with the change over the
-  // arrow, plus left padding so the wings never crowd the Leetify column
-  delta: "sm:w-45 sm:pl-2.5",
+  // arrow, plus left padding so the wings never crowd the Leetify column.
+  // Sized for the FACEIT row, which is the widest: level badge + two
+  // plate-sized elo values with the change between them.
+  delta: "sm:w-54 sm:pl-2.5",
   // fits the longest wordmark ("WINGMAN") with its dot at both breakpoints
   queue: "w-16 sm:w-21",
 };
