@@ -49,6 +49,12 @@ type Client struct {
 	baseURL     string
 	downloadURL string
 	apiKey      string
+	// downloadKey authenticates the Downloads API. FACEIT issues that as an
+	// "exclusive Access Token with a Downloads API scope" — approval does NOT
+	// add the scope to an existing Data API key (verified: an approved app's
+	// old key still answers err_f0 "no valid scope provided"), so it is
+	// configured separately and falls back to apiKey when unset.
+	downloadKey string
 	http        *http.Client
 }
 
@@ -62,6 +68,22 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 func WithDownloadURL(u string) Option {
 	return func(c *Client) { c.downloadURL = strings.TrimRight(u, "/") }
 }
+
+// WithDownloadKey sets the Downloads-API access token (see Client.downloadKey).
+func WithDownloadKey(k string) Option {
+	return func(c *Client) { c.downloadKey = strings.TrimSpace(k) }
+}
+
+// downloadToken is the token used for Downloads-API calls.
+func (c *Client) downloadToken() string {
+	if c.downloadKey != "" {
+		return c.downloadKey
+	}
+	return c.apiKey
+}
+
+// HasDownloadKey reports whether a dedicated Downloads-API token is set.
+func (c *Client) HasDownloadKey() bool { return c.downloadKey != "" }
 
 // New builds a Client. An empty baseURL falls back to the public API; apiKey may
 // be empty (calls then return ErrNoAPIKey).
@@ -231,7 +253,7 @@ func (c *Client) MatchDemoResource(ctx context.Context, matchID string) (string,
 // SignDemoURL exchanges a demo resource URL for a fetchable signed URL via
 // FACEIT's Download API. Requires the key to carry the Download API scope.
 func (c *Client) SignDemoURL(ctx context.Context, resourceURL string) (string, error) {
-	if c.apiKey == "" {
+	if c.downloadToken() == "" {
 		return "", ErrNoAPIKey
 	}
 	body, err := json.Marshal(map[string]string{"resource_url": resourceURL})
@@ -244,7 +266,7 @@ func (c *Client) SignDemoURL(ctx context.Context, resourceURL string) (string, e
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+c.downloadToken())
 
 	resp, err := c.doWithRetry(req)
 	if err != nil {
