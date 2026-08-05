@@ -38,6 +38,9 @@ type Config struct {
 	// FACEIT Data API (requires a free key from https://developers.faceit.com)
 	FaceitBaseURL string
 	FaceitAPIKey  string
+	// FaceitDownloadKey is the separate Downloads-API token (see faceit.Client);
+	// empty falls back to FaceitAPIKey.
+	FaceitDownloadKey string
 
 	// GRID esports live-data API (pro-match board). The whole feature is gated on
 	// GRIDAPIKey: with no key (and GRIDMock off) the endpoint reports disabled and
@@ -109,6 +112,7 @@ func Load() (*Config, error) {
 		LeetifyAPIKey:     getEnv("LEETIFY_API_KEY", ""),
 		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
 		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
+		FaceitDownloadKey: getEnv("FACEIT_DOWNLOAD_API_KEY", ""),
 		GRIDAPIKey:        getEnv("GRID_API_KEY", ""),
 		GRIDBaseURL:       getEnv("GRID_BASE_URL", "https://api-op.grid.gg"),
 		GRIDMock:          getEnv("GRID_MOCK", "") == "1",

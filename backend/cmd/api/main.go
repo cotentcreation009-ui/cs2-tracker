@@ -58,7 +58,7 @@ func run(log *slog.Logger) error {
 
 	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey)
 
-	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey)
+	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey, faceit.WithDownloadKey(cfg.FaceitDownloadKey))
 	if !faceitClient.HasKey() {
 		log.Warn("no FACEIT_API_KEY set — the FACEIT panel is disabled until provided")
 	}

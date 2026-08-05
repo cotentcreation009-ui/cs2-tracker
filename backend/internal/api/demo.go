@@ -269,7 +269,8 @@ func (s *Server) handleDemoFromURL(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old or not finished)")
 			return
 		case errors.Is(err, faceit.ErrNoDownloadScope):
-			writeError(w, http.StatusServiceUnavailable, "FACEIT demo downloads aren't enabled yet on our API key — paste a direct demo file URL for now")
+			s.log.Error("faceit downloads token missing/unscoped — set FACEIT_DOWNLOAD_API_KEY to the Downloads-scoped access token from the FACEIT developer portal")
+			writeError(w, http.StatusServiceUnavailable, "FACEIT demo downloads are temporarily unavailable — paste a direct demo file URL for now")
 			return
 		case errors.Is(err, faceit.ErrNotFound):
 			writeError(w, http.StatusBadRequest, "FACEIT match not found — check the room link")
@@ -429,7 +430,11 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 			fail(http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old)")
 			return
 		case errors.Is(ferr, faceit.ErrNoDownloadScope), errors.Is(ferr, faceit.ErrNoAPIKey):
-			fail(http.StatusServiceUnavailable, "FACEIT demo analysis isn't enabled yet — coming soon")
+			// The app is approved but the configured token lacks the Downloads
+			// scope — FACEIT issues that as a SEPARATE access token, so the fix
+			// is setting FACEIT_DOWNLOAD_API_KEY, not waiting for anything.
+			s.log.Error("faceit downloads token missing/unscoped — set FACEIT_DOWNLOAD_API_KEY to the Downloads-scoped access token from the FACEIT developer portal")
+			fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're finishing setup on our side")
 			return
 		default:
 			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "resolve faceit demo failed")
