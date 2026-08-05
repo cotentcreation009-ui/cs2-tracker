@@ -130,10 +130,18 @@ function RatingBadge({
   return (
     <span
       title={title}
-      className={`inline-block shrink-0 -skew-x-6 rounded-[3px] px-1 py-px ${dim ? "opacity-60" : ""}`}
-      style={{ background: `${hex}17`, boxShadow: `inset 0 0 0 1px ${hex}45` }}
+      // "before" is secondary, not washed out: keep the numerals legible and
+      // signal the difference with a flatter plate instead of global opacity
+      className="inline-block shrink-0 -skew-x-6 rounded-[3px] px-1 py-px"
+      style={{
+        background: dim ? `${hex}0f` : `${hex}17`,
+        boxShadow: `inset 0 0 0 1px ${hex}${dim ? "33" : "45"}`,
+      }}
     >
-      <span className="inline-block skew-x-6 text-[10.5px] font-extrabold italic leading-4 tabular-nums" style={{ color: hex }}>
+      <span
+        className="inline-block skew-x-6 text-[10.5px] font-extrabold italic leading-4 tabular-nums"
+        style={{ color: hex, opacity: dim ? 0.85 : 1 }}
+      >
         {slashes ? <span className="mr-0.5 opacity-60">{"//"}</span> : null}
         {text}
       </span>
@@ -161,7 +169,7 @@ function PremierPlate({
   return (
     <span
       title={title}
-      className={`relative inline-block shrink-0 ${compact ? "h-4 w-14" : "h-4.5 w-18"} ${dim ? "opacity-60" : ""}`}
+      className={`relative inline-block shrink-0 ${compact ? "h-4 w-14" : "h-4.5 w-18"} ${dim ? "opacity-85" : ""}`}
     >
       <svg viewBox="0 0 178 64" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
         {/* wings */}
