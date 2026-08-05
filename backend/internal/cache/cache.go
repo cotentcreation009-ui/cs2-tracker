@@ -83,6 +83,9 @@ func ProfileKey(steamID uint64) string {
 func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:v3:%d", steamID) }
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
 
+// InventoryKey caches a player's aggregated CS2 skin inventory showcase.
+func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:%d", steamID) }
+
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
 // v2: team scores now derive from per-player rounds-won (the teamScores array
