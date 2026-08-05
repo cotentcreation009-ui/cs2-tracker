@@ -23,6 +23,19 @@ func (d *DB) GetInventorySnapshot(ctx context.Context, steamID uint64) (payload 
 	return payload, fetchedAt, true, nil
 }
 
+// PruneInventorySnapshots drops snapshots nobody has refreshed in `older`,
+// and reports how many went. Past that age a snapshot has stopped being a
+// cache and is just retained personal data.
+func (d *DB) PruneInventorySnapshots(ctx context.Context, older time.Duration) (int64, error) {
+	tag, err := d.Pool.Exec(ctx,
+		`DELETE FROM inventory_snapshots WHERE fetched_at < now() - $1::interval`,
+		older.String())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // SaveInventorySnapshot records a fresh read, replacing any earlier one.
 func (d *DB) SaveInventorySnapshot(ctx context.Context, steamID uint64, payload []byte) error {
 	_, err := d.Pool.Exec(ctx, `

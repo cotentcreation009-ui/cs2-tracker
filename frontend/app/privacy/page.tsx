@@ -38,8 +38,21 @@ export default function PrivacyPage() {
         and public APIs — e.g. Steam persona name, avatar, country, account age,
         CS2 friend code and ban/VAC status, plus Leetify and FACEIT statistics
         (ratings, ranks, match history). We do not create this data; it originates
-        from those services and the player&apos;s own public profiles. We cache
-        responses briefly to reduce load on those providers.
+        from those services and the player&apos;s own public profiles.
+      </P>
+      <P>
+        <strong>Caching and stored snapshots:</strong> most responses are cached
+        only briefly and refreshed on demand. The one exception is the CS2
+        inventory showcase: Steam strictly limits how often anyone may read
+        inventories, so a successful read is stored on our server (in the United
+        States, on Google Cloud) as a summary — item names, rarities, estimated
+        values and totals — together with the SteamID64 and the time it was read.
+        It is
+        shown labelled with its age, is never served once it is more than seven
+        days old, and is deleted automatically after ninety days without a
+        refresh. If a player makes their inventory private, the next read
+        replaces the stored summary with nothing but that fact. Only public
+        inventories are ever read.
       </P>
 
       <H>Information we collect from visitors</H>
@@ -141,8 +154,10 @@ export default function PrivacyPage() {
 
       <H>Data retention &amp; security</H>
       <P>
-        Third-party data is cached only briefly and refreshed on demand. Logs are
-        retained only as long as needed for security and operations. We use HTTPS
+        Third-party data is cached only briefly and refreshed on demand, apart
+        from the CS2 inventory snapshots described above (served for at most
+        seven days, deleted after ninety without a refresh). Logs are retained
+        only as long as needed for security and operations. We use HTTPS
         everywhere and reasonable measures to protect data, though no method is
         100% secure.
       </P>

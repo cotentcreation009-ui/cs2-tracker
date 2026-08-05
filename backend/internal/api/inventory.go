@@ -17,6 +17,16 @@ import (
 // touching Steam at all.
 const refreshAfter = 6 * time.Hour
 
+// maxStaleAge caps how long a snapshot may stand in for a live read. Past this
+// we would rather show nothing: a player who has since made their inventory
+// private must stop appearing here, and a long Steam block must not turn our
+// stored copy into an indefinite mirror of data they stopped sharing.
+const maxStaleAge = 7 * 24 * time.Hour
+
+// snapshotRetention is how long an unrefreshed snapshot is kept at all. Anything
+// older is nobody's cache — it is just retained personal data.
+const snapshotRetention = 90 * 24 * time.Hour
+
 // handleInventory serves a player's CS2 skin-inventory showcase: items from
 // Steam's public inventory endpoint, valued via Skinport's bulk price list.
 //
@@ -70,8 +80,9 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		return view, nil
 	})
 	if err != nil {
-		// Whatever went wrong upstream, an older copy beats an error page.
-		if hasSnap {
+		// Whatever went wrong upstream, a recent-enough copy beats an error
+		// page — but only while it can still be called current.
+		if hasSnap && time.Since(snapAt) < maxStaleAge {
 			s.serveSnapshot(w, ctx, key, snap, snapAt, true)
 			return
 		}
