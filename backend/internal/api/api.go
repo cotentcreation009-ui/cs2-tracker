@@ -68,6 +68,7 @@ type Store interface {
 	// good copy outlives the cache).
 	GetInventorySnapshot(ctx context.Context, steamID uint64) ([]byte, time.Time, bool, error)
 	SaveInventorySnapshot(ctx context.Context, steamID uint64, payload []byte) error
+	PruneInventorySnapshots(ctx context.Context, older time.Duration) (int64, error)
 	Ping(ctx context.Context) error
 }
 
@@ -132,6 +133,29 @@ func (s *Server) StartProMatches(ctx context.Context) {
 			go s.prewarmProHistories(ctx)
 		}
 	}
+}
+
+// StartRetention runs the background jobs that expire stored data. Currently
+// just inventory snapshots, which are kept only as long as they are plausibly
+// a cache of what the player is publicly sharing right now.
+func (s *Server) StartRetention(ctx context.Context) {
+	go func() {
+		tick := time.NewTicker(24 * time.Hour)
+		defer tick.Stop()
+		for {
+			n, err := s.db.PruneInventorySnapshots(ctx, snapshotRetention)
+			if err != nil {
+				s.log.Warn("inventory snapshot prune", "err", err)
+			} else if n > 0 {
+				s.log.Info("pruned stale inventory snapshots", "rows", n)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	}()
 }
 
 // prewarmProHistories keeps the lineups/form/h2h caches warm for live matches

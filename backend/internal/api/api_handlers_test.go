@@ -64,6 +64,9 @@ func (f *fakeStore) SaveInventorySnapshot(_ context.Context, _ uint64, payload [
 	f.invSaved = payload
 	return nil
 }
+func (f *fakeStore) PruneInventorySnapshots(context.Context, time.Duration) (int64, error) {
+	return 0, nil
+}
 
 func (f *fakeStore) Ping(context.Context) error {
 	if f.ping != nil {

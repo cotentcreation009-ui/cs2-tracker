@@ -68,7 +68,7 @@ func TestInventoryServesRecentSnapshot(t *testing.T) {
 // copy still beats an error page — flagged stale so the UI can say so.
 func TestInventoryFallsBackToStaleSnapshot(t *testing.T) {
 	stored, _ := json.Marshal(steaminv.View{TotalValue: 99, ItemCount: 7})
-	fetchedAt := time.Now().Add(-30 * 24 * time.Hour)
+	fetchedAt := time.Now().Add(-2 * 24 * time.Hour)
 	r := routerNoSteam(&fakeStore{invSnapshot: stored, invFetchedAt: fetchedAt})
 
 	w := doGET(r, invPath)
@@ -81,6 +81,25 @@ func TestInventoryFallsBackToStaleSnapshot(t *testing.T) {
 	}
 	if !v.Stale {
 		t.Error("want stale=true so the UI can label the age")
+	}
+}
+
+// Past the stale cap we show nothing rather than keep mirroring a copy the
+// player may have stopped sharing — a long Steam block must not turn our
+// stored snapshot into an indefinite republication.
+func TestInventoryStopsServingAncientSnapshot(t *testing.T) {
+	stored, _ := json.Marshal(steaminv.View{TotalValue: 99, ItemCount: 7})
+	r := routerNoSteam(&fakeStore{
+		invSnapshot:  stored,
+		invFetchedAt: time.Now().Add(-maxStaleAge - time.Hour),
+	})
+
+	v := decodeInv(t, doGET(r, invPath).Body.Bytes())
+	if !v.Unavailable {
+		t.Errorf("want unavailable past the stale cap, got %+v", v)
+	}
+	if v.ItemCount != 0 {
+		t.Errorf("stale-capped snapshot still leaked items: %+v", v)
 	}
 }
 

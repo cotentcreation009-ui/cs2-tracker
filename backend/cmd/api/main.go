@@ -89,6 +89,7 @@ func run(log *slog.Logger) error {
 	// GRID pro-match poller: background loops that keep the live board fresh.
 	// No-op unless GRID_API_KEY (or GRID_MOCK=1) is set; stops when ctx is done.
 	srv.StartProMatches(ctx)
+	srv.StartRetention(ctx)
 
 	// Direct demo upload (object storage) is optional: when DEMO_GCS_BUCKET is
 	// unset, the demo flow falls back to through-server multipart upload.
