@@ -134,6 +134,16 @@ function Gauge({ score, hex }: { score: number; hex: string }) {
       />
       <circle cx={cx} cy={cy} r="8" fill={hex} />
       <circle cx={cx} cy={cy} r="3.5" fill="var(--color-bg)" />
+      {/* names the dial itself, sitting in the empty space under the pivot */}
+      <text
+        x={cx}
+        y={cy + 24}
+        textAnchor="middle"
+        className="fill-faint"
+        style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.18em" }}
+      >
+        CHEATER METER
+      </text>
     </svg>
   );
 }
