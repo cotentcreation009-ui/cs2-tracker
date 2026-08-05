@@ -89,6 +89,9 @@ type Server struct {
 	predReconAt time.Time
 	// lp resolves pro-player photos from Liquipedia (rate-limited, cache-heavy).
 	lp *liquipedia.Client
+	// invHTTP fetches Steam community inventories + Skinport prices (both
+	// public, no keys; kept separate so their timeouts don't affect API calls).
+	invHTTP *http.Client
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
 	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
 	sf singleflight.Group
@@ -112,7 +115,7 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log)}
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}}
 }
 
 // StartProMatches launches the GRID poller's background loops (a no-op when the
@@ -275,6 +278,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/faceit", s.handleFaceit)
 				r.Get("/steam-stats", s.handleSteamStats)
 				r.Get("/steam-extras", s.handleSteamExtras)
+				r.Get("/inventory", s.handleInventory)
 			})
 
 			r.Get("/matches/{id}", s.handleMatch)

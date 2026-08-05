@@ -20,6 +20,7 @@ import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { FriendsPanel } from "@/components/FriendsPanel";
+import { InventoryPanel } from "@/components/InventoryPanel";
 import { FaceitPanel } from "@/components/FaceitPanel";
 import { RankStrip } from "@/components/RankBadge";
 import { MapStrength } from "@/components/MapStrength";
@@ -242,6 +243,9 @@ export function ProfileView({
     matchstats: richMatchStats ? matchStatsPanel : null,
     // Friends — Leetify's frequent teammates, resolved+ranked lazily on open
     friends: leetify ? <FriendsPanel steamId={player.steamId64} /> : null,
+    // Inventory — CS2 skins + estimated value, fetched lazily on open. Always
+    // offered: a private inventory says so, which is itself an answer.
+    inventory: <InventoryPanel steamId={player.steamId64} />,
   };
 
   return (
