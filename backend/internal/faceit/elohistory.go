@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -114,4 +115,28 @@ func (c *Client) EloHistory(ctx context.Context, playerID string, limit int) ([]
 		}
 	}
 	return out, nil
+}
+
+// PlayerElo returns a FACEIT player's CURRENT CS2 elo by FACEIT player id via
+// the official Data API. FACEIT publishes no per-match elo for other players,
+// so this is the only value available for a scoreboard — the UI labels it as
+// current rather than implying it was their elo at match time.
+func (c *Client) PlayerElo(ctx context.Context, playerID string) (int, error) {
+	if c.apiKey == "" {
+		return 0, ErrNoAPIKey
+	}
+	if playerID == "" {
+		return 0, ErrNotFound
+	}
+	var pr struct {
+		Games struct {
+			CS2 struct {
+				FaceitElo int `json:"faceit_elo"`
+			} `json:"cs2"`
+		} `json:"games"`
+	}
+	if err := c.get(ctx, "/players/"+url.PathEscape(playerID), &pr); err != nil {
+		return 0, err
+	}
+	return pr.Games.CS2.FaceitElo, nil
 }

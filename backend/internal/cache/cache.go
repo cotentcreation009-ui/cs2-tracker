@@ -90,9 +90,9 @@ func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:%d", stea
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
 // v2: team scores now derive from per-player rounds-won (the teamScores array
 // mis-attributed sides) — the bump flushes boards cached with swapped scores.
-// v6: per-player at-match ranks (Premier/comp/FACEIT level) joined the board.
+// v7: per-player FACEIT elo joined the board (v6: at-match ranks).
 func LeetifyGameKey(gameID string, steamID uint64) string {
-	return fmt.Sprintf("cs2:leetify:game:v6:%s:%d", strings.ToLower(gameID), steamID)
+	return fmt.Sprintf("cs2:leetify:game:v7:%s:%d", strings.ToLower(gameID), steamID)
 }
 
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).

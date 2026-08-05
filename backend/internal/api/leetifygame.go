@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
@@ -60,6 +61,7 @@ func (s *Server) handleLeetifyGameStats(w http.ResponseWriter, r *http.Request) 
 				return leetify.GameStats{}, err
 			}
 			s.fillScoreboardAvatars(ctx, gs)
+			s.fillScoreboardFaceitElo(ctx, gs)
 			return *gs, nil
 		})
 		if err != nil {
@@ -121,4 +123,44 @@ func (s *Server) fillScoreboardAvatars(ctx context.Context, gs *leetify.GameStat
 			p.Avatar = avatar[p.SteamID]
 		}
 	}
+}
+
+// fillScoreboardFaceitElo decorates a FACEIT game's board with each player's
+// elo. FACEIT publishes no per-match elo for other players, so this is their
+// CURRENT elo (the UI says so). Ten lookups run concurrently and land in the
+// week-long board cache, so a viewed game costs them once. Best-effort: any
+// failure just leaves that row without a number.
+func (s *Server) fillScoreboardFaceitElo(ctx context.Context, gs *leetify.GameStats) {
+	if s.faceit == nil || !s.faceit.HasKey() || len(gs.Scoreboard) == 0 {
+		return
+	}
+	type ref struct{ ti, pi int }
+	var refs []ref
+	for ti := range gs.Scoreboard {
+		for pi := range gs.Scoreboard[ti].Players {
+			if gs.Scoreboard[ti].Players[pi].FaceitPlayerID != "" {
+				refs = append(refs, ref{ti, pi})
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	for _, rf := range refs {
+		wg.Add(1)
+		go func(rf ref) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			p := &gs.Scoreboard[rf.ti].Players[rf.pi]
+			if elo, err := s.faceit.PlayerElo(cctx, p.FaceitPlayerID); err == nil && elo > 0 {
+				p.FaceitElo = elo
+			}
+		}(rf)
+	}
+	wg.Wait()
 }
