@@ -616,7 +616,9 @@ type ScoreTeam struct {
 }
 
 // ScoreRow is one player's line on a game's scoreboard. Avatar is filled by
-// the API layer (one bulk Steam summaries call for the whole board).
+// the API layer (one bulk Steam summaries call for the whole board). The aim
+// block feeds a per-player hover breakdown — Leetify has no per-game "aim
+// rating", so the components are surfaced instead of inventing a number.
 type ScoreRow struct {
 	Name    string  `json:"name"`
 	SteamID string  `json:"steam_id,omitempty"`
@@ -627,7 +629,22 @@ type ScoreRow struct {
 	ADR     float64 `json:"adr"`
 	Rating  float64 `json:"rating"`
 	HSPct   float64 `json:"hs_pct"`
-	Me      bool    `json:"me,omitempty"`
+	KASTPct float64 `json:"kast_pct,omitempty"`
+	Impact  float64 `json:"impact"` // Leetify's per-game rating (raw fraction, can be negative)
+	MVPs    int     `json:"mvps,omitempty"`
+	Multi2K int     `json:"m2k,omitempty"`
+	Multi3K int     `json:"m3k,omitempty"`
+	Multi4K int     `json:"m4k,omitempty"`
+	Multi5K int     `json:"m5k,omitempty"`
+	// aim components
+	Preaim     float64 `json:"preaim,omitempty"`
+	ReactionMs float64 `json:"reaction_ms,omitempty"`
+	SprayPct   float64 `json:"spray_pct,omitempty"`
+	CSPct      float64 `json:"cs_pct,omitempty"` // counter-strafing good-shots %
+	// context flags
+	Leaver bool `json:"leaver,omitempty"`
+	Party  int  `json:"party,omitempty"` // 1..n — players sharing a number queued together; 0 = solo
+	Me     bool `json:"me,omitempty"`
 }
 
 // GetGameStats fetches one game's scoreboard and returns the row for steam64.
@@ -654,6 +671,10 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 	}
 
 	var payload struct {
+		Parties []struct {
+			Party     int    `json:"party"`
+			Steam64ID string `json:"steam64Id"`
+		} `json:"parties"`
 		PlayerStats []struct {
 			Steam64ID   string  `json:"steam64Id"`
 			Name        string  `json:"name"`
@@ -662,6 +683,7 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			KAST        float64 `json:"kast"` // 0..1 fraction
 			HLTVRating  float64 `json:"hltvRating"`
 			HSP         float64 `json:"hsp"` // 0..1 fraction
+			Leetify     float64 `json:"leetifyRating"`
 			TotalKills  int     `json:"totalKills"`
 			TotalDeaths int     `json:"totalDeaths"`
 			Assists     int     `json:"totalAssists"`
@@ -671,6 +693,11 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			Multi4K     int     `json:"multi4k"`
 			Multi5K     int     `json:"multi5k"`
 			Survived    float64 `json:"roundsSurvivedPercentage"` // 0..1 fraction
+			Preaim      float64 `json:"preaim"`
+			Reaction    float64 `json:"reactionTime"` // seconds
+			Spray       float64 `json:"sprayAccuracy"`
+			CSRatio     float64 `json:"counterStrafingShotsGoodRatio"`
+			IsLeaver    bool    `json:"isLeaver"`
 			// per-side rounds WON by this player's team — summed, this IS the
 			// team's score, attributed to the right team by construction
 			// (the top-level teamScores array's order does not reliably match
@@ -684,6 +711,24 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 		return nil, fmt.Errorf("leetify game stats: decode: %w", err)
 	}
 	sid := strconv.FormatUint(steam64, 10)
+
+	// party groups: renumber the raw ids to 1..n, keeping only real stacks
+	// (two or more members) so solo players stay unmarked
+	partySize := map[int]int{}
+	for _, pt := range payload.Parties {
+		partySize[pt.Party]++
+	}
+	partyNum := map[string]int{}
+	partyIdx := map[int]int{}
+	for _, pt := range payload.Parties {
+		if pt.Party == 0 || partySize[pt.Party] < 2 {
+			continue
+		}
+		if _, ok := partyIdx[pt.Party]; !ok {
+			partyIdx[pt.Party] = len(partyIdx) + 1
+		}
+		partyNum[pt.Steam64ID] = partyIdx[pt.Party]
+	}
 
 	// full board: teamNumber → rows; the viewer's team renders first
 	byTeam := map[int]*ScoreTeam{}
@@ -702,14 +747,27 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			t.Score = s
 		}
 		row := ScoreRow{
-			Name:    p.Name,
-			SteamID: p.Steam64ID,
-			Kills:   p.TotalKills,
-			Deaths:  p.TotalDeaths,
-			Assists: p.Assists,
-			ADR:     p.DPR,
-			Rating:  p.HLTVRating,
-			HSPct:   p.HSP * 100,
+			Name:       p.Name,
+			SteamID:    p.Steam64ID,
+			Kills:      p.TotalKills,
+			Deaths:     p.TotalDeaths,
+			Assists:    p.Assists,
+			ADR:        p.DPR,
+			Rating:     p.HLTVRating,
+			HSPct:      p.HSP * 100,
+			KASTPct:    p.KAST * 100,
+			Impact:     p.Leetify,
+			MVPs:       p.MVPs,
+			Multi2K:    p.Multi2K,
+			Multi3K:    p.Multi3K,
+			Multi4K:    p.Multi4K,
+			Multi5K:    p.Multi5K,
+			Preaim:     p.Preaim,
+			ReactionMs: p.Reaction * 1000,
+			SprayPct:   p.Spray * 100,
+			CSPct:      p.CSRatio * 100,
+			Leaver:     p.IsLeaver,
+			Party:      partyNum[p.Steam64ID],
 		}
 		if p.Steam64ID == sid {
 			row.Me = true
