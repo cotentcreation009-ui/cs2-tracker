@@ -31,6 +31,10 @@ type fakeStore struct {
 	job      func(string) (models.IngestJob, error)
 	ping     func() error
 	count    func(uint64) (int, error)
+
+	invSnapshot  []byte
+	invFetchedAt time.Time
+	invSaved     []byte
 }
 
 func (f *fakeStore) CountPlayerMatches(_ context.Context, id uint64) (int, error) {
@@ -49,6 +53,16 @@ func (f *fakeStore) ListUnresolvedProPredictions(context.Context, int) ([]db.Pro
 func (f *fakeStore) ResolveProPrediction(context.Context, string, string, bool) error { return nil }
 func (f *fakeStore) GetProPredictionRecord(context.Context, string) (db.ProPredictionRecord, error) {
 	return db.ProPredictionRecord{}, nil
+}
+func (f *fakeStore) GetInventorySnapshot(context.Context, uint64) ([]byte, time.Time, bool, error) {
+	if f.invSnapshot == nil {
+		return nil, time.Time{}, false, nil
+	}
+	return f.invSnapshot, f.invFetchedAt, true, nil
+}
+func (f *fakeStore) SaveInventorySnapshot(_ context.Context, _ uint64, payload []byte) error {
+	f.invSaved = payload
+	return nil
 }
 
 func (f *fakeStore) Ping(context.Context) error {

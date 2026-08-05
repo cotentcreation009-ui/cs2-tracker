@@ -8,6 +8,7 @@ package steaminv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,10 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrRateLimited means Steam is refusing inventory reads from this host — the
+// caller should serve a stored snapshot rather than treat it as a failure.
+var ErrRateLimited = errors.New("steaminv: steam is rate-limiting inventory reads")
 
 // package vars so tests can point at fixture servers
 var (
@@ -57,16 +62,24 @@ type RarityBand struct {
 
 // View is the aggregate the frontend renders.
 type View struct {
-	Private        bool         `json:"private,omitempty"`
-	TotalValue     float64      `json:"total_value"`
-	PricedItems    int          `json:"priced_items"`
+	Private bool `json:"private,omitempty"`
+	// Stale marks a stored snapshot we served because Steam wouldn't answer —
+	// the numbers are real, just as of FetchedAt.
+	Stale bool `json:"stale,omitempty"`
+	// Unavailable means we have never managed to read this inventory and
+	// Steam is currently refusing; RetryAfterSec is when it's worth asking again.
+	Unavailable   bool `json:"unavailable,omitempty"`
+	RetryAfterSec int  `json:"retry_after_sec,omitempty"`
+
+	TotalValue      float64      `json:"total_value"`
+	PricedItems     int          `json:"priced_items"`
 	ItemCount       int          `json:"item_count"` // total assets incl. duplicates
 	DistinctCount   int          `json:"distinct_count"`
 	MarketableCount int          `json:"marketable_count"`
-	TopItems       []Item       `json:"top_items"`
-	Categories     []Category   `json:"categories"`
-	Rarities       []RarityBand `json:"rarities"`
-	FetchedAt      string       `json:"fetched_at"`
+	TopItems        []Item       `json:"top_items"`
+	Categories      []Category   `json:"categories"`
+	Rarities        []RarityBand `json:"rarities"`
+	FetchedAt       string       `json:"fetched_at"`
 }
 
 // --- Skinport price cache (process-wide, 1h) --------------------------------
@@ -120,6 +133,94 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 	return priceMap
 }
 
+// --- request gate -----------------------------------------------------------
+//
+// Every inventory read the site makes leaves from ONE datacenter IP, and Steam
+// throttles that endpoint per IP. Left ungoverned, a handful of simultaneous
+// profile views earns a block that then affects every visitor for far longer
+// than the reads were worth. So: requests are spaced out, a caller that would
+// have to queue too long is turned away, and a 429 trips a circuit breaker that
+// backs off harder each time — because continuing to knock is what keeps a
+// Steam block alive.
+var (
+	minSpacing   = 6 * time.Second  // floor between two Steam inventory reads
+	maxQueueWait = 4 * time.Second  // longer than this and we'd rather serve stale
+	maxBackoff   = 30 * time.Minute // ceiling on the circuit-breaker cool-off
+)
+
+type gate struct {
+	mu           sync.Mutex
+	next         time.Time // earliest moment the next read may leave
+	blockedUntil time.Time // circuit open until (zero = closed)
+	strikes      int
+}
+
+var steamGate gate
+
+// reserve blocks for the request's turn, or reports ErrRateLimited if the line
+// is too long or the circuit is open.
+func (g *gate) reserve(ctx context.Context) error {
+	g.mu.Lock()
+	now := time.Now()
+	if now.Before(g.blockedUntil) {
+		d := g.blockedUntil.Sub(now)
+		g.mu.Unlock()
+		return fmt.Errorf("%w (cooling off for %s)", ErrRateLimited, d.Round(time.Second))
+	}
+	var wait time.Duration
+	if now.Before(g.next) {
+		wait = g.next.Sub(now)
+	}
+	if wait > maxQueueWait {
+		g.mu.Unlock()
+		return fmt.Errorf("%w (too many reads queued)", ErrRateLimited)
+	}
+	g.next = now.Add(wait + minSpacing)
+	g.mu.Unlock()
+
+	if wait > 0 {
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// trip opens the circuit after a 429, doubling the cool-off each consecutive
+// strike (5m, 10m, 20m, 30m…).
+func (g *gate) trip() time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.strikes++
+	d := time.Duration(1<<uint(min(g.strikes-1, 3))) * 5 * time.Minute
+	if d > maxBackoff {
+		d = maxBackoff
+	}
+	g.blockedUntil = time.Now().Add(d)
+	return d
+}
+
+// clear resets the strike count after a clean read.
+func (g *gate) clear() {
+	g.mu.Lock()
+	g.strikes, g.blockedUntil = 0, time.Time{}
+	g.mu.Unlock()
+}
+
+// RetryAfter reports how long the circuit stays open, or 0 if reads are allowed.
+func RetryAfter() time.Duration {
+	steamGate.mu.Lock()
+	defer steamGate.mu.Unlock()
+	if d := time.Until(steamGate.blockedUntil); d > 0 {
+		return d
+	}
+	return 0
+}
+
 // --- Steam inventory --------------------------------------------------------
 
 type steamInv struct {
@@ -147,14 +248,20 @@ type steamInv struct {
 }
 
 // Build fetches and aggregates a player's CS2 inventory. A private inventory
-// returns View{Private:true} with no error.
+// returns View{Private:true} with no error; ErrRateLimited means Steam turned
+// us away and the caller should fall back to a stored snapshot.
 func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) {
+	if err := steamGate.reserve(ctx); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf(inventoryURL, steam64), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StatRun/1.0")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Referer", fmt.Sprintf("https://steamcommunity.com/profiles/%d/inventory/", steam64))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("steaminv: fetch: %w", err)
@@ -162,10 +269,15 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
+		steamGate.clear()
 	case http.StatusForbidden, http.StatusUnauthorized:
+		// A real answer about a real profile — Steam is talking to us fine.
+		steamGate.clear()
 		return &View{Private: true, FetchedAt: time.Now().UTC().Format(time.RFC3339)}, nil
 	case http.StatusTooManyRequests:
-		return nil, fmt.Errorf("steaminv: steam rate-limited the request")
+		return nil, fmt.Errorf("%w (cooling off for %s)", ErrRateLimited, steamGate.trip().Round(time.Second))
+	case http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
+		return nil, fmt.Errorf("%w (steam returned %d)", ErrRateLimited, resp.StatusCode)
 	default:
 		return nil, fmt.Errorf("steaminv: status %d", resp.StatusCode)
 	}

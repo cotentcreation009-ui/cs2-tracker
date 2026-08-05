@@ -2,12 +2,17 @@ package steaminv
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// reqCount counts inventory reads that actually reached the fixture server.
+var reqCount atomic.Int64
 
 const invFixture = `{
   "assets": [
@@ -42,6 +47,7 @@ func fixtureServers(t *testing.T, invBody string, invStatus int) *http.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/inventory/") {
+			reqCount.Add(1)
 			w.WriteHeader(invStatus)
 			_, _ = w.Write([]byte(invBody))
 			return
@@ -57,6 +63,15 @@ func fixtureServers(t *testing.T, invBody string, invStatus int) *http.Client {
 	priceMu.Lock()
 	priceMap, priceAt = nil, time.Time{}
 	priceMu.Unlock()
+	// The throttle guards Steam's per-IP budget; a fixture server has none, so
+	// tests read back-to-back with a clean gate.
+	prevSpacing := minSpacing
+	minSpacing = 0
+	steamGate.clear()
+	steamGate.mu.Lock()
+	steamGate.next = time.Time{}
+	steamGate.mu.Unlock()
+	t.Cleanup(func() { minSpacing = prevSpacing })
 	return srv.Client()
 }
 
@@ -102,5 +117,29 @@ func TestBuildPrivateInventory(t *testing.T) {
 	}
 	if !v.Private {
 		t.Fatal("expected private flag")
+	}
+}
+
+// A 429 must report itself as a rate limit (so callers serve a snapshot rather
+// than an error) and stop further reads for a while — continuing to knock is
+// what turns a short Steam throttle into a long block.
+func TestRateLimitTripsCircuit(t *testing.T) {
+	hc := fixtureServers(t, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+	t.Cleanup(steamGate.clear)
+
+	if _, err := Build(context.Background(), hc, 76561198000000000); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited", err)
+	}
+	if RetryAfter() <= 0 {
+		t.Fatal("a 429 should open the circuit")
+	}
+
+	// While the circuit is open the next read must not reach Steam at all.
+	before := reqCount.Load()
+	if _, err := Build(context.Background(), hc, 76561198000000001); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err = %v, want ErrRateLimited while cooling off", err)
+	}
+	if got := reqCount.Load() - before; got != 0 {
+		t.Errorf("%d request(s) reached Steam while the circuit was open, want 0", got)
 	}
 }
