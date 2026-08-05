@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/andybalholm/brotli"
 )
 
 // reqCount counts inventory reads that actually reached the fixture server.
@@ -45,14 +47,34 @@ const pricesFixture = `[
 
 func fixtureServers(t *testing.T, invBody string, invStatus int) *http.Client {
 	t.Helper()
+	return fixtureHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(invStatus)
+		_, _ = w.Write([]byte(invBody))
+	})
+}
+
+// fixtureHandler stands up a Steam+Skinport double, letting the caller drive
+// the inventory responses (for paging, error sequences and the like).
+func fixtureHandler(t *testing.T, inv http.HandlerFunc) *http.Client {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/inventory/") {
 			reqCount.Add(1)
-			w.WriteHeader(invStatus)
-			_, _ = w.Write([]byte(invBody))
+			inv(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(pricesFixture))
+		// Skinport rejects any client that doesn't offer Brotli and only ever
+		// answers in it — emulate that exactly, so a client that stops asking
+		// for br fails here the way it fails in production.
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "br") {
+			w.WriteHeader(http.StatusNotAcceptable)
+			_, _ = w.Write([]byte(`{"errors":[{"id":"not_acceptable","message":"Client must support Brotli compression (Accept-Encoding: br)."}]}`))
+			return
+		}
+		w.Header().Set("Content-Encoding", "br")
+		bw := brotli.NewWriter(w)
+		_, _ = bw.Write([]byte(pricesFixture))
+		_ = bw.Close()
 	}))
 	t.Cleanup(srv.Close)
 	prevInv, prevSp := inventoryURL, skinportURL
@@ -117,6 +139,58 @@ func TestBuildPrivateInventory(t *testing.T) {
 	}
 	if !v.Private {
 		t.Fatal("expected private flag")
+	}
+}
+
+// Steam clamps a page at 2000 items and hands back a cursor for the rest. A
+// collector's inventory is exactly the case this panel exists for, so stopping
+// at page one would understate the people most likely to look.
+func TestBuildFollowsPagination(t *testing.T) {
+	// page 1: two cases, more to come. page 2: the AK, repeating the case
+	// description (Steam does) to prove it isn't counted twice.
+	const page1 = `{"assets":[{"classid":"c1","instanceid":"i1"},{"classid":"c1","instanceid":"i1"}],
+	  "descriptions":[{"classid":"c1","instanceid":"i1","name":"Dreams & Nightmares Case",
+	    "market_hash_name":"Dreams & Nightmares Case","type":"Base Grade Container","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Container"}]}],
+	  "total_inventory_count":3,"success":1,"more_items":1,"last_assetid":"A99"}`
+	const page2 = `{"assets":[{"classid":"c2","instanceid":"i0"}],
+	  "descriptions":[{"classid":"c1","instanceid":"i1","name":"Dreams & Nightmares Case",
+	    "market_hash_name":"Dreams & Nightmares Case","type":"Base Grade Container","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Container"}]},
+	   {"classid":"c2","instanceid":"i0","name":"StatTrak™ AK-47 | Redline (Field-Tested)",
+	    "market_hash_name":"StatTrak™ AK-47 | Redline (Field-Tested)","type":"Classified Rifle","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Rifle"}]}],
+	  "total_inventory_count":3,"success":1}`
+
+	var cursors []string
+	hc := fixtureHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		cursors = append(cursors, r.URL.Query().Get("start_assetid"))
+		if r.URL.Query().Get("start_assetid") == "" {
+			_, _ = w.Write([]byte(page1))
+			return
+		}
+		_, _ = w.Write([]byte(page2))
+	})
+
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "A99" {
+		t.Fatalf("cursors = %q, want [\"\", \"A99\"]", cursors)
+	}
+	if v.ItemCount != 3 {
+		t.Errorf("item_count = %d, want 3 across both pages", v.ItemCount)
+	}
+	if v.DistinctCount != 2 {
+		t.Errorf("distinct = %d, want 2 — the repeated description was counted twice", v.DistinctCount)
+	}
+	// 2 cases × 1.50 + 1 AK × 45.00
+	if v.TotalValue < 47.99 || v.TotalValue > 48.01 {
+		t.Errorf("total = %.2f, want 48.00", v.TotalValue)
+	}
+	if v.Truncated {
+		t.Error("a fully-read inventory must not be flagged truncated")
 	}
 }
 

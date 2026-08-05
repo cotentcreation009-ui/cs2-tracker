@@ -6,16 +6,21 @@
 package steaminv
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/andybalholm/brotli"
 )
 
 // ErrRateLimited means Steam is refusing inventory reads from this host — the
@@ -70,6 +75,12 @@ type View struct {
 	// Steam is currently refusing; RetryAfterSec is when it's worth asking again.
 	Unavailable   bool `json:"unavailable,omitempty"`
 	RetryAfterSec int  `json:"retry_after_sec,omitempty"`
+	// Truncated marks an inventory too large to read in full — the totals
+	// below cover the items we did read, not the whole collection.
+	Truncated bool `json:"truncated,omitempty"`
+	// TotalItems is what Steam says the inventory holds, which is larger than
+	// ItemCount when Truncated.
+	TotalItems int `json:"total_items,omitempty"`
 
 	TotalValue      float64      `json:"total_value"`
 	PricedItems     int          `json:"priced_items"`
@@ -90,6 +101,27 @@ var (
 	priceAt  time.Time
 )
 
+// decompress unwraps a response we asked to be compressed. Setting
+// Accept-Encoding by hand opts out of net/http's transparent gzip handling,
+// so whatever the server chose is ours to undo.
+func decompress(resp *http.Response) (io.ReadCloser, error) {
+	switch strings.ToLower(resp.Header.Get("Content-Encoding")) {
+	case "br":
+		return io.NopCloser(brotli.NewReader(resp.Body)), nil
+	case "gzip":
+		return gzip.NewReader(resp.Body)
+	default:
+		return io.NopCloser(resp.Body), nil
+	}
+}
+
+// logPriceFailure records why a price refresh came back empty. Prices failing
+// silently means every inventory shows $0 with no signal that anything broke.
+func logPriceFailure(status int, detail string) {
+	slog.Warn("skinport price fetch failed", "status", status,
+		"detail", strings.TrimSpace(detail))
+}
+
 func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 	priceMu.Lock()
 	defer priceMu.Unlock()
@@ -101,6 +133,11 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 		return priceMap
 	}
 	req.Header.Set("Accept", "application/json")
+	// Skinport hard-gates this endpoint on Brotli: anything that doesn't
+	// explicitly offer br gets a 406, including Go's automatic
+	// "Accept-Encoding: gzip". Setting the header ourselves also turns off
+	// the transport's transparent decompression, so we unwrap the body below.
+	req.Header.Set("Accept-Encoding", "br, gzip")
 	req.Header.Set("User-Agent", "StatRun/1.0 (https://csrun.win)")
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -108,14 +145,25 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Silence here is how the 406 above went unnoticed in production —
+		// every inventory priced at zero and nothing said why.
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		logPriceFailure(resp.StatusCode, string(snippet))
 		return priceMap
 	}
+	body, err := decompress(resp)
+	if err != nil {
+		logPriceFailure(resp.StatusCode, "decompress: "+err.Error())
+		return priceMap
+	}
+	defer body.Close()
 	var rows []struct {
 		Name      string   `json:"market_hash_name"`
 		Suggested *float64 `json:"suggested_price"`
 		Min       *float64 `json:"min_price"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&rows); err != nil {
+	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(&rows); err != nil {
+		logPriceFailure(resp.StatusCode, "decode: "+err.Error())
 		return priceMap
 	}
 	m := make(map[string]float64, len(rows))
@@ -137,15 +185,19 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 //
 // Every inventory read the site makes leaves from ONE datacenter IP, and Steam
 // throttles that endpoint per IP. Left ungoverned, a handful of simultaneous
-// profile views earns a block that then affects every visitor for far longer
-// than the reads were worth. So: requests are spaced out, a caller that would
-// have to queue too long is turned away, and a 429 trips a circuit breaker that
-// backs off harder each time — because continuing to knock is what keeps a
-// Steam block alive.
+// profile views earns a 429 that then affects every visitor.
+//
+// The numbers come from measuring the endpoint rather than from folklore. It is
+// a rolling window of roughly six requests per minute per calling IP, and it
+// clears after about a minute of complete silence — but only complete silence:
+// requesting during the window keeps resetting it, which is why a naive retry
+// loop looks like an hours-long ban. So we pace under the ceiling, and a 429
+// buys quiet for a bit longer than the window rather than for hours.
 var (
-	minSpacing   = 6 * time.Second  // floor between two Steam inventory reads
-	maxQueueWait = 4 * time.Second  // longer than this and we'd rather serve stale
-	maxBackoff   = 30 * time.Minute // ceiling on the circuit-breaker cool-off
+	minSpacing   = 12 * time.Second // ~5/min, under the measured ~6/min ceiling
+	maxQueueWait = 8 * time.Second  // longer than this and we'd rather serve stale
+	firstBackoff = 90 * time.Second // one window plus margin
+	maxBackoff   = 5 * time.Minute  // ceiling on the circuit-breaker cool-off
 )
 
 type gate struct {
@@ -191,12 +243,14 @@ func (g *gate) reserve(ctx context.Context) error {
 }
 
 // trip opens the circuit after a 429, doubling the cool-off each consecutive
-// strike (5m, 10m, 20m, 30m…).
+// strike (90s, 3m, 5m…). The first wait is deliberately close to the real
+// recovery window — waiting hours for a one-minute problem makes the panel look
+// permanently broken.
 func (g *gate) trip() time.Duration {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.strikes++
-	d := time.Duration(1<<uint(min(g.strikes-1, 3))) * 5 * time.Minute
+	d := firstBackoff << uint(min(g.strikes-1, 3))
 	if d > maxBackoff {
 		d = maxBackoff
 	}
@@ -243,18 +297,37 @@ type steamInv struct {
 			Color    string `json:"color"`
 		} `json:"tags"`
 	} `json:"descriptions"`
-	TotalCount int `json:"total_inventory_count"`
-	Success    int `json:"success"`
+	TotalCount  int    `json:"total_inventory_count"`
+	Success     int    `json:"success"`
+	MoreItems   int    `json:"more_items"`
+	LastAssetID string `json:"last_assetid"`
 }
 
-// Build fetches and aggregates a player's CS2 inventory. A private inventory
-// returns View{Private:true} with no error; ErrRateLimited means Steam turned
-// us away and the caller should fall back to a stored snapshot.
-func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) {
+// errPrivate is the private-inventory signal, unwound in Build.
+var errPrivate = errors.New("steaminv: inventory is private")
+
+// maxPages bounds a single build. Steam clamps a page at 2000 items and every
+// page spends a slot in the same per-minute budget, so one enormous inventory
+// must not eat the whole site's allowance.
+const maxPages = 4
+
+// fetchPage reads one page of the inventory, starting after cursor when given.
+// Status code alone decides the outcome — Steam's 403 (private) and 429
+// (throttled) bodies are both the literal bytes "null", so the body can never
+// be used to tell them apart.
+func fetchPage(ctx context.Context, hc *http.Client, steam64 uint64, cursor string) (*steamInv, error) {
 	if err := steamGate.reserve(ctx); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf(inventoryURL, steam64), nil)
+	u := fmt.Sprintf(inventoryURL, steam64)
+	if cursor != "" {
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + "start_assetid=" + url.QueryEscape(cursor)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -271,9 +344,10 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	case http.StatusOK:
 		steamGate.clear()
 	case http.StatusForbidden, http.StatusUnauthorized:
-		// A real answer about a real profile — Steam is talking to us fine.
-		steamGate.clear()
-		return &View{Private: true, FetchedAt: time.Now().UTC().Format(time.RFC3339)}, nil
+		// A real answer about a real profile, so we are not blocked — but a
+		// 403 still spends a slot in Steam's window, so the strike count
+		// stays where it is rather than being reset.
+		return nil, errPrivate
 	case http.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w (cooling off for %s)", ErrRateLimited, steamGate.trip().Round(time.Second))
 	case http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
@@ -285,9 +359,62 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&inv); err != nil {
 		return nil, fmt.Errorf("steaminv: decode: %w", err)
 	}
-	if inv.Success != 1 && len(inv.Assets) == 0 {
-		// Steam answers 200 {"success": false} for some private inventories
+	return &inv, nil
+}
+
+// Build fetches and aggregates a player's CS2 inventory, following Steam's
+// paging cursor so a large collection isn't silently cut off at the first
+// page. A private inventory returns View{Private:true} with no error;
+// ErrRateLimited means Steam turned us away and the caller should fall back to
+// a stored snapshot.
+func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) {
+	private := func() (*View, error) {
 		return &View{Private: true, FetchedAt: time.Now().UTC().Format(time.RFC3339)}, nil
+	}
+
+	var inv steamInv
+	seenDesc := map[string]bool{} // descriptions repeat across pages
+	truncated := false
+	cursor := ""
+	for page := 0; ; page++ {
+		p, err := fetchPage(ctx, hc, steam64, cursor)
+		if err != nil {
+			if errors.Is(err, errPrivate) {
+				return private()
+			}
+			if page == 0 {
+				return nil, err
+			}
+			// Later pages failing still leaves a real, if partial, picture.
+			truncated = true
+			break
+		}
+		inv.Assets = append(inv.Assets, p.Assets...)
+		for _, d := range p.Descriptions {
+			k := d.ClassID + "_" + d.InstanceID
+			if seenDesc[k] {
+				continue
+			}
+			seenDesc[k] = true
+			inv.Descriptions = append(inv.Descriptions, d)
+		}
+		if page == 0 {
+			inv.Success, inv.TotalCount = p.Success, p.TotalCount
+		}
+		if p.MoreItems != 1 || p.LastAssetID == "" {
+			break
+		}
+		if page+1 >= maxPages {
+			truncated = true
+			break
+		}
+		cursor = p.LastAssetID
+	}
+
+	if inv.Success != 1 && len(inv.Assets) == 0 {
+		// Defensive: the live private path is a 403, but Steam has historically
+		// also answered 200 {"success": false} here.
+		return private()
 	}
 
 	// asset counts per class+instance → grouped items
@@ -298,7 +425,12 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	pm := prices(ctx, hc)
 
 	items := make([]Item, 0, len(inv.Descriptions))
-	v := &View{ItemCount: len(inv.Assets), FetchedAt: time.Now().UTC().Format(time.RFC3339)}
+	v := &View{
+		ItemCount:  len(inv.Assets),
+		TotalItems: inv.TotalCount,
+		Truncated:  truncated,
+		FetchedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
 	catMap := map[string]*Category{}
 	rarMap := map[string]*RarityBand{}
 	for _, d := range inv.Descriptions {
