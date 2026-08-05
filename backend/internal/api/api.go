@@ -608,7 +608,28 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
-		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
+		func() (*leetify.Profile, error) {
+			p, err := s.leetify.GetProfile(r.Context(), id)
+			if err != nil {
+				return nil, err
+			}
+			// Enrich faceit rows with FACEIT's OWN per-match elo (+/− change) —
+			// the only surface that still has it (Leetify's copy is null on
+			// recent games). Best-effort: no FACEIT key, an unknown player or
+			// the stats host blocking us just leaves the chained values.
+			if s.faceit != nil && s.faceit.HasKey() {
+				if fp, ferr := s.faceit.GetProfile(r.Context(), id); ferr == nil && fp != nil {
+					if hist, herr := s.faceit.EloHistory(r.Context(), fp.PlayerID, 300); herr == nil && len(hist) > 0 {
+						pts := make([]leetify.FaceitEloGame, len(hist))
+						for i, h := range hist {
+							pts[i] = leetify.FaceitEloGame{Date: h.Date, Map: h.Map, Elo: h.Elo, Delta: h.EloDelta, HasDelta: h.HasDelta}
+						}
+						p.ApplyFaceitElo(pts)
+					}
+				}
+			}
+			return p, nil
+		})
 	if notFound {
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
 		return

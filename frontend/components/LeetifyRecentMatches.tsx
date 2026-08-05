@@ -1127,10 +1127,9 @@ export function LeetifyRecentMatches({
       <p className="mt-1.5 text-[10px] text-faint">
         Rank shows the Premier rating / FACEIT elo you carried into the game → what you left with,
         and the change. Badges carry the in-game tier colour, so a rating crossing a bracket
-        changes colour too. Ratings come via Leetify, and they don&apos;t receive one for every
-        game — notably, recent FACEIT matches often arrive without elo (FACEIT stopped exposing
-        it), so those show the level badge alone rather than an invented number. K-D per game via
-        Leetify.
+        changes colour too. FACEIT elo movement comes straight from FACEIT&apos;s own match
+        history where available; Premier ratings via Leetify. Games with no recorded rating show
+        the level badge alone rather than an invented number. K-D per game via Leetify.
       </p>
     </div>
   );

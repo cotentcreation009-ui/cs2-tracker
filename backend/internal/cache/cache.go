@@ -78,9 +78,9 @@ func ProfileKey(steamID uint64) string {
 // Cache keys for live third-party payloads (TTL-expired, not invalidated).
 // LeetifyKey caches a player's live Leetify profile. v2: per-game kills/deaths,
 // FACEIT elo and rating movement were added to the payload — the bump drops
-// old-shape entries (including the 24h stale copy) the moment this deploys,
+// old-shape entries the moment this deploys (v3: FACEIT-authoritative elo),
 // instead of serving matches with no K-D until they age out.
-func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:v2:%d", steamID) }
+func LeetifyKey(steamID uint64) string { return fmt.Sprintf("cs2:leetify:v3:%d", steamID) }
 func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", steamID) }
 
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game

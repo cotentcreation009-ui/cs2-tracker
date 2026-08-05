@@ -297,6 +297,65 @@ func computeRankDeltas(ms []RecentMatch) {
 	}
 }
 
+// FaceitEloGame is a per-match elo point from FACEIT's own history (fetched
+// by the faceit package), used to enrich faceit rows here.
+type FaceitEloGame struct {
+	Date     time.Time
+	Map      string // "de_overpass"
+	Elo      int    // after the match
+	Delta    int
+	HasDelta bool
+}
+
+// ApplyFaceitElo overwrites faceit rows' elo movement with FACEIT's OWN
+// per-match numbers — authoritative, unlike the chained Leetify-legacy elo
+// (which is null on recent games). Rows match on map + closest finish time
+// within 30 minutes; unmatched rows keep whatever the chain derived.
+func (p *Profile) ApplyFaceitElo(hist []FaceitEloGame) {
+	if len(hist) == 0 {
+		return
+	}
+	apply := func(ms []RecentMatch) {
+		for i := range ms {
+			m := &ms[i]
+			if m.DataSource != "faceit" {
+				continue
+			}
+			at, err := time.Parse(time.RFC3339, m.FinishedAt)
+			if err != nil {
+				continue
+			}
+			var best *FaceitEloGame
+			bestGap := 30 * time.Minute
+			for j := range hist {
+				g := &hist[j]
+				if g.Elo <= 0 || !strings.EqualFold(g.Map, m.MapName) {
+					continue
+				}
+				gap := at.Sub(g.Date)
+				if gap < 0 {
+					gap = -gap
+				}
+				if gap < bestGap {
+					bestGap = gap
+					best = g
+				}
+			}
+			if best == nil {
+				continue
+			}
+			m.Elo = best.Elo
+			if best.HasDelta {
+				d := best.Delta
+				m.RankDelta = &d
+				m.RankBefore = best.Elo - best.Delta
+			}
+		}
+	}
+	apply(p.RecentMatches)
+	apply(p.FaceitMatches)
+}
+
 func transientStatus(code int) bool {
 	switch code {
 	case http.StatusTooManyRequests, http.StatusBadGateway,
