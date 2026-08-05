@@ -429,6 +429,10 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(ferr, faceit.ErrNoDemo), errors.Is(ferr, faceit.ErrNotFound):
 			fail(http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old)")
 			return
+		case errors.Is(ferr, faceit.ErrInvalidKey):
+			s.log.Error("FACEIT rejected the configured API key (invalid_token) — replace FACEIT_API_KEY with a current key from developers.faceit.com")
+			fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're fixing our connection to FACEIT")
+			return
 		case errors.Is(ferr, faceit.ErrNoDownloadScope), errors.Is(ferr, faceit.ErrNoAPIKey):
 			// The app is approved but the configured token lacks the Downloads
 			// scope — FACEIT issues that as a SEPARATE access token, so the fix

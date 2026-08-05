@@ -10,11 +10,12 @@
 package faceit
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,6 +31,10 @@ var (
 	// ErrNoDemo means the match exists but exposes no demo file (too old, not
 	// finished, or FACEIT didn't record one).
 	ErrNoDemo = errors.New("faceit: match has no demo available")
+	// ErrInvalidKey means FACEIT rejected the key itself (400 invalid_token —
+	// revoked, rotated or mistyped). Distinct from ErrNoAPIKey so operators get
+	// "replace the key" rather than "configure a key".
+	ErrInvalidKey = errors.New("faceit: api key was rejected (invalid_token)")
 	// ErrNoDownloadScope means the API key was rejected by FACEIT's Download API —
 	// demo downloads need the separate "Download API" scope enabled for the key in
 	// the FACEIT developer portal (demo CDN URLs are not directly fetchable).
@@ -298,6 +303,11 @@ func (c *Client) SignDemoURL(ctx context.Context, resourceURL string) (string, e
 		return "", ErrNoDownloadScope
 	case http.StatusNotFound:
 		return "", ErrNoDemo
+	case http.StatusBadRequest:
+		if b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12)); isInvalidToken(b) {
+			return "", ErrInvalidKey
+		}
+		return "", fmt.Errorf("faceit: download-url unexpected status %d", resp.StatusCode)
 	default:
 		return "", fmt.Errorf("faceit: download-url unexpected status %d", resp.StatusCode)
 	}
@@ -327,9 +337,23 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 		return ErrNotFound
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return ErrNoAPIKey
+	case http.StatusBadRequest:
+		// A revoked/rotated key answers 400 {"error":"invalid_token"} rather
+		// than 401 — without this it looked like a server bug ("internal
+		// error") instead of "the key needs replacing".
+		if b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12)); isInvalidToken(b) {
+			return ErrInvalidKey
+		}
+		return fmt.Errorf("faceit: unexpected status %d", resp.StatusCode)
 	default:
 		return fmt.Errorf("faceit: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// isInvalidToken spots FACEIT's "the key itself is bad" response body.
+func isInvalidToken(body []byte) bool {
+	s := strings.ToLower(string(body))
+	return strings.Contains(s, "invalid_token") || strings.Contains(s, "token was not recognised")
 }
 
 func transientStatus(code int) bool {
