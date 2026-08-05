@@ -870,6 +870,12 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, faceit.ErrInvalidKey) {
+			// The key is revoked/rotated — an operator problem, not a user one.
+			s.log.Error("FACEIT rejected the configured API key (invalid_token) — replace FACEIT_API_KEY with a current key from developers.faceit.com")
+			writeError(w, http.StatusServiceUnavailable, "FACEIT data is temporarily unavailable")
+			return
+		}
 		s.serverError(w, "faceit profile", err)
 		return
 	}
@@ -890,7 +896,7 @@ func (s *Server) handleFaceitResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.faceit.ResolveNickname(r.Context(), nick)
-	if errors.Is(err, faceit.ErrNotFound) || errors.Is(err, faceit.ErrNoAPIKey) {
+	if errors.Is(err, faceit.ErrNotFound) || errors.Is(err, faceit.ErrNoAPIKey) || errors.Is(err, faceit.ErrInvalidKey) {
 		writeError(w, http.StatusNotFound, "no CS2 SteamID for that FACEIT nickname")
 		return
 	}
