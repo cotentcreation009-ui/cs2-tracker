@@ -48,6 +48,10 @@ type AppliedMod struct {
 	Kind string `json:"kind"` // "sticker" | "charm" | "patch"
 	Name string `json:"name"`
 	Icon string `json:"icon"`
+	// Price is what this sticker/charm sells for on its own (same
+	// realized-median-first sourcing as item prices). Notional once applied —
+	// scraping a sticker destroys it — but it is how crafts are appraised.
+	Price float64 `json:"price,omitempty"`
 }
 
 // Copy is one physical copy's own numbers: the paint float (wear), the paint
@@ -790,6 +794,16 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			blocks = append(blocks, b.Value)
 		}
 		it.Applied = parseApplied(blocks)
+		// Applied mods are market items in their own right — the market name
+		// is just the kind prefixed ("Sticker | MICHU | London 2018"), so the
+		// price map we already hold values them too.
+		for i := range it.Applied {
+			m := &it.Applied[i]
+			mk := strings.ToUpper(m.Kind[:1]) + m.Kind[1:] + " | " + m.Name
+			if p, ok := pm[mk]; ok {
+				m.Price = p.USD
+			}
+		}
 		for _, aid := range groupAssets[gk] {
 			if c, ok := propsByAsset[aid]; ok {
 				it.Copies = append(it.Copies, c)

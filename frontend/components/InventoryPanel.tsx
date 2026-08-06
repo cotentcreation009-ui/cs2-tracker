@@ -11,6 +11,9 @@ interface AppliedMod {
   kind: "sticker" | "charm" | "patch";
   name: string;
   icon: string;
+  // what this sticker/charm sells for on its own — notional once applied
+  // (scraping destroys it), but it's how crafts are appraised
+  price?: number;
 }
 
 interface InvCopy {
@@ -722,23 +725,44 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
           </div>
         ) : null}
 
-        {/* applied stickers / charms / patches, by name */}
+        {/* applied stickers / charms / patches, by name and worth */}
         {it.applied?.length ? (
-          <div className="mt-4">
-            <div className="stat-label mb-1.5">Applied</div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {it.applied.map((m, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg border border-line bg-panel2/40 px-2 py-1.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={m.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-auto shrink-0" />
-                  <div className="min-w-0">
-                    <p className="truncate text-[11px] font-semibold leading-tight text-ink">{m.name}</p>
-                    <p className="text-[9px] uppercase tracking-wide text-faint">{m.kind}</p>
-                  </div>
+          (() => {
+            const stickerSum = it.applied.reduce((a, m) => a + (m.price ?? 0), 0);
+            return (
+              <div className="mt-4">
+                <div className="mb-1.5 flex items-baseline justify-between">
+                  <span className="stat-label">Applied</span>
+                  {stickerSum > 0 ? (
+                    <span
+                      className="text-[11px] text-muted"
+                      title="What these would cost to buy separately. Applied stickers can't be removed intact, so this is how a craft is appraised, not money you can extract."
+                    >
+                      worth <span className="font-bold tabular-nums text-ink">{usd(stickerSum)}</span>{" "}
+                      separately
+                    </span>
+                  ) : null}
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {it.applied.map((m, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-lg border border-line bg-panel2/40 px-2 py-1.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={m.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-auto shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-semibold leading-tight text-ink">{m.name}</p>
+                        <p className="flex items-baseline justify-between gap-1 text-[9px] uppercase tracking-wide text-faint">
+                          {m.kind}
+                          {m.price ? (
+                            <span className="font-bold normal-case tabular-nums text-muted">{usd(m.price)}</span>
+                          ) : null}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()
         ) : null}
 
         {/* price provenance */}

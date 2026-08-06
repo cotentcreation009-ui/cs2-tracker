@@ -45,7 +45,8 @@ const invFixture = `{
 const pricesFixture = `[
   {"market_hash_name": "Dreams & Nightmares Case", "suggested_price": 1.50, "min_price": 1.20},
   {"market_hash_name": "StatTrak™ AK-47 | Redline (Field-Tested)", "suggested_price": 45.00, "min_price": 41.00},
-  {"market_hash_name": "Unrelated Item", "suggested_price": 9.99}
+  {"market_hash_name": "Unrelated Item", "suggested_price": 9.99},
+  {"market_hash_name": "Sticker | Seeing Red", "suggested_price": 80.00}
 ]`
 
 // The sales feed: the case has enough 30-day volume for its median to win over
@@ -374,6 +375,14 @@ func TestBuildAttachesStickersAndCopies(t *testing.T) {
 		stickered.Applied[1].Name != "Assassin (Holo)" ||
 		!strings.HasPrefix(stickered.Applied[0].Icon, "https://cdn.steamstatic.com/") {
 		t.Errorf("stickers parsed wrong: %+v", stickered.Applied)
+	}
+	// stickers are market items too — "Sticker | Seeing Red" is in the price
+	// feed at 80.00, and the applied entry must carry it
+	if stickered.Applied[0].Price != 80.00 {
+		t.Errorf("sticker price = %.2f, want 80.00 from the price map", stickered.Applied[0].Price)
+	}
+	if stickered.Applied[1].Price != 0 {
+		t.Errorf("unlisted sticker should carry no price, got %.2f", stickered.Applied[1].Price)
 	}
 	if len(stickered.Copies) != 1 || stickered.Copies[0].Float == nil ||
 		*stickered.Copies[0].Float != 0.215 || stickered.Copies[0].Seed != 420 ||
