@@ -94,6 +94,9 @@ type Server struct {
 	predReconAt time.Time
 	// lp resolves pro-player photos from Liquipedia (rate-limited, cache-heavy).
 	lp *liquipedia.Client
+	// invBackfill repairs inventories that Steam's throttle turned away, so a
+	// failed request still leaves the next one a snapshot to serve.
+	invBackfill *backfill
 	// invHTTP fetches Steam community inventories + Skinport prices (both
 	// public, no keys; kept separate so their timeouts don't affect API calls).
 	invHTTP *http.Client
@@ -120,7 +123,7 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}}
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
 }
 
 // StartProMatches launches the GRID poller's background loops (a no-op when the

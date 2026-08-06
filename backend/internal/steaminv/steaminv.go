@@ -298,11 +298,20 @@ func prices(ctx context.Context, hc *http.Client) map[string]Price {
 // loop looks like an hours-long ban. So we pace under the ceiling, and a 429
 // buys quiet for a bit longer than the window rather than for hours.
 var (
-	minSpacing   = 12 * time.Second // ~5/min, under the measured ~6/min ceiling
+	// 3/min. The measured ceiling is ~6/min, and running at 5/min left no
+	// headroom at all: one burst tipped it over and the breaker then spent
+	// longer closed than the reads were worth. Half the budget is the rate
+	// that actually sustains, and the backfill worker means a slower rate no
+	// longer costs anyone their page.
+	minSpacing   = 20 * time.Second
 	maxQueueWait = 8 * time.Second  // longer than this and we'd rather serve stale
 	firstBackoff = 90 * time.Second // one window plus margin
 	maxBackoff   = 5 * time.Minute  // ceiling on the circuit-breaker cool-off
 )
+
+// Spacing is the enforced gap between Steam reads, for callers that pace their
+// own work against the same budget.
+func Spacing() time.Duration { return minSpacing }
 
 type gate struct {
 	mu           sync.Mutex

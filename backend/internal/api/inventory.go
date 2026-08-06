@@ -88,6 +88,12 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		}
 		if !errors.Is(err, steaminv.ErrRateLimited) {
 			s.log.Warn("steam inventory", "steam_id", id, "err", err)
+		} else {
+			// Throttled, and we have nothing stored. Hand the profile to the
+			// backfill worker so this request still leaves the next one
+			// something to serve — otherwise a busy profile can be asked for
+			// forever and read never.
+			s.invBackfill.enqueue(id)
 		}
 		retry := int(steaminv.RetryAfter().Round(time.Second).Seconds())
 		if retry == 0 {

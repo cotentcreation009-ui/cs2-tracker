@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,14 +23,51 @@ func (deadTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("steam unreachable")
 }
 
-// routerNoSteam builds a router whose inventory fetches can never reach Steam,
-// standing in for the throttled/blocked case.
-func routerNoSteam(store Store) http.Handler {
+// throttledTransport answers every inventory read the way a rate-limited Steam
+// does: 429 with a body of literally "null".
+type throttledTransport struct{}
+
+func (throttledTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       io.NopCloser(strings.NewReader("null")),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func serverWith(store Store, rt http.RoundTripper) *Server {
 	cfg := &config.Config{CORSOrigins: []string{"*"}}
 	s := NewServer(cfg, store, steam.New(""), nil, nil, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	s.invHTTP = &http.Client{Transport: deadTransport{}}
-	return s.Router()
+	s.invHTTP = &http.Client{Transport: rt}
+	return s
+}
+
+// routerNoSteam builds a router whose inventory fetches can never reach Steam,
+// standing in for the throttled/blocked case.
+func routerNoSteam(store Store) http.Handler {
+	return serverWith(store, deadTransport{}).Router()
+}
+
+// A throttled request must leave the profile queued for repair. Without this,
+// a request that can't be served does nothing at all — no snapshot is written,
+// so the next visitor to the same profile gets the same nothing, forever.
+func TestInventoryQueuesBackfillWhenThrottled(t *testing.T) {
+	s := serverWith(&fakeStore{}, throttledTransport{})
+	r := s.Router()
+
+	v := decodeInv(t, doGET(r, invPath).Body.Bytes())
+	if !v.Unavailable {
+		t.Fatalf("want unavailable while throttled, got %+v", v)
+	}
+	select {
+	case got := <-s.invBackfill.ch:
+		if got != 76561198000000001 {
+			t.Errorf("queued %d, want the requested profile", got)
+		}
+	default:
+		t.Error("throttled request left nothing queued — the snapshot can never fill")
+	}
 }
 
 func decodeInv(t *testing.T, body []byte) steaminv.View {
