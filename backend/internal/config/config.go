@@ -42,6 +42,11 @@ type Config struct {
 	// empty falls back to FaceitAPIKey.
 	FaceitDownloadKey string
 
+	// SteamApisKey enables the steamapis.com inventory fallback (free key from
+	// steamapis.com, 500 requests/cycle on the free tier). Empty means the
+	// only inventory source is Steam's own IP-throttled endpoint.
+	SteamApisKey string
+
 	// GRID esports live-data API (pro-match board). The whole feature is gated on
 	// GRIDAPIKey: with no key (and GRIDMock off) the endpoint reports disabled and
 	// the poller never starts. GRIDMock serves a small set of realistic sample
@@ -113,6 +118,7 @@ func Load() (*Config, error) {
 		FaceitBaseURL:     getEnv("FACEIT_BASE_URL", "https://open.faceit.com/data/v4"),
 		FaceitAPIKey:      getEnv("FACEIT_API_KEY", ""),
 		FaceitDownloadKey: getEnv("FACEIT_DOWNLOAD_API_KEY", ""),
+		SteamApisKey:      getEnv("STEAMAPIS_KEY", ""),
 		GRIDAPIKey:        getEnv("GRID_API_KEY", ""),
 		GRIDBaseURL:       getEnv("GRID_BASE_URL", "https://api-op.grid.gg"),
 		GRIDMock:          getEnv("GRID_MOCK", "") == "1",

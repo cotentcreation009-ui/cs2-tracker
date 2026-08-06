@@ -320,6 +320,53 @@ func TestBuildFollowsPagination(t *testing.T) {
 	}
 }
 
+// When Steam refuses and a steamapis key is configured, the read must go
+// through and come back marked with its source — a Steam penalty must not
+// take the whole feature down when a second road exists.
+func TestBuildFallsBackToSteamapis(t *testing.T) {
+	hc := fixtureServers(t, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+	t.Cleanup(steamGate.clear)
+
+	// steamapis serves the same shape from its own path on the fixture server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "test-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(invFixture))
+	}))
+	t.Cleanup(srv.Close)
+	prevURL := steamapisURL
+	steamapisURL = srv.URL + "/v2/steam/users/%d/inventory/730/2"
+	SetFallbackKey("test-key")
+	t.Cleanup(func() { steamapisURL = prevURL; SetFallbackKey("") })
+
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatalf("fallback should have carried the read: %v", err)
+	}
+	if v.Source != "steamapis" {
+		t.Errorf("source = %q, want steamapis so the origin is visible", v.Source)
+	}
+	if v.ItemCount != 5 || v.DistinctCount != 3 {
+		t.Errorf("items=%d distinct=%d — fallback data not aggregated normally", v.ItemCount, v.DistinctCount)
+	}
+
+	// The breaker tripped on Steam's 429; the fallback must ALSO carry a read
+	// that never reaches Steam because the breaker holds the door.
+	if RetryAfter() <= 0 {
+		t.Fatal("expected the breaker open after Steam's 429")
+	}
+	before := reqCount.Load()
+	v2, err := Build(context.Background(), hc, 76561198000000001)
+	if err != nil || v2.Source != "steamapis" {
+		t.Fatalf("read during open breaker: err=%v source=%q", err, v2.Source)
+	}
+	if got := reqCount.Load() - before; got != 0 {
+		t.Errorf("%d request(s) reached Steam while the breaker was open", got)
+	}
+}
+
 // A 429 must report itself as a rate limit (so callers serve a snapshot rather
 // than an error) and stop further reads for a while — continuing to knock is
 // what turns a short Steam throttle into a long block.

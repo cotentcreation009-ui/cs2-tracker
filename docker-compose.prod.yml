@@ -50,6 +50,9 @@ services:
       FACEIT_API_KEY: ${FACEIT_API_KEY:-}
       FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
       LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
+      # Inventory fallback: reads Steam refuses go via steamapis.com (key-metered,
+      # not IP-throttled), so a Steam penalty doesn't blank the Inventory panel.
+      STEAMAPIS_KEY: ${STEAMAPIS_KEY:-}
       # GRID (live pro-matches board). Empty = feature disabled (nav still shows
       # but the board reads "coming soon"). GRID_MOCK=1 serves sample data.
       GRID_API_KEY: ${GRID_API_KEY:-}
