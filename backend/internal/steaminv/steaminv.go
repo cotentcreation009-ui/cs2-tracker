@@ -98,6 +98,11 @@ type View struct {
 	// ItemCount when Truncated.
 	TotalItems int `json:"total_items,omitempty"`
 
+	// Source records where the item list came from when it wasn't Steam
+	// directly ("steamapis") — diagnostic, and lets ops verify the fallback
+	// is carrying reads during a Steam penalty.
+	Source string `json:"source,omitempty"`
+
 	TotalValue  float64 `json:"total_value"`
 	PricedItems int     `json:"priced_items"`
 	// RealizedItems is how many of PricedItems are valued at a median of real
@@ -425,6 +430,73 @@ type steamInv struct {
 // errPrivate is the private-inventory signal, unwound in Build.
 var errPrivate = errors.New("steaminv: inventory is private")
 
+// --- steamapis fallback -----------------------------------------------------
+//
+// Steam throttles the community endpoint per source IP, and the VM has exactly
+// one. When Steam refuses us, steamapis.com serves the same JSON shape from
+// its own infrastructure, authenticated by key instead of by IP reputation —
+// so a Steam penalty stops taking the whole feature down with it. Steam stays
+// primary because it is free and unmetered; the fallback only spends its
+// budget while Steam is refusing, which is also exactly when leaving Steam
+// alone helps the penalty clear.
+var steamapisURL = "https://api.steamapis.com/v2/steam/users/%d/inventory/730/2"
+
+var (
+	fallbackMu  sync.RWMutex
+	fallbackKey string
+)
+
+// SetFallbackKey configures the steamapis key. Empty disables the fallback.
+func SetFallbackKey(k string) {
+	fallbackMu.Lock()
+	fallbackKey = k
+	fallbackMu.Unlock()
+}
+
+func getFallbackKey() string {
+	fallbackMu.RLock()
+	defer fallbackMu.RUnlock()
+	return fallbackKey
+}
+
+// fetchPageFallback reads one page via steamapis. No gate: their service is
+// key-metered, not IP-throttled, and every request here is one Steam never
+// sees. Errors are deliberately NOT mapped to errPrivate — a 403 from a proxy
+// can mean a key or account problem, and "private" is a claim about the
+// player we only make on Steam's own word.
+func fetchPageFallback(ctx context.Context, hc *http.Client, steam64 uint64, cursor string) (*steamInv, error) {
+	u := fmt.Sprintf(steamapisURL, steam64)
+	if cursor != "" {
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + "start_assetid=" + url.QueryEscape(cursor)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-api-key", getFallbackKey())
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("steaminv: steamapis fetch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		slog.Warn("steamapis fallback failed", "status", resp.StatusCode,
+			"detail", strings.TrimSpace(string(snippet)))
+		return nil, fmt.Errorf("steaminv: steamapis status %d", resp.StatusCode)
+	}
+	var inv steamInv
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&inv); err != nil {
+		return nil, fmt.Errorf("steaminv: steamapis decode: %w", err)
+	}
+	return &inv, nil
+}
+
 // maxPages bounds a single build. Steam clamps a page at 2000 items and every
 // page spends a slot in the same per-minute budget, so one enormous inventory
 // must not eat the whole site's allowance.
@@ -501,9 +573,19 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	var inv steamInv
 	seenDesc := map[string]bool{} // descriptions repeat across pages
 	truncated := false
+	viaFallback := false
 	cursor := ""
 	for page := 0; ; page++ {
 		p, err := fetchPage(ctx, hc, steam64, cursor)
+		if errors.Is(err, ErrRateLimited) && getFallbackKey() != "" {
+			// Steam is refusing — either a live 429 or the breaker holding the
+			// door shut. Both mean the same thing here: this read goes through
+			// steamapis, and Steam gets the silence its penalty needs.
+			p, err = fetchPageFallback(ctx, hc, steam64, cursor)
+			if err == nil {
+				viaFallback = true
+			}
+		}
 		if err != nil {
 			if errors.Is(err, errPrivate) {
 				return private()
@@ -560,6 +642,9 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		TotalItems: inv.TotalCount,
 		Truncated:  truncated,
 		FetchedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	if viaFallback {
+		v.Source = "steamapis"
 	}
 	catMap := map[string]*Category{}
 	rarMap := map[string]*RarityBand{}

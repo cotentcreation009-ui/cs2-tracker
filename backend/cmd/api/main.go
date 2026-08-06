@@ -22,6 +22,7 @@ import (
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
+	"github.com/cs2tracker/server/internal/steaminv"
 )
 
 func main() {
@@ -64,6 +65,10 @@ func run(log *slog.Logger) error {
 	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey, faceit.WithDownloadKey(cfg.FaceitDownloadKey))
 	if !faceitClient.HasKey() {
 		log.Warn("no FACEIT_API_KEY set — the FACEIT panel is disabled until provided")
+	}
+	steaminv.SetFallbackKey(cfg.SteamApisKey)
+	if cfg.SteamApisKey == "" {
+		log.Info("no STEAMAPIS_KEY set — inventory reads depend entirely on Steam tolerating this IP")
 	}
 
 	// Redis-backed queue + cache are best-effort: the API still serves reads if
