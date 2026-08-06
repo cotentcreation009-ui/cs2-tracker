@@ -55,6 +55,10 @@ type Item struct {
 	// days. Non-zero means Price is the median of those sales; zero means it
 	// is Skinport's suggested price, which nobody has necessarily paid.
 	SaleVolume int `json:"sale_volume,omitempty"`
+	// PriceVariants > 1 means several finishes share this market name (Doppler
+	// phases and their rare variants) and Price is the median across them —
+	// which finish this one is cannot be read from a public inventory.
+	PriceVariants int `json:"price_variants,omitempty"`
 	// Marketable and Tradable are why an item can be unpriced: a market price
 	// only exists for something the market will carry. Steam gives us both, so
 	// an item with no price can say which kind of "no" it is rather than
@@ -121,6 +125,22 @@ type Price struct {
 	// Volume is the 30-day sale count behind a realized median; 0 means this
 	// is Skinport's suggested price rather than something anyone paid.
 	Volume int
+	// Variants is how many separately-priced finishes share this one market
+	// name (Doppler phases, Ruby/Emerald/Sapphire/Black Pearl). More than one
+	// means the figure is a median across them rather than this item's price,
+	// because which finish someone owns is not knowable from a public
+	// inventory — the phase lives in inspect data Steam does not publish.
+	Variants int
+}
+
+// median of a non-empty slice; sorts in place.
+func median(v []float64) float64 {
+	sort.Float64s(v)
+	n := len(v)
+	if n%2 == 1 {
+		return v[n/2]
+	}
+	return (v[n/2-1] + v[n/2]) / 2
 }
 
 // minVolume is how many sales a median needs before we prefer it. A median of
@@ -211,14 +231,24 @@ func prices(ctx context.Context, hc *http.Client) map[string]Price {
 	if err := fetchSkinport(ctx, hc, skinportURL, &listed); err != nil {
 		return priceMap // stale-if-error: keep whatever we had
 	}
-	m := make(map[string]Price, len(listed))
+	// Skinport publishes one row per finish, so a Doppler knife arrives as five
+	// or six rows sharing a market name. Assigning them into the map one by one
+	// would leave whichever landed last — routinely the Ruby or Emerald, which
+	// is worth several times a normal phase. Collect every row and take the
+	// median instead: the finish someone actually owns is not knowable from a
+	// public inventory, and a median is not dragged by the rare ones.
+	listedPrices := make(map[string][]float64, len(listed))
 	for _, r := range listed {
 		switch {
 		case r.Suggested != nil && *r.Suggested > 0:
-			m[r.Name] = Price{USD: *r.Suggested}
+			listedPrices[r.Name] = append(listedPrices[r.Name], *r.Suggested)
 		case r.Min != nil && *r.Min > 0:
-			m[r.Name] = Price{USD: *r.Min}
+			listedPrices[r.Name] = append(listedPrices[r.Name], *r.Min)
 		}
+	}
+	m := make(map[string]Price, len(listedPrices))
+	for name, ps := range listedPrices {
+		m[name] = Price{USD: median(ps), Variants: len(ps)}
 	}
 
 	// Realized sales override the estimate where the market is liquid enough
@@ -232,10 +262,20 @@ func prices(ctx context.Context, hc *http.Client) map[string]Price {
 		} `json:"last_30_days"`
 	}
 	if err := fetchSkinport(ctx, hc, skinportSalesURL, &sold); err == nil {
+		soldPrices := make(map[string][]float64, len(sold))
+		soldVolume := make(map[string]int, len(sold))
 		for _, r := range sold {
 			if r.Last.Volume >= minVolume && r.Last.Median > 0 {
-				m[r.Name] = Price{USD: r.Last.Median, Volume: r.Last.Volume}
+				soldPrices[r.Name] = append(soldPrices[r.Name], r.Last.Median)
+				soldVolume[r.Name] += r.Last.Volume
 			}
+		}
+		for name, ps := range soldPrices {
+			variants := len(ps)
+			if v := m[name].Variants; v > variants {
+				variants = v
+			}
+			m[name] = Price{USD: median(ps), Volume: soldVolume[name], Variants: variants}
 		}
 	}
 
@@ -539,6 +579,9 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		if p, ok := pm[d.MarketName]; ok {
 			it.Price = p.USD
 			it.SaleVolume = p.Volume
+			if p.Variants > 1 {
+				it.PriceVariants = p.Variants
+			}
 			v.TotalValue += p.USD * float64(n)
 			v.PricedItems += n
 			if p.Volume > 0 {

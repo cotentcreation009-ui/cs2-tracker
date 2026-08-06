@@ -23,6 +23,10 @@ interface InvItem {
   // days; absent means it's Skinport's suggested price, which nobody has
   // necessarily paid.
   sale_volume?: number;
+  // >1 means several finishes share this market name (Doppler phases and their
+  // rare variants) and price is the median across them — which one this is
+  // can't be read from a public inventory.
+  price_variants?: number;
   marketable?: boolean;
   tradable?: boolean;
 }
@@ -76,8 +80,8 @@ function priceGap(it: InvItem): { short: string; long: string } | null {
     };
   }
   return {
-    short: "No listings",
-    long: "Sellable, but nobody has one listed on Skinport right now, so there's no price to quote.",
+    short: "No price",
+    long: "Sellable, but with nothing listed on Skinport and too few recent sales to take a median from, there's no figure worth quoting.",
   };
 }
 
@@ -429,8 +433,9 @@ function Collection({ items }: { items: InvItem[] }) {
           <span className="font-semibold text-ink">Not sellable</span>
           {" means Steam doesn't allow the item on the Community Market at all — service medals, "}
           {"coins, badges, applied graffiti, name tags and storage units. "}
-          <span className="font-semibold text-ink">No listings</span>
-          {" means it can be sold, but nobody has one listed on Skinport right now."}
+          <span className="font-semibold text-ink">No price</span>
+          {" means it can be sold, but nothing is listed and too few have sold recently to take a "}
+          {"median from."}
         </p>
       ) : null}
 
@@ -500,6 +505,10 @@ function ItemCard({ it }: { it: InvItem }) {
               it.sale_volume
                 ? `Median of ${it.sale_volume} sales in the last 30 days.`
                 : "Skinport's suggested price — no recent sales to go on."
+            }${
+              it.price_variants
+                ? ` This skin comes in ${it.price_variants} separately-priced finishes and a public inventory doesn't say which one this is, so the figure is the median across them.`
+                : ""
             }`
           : gap
             ? `${it.name} — ${gap.long}`
@@ -527,9 +536,14 @@ function ItemCard({ it }: { it: InvItem }) {
           </span>
         ) : (
           <>
-            <span className="text-xs font-bold tabular-nums text-ink">{usd((it.price ?? 0) * it.count)}</span>
+            <span className="text-xs font-bold tabular-nums text-ink">
+              {it.price_variants ? "~" : ""}
+              {usd((it.price ?? 0) * it.count)}
+            </span>
             {it.count > 1 ? (
               <span className="text-[9px] tabular-nums text-faint">{usd(it.price ?? 0)} ea</span>
+            ) : it.price_variants ? (
+              <span className="text-[9px] text-faint">phase?</span>
             ) : null}
           </>
         )}

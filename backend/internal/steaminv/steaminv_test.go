@@ -16,6 +16,9 @@ import (
 // reqCount counts inventory reads that actually reached the fixture server.
 var reqCount atomic.Int64
 
+// pricesFixtureOverride lets one test serve a different /v1/items body.
+var pricesFixtureOverride string
+
 const invFixture = `{
   "assets": [
     {"classid": "c1", "instanceid": "i1"},
@@ -81,9 +84,17 @@ func fixtureHandler(t *testing.T, inv http.HandlerFunc) *http.Client {
 		}
 		w.Header().Set("Content-Encoding", "br")
 		bw := brotli.NewWriter(w)
-		if strings.Contains(r.URL.Path, "/sales") {
-			_, _ = bw.Write([]byte(salesFixture))
-		} else {
+		switch {
+		case strings.Contains(r.URL.Path, "/sales"):
+			// the phase-split test drives /v1/items only
+			if pricesFixtureOverride != "" {
+				_, _ = bw.Write([]byte(`[]`))
+			} else {
+				_, _ = bw.Write([]byte(salesFixture))
+			}
+		case pricesFixtureOverride != "":
+			_, _ = bw.Write([]byte(pricesFixtureOverride))
+		default:
 			_, _ = bw.Write([]byte(pricesFixture))
 		}
 		_ = bw.Close()
@@ -170,6 +181,54 @@ func TestBuildPrivateInventory(t *testing.T) {
 	}
 	if !v.Private {
 		t.Fatal("expected private flag")
+	}
+}
+
+// Skinport prices each Doppler finish separately under one market name, so a
+// knife arrives as several rows whose prices differ by multiples — a Ruby runs
+// ~6x a normal phase. Which finish someone owns is not knowable from a public
+// inventory, so taking whichever row landed last would value every Doppler at
+// a rare phase and overstate the inventory badly.
+func TestPricesMedianAcrossFinishes(t *testing.T) {
+	const knife = `{"assets":[{"classid":"k1","instanceid":"0"}],
+	 "descriptions":[{"classid":"k1","instanceid":"0","name":"★ Karambit | Doppler (Factory New)",
+	   "market_hash_name":"★ Karambit | Doppler (Factory New)","type":"Knife","marketable":1,
+	   "tags":[{"category":"Type","localized_tag_name":"Knife"}]}],
+	 "total_inventory_count":1,"success":1}`
+	// Phases 1-4 then Ruby last — the order that made last-write-wins pick 9077.
+	const phases = `[
+	  {"market_hash_name":"★ Karambit | Doppler (Factory New)","version":"Phase 1","suggested_price":1440.89},
+	  {"market_hash_name":"★ Karambit | Doppler (Factory New)","version":"Phase 2","suggested_price":1944.50},
+	  {"market_hash_name":"★ Karambit | Doppler (Factory New)","version":"Phase 3","suggested_price":1392.82},
+	  {"market_hash_name":"★ Karambit | Doppler (Factory New)","version":"Phase 4","suggested_price":1456.54},
+	  {"market_hash_name":"★ Karambit | Doppler (Factory New)","version":"Ruby","suggested_price":9077.03}
+	]`
+
+	hc := fixtureHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(knife))
+	})
+	// swap in the phase-split price feed for this test only
+	prev := pricesFixtureOverride
+	pricesFixtureOverride = phases
+	t.Cleanup(func() { pricesFixtureOverride = prev })
+	priceMu.Lock()
+	priceMap, priceAt = nil, time.Time{}
+	priceMu.Unlock()
+
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.TopItems) != 1 {
+		t.Fatalf("want 1 item, got %d", len(v.TopItems))
+	}
+	got := v.TopItems[0]
+	// median of the five = Phase 4's 1456.54, not the Ruby's 9077.03
+	if got.Price < 1456.53 || got.Price > 1456.55 {
+		t.Errorf("price = %.2f, want the 1456.54 median across finishes (Ruby is 9077.03)", got.Price)
+	}
+	if got.PriceVariants != 5 {
+		t.Errorf("price_variants = %d, want 5 so the UI can say the finish is unknown", got.PriceVariants)
 	}
 }
 
