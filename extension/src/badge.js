@@ -53,6 +53,7 @@ const SR = {
     if (data && data.banned) {
       a.classList.add("sr-chip--ban");
       a.title = "VAC/game ban on record — view on StatRun";
+      a.setAttribute("aria-label", a.title);
       a.textContent = "BAN";
       return a;
     }
@@ -66,56 +67,17 @@ const SR = {
         (data.cheat.lowConfidence ? " · low confidence" : "") +
         (data.gap != null ? ` · cross-platform gap ${data.gap >= 0 ? "+" : ""}${data.gap.toFixed(2)}` : "") +
         " — view on StatRun";
+      a.setAttribute("aria-label", a.title);
       a.innerHTML = `<span class="sr-dot"></span>${data.cheat.score}`;
       return a;
     }
     // no data → neutral "view on StatRun" mark
     a.classList.add("sr-chip--neutral");
     a.title = "View this player on StatRun";
+    a.setAttribute("aria-label", a.title);
     a.textContent = "SR";
     return a;
   },
-
-  // A richer card for the Steam profile page.
-  panel(data) {
-    const wrap = document.createElement("div");
-    wrap.className = "sr-panel";
-    wrap.dataset.srPanel = "1";
-
-    const cheat = data && data.cheat;
-    const b = SR.bandOf(cheat);
-    const score = cheat ? `${cheat.score}%` : "—";
-    const bandLabel = data && data.banned ? "Banned" : cheat ? b.label : "Not enough data";
-    const hex = data && data.banned ? SR.BANDS.veryhigh.hex : cheat ? b.hex : "#8b98a9";
-
-    const rank = (label, val) =>
-      val != null && val !== 0
-        ? `<div class="sr-stat"><div class="sr-stat-l">${label}</div><div class="sr-stat-v">${val}</div></div>`
-        : "";
-
-    wrap.innerHTML = `
-      <div class="sr-panel-head">
-        <span class="sr-logo">Stat<b>Run</b></span>
-        <span class="sr-tag">CheatMeter</span>
-      </div>
-      <div class="sr-panel-body">
-        <div class="sr-gauge" style="--sr:${hex}">
-          <div class="sr-gauge-score">${score}</div>
-          <div class="sr-gauge-band">${bandLabel}</div>
-        </div>
-        <div class="sr-stats">
-          ${rank("Premier", data && data.premier ? data.premier.toLocaleString() : null)}
-          ${rank("FACEIT", data && data.faceitLevel ? "Lvl " + data.faceitLevel : null)}
-          ${rank("Elo", data && data.faceitElo ? data.faceitElo.toLocaleString() : null)}
-          ${rank("K/D", data && data.kd ? data.kd.toFixed(2) : null)}
-          ${data && data.gap != null ? rank("MM vs FACEIT", (data.gap >= 0 ? "+" : "") + data.gap.toFixed(2)) : ""}
-        </div>
-      </div>
-      <a class="sr-cta" target="_blank" rel="noreferrer" href="${(data && data.profileUrl) || "https://csrun.win"}">
-        View full report on StatRun →
-      </a>
-      <div class="sr-foot">Signal, not proof — elite legit players score high too.</div>
-    `;
-    return wrap;
-  },
+  // (the old SR.panel Steam card lived here — steam.js builds its own
+  // token-based panel now, and the legacy styles it depended on are gone)
 };

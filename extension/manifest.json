@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "StatRun — CS2 CheatMeter for FACEIT & Steam",
-  "version": "1.0.0",
-  "description": "See each player's CheatMeter risk score, Premier/FACEIT ranks and cross-platform gap right inside FACEIT match rooms and Steam profiles.",
+  "name": "StatRun for FACEIT — CheatMeter, Elo & Cross-Platform Stats",
+  "version": "2.0.0",
+  "description": "Elo deltas, win prediction, map veto stats, CheatMeter risk scores and Premier/Leetify cross-platform ranks — inside FACEIT match rooms and Steam profiles.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -17,10 +17,9 @@
     }
   },
   "options_page": "src/options.html",
-  "permissions": ["storage"],
+  "permissions": ["storage", "notifications"],
   "host_permissions": [
-    "https://csrun.win/*",
-    "https://steamcommunity.run/*"
+    "https://csrun.win/*"
   ],
   "background": {
     "service_worker": "src/background.js"
@@ -28,8 +27,15 @@
   "content_scripts": [
     {
       "matches": ["https://www.faceit.com/*"],
-      "js": ["src/badge.js", "src/faceit.js"],
-      "css": ["src/styles.css"],
+      "js": [
+        "src/lib/api.js",
+        "src/badge.js",
+        "src/faceit.js",
+        "src/matchroom.js",
+        "src/profile.js",
+        "src/automation.js"
+      ],
+      "css": ["src/tokens.css", "src/styles.css", "src/matchroom.css"],
       "run_at": "document_idle"
     },
     {
@@ -37,8 +43,8 @@
         "https://steamcommunity.com/profiles/*",
         "https://steamcommunity.com/id/*"
       ],
-      "js": ["src/badge.js", "src/steam.js"],
-      "css": ["src/styles.css"],
+      "js": ["src/lib/api.js", "src/badge.js", "src/steam.js"],
+      "css": ["src/tokens.css", "src/styles.css"],
       "run_at": "document_idle"
     }
   ]

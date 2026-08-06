@@ -1,73 +1,88 @@
 # StatRun browser extension
 
-Injects StatRun's **CheatMeter** risk score, Premier/FACEIT ranks and the
-cross-platform gap directly into **FACEIT match rooms** and **Steam profiles** —
-so you can size up 9 strangers without leaving the page.
+Elo deltas, win prediction, map-veto stats, CheatMeter risk scores and
+cross-platform Premier/Leetify ranks — inside **FACEIT match rooms**, **FACEIT
+profiles** and **Steam profiles**.
+
+Plain MV3 JavaScript. No build step, no frameworks, no CDN.
 
 ## What it does
 
-- **FACEIT** (`faceit.com/*`): finds every player link on the page (match rooms,
-  team lists, hubs) and drops a compact CheatMeter chip next to each name — the
-  risk score coloured by band, a `BAN` flag for VAC/game bans, click-through to
-  the full StatRun profile.
-- **Steam** (`steamcommunity.com/profiles/*` and `/id/*`): adds a CheatMeter
-  panel under the profile header — score, band, Premier/FACEIT ranks, K/D,
-  cross-platform gap, and a link to the full report.
+**FACEIT match room** (`/cs2/room/{id}`) — the flagship. Two team cards with all
+ten players: avatar, country, level badge, elo, last-30 K/D and win rate, win/loss
+streak, CheatMeter chip, Premier plate and Leetify aim. Each card headlines its
+average elo and this match's elo estimate (`+25 / −25`). Below them, a map panel
+showing how often each team has played every map in the last 30 and how they did
+there — the read you actually want during veto.
 
-All data comes from **one public endpoint** on your own site:
-`GET /api/public/cheatmeter?steamid=…` (or `?faceit=<nickname>`), which reuses the
-exact CheatMeter model from the site. No FACEIT/Steam scraping of private data;
-only public profile stats, with attribution.
+**FACEIT profile** (`/players/{nick}`) — current elo, level badge, progress to the
+next level floor, today's net elo change, and the last ten matches with per-match
+elo deltas.
 
-## Architecture
+**Steam profile** — CheatMeter band, Premier plate, FACEIT level + elo, K/D and the
+cross-platform gap, with a VAC/game-ban banner when one is on record.
 
-```
-content script (faceit.js / steam.js)
-   → finds player identifiers on the page
-   → chrome.runtime.sendMessage({steamid | faceit})
-background service worker (background.js)
-   → fetch https://csrun.win/api/public/cheatmeter?…   (host_permission → no page CORS)
-   → in-memory 5-min cache (dedupes a 10-player room)
-   → replies with {cheat:{score,band}, premier, faceitElo, kd, gap, banned, profileUrl}
-badge.js → renders the chip / panel
-```
+**Optional automation** (all default OFF, per-feature toggles): auto-accept the
+ready dialog, dismiss cookie/promo modals, and a desktop notification when a match
+is ready while the tab is in the background.
 
-No build step — it's plain MV3 JavaScript. Load the folder as-is.
+## Where the data comes from
 
-## Test it locally (load unpacked)
+Two planes, both cached 5 minutes in-page with inflight dedupe:
 
-1. Chrome/Edge → `chrome://extensions` → toggle **Developer mode** (top right).
+1. **FACEIT's own frontend API, same-origin from the content script** — no key, no
+   CORS, and it runs on the visitor's own IP, so the rate limits that hit a
+   server never apply. `users/v1/nicknames`, `stats/v1/stats/time`, `match/v2/match`.
+2. **StatRun's public endpoint** via the background worker —
+   `GET csrun.win/api/public/cheatmeter?steamid=|faceit=` for the CheatMeter score,
+   Premier rank, ban flag and cross-platform gap. This is the layer no other FACEIT
+   extension has.
+
+Nothing is fetched from a UI module; every network call lives in `src/lib/api.js`.
+
+## Install (load unpacked)
+
+1. Open `chrome://extensions` and turn on **Developer mode** (top right).
 2. **Load unpacked** → select this `extension/` folder.
-3. (Optional, for a local site build) open the extension's **Options** and set the
-   site URL to `http://localhost:3000` — otherwise it reads from
-   `https://csrun.win`.
-4. Visit a **FACEIT match room** and a **Steam profile** and confirm the chips /
-   panel appear.
+3. Visit any FACEIT match room, FACEIT profile, or Steam profile.
 
-The public API must be deployed for real data (it lives in the site). Against
-production it works immediately; against localhost you need the site + backend
-running.
+Settings live in the toolbar popup (master toggle + quick lookup) and the options
+page (per-feature toggles, automation, API base).
 
-## Publish to the Chrome Web Store (when ready)
+## Layout
 
-1. One-time **$5** developer registration at
-   <https://chrome.google.com/webstore/devconsole>.
-2. Zip this folder's contents (not the folder itself): `manifest.json`, `src/`,
-   `icons/`.
-3. Upload, fill the listing (name, description, screenshots, a small + large
-   promo tile), link the **privacy policy** (your site already has `/privacy`),
-   and justify the permissions: `storage` (settings) + host access to
-   `csrun.win` (read stats), `faceit.com` / `steamcommunity.com` (inject
-   badges).
-4. Submit for review (Google typically reviews in a few days).
-5. Edge Add-ons store takes the same zip separately if you want Edge too.
+```
+manifest.json         MV3 manifest
+src/tokens.css        design tokens — the ONLY place colors/spacing live
+src/lib/api.js        data layer — every network call in the extension
+src/badge.js          the inline CheatMeter chip
+src/faceit.js         chips beside player links, SPA route watching
+src/matchroom.js/.css the match-room panel
+src/profile.js        the elo widget
+src/steam.js          the Steam report panel
+src/automation.js     option-gated QoL (all default off)
+src/background.js     fetch proxy + cache + notifications
+src/popup.*           toolbar popup
+src/options.*         settings
+dev/                  standalone fixtures — real render paths, mocked network
+```
 
-## Notes / next steps
+`DESIGN.md` is the design contract (tokens, component specs, the quality bar).
+`ARCHITECTURE.md` is the module map and data contracts. Both are binding: a module
+that wants something they don't define is wrong, or the doc gets amended first.
 
-- The FACEIT injector keys off the stable `/players/<nickname>` link pattern, so
-  it's resilient to FACEIT's frequent DOM changes. If a specific match-room
-  layout hides the badge or places it oddly, that's a CSS/placement tweak.
-- Icons in `icons/` are generated placeholders (the StatRun chart mark) — swap in
-  a polished logo before publishing if you have one.
-- Consider adding: a config toggle per surface (FACEIT-only / Steam-only), and a
-  hover card with the full factor breakdown (a later enhancement).
+## Development
+
+```
+node --check src/*.js          # syntax
+```
+
+Open any file in `dev/` directly in a browser — the fixtures drive the real render
+code with a mocked network, including the edge cases (a player with no history, a
+banned player, a 30k Premier rating, missing Leetify, truncating nicknames).
+
+## Notes
+
+Independent project — not affiliated with FACEIT or Valve. Reads only public
+profile data. The CheatMeter is a signal, not an accusation; elite legitimate
+players score high too.

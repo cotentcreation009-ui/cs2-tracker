@@ -1,0 +1,118 @@
+/* StatRun extension design tokens — the ONLY place colors/spacing/type live.
+   Everything is namespaced --sr-* / .sr-* so host pages can never collide. */
+
+:root {
+  /* surfaces */
+  --sr-bg: #0b0f1a;
+  --sr-panel: #10182b;
+  --sr-panel2: #141d33;
+  --sr-line: #22314f;
+  --sr-line2: #31456b;
+
+  /* ink */
+  --sr-ink: #e8edf6;
+  --sr-muted: #9aa7bd;
+  /* judged: #66748c measured ~3.7:1 on --sr-panel — 10px labels need ≥4.5:1.
+     #7e8ca6 clears it (~5.2:1) while staying quieter than --sr-muted. */
+  --sr-faint: #7e8ca6;
+
+  /* accents */
+  --sr-brand: #38d6ff;   /* StatRun identity, links */
+  --sr-orange: #ff8a50;  /* FACEIT / elo */
+  --sr-good: #46d369;
+  --sr-mid: #f5b942;
+  --sr-bad: #f5694a;
+  --sr-high: #ff7a3d;    /* cheatmeter "high" band */
+
+  /* geometry */
+  --sr-r-chip: 4px;
+  --sr-r-card: 10px;
+  --sr-r-panel: 12px;
+  --sr-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+
+  --sr-font: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Host-neutral surfaces for FACEIT. Measured on the live site: the page is
+   rgb(18,18,18) and its cards rgb(29,29,29) — zero chroma. Our navy panels
+   sit ~27 points of blue away from that and read as a bolted-on third-party
+   card, which is the one thing an injected UI cannot afford. On faceit.com
+   the surface and line vars go neutral; ink and every accent (brand, orange,
+   band, tier) are untouched, so it is still unmistakably one product.
+   Steam keeps the navy — its own chrome (#1b2838) genuinely is blue — and so
+   do the popup and options, where navy IS the StatRun identity. */
+.sr-host-faceit {
+  --sr-bg: #0e0e0e;
+  --sr-panel: #17181a;
+  --sr-panel2: #1e2024;
+  --sr-line: #2b2d31;
+  --sr-line2: #3a3d43;
+}
+
+/* ---- shared primitives ----------------------------------------------- */
+
+.sr-reset,
+.sr-reset * {
+  all: revert;
+  box-sizing: border-box;
+  font-family: var(--sr-font);
+  margin: 0;
+  padding: 0;
+  line-height: 1.35;
+}
+
+.sr-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sr-faint);
+}
+
+.sr-card {
+  background: var(--sr-panel);
+  border: 1px solid var(--sr-line);
+  border-radius: var(--sr-r-card);
+}
+
+.sr-panel {
+  background: var(--sr-panel);
+  border: 1px solid var(--sr-line);
+  border-radius: var(--sr-r-panel);
+  box-shadow: var(--sr-shadow);
+}
+
+/* skeleton shimmer for loading states */
+.sr-skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--sr-panel2);
+  border-radius: var(--sr-r-chip);
+}
+.sr-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.05), transparent);
+  animation: sr-shimmer 1.4s infinite;
+}
+@keyframes sr-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sr-skel::after { animation: none; }
+  .sr-hoverable { transition: none !important; }
+}
+
+/* FACEIT level badge hex by level (official ladder colors) */
+.sr-lvl { --lvl: var(--sr-faint); color: var(--lvl); border: 1px solid color-mix(in srgb, var(--lvl) 55%, transparent); background: color-mix(in srgb, var(--lvl) 12%, transparent); }
+.sr-lvl-1 { --lvl: #eeeeee; }
+.sr-lvl-2, .sr-lvl-3 { --lvl: #47e36c; }
+.sr-lvl-4, .sr-lvl-5, .sr-lvl-6, .sr-lvl-7 { --lvl: #ffc659; }
+.sr-lvl-8, .sr-lvl-9 { --lvl: #ff8a50; }
+.sr-lvl-10 { --lvl: #fe1f00; color: #ff4626; } /* text lifted to ~4.6:1; ring/tint keep FACEIT's red */

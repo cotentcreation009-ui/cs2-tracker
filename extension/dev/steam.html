@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StatRun dev — Steam profile panel</title>
+<link rel="stylesheet" href="../src/tokens.css">
+<style>
+  /* Dev-only Steam shell — grey Steam-ish chrome so the panel is judged in
+     situ. Panel markup + styles come exclusively from src/steam.js. */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #1b2838;
+    color: #c6d4df;
+    font-family: "Motiva Sans", Arial, "Segoe UI", sans-serif;
+  }
+  .fx-topbar {
+    background: #171a21;
+    color: #b8b6b4;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  .fx-topbar span {
+    margin-left: 16px;
+    color: #556772;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: normal;
+  }
+  .fx-page { max-width: 936px; margin: 0 auto; padding: 0 16px 48px; }
+  .fx-cap {
+    max-width: 700px;
+    margin: 28px auto 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #66748c;
+  }
+  .profile_header_bg {
+    margin-top: 16px;
+    border-radius: 4px;
+    background: linear-gradient(180deg, #2e4057 0%, #1f2f42 60%, #1b2838 100%);
+    padding: 0 0 16px;
+  }
+  .profile_header { display: flex; gap: 20px; padding: 24px; }
+  .fx-avatar {
+    flex: none;
+    width: 112px;
+    height: 112px;
+    border: 1px solid #4c6b8c;
+    background: linear-gradient(135deg, #3a4f66, #22303f);
+  }
+  .fx-name { font-size: 24px; color: #fff; }
+  .fx-real { margin-top: 2px; font-size: 14px; color: #b8b6b4; }
+  .fx-sum { margin-top: 10px; font-size: 13px; color: #8f98a0; }
+  .fx-lvl {
+    margin-left: auto;
+    align-self: flex-start;
+    padding: 6px 10px;
+    border: 1px solid #435668;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #9b9b9b;
+    white-space: nowrap;
+  }
+  .fx-lvl b { color: #c6d4df; }
+</style>
+</head>
+<body>
+
+<div class="fx-topbar">STEAM<span>Community &rsaquo; Profiles &rsaquo; fixture</span></div>
+
+<div class="fx-page">
+
+  <p class="fx-cap">Live path — steam.js resolves g_rgProfileData, mock API answers after 400 ms (skeleton, then panel)</p>
+  <div class="profile_header_bg">
+    <div class="profile_header">
+      <div class="fx-avatar"></div>
+      <div>
+        <div class="fx-name">ka1do</div>
+        <div class="fx-real">Kai · Sweden</div>
+        <div class="fx-sum">No information given.</div>
+      </div>
+      <div class="fx-lvl">Level <b>42</b></div>
+    </div>
+    <!-- steam.js inserts #statrun-steam-panel after .profile_header -->
+  </div>
+
+  <p class="fx-cap">Banned — severe band, glow on the chip, BAN banner row</p>
+  <div id="fx-banned"></div>
+
+  <p class="fx-cap">Partial data — Premier only, missing values show &#8212;</p>
+  <div id="fx-partial"></div>
+
+  <p class="fx-cap">Empty — profile known, nothing tracked</p>
+  <div id="fx-empty"></div>
+
+  <p class="fx-cap">Loading — skeleton shimmer (static here)</p>
+  <div id="fx-loading"></div>
+
+</div>
+
+<script>
+  // Steam embeds the profile's identity as an inline JSON assignment on /id/
+  // vanity pages — steam.js reads the SteamID64 out of this blob.
+  var g_rgProfileData = {"url": "https://steamcommunity.com/id/ka1do/", "steamid": "76561198084152880", "personaname": "ka1do", "summary": ""};
+</script>
+
+<script>
+  // Mock data layer — replaces the network only; all markup comes from steam.js.
+  (function () {
+    var FIXTURES = {
+      "76561198084152880": {
+        cheat: { score: 12, band: "low" },
+        premier: 18432,
+        faceitElo: 2247,
+        kd: 1.18,
+        gap: 0.14,
+        banned: false,
+        profileUrl: "https://csrun.win/player/76561198084152880"
+      }
+    };
+    window.SRApi = {
+      cheatmeter: function (q) {
+        var data = (q && FIXTURES[q.steamid]) || null;
+        return new Promise(function (resolve) {
+          setTimeout(function () { resolve(data); }, 400); // let the skeleton show
+        });
+      }
+    };
+  })();
+</script>
+
+<script src="../src/steam.js"></script>
+
+<script>
+  // Extra states rendered through the real code paths (SRSteam is exported by
+  // steam.js for exactly this harness — mock data in, real DOM out).
+  document.getElementById("fx-banned").appendChild(SRSteam.render({
+    cheat: { score: 88, band: "severe" },
+    premier: 27750,
+    faceitElo: 1204,
+    kd: 1.71,
+    gap: 0.88,
+    banned: true,
+    profileUrl: "https://csrun.win/player/76561197960287930"
+  }));
+  document.getElementById("fx-partial").appendChild(SRSteam.render({
+    cheat: { score: 47, band: "guarded" },
+    premier: 8901,
+    faceitElo: null,
+    kd: null,
+    gap: null,
+    banned: false,
+    profileUrl: "https://csrun.win/player/76561198012345678"
+  }));
+  document.getElementById("fx-empty").appendChild(SRSteam.render({}));
+  document.getElementById("fx-loading").appendChild(SRSteam.skeleton());
+</script>
+
+</body>
+</html>

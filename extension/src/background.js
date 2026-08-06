@@ -7,6 +7,21 @@ const DEFAULT_API = "https://csrun.win";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map(); // key -> { at, data }
 
+const NOTIFY_MIN_GAP_MS = 10 * 1000;
+let lastNotifyAt = 0;
+
+function notify({ title, message }) {
+  const now = Date.now();
+  if (now - lastNotifyAt < NOTIFY_MIN_GAP_MS) return; // rate limit: 1 per 10s
+  lastNotifyAt = now;
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: String(title || "StatRun"),
+    message: String(message || ""),
+  });
+}
+
 async function apiBase() {
   const { apiBase } = await chrome.storage.sync.get("apiBase");
   return (apiBase || DEFAULT_API).replace(/\/+$/, "");
@@ -40,6 +55,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then(sendResponse)
       .catch((e) => sendResponse({ error: String(e && e.message) }));
     return true; // async response
+  }
+  if (msg && msg.type === "notify") {
+    notify(msg);
+    return; // fire-and-forget, no response
   }
   if (msg && msg.type === "enabled") {
     chrome.storage.sync
