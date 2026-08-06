@@ -19,6 +19,10 @@ interface InvItem {
   souvenir?: boolean;
   count: number;
   price?: number;
+  // Non-zero means price is the median of that many real sales in the last 30
+  // days; absent means it's Skinport's suggested price, which nobody has
+  // necessarily paid.
+  sale_volume?: number;
   marketable?: boolean;
   tradable?: boolean;
 }
@@ -36,6 +40,8 @@ interface InvView {
   total_items?: number;
   total_value: number;
   priced_items: number;
+  // How many of priced_items are valued on real sales rather than an estimate.
+  realized_items?: number;
   item_count: number;
   distinct_count: number;
   marketable_count: number;
@@ -216,7 +222,19 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
               {usd(view.total_value)}
             </div>
             <div className="mt-1 text-[11px] text-faint">
-              {view.priced_items} of {view.item_count} items priced · market prices via Skinport
+              {view.priced_items} of {view.item_count} items priced
+              {view.realized_items ? (
+                <>
+                  {" · "}
+                  <span
+                    className="text-muted"
+                    title="Valued at the median of what actually sold on Skinport in the last 30 days, rather than at a suggested price"
+                  >
+                    {view.realized_items} on real sale prices
+                  </span>
+                </>
+              ) : null}
+              {" · via Skinport"}
             </div>
             {view.truncated ? (
               <div className="mt-1 text-[11px] text-muted">
@@ -269,9 +287,11 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-3">
         <p className="text-[10px] leading-snug text-faint">
-          Values are market estimates (Skinport suggested prices, USD) — not Steam wallet prices,
-          and unpriced items aren&apos;t counted. Inventory data from Steam; shown only for public
-          inventories{asOf ? <> · read {asOf}</> : null}.
+          Values in USD from Skinport: the median of the last 30 days of real sales where an item
+          sells often enough for that to mean something, otherwise Skinport&apos;s suggested price.
+          These are cash-market figures, not Steam wallet prices, and items with no market price
+          aren&apos;t counted. Inventory data from Steam; shown only for public inventories
+          {asOf ? <> · read {asOf}</> : null}.
         </p>
         <a
           href={`https://steamcommunity.com/profiles/${steamId}/inventory/#730`}
@@ -474,7 +494,17 @@ function ItemCard({ it }: { it: InvItem }) {
     <div
       className="group relative overflow-hidden rounded-xl border p-2.5 transition duration-150 hover:-translate-y-0.5"
       style={{ borderColor: `${hue}40`, background: `linear-gradient(180deg, ${hue}14, transparent 70%)` }}
-      title={`${it.name}${it.price ? ` — ${usd(it.price)} each` : gap ? ` — ${gap.long}` : ""}`}
+      title={
+        it.price
+          ? `${it.name} — ${usd(it.price)} each. ${
+              it.sale_volume
+                ? `Median of ${it.sale_volume} sales in the last 30 days.`
+                : "Skinport's suggested price — no recent sales to go on."
+            }`
+          : gap
+            ? `${it.name} — ${gap.long}`
+            : it.name
+      }
     >
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, ${hue}, transparent)` }} />
       {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -45,6 +45,14 @@ const pricesFixture = `[
   {"market_hash_name": "Unrelated Item", "suggested_price": 9.99}
 ]`
 
+// The sales feed: the case has enough 30-day volume for its median to win over
+// the suggested price; the AK's two sales are below the floor, so its
+// suggested price stands.
+const salesFixture = `[
+  {"market_hash_name": "Dreams & Nightmares Case", "last_30_days": {"median": 1.20, "volume": 900}},
+  {"market_hash_name": "StatTrak™ AK-47 | Redline (Field-Tested)", "last_30_days": {"median": 99.00, "volume": 2}}
+]`
+
 func fixtureServers(t *testing.T, invBody string, invStatus int) *http.Client {
 	t.Helper()
 	return fixtureHandler(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -73,14 +81,21 @@ func fixtureHandler(t *testing.T, inv http.HandlerFunc) *http.Client {
 		}
 		w.Header().Set("Content-Encoding", "br")
 		bw := brotli.NewWriter(w)
-		_, _ = bw.Write([]byte(pricesFixture))
+		if strings.Contains(r.URL.Path, "/sales") {
+			_, _ = bw.Write([]byte(salesFixture))
+		} else {
+			_, _ = bw.Write([]byte(pricesFixture))
+		}
 		_ = bw.Close()
 	}))
 	t.Cleanup(srv.Close)
-	prevInv, prevSp := inventoryURL, skinportURL
+	prevInv, prevSp, prevSales := inventoryURL, skinportURL, skinportSalesURL
 	inventoryURL = srv.URL + "/inventory/%d/730/2"
 	skinportURL = srv.URL + "/skinport"
-	t.Cleanup(func() { inventoryURL, skinportURL = prevInv, prevSp })
+	skinportSalesURL = srv.URL + "/skinport/sales"
+	t.Cleanup(func() {
+		inventoryURL, skinportURL, skinportSalesURL = prevInv, prevSp, prevSales
+	})
 	// reset the price cache between tests
 	priceMu.Lock()
 	priceMap, priceAt = nil, time.Time{}
@@ -109,9 +124,25 @@ func TestBuildAggregates(t *testing.T) {
 	if v.ItemCount != 5 || v.DistinctCount != 3 {
 		t.Fatalf("counts: items=%d distinct=%d", v.ItemCount, v.DistinctCount)
 	}
-	// 3 cases × 1.50 + 1 AK × 45.00 = 49.50; sticker unpriced
-	if v.TotalValue < 49.49 || v.TotalValue > 49.51 {
-		t.Fatalf("total = %.2f, want 49.50", v.TotalValue)
+	// The case is valued at its realized median (1.20, 900 sales) rather than
+	// its suggested 1.50; the AK's 2 sales are under the floor so its
+	// suggested 45.00 stands. 3 × 1.20 + 45.00 = 48.60; sticker unpriced.
+	if v.TotalValue < 48.59 || v.TotalValue > 48.61 {
+		t.Fatalf("total = %.2f, want 48.60 (realized median preferred)", v.TotalValue)
+	}
+	if v.RealizedItems != 3 {
+		t.Errorf("realized = %d, want the 3 cases backed by real sales", v.RealizedItems)
+	}
+	byName := map[string]Item{}
+	for _, it := range v.TopItems {
+		byName[it.MarketName] = it
+	}
+	if got := byName["Dreams & Nightmares Case"]; got.SaleVolume != 900 || got.Price != 1.20 {
+		t.Errorf("case priced %.2f vol %d, want the 1.20 median from 900 sales", got.Price, got.SaleVolume)
+	}
+	if got := byName["StatTrak™ AK-47 | Redline (Field-Tested)"]; got.SaleVolume != 0 || got.Price != 45.00 {
+		t.Errorf("AK priced %.2f vol %d, want the suggested 45.00 — 2 sales is not a market",
+			got.Price, got.SaleVolume)
 	}
 	if v.PricedItems != 4 || v.MarketableCount != 4 {
 		t.Fatalf("priced=%d marketable=%d", v.PricedItems, v.MarketableCount)
@@ -221,9 +252,9 @@ func TestBuildFollowsPagination(t *testing.T) {
 	if v.DistinctCount != 2 {
 		t.Errorf("distinct = %d, want 2 — the repeated description was counted twice", v.DistinctCount)
 	}
-	// 2 cases × 1.50 + 1 AK × 45.00
-	if v.TotalValue < 47.99 || v.TotalValue > 48.01 {
-		t.Errorf("total = %.2f, want 48.00", v.TotalValue)
+	// 2 cases × 1.20 realized median + 1 AK × 45.00 suggested
+	if v.TotalValue < 47.39 || v.TotalValue > 47.41 {
+		t.Errorf("total = %.2f, want 47.40", v.TotalValue)
 	}
 	if v.Truncated {
 		t.Error("a fully-read inventory must not be flagged truncated")
