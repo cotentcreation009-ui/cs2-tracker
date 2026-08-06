@@ -31,6 +31,9 @@ var ErrRateLimited = errors.New("steaminv: steam is rate-limiting inventory read
 var (
 	inventoryURL = "https://steamcommunity.com/inventory/%d/730/2?l=english&count=2000"
 	skinportURL  = "https://api.skinport.com/v1/items?app_id=730&currency=USD"
+	// What items actually sold for, rather than what Skinport suggests they
+	// are worth — 35k names with min/max/avg/median/volume per window.
+	skinportSalesURL = "https://api.skinport.com/v1/sales/history?app_id=730&currency=USD"
 )
 
 const iconBase = "https://community.fastly.steamstatic.com/economy/image/"
@@ -46,8 +49,12 @@ type Item struct {
 	Exterior    string  `json:"exterior,omitempty"`
 	StatTrak    bool    `json:"stattrak,omitempty"`
 	Souvenir    bool    `json:"souvenir,omitempty"`
-	Count       int     `json:"count"`
-	Price       float64 `json:"price,omitempty"` // per unit, USD (Skinport suggested)
+	Count int     `json:"count"`
+	Price float64 `json:"price,omitempty"` // per unit, USD
+	// SaleVolume is how many of these actually sold on Skinport in the last 30
+	// days. Non-zero means Price is the median of those sales; zero means it
+	// is Skinport's suggested price, which nobody has necessarily paid.
+	SaleVolume int `json:"sale_volume,omitempty"`
 	// Marketable and Tradable are why an item can be unpriced: a market price
 	// only exists for something the market will carry. Steam gives us both, so
 	// an item with no price can say which kind of "no" it is rather than
@@ -87,8 +94,12 @@ type View struct {
 	// ItemCount when Truncated.
 	TotalItems int `json:"total_items,omitempty"`
 
-	TotalValue      float64      `json:"total_value"`
-	PricedItems     int          `json:"priced_items"`
+	TotalValue  float64 `json:"total_value"`
+	PricedItems int     `json:"priced_items"`
+	// RealizedItems is how many of PricedItems are valued at a median of real
+	// sales rather than a suggested price — i.e. how much of the total is
+	// backed by money that changed hands.
+	RealizedItems int `json:"realized_items,omitempty"`
 	ItemCount       int          `json:"item_count"` // total assets incl. duplicates
 	DistinctCount   int          `json:"distinct_count"`
 	MarketableCount int          `json:"marketable_count"`
@@ -100,9 +111,25 @@ type View struct {
 
 // --- Skinport price cache (process-wide, 1h) --------------------------------
 
+// Price is what one unit is worth and how much that figure is worth trusting.
+// Skinport publishes two things: a suggested price, and the record of what
+// items actually sold for. A median of real sales beats an estimate, so we
+// prefer it wherever enough sales exist to make a median mean anything, and
+// fall back to the suggested price otherwise.
+type Price struct {
+	USD float64
+	// Volume is the 30-day sale count behind a realized median; 0 means this
+	// is Skinport's suggested price rather than something anyone paid.
+	Volume int
+}
+
+// minVolume is how many sales a median needs before we prefer it. A median of
+// one or two sales is a coin flip, not a market.
+const minVolume = 3
+
 var (
 	priceMu  sync.Mutex
-	priceMap map[string]float64
+	priceMap map[string]Price
 	priceAt  time.Time
 )
 
@@ -127,18 +154,14 @@ func logPriceFailure(status int, detail string) {
 		"detail", strings.TrimSpace(detail))
 }
 
-func prices(ctx context.Context, hc *http.Client) map[string]float64 {
-	priceMu.Lock()
-	defer priceMu.Unlock()
-	if priceMap != nil && time.Since(priceAt) < time.Hour {
-		return priceMap
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, skinportURL, nil)
+// fetchSkinport GETs one Skinport feed and decodes it into out.
+func fetchSkinport(ctx context.Context, hc *http.Client, url string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return priceMap
+		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	// Skinport hard-gates this endpoint on Brotli: anything that doesn't
+	// Skinport hard-gates these endpoints on Brotli: anything that doesn't
 	// explicitly offer br gets a 406, including Go's automatic
 	// "Accept-Encoding: gzip". Setting the header ourselves also turns off
 	// the transport's transparent decompression, so we unwrap the body below.
@@ -146,7 +169,7 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 	req.Header.Set("User-Agent", "StatRun/1.0 (https://csrun.win)")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return priceMap // stale-if-error: keep whatever we had
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -154,32 +177,68 @@ func prices(ctx context.Context, hc *http.Client) map[string]float64 {
 		// every inventory priced at zero and nothing said why.
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
 		logPriceFailure(resp.StatusCode, string(snippet))
-		return priceMap
+		return fmt.Errorf("skinport: status %d", resp.StatusCode)
 	}
 	body, err := decompress(resp)
 	if err != nil {
 		logPriceFailure(resp.StatusCode, "decompress: "+err.Error())
-		return priceMap
+		return err
 	}
 	defer body.Close()
-	var rows []struct {
+	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(out); err != nil {
+		logPriceFailure(resp.StatusCode, "decode: "+err.Error())
+		return err
+	}
+	return nil
+}
+
+// prices builds the name→price map from Skinport's two feeds. The sales feed
+// is what people actually paid, so it wins wherever there is enough volume for
+// a median to mean something; the suggested-price feed covers everything else.
+// Both are one keyless call each and cached together for an hour.
+func prices(ctx context.Context, hc *http.Client) map[string]Price {
+	priceMu.Lock()
+	defer priceMu.Unlock()
+	if priceMap != nil && time.Since(priceAt) < time.Hour {
+		return priceMap
+	}
+
+	var listed []struct {
 		Name      string   `json:"market_hash_name"`
 		Suggested *float64 `json:"suggested_price"`
 		Min       *float64 `json:"min_price"`
 	}
-	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(&rows); err != nil {
-		logPriceFailure(resp.StatusCode, "decode: "+err.Error())
-		return priceMap
+	if err := fetchSkinport(ctx, hc, skinportURL, &listed); err != nil {
+		return priceMap // stale-if-error: keep whatever we had
 	}
-	m := make(map[string]float64, len(rows))
-	for _, r := range rows {
+	m := make(map[string]Price, len(listed))
+	for _, r := range listed {
 		switch {
 		case r.Suggested != nil && *r.Suggested > 0:
-			m[r.Name] = *r.Suggested
+			m[r.Name] = Price{USD: *r.Suggested}
 		case r.Min != nil && *r.Min > 0:
-			m[r.Name] = *r.Min
+			m[r.Name] = Price{USD: *r.Min}
 		}
 	}
+
+	// Realized sales override the estimate where the market is liquid enough
+	// to have an opinion. Best-effort: if this feed fails we still have the
+	// suggested prices above.
+	var sold []struct {
+		Name string `json:"market_hash_name"`
+		Last struct {
+			Median float64 `json:"median"`
+			Volume int     `json:"volume"`
+		} `json:"last_30_days"`
+	}
+	if err := fetchSkinport(ctx, hc, skinportSalesURL, &sold); err == nil {
+		for _, r := range sold {
+			if r.Last.Volume >= minVolume && r.Last.Median > 0 {
+				m[r.Name] = Price{USD: r.Last.Median, Volume: r.Last.Volume}
+			}
+		}
+	}
+
 	if len(m) > 0 {
 		priceMap, priceAt = m, time.Now()
 	}
@@ -478,9 +537,13 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			}
 		}
 		if p, ok := pm[d.MarketName]; ok {
-			it.Price = p
-			v.TotalValue += p * float64(n)
+			it.Price = p.USD
+			it.SaleVolume = p.Volume
+			v.TotalValue += p.USD * float64(n)
 			v.PricedItems += n
+			if p.Volume > 0 {
+				v.RealizedItems += n
+			}
 		}
 		if it.Marketable {
 			v.MarketableCount += n
