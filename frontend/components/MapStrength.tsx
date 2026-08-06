@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, timeAgo } from "@/lib/format";
-import { isActivePremierMap, radarImage } from "@/lib/maps/calibration";
+import { PREMIER_ACTIVE_MAPS, isActivePremierMap, normalizeMapName, radarImage } from "@/lib/maps/calibration";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -234,7 +234,7 @@ function MapIcon({ map, noLabel = false }: { map: string; noLabel?: boolean }) {
   return (
     <span className="group relative grid place-items-center">
       {stage >= 2 ? (
-        <span className="grid h-9 w-9 place-items-center rounded-full border border-line2 bg-panel2 text-[9px] font-bold text-muted">
+        <span className="grid h-11 w-11 place-items-center rounded-full border border-line2 bg-panel2 text-[10px] font-bold text-muted">
           {short}
         </span>
       ) : (
@@ -244,7 +244,7 @@ function MapIcon({ map, noLabel = false }: { map: string; noLabel?: boolean }) {
           alt={mapLabel(map)}
           onError={() => setStage((s) => s + 1)}
           draggable={false}
-          className={`h-9 w-9 rounded-full border border-line2 bg-panel2/80 ${
+          className={`h-11 w-11 rounded-full border border-line2 bg-panel2/80 ${
             stage === 0 ? "object-contain p-0.5" : "object-cover"
           }`}
         />
@@ -286,25 +286,30 @@ function MapWinRadar({
 }) {
   void metric;
   const [hov, setHov] = useState<string | null>(null); // hovered vertex (map key)
-  // Lock the radar to the current Premier active-duty pool so retired/community
-  // maps (Overpass, Vertigo, Train, workshop maps) never appear as vertices.
-  const activeRows = rows.filter((r) => isActivePremierMap(r.map));
-  const reliable = activeRows.filter((r) => r.n >= 3);
-  const base = (reliable.length >= 3 ? reliable : activeRows.filter((r) => r.n >= 1)).slice(0, 9);
-  // fixed angular order (by name) so vertices don't jump as values change
-  const data = [...base].sort((a, b) => a.map.localeCompare(b.map));
+  // The radar is the current Premier active-duty pool — the WHOLE pool, every
+  // profile. Retired/community maps never appear, and a pool map the player
+  // hasn't touched still gets its vertex (dimmed, at the centre) instead of
+  // silently vanishing: "you haven't played Nuke" is information.
+  const played = new Map(
+    rows.filter((r) => isActivePremierMap(r.map)).map((r) => [normalizeMapName(r.map), r]),
+  );
+  const data: MapRow[] = [...PREMIER_ACTIVE_MAPS]
+    .sort((a, b) => a.localeCompare(b))
+    .map((map) => played.get(map) ?? { map, ms: [], n: 0, w: 0, l: 0, winPct: 0 });
 
-  if (data.length < 3) return null;
+  // fewer than 3 played pool maps and a spider chart says nothing
+  if (data.filter((r) => r.n > 0).length < 3) return null;
 
   const N = data.length;
-  const vals = data.map(valOf);
+  const vals = data.map((r) => (r.n > 0 ? valOf(r) : null));
+  const real = vals.filter((v): v is number => v != null);
 
   // Scale to the data's own range instead of 0–100, so a 43–75% spread fills the
   // chart rather than bunching near the centre. 50% stays inside the band.
-  const lo = Math.max(0, Math.min(40, Math.min(...vals) - 6));
-  const hi = Math.min(100, Math.max(60, Math.max(...vals) + 6));
+  const lo = Math.max(0, Math.min(40, Math.min(...real) - 6));
+  const hi = Math.min(100, Math.max(60, Math.max(...real) + 6));
   const span = hi - lo || 1;
-  const frac = (v: number) => clamp((v - lo) / span, 0.06, 1);
+  const frac = (v: number | null) => (v == null ? 0.06 : clamp((v - lo) / span, 0.06, 1));
   const frac50 = clamp((50 - lo) / span, 0.06, 1);
 
   const ang = (i: number) => -Math.PI / 2 + (i / N) * Math.PI * 2;
@@ -313,7 +318,7 @@ function MapWinRadar({
     y: RC + Math.sin(ang(i)) * RR * f,
   });
 
-  const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const avg = real.reduce((s, v) => s + v, 0) / real.length;
   const col = winColor(avg);
   const polyPts = data
     .map((_, i) => ptAt(i, frac(vals[i])))
@@ -322,7 +327,8 @@ function MapWinRadar({
   const ring = (f: number) =>
     data.map((_, i) => ptAt(i, f)).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
-  const ranked = data.map((r) => ({ r, v: valOf(r) })).sort((a, b) => b.v - a.v);
+  // best/worst only means anything on maps actually played
+  const ranked = data.filter((r) => r.n > 0).map((r) => ({ r, v: valOf(r) })).sort((a, b) => b.v - a.v);
   const best = ranked[0];
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
   const totalGames = data.reduce((s, r) => s + r.n, 0);
@@ -409,32 +415,39 @@ function MapWinRadar({
                 })();
           const avgRating = r.ms.reduce((s, m) => s + m.leetify_rating, 0) / r.n;
           const isHov = hov === r.map;
-          const wc = winColor(valOf(r));
+          const unplayed = r.n === 0;
+          const wc = unplayed ? "#8a93a5" : winColor(valOf(r));
           return (
             <div
               key={r.map}
-              className="absolute -translate-x-1/2 -translate-y-1/2"
+              className={`absolute -translate-x-1/2 -translate-y-1/2 ${unplayed ? "opacity-40" : ""}`}
               style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%`, zIndex: isHov ? 30 : undefined }}
               onMouseEnter={() => setHov(r.map)}
               onMouseLeave={() => setHov(null)}
             >
               <MapIcon map={r.map} noLabel />
               {isHov && (
-                <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line2 bg-bg/95 px-2.5 py-1.5 text-[11px] leading-snug shadow-xl">
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-lg border border-line2 bg-bg/95 px-2.5 py-1.5 text-[11px] leading-snug opacity-100 shadow-xl">
                   <div className="font-bold capitalize text-ink">{mapLabel(r.map)}</div>
-                  <div>
-                    <span className="font-bold tabular-nums" style={{ color: wc }}>
-                      {valOf(r).toFixed(0)}%
-                    </span>{" "}
-                    <span className="text-faint">win rate ({useMetric})</span>
-                  </div>
-                  <div className="tabular-nums text-muted">
-                    {rec} <span className="text-faint">{useMetric === "matches" ? "record" : "rounds"} · over {r.n} matches</span>
-                  </div>
-                  <div className="tabular-nums text-muted">
-                    {avgRating >= 0 ? "+" : ""}
-                    {(avgRating * 100).toFixed(2)} <span className="text-faint">avg rating</span>
-                  </div>
+                  {unplayed ? (
+                    <div className="text-faint">No matches in this window</div>
+                  ) : (
+                    <>
+                      <div>
+                        <span className="font-bold tabular-nums" style={{ color: wc }}>
+                          {valOf(r).toFixed(0)}%
+                        </span>{" "}
+                        <span className="text-faint">win rate ({useMetric})</span>
+                      </div>
+                      <div className="tabular-nums text-muted">
+                        {rec} <span className="text-faint">{useMetric === "matches" ? "record" : "rounds"} · over {r.n} matches</span>
+                      </div>
+                      <div className="tabular-nums text-muted">
+                        {avgRating >= 0 ? "+" : ""}
+                        {(avgRating * 100).toFixed(2)} <span className="text-faint">avg rating</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
