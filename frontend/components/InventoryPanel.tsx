@@ -7,7 +7,20 @@ import { useEffect, useMemo, useState } from "react";
 // price. Fetched when the panel first opens; Steam-side results are cached
 // hard so repeat opens cost nothing.
 
+interface AppliedMod {
+  kind: "sticker" | "charm" | "patch";
+  name: string;
+  icon: string;
+}
+
+interface InvCopy {
+  float?: number;
+  seed?: number;
+  inspect?: string;
+}
+
 interface InvItem {
+  id: string;
   name: string;
   market_hash_name: string;
   icon: string;
@@ -27,9 +40,26 @@ interface InvItem {
   // rare variants) and price is the median across them — which one this is
   // can't be read from a public inventory.
   price_variants?: number;
+  // stickers/charms/patches applied to this copy, and each copy's own
+  // float / paint seed / inspect-link payload
+  applied?: AppliedMod[];
+  copies?: InvCopy[];
   marketable?: boolean;
   tradable?: boolean;
 }
+
+// The in-game wear brackets, for placing a float on the bar.
+const WEAR_BANDS: { name: string; short: string; to: number }[] = [
+  { name: "Factory New", short: "FN", to: 0.07 },
+  { name: "Minimal Wear", short: "MW", to: 0.15 },
+  { name: "Field-Tested", short: "FT", to: 0.38 },
+  { name: "Well-Worn", short: "WW", to: 0.45 },
+  { name: "Battle-Scarred", short: "BS", to: 1 },
+];
+
+// A copy's payload becomes the exact link the game accepts — the same string
+// the Steam client builds from Valve's own asset properties.
+const inspectLink = (hex: string) => `steam://run/730//+csgo_econ_action_preview%20${hex}`;
 
 interface InvView {
   private?: boolean;
@@ -332,6 +362,7 @@ function Collection({ items }: { items: InvItem[] }) {
   const [priced, setPriced] = useState<PriceFilter>("all");
   const [sort, setSort] = useState<SortKey>("value");
   const [shown, setShown] = useState(PAGE);
+  const [detail, setDetail] = useState<InvItem | null>(null);
 
   // categories, richest first — the tab row doubles as the breakdown that
   // used to sit at the bottom as dead chips
@@ -455,9 +486,11 @@ function Collection({ items }: { items: InvItem[] }) {
 
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         {visible.slice(0, shown).map((it) => (
-          <ItemCard key={it.market_hash_name} it={it} />
+          <ItemCard key={it.id || it.market_hash_name} it={it} onOpen={() => setDetail(it)} />
         ))}
       </div>
+
+      {detail ? <ItemDetail it={detail} onClose={() => setDetail(null)} /> : null}
 
       {visible.length === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-muted">Nothing here — try another filter.</p>
@@ -505,13 +538,15 @@ function CatTab({
   );
 }
 
-function ItemCard({ it }: { it: InvItem }) {
+function ItemCard({ it, onOpen }: { it: InvItem; onOpen: () => void }) {
   const hue = it.rarity_color || "#8a93a5";
   const wear = it.exterior ? (WEAR_SHORT[it.exterior] ?? it.exterior) : "";
   const gap = priceGap(it);
   return (
-    <div
-      className="group relative overflow-hidden rounded-xl border p-2.5 transition duration-150 hover:-translate-y-0.5"
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative overflow-hidden rounded-xl border p-2.5 text-left transition duration-150 hover:-translate-y-0.5 focus-visible:outline-2"
       style={{ borderColor: `${hue}40`, background: `linear-gradient(180deg, ${hue}14, transparent 70%)` }}
       title={
         it.price
@@ -532,6 +567,16 @@ function ItemCard({ it }: { it: InvItem }) {
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, ${hue}, transparent)` }} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={it.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="mx-auto h-20 w-auto object-contain drop-shadow-md" />
+      {/* applied stickers/charms ride along the card bottom edge of the image,
+          the way trade sites show them — the detail view names them */}
+      {it.applied?.length ? (
+        <span className="pointer-events-none absolute right-1.5 top-1.5 flex gap-0.5">
+          {it.applied.slice(0, 5).map((m, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={m.icon} alt={m.name} title={`${m.kind === "sticker" ? "Sticker" : m.kind === "charm" ? "Charm" : "Patch"}: ${m.name}`} loading="lazy" referrerPolicy="no-referrer" className="h-5 w-auto drop-shadow" />
+          ))}
+        </span>
+      ) : null}
       <div className="mt-1.5 min-h-8">
         <p className="truncate text-[11px] font-semibold leading-tight text-ink">
           {it.name.replace(/^StatTrak™ /, "").replace(/^Souvenir /, "")}
@@ -540,6 +585,9 @@ function ItemCard({ it }: { it: InvItem }) {
           {it.stattrak ? <span className="font-bold text-[#cf6a32]">ST™</span> : null}
           {it.souvenir ? <span className="font-bold text-[#ffd700]">SOUV</span> : null}
           {wear ? <span>{wear}</span> : null}
+          {it.copies?.[0]?.float != null ? (
+            <span className="tabular-nums">{it.copies[0].float.toFixed(4)}</span>
+          ) : null}
           {it.count > 1 ? <span>×{it.count}</span> : null}
         </p>
       </div>
@@ -561,6 +609,220 @@ function ItemCard({ it }: { it: InvItem }) {
             ) : null}
           </>
         )}
+      </div>
+    </button>
+  );
+}
+
+// WearBar places a float on the in-game wear scale, with the bracket
+// boundaries marked so the number means something at a glance.
+function WearBar({ float }: { float: number }) {
+  return (
+    <div>
+      <div className="relative h-2 w-full overflow-hidden rounded-full bg-linear-to-r from-[#4ade80] via-[#facc15] to-[#ef4444]">
+        {WEAR_BANDS.slice(0, -1).map((b) => (
+          <span key={b.short} className="absolute inset-y-0 w-px bg-bg/70" style={{ left: `${b.to * 100}%` }} />
+        ))}
+        <span
+          className="absolute -top-0 h-2 w-1 rounded-sm border border-bg bg-ink"
+          style={{ left: `calc(${Math.min(float, 1) * 100}% - 2px)` }}
+          aria-hidden
+        />
+      </div>
+      <div className="mt-0.5 flex justify-between text-[8px] text-faint">
+        {WEAR_BANDS.map((b) => (
+          <span key={b.short}>{b.short}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ItemDetail is the click-through view: the skin large, its wear on the scale,
+// pattern seed, applied stickers by name, the price's provenance, and a
+// working in-game inspect link per copy.
+function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
+  const [copied, setCopied] = useState<number | null>(null);
+  const hue = it.rarity_color || "#8a93a5";
+  const gap = priceGap(it);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const copyInspect = (hex: string, i: number) => {
+    navigator.clipboard?.writeText(inspectLink(hex)).then(() => {
+      setCopied(i);
+      setTimeout(() => setCopied(null), 1600);
+    });
+  };
+
+  const copies = it.copies ?? [];
+  const first = copies[0];
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-bg/80 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={it.name}
+    >
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border bg-panel p-4 shadow-2xl sm:p-5"
+        style={{ borderColor: `${hue}50` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* header */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold leading-tight text-ink">
+              {it.stattrak ? <span className="text-[#cf6a32]">StatTrak™ </span> : null}
+              {it.souvenir ? <span className="text-[#ffd700]">Souvenir </span> : null}
+              {it.name.replace(/^StatTrak™ /, "").replace(/^Souvenir /, "")}
+            </h3>
+            <p className="mt-0.5 text-[11px]" style={{ color: hue }}>
+              {it.rarity}
+              {it.exterior ? <span className="text-muted"> · {it.exterior}</span> : null}
+              {it.count > 1 ? <span className="text-muted"> · ×{it.count}</span> : null}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="btn btn-ghost h-8 w-8 shrink-0 p-0 text-sm" aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* the skin itself, lit by its rarity */}
+        <div
+          className="relative mt-3 flex items-center justify-center rounded-xl border border-line/60 py-6"
+          style={{ background: `radial-gradient(ellipse at center, ${hue}1f, transparent 75%)` }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={it.icon} alt={it.name} referrerPolicy="no-referrer" className="h-36 w-auto object-contain drop-shadow-xl" />
+        </div>
+
+        {/* wear + pattern */}
+        {first?.float != null ? (
+          <div className="mt-4">
+            <div className="mb-1 flex items-baseline justify-between">
+              <span className="stat-label">Float (wear)</span>
+              <span className="text-sm font-bold tabular-nums text-ink">{first.float.toFixed(6)}</span>
+            </div>
+            <WearBar float={first.float} />
+            {first.seed ? (
+              <p className="mt-1.5 text-[11px] text-muted">
+                Pattern seed <span className="font-semibold tabular-nums text-ink">{first.seed}</span>
+                <span className="text-faint"> — decides where the finish sits on this exact copy</span>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* applied stickers / charms / patches, by name */}
+        {it.applied?.length ? (
+          <div className="mt-4">
+            <div className="stat-label mb-1.5">Applied</div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {it.applied.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg border border-line bg-panel2/40 px-2 py-1.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.icon} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-auto shrink-0" />
+                  <div className="min-w-0">
+                    <p className="truncate text-[11px] font-semibold leading-tight text-ink">{m.name}</p>
+                    <p className="text-[9px] uppercase tracking-wide text-faint">{m.kind}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* price provenance */}
+        <div className="mt-4 rounded-lg border border-line bg-panel2/40 px-3 py-2">
+          {gap ? (
+            <p className="text-[11px] leading-relaxed text-muted">
+              <span className="font-semibold text-ink">{gap.short}.</span> {gap.long}
+            </p>
+          ) : (
+            <div className="flex items-baseline justify-between gap-2">
+              <div>
+                <div className="stat-label">Market value</div>
+                <div className="text-lg font-extrabold tabular-nums text-ink">
+                  {it.price_variants ? "~" : ""}
+                  {usd(it.price ?? 0)}
+                  {it.count > 1 ? <span className="text-xs font-semibold text-muted"> each</span> : null}
+                </div>
+              </div>
+              <p className="max-w-[55%] text-right text-[10px] leading-snug text-faint">
+                {it.sale_volume
+                  ? `Median of ${it.sale_volume} Skinport sales in the last 30 days`
+                  : "Skinport's suggested price — no recent sales to go on"}
+                {it.price_variants
+                  ? `. ${it.price_variants} finishes share this name; the figure is the median across them.`
+                  : ""}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* per-copy inspect links */}
+        {copies.some((c) => c.inspect) ? (
+          <div className="mt-4">
+            <div className="stat-label mb-1.5">Inspect in game</div>
+            <div className="space-y-1.5">
+              {copies.map((c, i) =>
+                c.inspect ? (
+                  <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel2/40 px-2.5 py-1.5">
+                    <span className="text-[11px] tabular-nums text-muted">
+                      {copies.length > 1 ? `Copy ${i + 1}` : "This copy"}
+                      {c.float != null ? <span className="text-faint"> · float {c.float.toFixed(4)}</span> : null}
+                    </span>
+                    <span className="flex gap-1.5">
+                      <button type="button" onClick={() => copyInspect(c.inspect!, i)} className="btn btn-ghost h-7 px-2.5 text-[11px]">
+                        {copied === i ? "Copied ✓" : "Copy link"}
+                      </button>
+                      <a href={inspectLink(c.inspect)} className="btn btn-ghost h-7 px-2.5 text-[11px]">
+                        Open in game
+                      </a>
+                    </span>
+                  </div>
+                ) : null,
+              )}
+            </div>
+            <p className="mt-1 text-[9.5px] leading-snug text-faint">
+              &quot;Open in game&quot; needs Steam and CS2 installed; &quot;Copy link&quot; can be pasted to anyone —
+              it shows this exact copy, wear and stickers included, in their game.
+            </p>
+          </div>
+        ) : null}
+
+        {/* outbound */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {it.marketable ? (
+            <a
+              href={`https://steamcommunity.com/market/listings/730/${encodeURIComponent(it.market_hash_name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost h-8 px-3 text-xs"
+            >
+              Steam Market ↗
+            </a>
+          ) : null}
+          {it.price ? (
+            <a
+              href={`https://skinport.com/market?search=${encodeURIComponent(it.market_hash_name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost h-8 px-3 text-xs"
+            >
+              Skinport ↗
+            </a>
+          ) : null}
+        </div>
       </div>
     </div>
   );

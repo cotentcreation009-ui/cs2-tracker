@@ -90,7 +90,9 @@ func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", ste
 // where volume allows, so old entries carry figures from a different method.
 // v4: a name whose finishes are priced separately (Doppler phases) takes the
 // median across them instead of whichever row happened to land last.
-func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:v4:%d", steamID) }
+// v5: entries carry per-copy detail (stickers, float, seed, inspect payload)
+// and stickered/float-bearing copies no longer merge.
+func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:v5:%d", steamID) }
 
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
