@@ -127,7 +127,9 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
 
   useEffect(() => {
     let alive = true;
-    setState("loading");
+    // Re-polls refresh silently behind the current message — flashing the
+    // skeleton every poll would make the panel strobe while it waits.
+    if (attempt === 0) setState("loading");
     fetch(`/api/profiles/${encodeURIComponent(steamId)}/inventory`, {
       cache: attempt > 0 ? "reload" : "default",
     })
@@ -148,6 +150,19 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
       alive = false;
     };
   }, [steamId, attempt]);
+
+  // While the backend is queueing the read, poll for it. The backfill worker
+  // fills the snapshot in the background, so "check back in a moment" comes
+  // true on its own instead of asking the visitor to press the button.
+  const retryIn = view?.unavailable ? (view.retry_after_sec ?? 60) : 0;
+  useEffect(() => {
+    if (state !== "ready" || !retryIn) return;
+    const t = setTimeout(
+      () => setAttempt((n) => n + 1),
+      Math.min(Math.max(retryIn, 15), 120) * 1000,
+    );
+    return () => clearTimeout(t);
+  }, [state, retryIn, attempt]);
 
   if (state === "loading") {
     return (
