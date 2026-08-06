@@ -1,0 +1,260 @@
+// StatRun data layer — the ONLY fetch surface in the extension.
+// Two planes: FACEIT's frontend API (same-origin from the content script, no
+// key, the visitor's own session) and the StatRun public API (proxied through
+// the background worker via {type:"lookup"} messages). Every call is cached
+// in-memory for 5 minutes with inflight-promise dedupe, and every failure
+// resolves to null — callers render honest empty states, never throw.
+//
+// Exposes window.SRApi  { user, eloHistory, room, cheatmeter }
+//     and window.SRSettings { get, onChange }.
+
+(function () {
+  "use strict";
+
+  // Tag the document so tokens.css can swap injected surfaces to FACEIT's
+  // neutral chrome (see .sr-host-faceit). Done here because api.js is the
+  // first content script on both hosts, so the class is set before any
+  // module renders.
+  if (location.hostname.endsWith("faceit.com")) {
+    document.documentElement.classList.add("sr-host-faceit");
+  }
+
+  const TTL_MS = 5 * 60 * 1000;
+  const FETCH_TIMEOUT_MS = 8000;
+  const PAGE_GAP_MS = 350;
+  const PAGE_SIZE = 100; // FACEIT stats endpoint page ceiling
+  const MAX_PAGES = 3;
+
+  // ---- cache: Map key -> { at, promise } --------------------------------
+  // Storing the promise (not the value) gives inflight dedupe for free: a
+  // second caller during a pending fetch gets the same promise back.
+
+  const cache = new Map();
+
+  function cached(key, make) {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < TTL_MS) return hit.promise;
+    const promise = Promise.resolve()
+      .then(make)
+      .catch(() => null); // the data layer never throws
+    cache.set(key, { at: Date.now(), promise });
+    return promise;
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ---- srFetch: same-origin JSON with an 8s budget ----------------------
+
+  async function srFetch(url) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        credentials: "same-origin",
+        headers: { accept: "application/json" },
+        signal: ctl.signal,
+      });
+      if (!res.ok) return null;
+      const body = await res.json();
+      // FACEIT wraps most responses in { payload }; some (stats rows) are bare.
+      return body && typeof body === "object" && "payload" in body
+        ? body.payload
+        : body;
+    } catch {
+      return null; // network error, abort, or invalid JSON — all the same to callers
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // ---- SRApi.user(nick) -------------------------------------------------
+
+  function user(nick) {
+    const key = `u:${String(nick).toLowerCase()}`;
+    return cached(key, async () => {
+      const p = await srFetch(
+        `/api/users/v1/nicknames/${encodeURIComponent(nick)}`,
+      );
+      if (!p || !p.id) return null;
+      const cs2 = (p.games && p.games.cs2) || {};
+      return {
+        uuid: p.id,
+        steam64: cs2.game_id || null,
+        elo: cs2.faceit_elo != null ? +cs2.faceit_elo : null,
+        level: cs2.skill_level != null ? +cs2.skill_level : null,
+        country: p.country || null,
+        avatar: p.avatar || null,
+      };
+    });
+  }
+
+  // ---- SRApi.eloHistory(uuid, n) ----------------------------------------
+  // Newest first. Recent rows may omit elo (FACEIT lags) — they are included
+  // with elo:null so per-map aggregation still counts them.
+
+  function mapHistoryRow(r) {
+    r = r || {};
+    return {
+      matchId: r.matchId || null,
+      date: new Date(+r.date),
+      map: r.i1 || null,
+      // a genuine 0-kill game is a reading, not a gap — only absent/NaN → null
+      kills: r.i6 != null && r.i6 !== "" && !isNaN(+r.i6) ? +r.i6 : null,
+      deaths: r.i8 != null && r.i8 !== "" && !isNaN(+r.i8) ? +r.i8 : null,
+      win: r.i10 === "1",
+      elo: r.elo ? +r.elo : null,
+      delta: r.elo_delta ? +r.elo_delta : null,
+    };
+  }
+
+  function eloHistory(uuid, n) {
+    const want = Math.max(1, Math.floor(+n) || 100);
+    return cached(`h:${uuid}:${want}`, async () => {
+      const size = Math.min(want, PAGE_SIZE);
+      const rows = [];
+      for (let page = 0; page * size < want && page < MAX_PAGES; page++) {
+        if (page > 0) await sleep(PAGE_GAP_MS); // be polite between pages
+        const batch = await srFetch(
+          `/api/stats/v1/stats/time/users/${encodeURIComponent(uuid)}` +
+            `/games/cs2?page=${page}&size=${size}`,
+        );
+        if (!Array.isArray(batch)) {
+          if (page === 0) return null; // nothing at all → honest null
+          break; // partial history beats none
+        }
+        for (const r of batch) rows.push(mapHistoryRow(r));
+        if (batch.length < size) break; // short page — history exhausted
+      }
+      return rows.slice(0, want);
+    });
+  }
+
+  // ---- SRApi.room(roomId) -----------------------------------------------
+
+  function mapTeam(t) {
+    t = t || {};
+    const roster = Array.isArray(t.roster) ? t.roster : [];
+    return {
+      name: typeof t.name === "string" ? t.name : "",
+      roster: roster.map((m) => {
+        m = m || {};
+        return {
+          uuid: m.id || null,
+          nick: typeof m.nickname === "string" ? m.nickname : "",
+          steam64: m.gameId || null,
+          elo: m.elo != null ? +m.elo : null,
+          level: m.gameSkillLevel != null ? +m.gameSkillLevel : null,
+          // present on FACEIT's roster payload; the panel degrades when absent
+          avatar: typeof m.avatar === "string" ? m.avatar : null,
+          country: typeof m.country === "string" ? m.country : null,
+        };
+      }),
+    };
+  }
+
+  function room(roomId) {
+    return cached(`r:${roomId}`, async () => {
+      const p = await srFetch(
+        `/api/match/v2/match/${encodeURIComponent(roomId)}`,
+      );
+      if (!p || !p.teams) return null;
+      return {
+        state: p.state || null,
+        teams: [mapTeam(p.teams.faction1), mapTeam(p.teams.faction2)],
+      };
+    });
+  }
+
+  // ---- SRApi.cheatmeter({steamid|faceit}) -------------------------------
+  // Passthrough to the background worker, which owns the cross-origin call
+  // and its own cache; we still cache here to skip the message round-trip.
+
+  function cheatmeter(params) {
+    params = params || {};
+    const key = params.steamid
+      ? `c:s:${params.steamid}`
+      : `c:f:${String(params.faceit || "").toLowerCase()}`;
+    return cached(key, () => {
+      return new Promise((resolve) => {
+        try {
+          chrome.runtime.sendMessage(
+            { type: "lookup", steamid: params.steamid, faceit: params.faceit },
+            (r) => {
+              resolve(chrome.runtime.lastError || !r || r.error ? null : r);
+            },
+          );
+        } catch {
+          resolve(null); // extension context gone — silent no-op
+        }
+      });
+    });
+  }
+
+  // ---- SRSettings --------------------------------------------------------
+  // One cached chrome.storage.sync read; invalidated (and re-broadcast) on
+  // every storage change. The options page is the only writer.
+
+  const DEFAULTS = {
+    enabled: true,
+    "feature.matchroom": true,
+    "feature.profile": true,
+    "feature.steam": true,
+    "feature.chips": true,
+    "auto.accept": false,
+    "auto.closeModals": false,
+    "notify.matchReady": false,
+    apiBase: "https://csrun.win",
+  };
+
+  let settingsPromise = null;
+  const changeListeners = new Set();
+
+  function settingsGet() {
+    if (!settingsPromise) {
+      settingsPromise = new Promise((resolve) => {
+        try {
+          chrome.storage.sync.get(DEFAULTS, (stored) => {
+            resolve(
+              chrome.runtime.lastError
+                ? { ...DEFAULTS }
+                : { ...DEFAULTS, ...stored },
+            );
+          });
+        } catch {
+          resolve({ ...DEFAULTS });
+        }
+      });
+    }
+    return settingsPromise;
+  }
+
+  // cb(settings, changes) — called with the fresh, defaults-merged snapshot.
+  function settingsOnChange(cb) {
+    if (typeof cb === "function") changeListeners.add(cb);
+  }
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "sync") return;
+      settingsPromise = null; // next get() re-reads
+      settingsGet().then((settings) => {
+        changeListeners.forEach((cb) => {
+          try {
+            cb(settings, changes);
+          } catch {
+            /* a broken listener must not break the rest */
+          }
+        });
+      });
+    });
+  } catch {
+    /* no chrome.storage here (e.g. dev harness) — onChange simply never fires */
+  }
+
+  // ---- export ------------------------------------------------------------
+
+  window.SRApi = { user, eloHistory, room, cheatmeter };
+  window.SRSettings = { get: settingsGet, onChange: settingsOnChange };
+})();

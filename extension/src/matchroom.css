@@ -1,0 +1,446 @@
+/* StatRun match-room panel. Tokens (tokens.css) only — no raw values except
+   the 4px-grid geometry this module owns. Injected root: #statrun-room. */
+
+#statrun-room {
+  display: block;
+  margin: 12px 0 16px;
+  font-family: var(--sr-font);
+  color: var(--sr-ink);
+}
+
+/* ---- team cards -------------------------------------------------------- */
+
+.sr-mr-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .sr-mr-teams {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sr-mr-card {
+  background: var(--sr-panel);
+  border: 1px solid var(--sr-line);
+  border-radius: var(--sr-r-card);
+  box-shadow: var(--sr-shadow);
+  overflow: hidden;
+  /* one fixed template shared by header labels + every row in BOTH cards */
+  --sr-mr-grid: 24px minmax(0, 1fr) 20px 42px 34px 34px 34px 44px 48px 28px;
+}
+
+.sr-mr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--sr-line);
+}
+.sr-mr-teamname {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sr-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sr-mr-headright {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
+}
+.sr-mr-avg {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.sr-mr-avgval {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sr-orange);
+}
+
+/* elo prediction chip: "+24 / −26 est" */
+.sr-mr-pred {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--sr-r-chip);
+  background: var(--sr-panel2);
+  border: 1px solid var(--sr-line);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sr-mr-pred-gain { color: var(--sr-good); }
+.sr-mr-pred-loss { color: var(--sr-bad); }
+.sr-mr-pred-sep {
+  color: var(--sr-faint);
+  font-weight: 400;
+}
+.sr-mr-pred-est {
+  color: var(--sr-faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ---- column labels + player rows --------------------------------------- */
+
+.sr-mr-cols,
+.sr-mr-row {
+  display: grid;
+  grid-template-columns: var(--sr-mr-grid);
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+}
+.sr-mr-cols {
+  padding: 8px 12px 4px;
+}
+.sr-mr-l-player { grid-column: 1 / 3; }
+
+.sr-mr-row {
+  min-height: 32px;
+  border-top: 1px solid var(--sr-line);
+  transition: background 120ms ease-out;
+}
+.sr-mr-row:not(.sr-mr-row--skel):hover {
+  background: var(--sr-panel2);
+}
+
+/* column alignment — labels and cells share the exact same rules */
+.sr-mr-l-elo, .sr-mr-elo,
+.sr-mr-l-kd, .sr-mr-c-kd,
+.sr-mr-l-wr, .sr-mr-c-wr,
+.sr-mr-l-prem, .sr-mr-c-prem,
+.sr-mr-l-aim, .sr-mr-c-aim {
+  justify-self: end;
+  text-align: right;
+}
+.sr-mr-l-streak, .sr-mr-c-streak,
+.sr-mr-l-cm, .sr-mr-c-cm {
+  justify-self: center;
+  text-align: center;
+}
+
+.sr-mr-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: var(--sr-panel2);
+  border: 1px solid var(--sr-line2);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sr-muted);
+}
+.sr-mr-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sr-mr-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.sr-mr-nick {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sr-ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 120ms ease-out;
+}
+.sr-mr-nick:hover {
+  color: var(--sr-brand);
+}
+.sr-mr-flag {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* level badge — colors come from tokens.css .sr-lvl-N; size lives here */
+#statrun-room .sr-mr-lvl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--sr-r-chip);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sr-mr-elo {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sr-orange);
+}
+
+.sr-mr-cell {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--sr-ink);
+}
+
+.sr-mr-streak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  min-width: 28px;
+  padding: 0 4px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+}
+.sr-mr-streak--w {
+  color: var(--sr-good);
+  background: color-mix(in srgb, var(--sr-good) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-good) 40%, transparent);
+}
+.sr-mr-streak--l {
+  color: var(--sr-bad);
+  background: color-mix(in srgb, var(--sr-bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-bad) 40%, transparent);
+}
+
+/* fallback CheatMeter chip (badge.js absent); mirrors the sr-chip language */
+.sr-mr-cm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--sr-r-chip);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.sr-mr-cm--score {
+  color: var(--sr-cm);
+  background: color-mix(in srgb, var(--sr-cm) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sr-cm) 45%, transparent);
+}
+.sr-mr-cmdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sr-cm);
+}
+.sr-mr-cm--dim { background: transparent; border-style: dashed; } /* see .sr-chip--dim */
+.sr-mr-cm--ban {
+  /* dark glyphs on the solid red — ink-on-red measured ~2.6:1 */
+  color: var(--sr-bg);
+  background: var(--sr-bad);
+  border-color: var(--sr-bad);
+}
+.sr-mr-cm--neutral {
+  color: var(--sr-muted);
+  background: color-mix(in srgb, var(--sr-muted) 12%, transparent);
+  border-color: color-mix(in srgb, var(--sr-muted) 30%, transparent);
+}
+.sr-mr-cm:hover { filter: brightness(1.15); }
+/* badge.js chip carries its own margin for inline use — zero it in our grid */
+#statrun-room .sr-chip { margin: 0; }
+
+/* Premier mini-plate — tier hex arrives via --sr-tier from matchroom.js */
+.sr-mr-prem {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--sr-tier) 62%, white);
+  background: color-mix(in srgb, var(--sr-tier) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-tier) 45%, transparent);
+}
+
+.sr-mr-aim {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sr-brand);
+}
+
+.sr-mr-dash {
+  color: var(--sr-faint);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.sr-mr-empty {
+  padding: 16px 12px;
+  border-top: 1px solid var(--sr-line);
+  font-size: 11px;
+  color: var(--sr-faint);
+  text-align: center;
+}
+
+/* ---- veto / map-form panel --------------------------------------------- */
+
+.sr-veto-panel {
+  margin-top: 12px;
+  background: var(--sr-panel);
+  border: 1px solid var(--sr-line);
+  border-radius: var(--sr-r-card); /* sibling of the team cards — same radius */
+  box-shadow: var(--sr-shadow);
+  overflow: hidden;
+  --sr-mr-vgrid: 76px 88px minmax(0, 1fr) 88px;
+}
+
+.sr-mr-vhead,
+.sr-mr-vrow {
+  display: grid;
+  grid-template-columns: var(--sr-mr-vgrid);
+  column-gap: 8px;
+  align-items: center;
+  padding: 4px 12px;
+}
+.sr-mr-vhead {
+  padding: 10px 12px 6px;
+}
+.sr-mr-vrow {
+  min-height: 28px;
+  border-top: 1px solid var(--sr-line);
+}
+
+.sr-mr-vteam {
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sr-faint); /* one gray per header row — matches .sr-label */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sr-mr-vteam--a { text-align: right; }
+.sr-mr-vh-mid { text-align: center; }
+
+.sr-mr-vmap {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sr-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sr-mr-vnum {
+  font-size: 11px;
+  color: var(--sr-muted);
+  white-space: nowrap;
+}
+.sr-mr-vnum--a { justify-self: end; text-align: right; }
+.sr-mr-vnum--b { justify-self: start; }
+.sr-mr-vnum--top {
+  color: var(--sr-ink);
+  font-weight: 700;
+}
+
+/* bar pair: team A grows right-to-left, team B left-to-right, shared scale */
+.sr-mr-vbars {
+  display: flex;
+  align-items: center;
+  min-height: 16px;
+  min-width: 0;
+}
+.sr-mr-vhalf {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 16px;
+}
+.sr-mr-vhalf--a {
+  justify-content: flex-end;
+  padding-right: 4px;
+  border-right: 1px solid var(--sr-line2); /* shared center axis */
+}
+.sr-mr-vhalf--b {
+  padding-left: 4px;
+}
+.sr-mr-vbar {
+  height: 8px;
+  border-radius: var(--sr-r-chip);
+  background: color-mix(in srgb, var(--sr-brand) 45%, transparent);
+}
+.sr-mr-vbar--top {
+  background: var(--sr-brand); /* team's most-played map */
+}
+
+/* ---- footer ------------------------------------------------------------ */
+
+.sr-mr-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 2px 0;
+}
+.sr-mr-wordmark {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sr-ink);
+  text-decoration: none;
+}
+.sr-mr-wordmark b {
+  color: var(--sr-brand);
+  font-weight: 700;
+}
+.sr-mr-wordmark:hover b {
+  filter: brightness(1.15);
+}
+.sr-mr-note {
+  font-size: 10px;
+  color: var(--sr-faint);
+}
+
+/* ---- skeletons (layout only — shimmer comes from tokens.css .sr-skel) --- */
+
+.sr-mr-skel-avatar { width: 24px; height: 24px; border-radius: 50%; }
+.sr-mr-skel-name   { width: 70%;  height: 10px; }
+.sr-mr-skel-cell   { width: 100%; height: 10px; }
+.sr-mr-skel-stat   { width: 24px; height: 10px; }
+.sr-mr-skel-bar    { width: 100%; height: 8px; }
+.sr-mr-skel-title  { width: 120px; height: 12px; }
+.sr-mr-skel-chip   { width: 96px; height: 18px; margin-left: auto; }
+
+/* ---- a11y / motion ------------------------------------------------------ */
+
+#statrun-room a:focus-visible {
+  outline: 2px solid var(--sr-brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-mr-row,
+  .sr-mr-nick {
+    transition: none;
+  }
+}

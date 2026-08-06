@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" class="sr-host-faceit">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StatRun — match room fixture</title>
+  <link rel="stylesheet" href="../src/tokens.css">
+  <link rel="stylesheet" href="../src/matchroom.css">
+  <style>
+    /* Fixture-only host-page shell — simulates FACEIT's dark chrome. These
+       styles are NOT extension UI; the panel itself uses only sr-* rules. */
+    html, body { margin: 0; background: #121212; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .fx-nav {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 24px;
+      background: #151a26; border-bottom: 1px solid #232b3d;
+      color: #8b95a9; font-size: 13px;
+    }
+    .fx-nav b { color: #ff5500; }
+    main { max-width: 1140px; margin: 0 auto; padding: 16px; }
+    .fx-room {
+      border: 1px dashed #2a3550; border-radius: 12px;
+      padding: 48px 24px; text-align: center;
+      color: #66748c; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="fx-nav"><b>FACEIT</b> fixture shell &middot; /cs2/room/dev</div>
+  <main>
+    <div class="fx-room">Host page room content &mdash; the StatRun panel mounts above this block.</div>
+  </main>
+
+  <!-- The hash drives matchroom.js's dev route (no real SPA routing here). -->
+  <script>if (!/[#&]room=/.test(location.hash)) location.hash = "#room=dev";</script>
+  <script src="mock-api.js"></script>
+  <script src="../src/matchroom.js"></script>
+</body>
+</html>

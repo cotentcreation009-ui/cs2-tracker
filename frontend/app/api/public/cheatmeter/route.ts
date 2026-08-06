@@ -85,6 +85,12 @@ export async function GET(req: Request): Promise<Response> {
     kd: faceit?.kdRatio || leetify?.kd || null,
     gap: sus?.gap ?? null,
     banned,
+    // extras the extension's match-room panel renders (all already fetched)
+    country: faceit?.country || null,
+    winRatePct: faceit?.winRatePct || null,
+    winStreak: faceit?.currentWinStreak ?? null,
+    recentResults: faceit?.recentResults?.slice(0, 5) ?? null,
+    leetifyAim: leetify?.rating?.aim ?? null,
   };
 
   return NextResponse.json(payload, {
