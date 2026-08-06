@@ -187,7 +187,10 @@ function MapLog({
             const hex = hexOf(r.winnerTeam);
             const side = (r.winnerSide || "").toUpperCase();
             const note = notes.get(`${mp.sequence}:${r.number}`);
-            const showBreak = isBreakAfter(r.number) && i < arr.length - 1;
+            // newest-first: the gap between periods sits BELOW the first round
+            // of the new period — i.e. below R13 when halftime follows R12 —
+            // so test whether the round before this one closed a period.
+            const showBreak = isBreakAfter(r.number - 1) && i < arr.length - 1;
             return (
               <div key={r.number}>
                 <div className="flex items-center gap-2.5 rounded-md px-2 py-1 text-xs transition hover:bg-panel/50">
@@ -205,7 +208,7 @@ function MapLog({
                 {showBreak ? (
                   <div className="my-1.5 flex items-center gap-2 px-2" aria-hidden>
                     <span className="h-px flex-1 bg-line/60" />
-                    <span className="text-[9px] uppercase tracking-wider text-faint">{breakLabel(r.number)}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-faint">{breakLabel(r.number - 1)}</span>
                     <span className="h-px flex-1 bg-line/60" />
                   </div>
                 ) : null}
