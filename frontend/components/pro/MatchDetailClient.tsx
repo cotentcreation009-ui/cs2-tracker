@@ -188,6 +188,11 @@ export function MatchDetailClient({
         </div>
       </div>
 
+      {/* recent form + head-to-head + lineups — the "who are these teams"
+          context reads BEFORE the live numbers; `match` keeps the win estimate
+          live-blended as the poll updates */}
+      {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} match={m} /> : null}
+
       {/* per-map breakdown with scoreboards */}
       {maps.length > 0 ? (
         <section className="space-y-3">
@@ -210,10 +215,6 @@ export function MatchDetailClient({
 
       {/* round-by-round log with live economy — everything the poll gives us */}
       <GameLog match={m} />
-
-      {/* recent form + head-to-head, loaded lazily below the live data —
-          `match` keeps the win estimate live-blended as the poll updates */}
-      {a && b ? <ProHistoryPanel id={m.seriesId} teams={[a, b]} match={m} /> : null}
     </div>
   );
 }
