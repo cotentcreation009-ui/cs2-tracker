@@ -163,16 +163,31 @@
 
   // ---- mount -------------------------------------------------------------
 
+  // Match rooms have NO <main> — measured on the live page, which is why an
+  // earlier `querySelector("main")`-only version mounted nothing at all there.
+  // Try the room's own containers first, then the generic ones, and only give
+  // up if the document has no usable host.
+  function hostEl() {
+    return (
+      document.querySelector("#canvas-body") ||
+      document.querySelector("#canvas-wrapper") ||
+      document.querySelector('[class*="CanvasHolder"]') ||
+      document.querySelector("main") ||
+      document.querySelector("#__next") ||
+      null
+    );
+  }
+
   function insertMount() {
     const old = document.getElementById(MOUNT_ID);
     if (old) old.remove();
-    const main = document.querySelector("main");
-    if (!main) return null; // no stable anchor — degrade to nothing
+    const host = hostEl();
+    if (!host) return null; // no stable anchor — degrade to nothing
     const mount = el("div", "sr-reset sr-mr");
     mount.id = MOUNT_ID;
-    const anchor = main.firstElementChild;
-    if (anchor) main.insertBefore(mount, anchor);
-    else main.appendChild(mount);
+    const anchor = host.firstElementChild;
+    if (anchor) host.insertBefore(mount, anchor);
+    else host.appendChild(mount);
     return mount;
   }
 
@@ -559,7 +574,11 @@
 
     const mount = insertMount();
     if (!mount) {
-      state.dead = true;
+      // No host container YET — the room shell renders asynchronously. This is
+      // retryable, not terminal: leaving state.dead false lets the observer
+      // call us again once the SPA has built the page. (Marking it dead here
+      // is what silently disabled the panel on every match room.)
+      state.id = null;
       return;
     }
     renderSkeleton(mount);
