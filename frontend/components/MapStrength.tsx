@@ -244,11 +244,13 @@ function MapIcon({ map, noLabel = false }: { map: string; noLabel?: boolean }) {
           alt={mapLabel(map)}
           onError={() => setStage((s) => s + 1)}
           draggable={false}
-          // solid fill + real padding: star/diamond logos (Cache, Anubis) don't
-          // fill the circle, and on a translucent chip their silhouette wins —
-          // reading as an oval next to the circular badges. The chip must
-          // supply the circle no matter the artwork's shape.
-          className={`h-11 w-11 rounded-full border border-line2 bg-panel2 ${
+          // max-w-none matters: the radar positions each vertex absolutely with
+          // no width, so the wrapper shrinks to the space left of the radar's
+          // right edge — and the preflight img{max-width:100%} then squeezed
+          // right-side icons into ovals (Cache at 26px wide) while left-side
+          // ones stayed circular. The icon must own its 44px regardless of
+          // where in the ring it lands.
+          className={`h-11 w-11 max-w-none rounded-full border border-line2 bg-panel2 ${
             stage === 0 ? "object-contain p-1" : "object-cover"
           }`}
         />
@@ -424,7 +426,7 @@ function MapWinRadar({
           return (
             <div
               key={r.map}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 ${unplayed ? "opacity-40" : ""}`}
+              className={`absolute grid w-11 -translate-x-1/2 -translate-y-1/2 place-items-center ${unplayed ? "opacity-40" : ""}`}
               style={{ left: `${(o.x / RADAR) * 100}%`, top: `${(o.y / RADAR) * 100}%`, zIndex: isHov ? 30 : undefined }}
               onMouseEnter={() => setHov(r.map)}
               onMouseLeave={() => setHov(null)}
