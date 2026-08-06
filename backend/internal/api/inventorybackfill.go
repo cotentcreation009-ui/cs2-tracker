@@ -92,11 +92,22 @@ func (s *Server) StartInventoryBackfill(ctx context.Context) {
 // case and only while the breaker says it is worth waiting for.
 func (s *Server) fillInventory(ctx context.Context, steamID uint64) {
 	for attempt := 0; attempt < 3; attempt++ {
-		if d := steaminv.RetryAfter(); d > 0 {
+		// Wait out whatever is in the way. A tripped breaker says exactly how
+		// long; being turned away by the pacing gate instead reports nothing
+		// to wait for, and retrying on that immediately would spend every
+		// attempt inside a microsecond — which is precisely the case that
+		// happens whenever live traffic is also reading.
+		wait := steaminv.RetryAfter()
+		if wait > 0 {
+			wait += time.Second
+		} else if attempt > 0 {
+			wait = steaminv.Spacing()
+		}
+		if wait > 0 {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(d + time.Second):
+			case <-time.After(wait):
 			}
 		}
 		v, err := steaminv.Build(ctx, s.invHTTP, steamID)
