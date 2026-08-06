@@ -88,7 +88,9 @@ func FaceitKey(steamID uint64) string  { return fmt.Sprintf("cs2:faceit:%d", ste
 // the panel can filter by category and explain an unpriced item — old entries
 // would filter over a truncated list. v3: prices are the median of real sales
 // where volume allows, so old entries carry figures from a different method.
-func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:v3:%d", steamID) }
+// v4: a name whose finishes are priced separately (Doppler phases) takes the
+// median across them instead of whichever row happened to land last.
+func InventoryKey(steamID uint64) string { return fmt.Sprintf("cs2:inv:v4:%d", steamID) }
 
 // LeetifyGameKey caches one player's deep scoreboard line for one Leetify game
 // (expanded-row stats — ADR/KAST/rating). Immutable once the game finished.
