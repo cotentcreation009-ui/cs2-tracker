@@ -306,7 +306,13 @@ var (
 	minSpacing   = 20 * time.Second
 	maxQueueWait = 8 * time.Second  // longer than this and we'd rather serve stale
 	firstBackoff = 90 * time.Second // one window plus margin
-	maxBackoff   = 5 * time.Minute  // ceiling on the circuit-breaker cool-off
+	// The ceiling has to be long enough for an ESCALATED penalty to clear, not
+	// just the ordinary one. Steam extends a block that keeps being poked, and
+	// a 5-minute cap meant a probe every five minutes forever — observed live
+	// as a breaker that cycled for half an hour without ever getting a 200.
+	// Snapshots and the backfill queue mean nobody is waiting on this probe,
+	// so patience costs nothing.
+	maxBackoff = 30 * time.Minute
 )
 
 // Spacing is the enforced gap between Steam reads, for callers that pace their
@@ -356,14 +362,14 @@ func (g *gate) reserve(ctx context.Context) error {
 }
 
 // trip opens the circuit after a 429, doubling the cool-off each consecutive
-// strike (90s, 3m, 5m…). The first wait is deliberately close to the real
-// recovery window — waiting hours for a one-minute problem makes the panel look
-// permanently broken.
+// strike (90s, 3m, 6m, 12m, 24m, 30m cap). The first wait stays close to the
+// ordinary recovery window so a routine throttle clears fast; the tail exists
+// for the escalated case, where every premature probe restarts the penalty.
 func (g *gate) trip() time.Duration {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.strikes++
-	d := firstBackoff << uint(min(g.strikes-1, 3))
+	d := firstBackoff << uint(min(g.strikes-1, 5))
 	if d > maxBackoff {
 		d = maxBackoff
 	}
