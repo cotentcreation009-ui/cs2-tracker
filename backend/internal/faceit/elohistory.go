@@ -17,7 +17,7 @@ import (
 // Elo field), so this is used read-only, best-effort, with an aggressive
 // circuit breaker: if FACEIT ever blocks or changes it, elo movement simply
 // goes absent rather than breaking anything.
-const statsHost = "https://api.faceit.com"
+var statsHost = "https://api.faceit.com" // var so tests can point at a fixture
 
 // EloGame is one row of a player's FACEIT match history that carries elo.
 type EloGame struct {
@@ -58,10 +58,23 @@ func (c *Client) EloHistory(ctx context.Context, playerID string, limit int) ([]
 	}
 	out := make([]EloGame, 0, limit)
 	for page := 0; len(out) < limit && page < (limit+99)/100; page++ {
+		// A page is one request, and an active player needs three of them. A
+		// back-to-back burst from a datacenter IP is exactly what gets a later
+		// page 403'd — and losing page N must never cost the pages already in
+		// hand: one page covers a month of matches, which is what the UI
+		// actually shows. So pace the pages, and treat any failure past the
+		// first as "return what we have".
+		if page > 0 {
+			select {
+			case <-ctx.Done():
+				return out, nil
+			case <-time.After(400 * time.Millisecond):
+			}
+		}
 		u := fmt.Sprintf("%s/stats/v1/stats/time/users/%s/games/cs2?page=%d&size=100", statsHost, playerID, page)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
-			return nil, err
+			return out, nil
 		}
 		// browser-shaped headers: the plain default UA gets a Cloudflare 403
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -71,15 +84,21 @@ func (c *Client) EloHistory(ctx context.Context, playerID string, limit int) ([]
 
 		resp, err := c.http.Do(req)
 		if err != nil {
+			if page > 0 {
+				return out, nil
+			}
 			return nil, err
 		}
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
 			resp.Body.Close()
 			noteStatsBlock()
-			return nil, nil
+			return out, nil
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
+			if page > 0 {
+				return out, nil
+			}
 			return nil, fmt.Errorf("faceit stats: status %d", resp.StatusCode)
 		}
 		var rows []struct {
@@ -92,6 +111,9 @@ func (c *Client) EloHistory(ctx context.Context, playerID string, limit int) ([]
 		err = json.NewDecoder(resp.Body).Decode(&rows)
 		resp.Body.Close()
 		if err != nil {
+			if page > 0 {
+				return out, nil
+			}
 			return nil, fmt.Errorf("faceit stats: decode: %w", err)
 		}
 		for _, r := range rows {
