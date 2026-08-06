@@ -244,8 +244,12 @@ function MapIcon({ map, noLabel = false }: { map: string; noLabel?: boolean }) {
           alt={mapLabel(map)}
           onError={() => setStage((s) => s + 1)}
           draggable={false}
-          className={`h-11 w-11 rounded-full border border-line2 bg-panel2/80 ${
-            stage === 0 ? "object-contain p-0.5" : "object-cover"
+          // solid fill + real padding: star/diamond logos (Cache, Anubis) don't
+          // fill the circle, and on a translucent chip their silhouette wins —
+          // reading as an oval next to the circular badges. The chip must
+          // supply the circle no matter the artwork's shape.
+          className={`h-11 w-11 rounded-full border border-line2 bg-panel2 ${
+            stage === 0 ? "object-contain p-1" : "object-cover"
           }`}
         />
       )}
