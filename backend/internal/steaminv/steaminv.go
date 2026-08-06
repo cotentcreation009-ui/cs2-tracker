@@ -11,11 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +41,30 @@ var (
 
 const iconBase = "https://community.fastly.steamstatic.com/economy/image/"
 
+// AppliedMod is something attached to a specific copy of an item — a sticker,
+// charm or patch. This is what collectors actually collect: the same skin with
+// tournament stickers is a different object, and worth different money.
+type AppliedMod struct {
+	Kind string `json:"kind"` // "sticker" | "charm" | "patch"
+	Name string `json:"name"`
+	Icon string `json:"icon"`
+}
+
+// Copy is one physical copy's own numbers: the paint float (wear), the paint
+// seed (pattern), and the self-encoded inspect payload the game accepts in a
+// steam://…+csgo_econ_action_preview link. All come straight from Valve's
+// asset_properties block — no game-coordinator round trip involved.
+type Copy struct {
+	Float   *float64 `json:"float,omitempty"`
+	Seed    int      `json:"seed,omitempty"`
+	Inspect string   `json:"inspect,omitempty"`
+}
+
 // Item is one distinct inventory entry (identical items are grouped).
 type Item struct {
+	// ID is a stable per-entry key. Entries can share a name now that a
+	// stickered or float-bearing copy stands alone instead of merging.
+	ID          string  `json:"id"`
 	Name        string  `json:"name"`             // "AK-47 | Redline (Field-Tested)"
 	MarketName  string  `json:"market_hash_name"` // price join key
 	IconURL     string  `json:"icon"`             // full CDN URL
@@ -49,8 +74,8 @@ type Item struct {
 	Exterior    string  `json:"exterior,omitempty"`
 	StatTrak    bool    `json:"stattrak,omitempty"`
 	Souvenir    bool    `json:"souvenir,omitempty"`
-	Count int     `json:"count"`
-	Price float64 `json:"price,omitempty"` // per unit, USD
+	Count       int     `json:"count"`
+	Price       float64 `json:"price,omitempty"` // per unit, USD
 	// SaleVolume is how many of these actually sold on Skinport in the last 30
 	// days. Non-zero means Price is the median of those sales; zero means it
 	// is Skinport's suggested price, which nobody has necessarily paid.
@@ -59,6 +84,11 @@ type Item struct {
 	// phases and their rare variants) and Price is the median across them —
 	// which finish this one is cannot be read from a public inventory.
 	PriceVariants int `json:"price_variants,omitempty"`
+	// Applied stickers/charms/patches on this copy, and each copy's own
+	// float/seed/inspect payload. Entries carrying either never merge with
+	// their plain namesakes.
+	Applied []AppliedMod `json:"applied,omitempty"`
+	Copies  []Copy       `json:"copies,omitempty"`
 	// Marketable and Tradable are why an item can be unpriced: a market price
 	// only exists for something the market will carry. Steam gives us both, so
 	// an item with no price can say which kind of "no" it is rather than
@@ -108,7 +138,7 @@ type View struct {
 	// RealizedItems is how many of PricedItems are valued at a median of real
 	// sales rather than a suggested price — i.e. how much of the total is
 	// backed by money that changed hands.
-	RealizedItems int `json:"realized_items,omitempty"`
+	RealizedItems   int          `json:"realized_items,omitempty"`
 	ItemCount       int          `json:"item_count"` // total assets incl. duplicates
 	DistinctCount   int          `json:"distinct_count"`
 	MarketableCount int          `json:"marketable_count"`
@@ -403,6 +433,7 @@ func RetryAfter() time.Duration {
 
 type steamInv struct {
 	Assets []struct {
+		AssetID    string `json:"assetid"`
 		ClassID    string `json:"classid"`
 		InstanceID string `json:"instanceid"`
 	} `json:"assets"`
@@ -415,16 +446,69 @@ type steamInv struct {
 		Type       string `json:"type"`
 		Tradable   int    `json:"tradable"`
 		Marketable int    `json:"marketable"`
-		Tags       []struct {
+		// Inner rich-text blocks. Applied stickers/charms arrive here as an
+		// HTML fragment (sticker_info / keychain_info) — the only place the
+		// public inventory exposes them.
+		Descriptions []struct {
+			Value string `json:"value"`
+		} `json:"descriptions"`
+		Tags []struct {
 			Category string `json:"category"`
 			Name     string `json:"localized_tag_name"`
 			Color    string `json:"color"`
 		} `json:"tags"`
 	} `json:"descriptions"`
+	// Per-asset numbers Valve started publishing in 2026: propertyid 1 is the
+	// paint seed, 2 the paint float, 6 the self-encoded inspect-link payload.
+	AssetProperties []struct {
+		AssetID string `json:"assetid"`
+		Props   []struct {
+			PropertyID  int    `json:"propertyid"`
+			IntValue    string `json:"int_value"`
+			FloatValue  string `json:"float_value"`
+			StringValue string `json:"string_value"`
+		} `json:"asset_properties"`
+	} `json:"asset_properties"`
 	TotalCount  int    `json:"total_inventory_count"`
 	Success     int    `json:"success"`
 	MoreItems   int    `json:"more_items"`
 	LastAssetID string `json:"last_assetid"`
+}
+
+// imgTagRe finds <img …> tags inside the sticker/keychain HTML fragments;
+// attrRe pulls one attribute out of a tag regardless of attribute order.
+var (
+	imgTagRe    = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	srcAttrRe   = regexp.MustCompile(`(?i)\bsrc="([^"]+)"`)
+	titleAttrRe = regexp.MustCompile(`(?i)\btitle="([^"]+)"`)
+)
+
+// parseApplied extracts stickers, charms and patches from a description's
+// inner HTML blocks. Steam renders them as <img title="Sticker: Name"> runs
+// inside a sticker_info/keychain_info div; the title prefix says which kind.
+func parseApplied(blocks []string) []AppliedMod {
+	var out []AppliedMod
+	for _, b := range blocks {
+		if !strings.Contains(b, "sticker_info") && !strings.Contains(b, "keychain_info") {
+			continue
+		}
+		for _, tag := range imgTagRe.FindAllString(b, -1) {
+			t := titleAttrRe.FindStringSubmatch(tag)
+			s := srcAttrRe.FindStringSubmatch(tag)
+			if t == nil || s == nil {
+				continue
+			}
+			kind, name, ok := strings.Cut(html.UnescapeString(t[1]), ": ")
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(kind) {
+			case "sticker", "charm", "patch":
+				out = append(out, AppliedMod{Kind: strings.ToLower(kind), Name: name, Icon: s[1]})
+			}
+		}
+	}
+	return out
 }
 
 // errPrivate is the private-inventory signal, unwound in Build.
@@ -484,6 +568,14 @@ func fetchPageFallback(ctx context.Context, hc *http.Client, steam64 uint64, cur
 		return nil, fmt.Errorf("steaminv: steamapis fetch: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		// Verified live: steamapis answers a PRIVATE inventory with 403 and an
+		// explicit "make sure profile and inventory is public" body, while key
+		// problems are 401. That makes their 403 trustworthy enough to carry
+		// the private verdict — without it, private profiles would sit in the
+		// "fetching" state for as long as Steam itself refuses to answer us.
+		return nil, errPrivate
+	}
 	if resp.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
 		slog.Warn("steamapis fallback failed", "status", resp.StatusCode,
@@ -598,6 +690,7 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			break
 		}
 		inv.Assets = append(inv.Assets, p.Assets...)
+		inv.AssetProperties = append(inv.AssetProperties, p.AssetProperties...)
 		for _, d := range p.Descriptions {
 			k := d.ClassID + "_" + d.InstanceID
 			if seenDesc[k] {
@@ -625,10 +718,36 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		return private()
 	}
 
-	// asset counts per class+instance → grouped items
+	// asset counts and asset ids per class+instance → grouped items
 	counts := map[string]int{}
+	groupAssets := map[string][]string{}
 	for _, a := range inv.Assets {
-		counts[a.ClassID+"_"+a.InstanceID]++
+		k := a.ClassID + "_" + a.InstanceID
+		counts[k]++
+		groupAssets[k] = append(groupAssets[k], a.AssetID)
+	}
+	// per-asset numbers (float / seed / inspect payload), keyed by assetid
+	propsByAsset := map[string]Copy{}
+	for _, e := range inv.AssetProperties {
+		var c Copy
+		for _, p := range e.Props {
+			switch p.PropertyID {
+			case 1:
+				if n, err := strconv.Atoi(p.IntValue); err == nil {
+					c.Seed = n
+				}
+			case 2:
+				if f, err := strconv.ParseFloat(p.FloatValue, 64); err == nil {
+					f := f
+					c.Float = &f
+				}
+			case 6:
+				c.Inspect = p.StringValue
+			}
+		}
+		if c.Float != nil || c.Seed != 0 || c.Inspect != "" {
+			propsByAsset[e.AssetID] = c
+		}
 	}
 	pm := prices(ctx, hc)
 
@@ -653,7 +772,9 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		if n == 0 {
 			continue
 		}
+		gk := d.ClassID + "_" + d.InstanceID
 		it := Item{
+			ID:         "i" + gk,
 			Name:       d.Name,
 			MarketName: d.MarketName,
 			IconURL:    iconBase + d.IconURL,
@@ -663,6 +784,28 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			StatTrak:   strings.Contains(d.Name, "StatTrak"),
 			Souvenir:   strings.HasPrefix(d.Name, "Souvenir"),
 		}
+		// what this copy carries, and its own numbers
+		blocks := make([]string, 0, len(d.Descriptions))
+		for _, b := range d.Descriptions {
+			blocks = append(blocks, b.Value)
+		}
+		it.Applied = parseApplied(blocks)
+		for _, aid := range groupAssets[gk] {
+			if c, ok := propsByAsset[aid]; ok {
+				it.Copies = append(it.Copies, c)
+			}
+		}
+		// best wear first — low float is the collectible end
+		sort.SliceStable(it.Copies, func(i, j int) bool {
+			a, b := it.Copies[i].Float, it.Copies[j].Float
+			if a == nil {
+				return false
+			}
+			if b == nil {
+				return true
+			}
+			return *a < *b
+		})
 		for _, t := range d.Tags {
 			switch t.Category {
 			case "Type":
@@ -691,22 +834,29 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		if it.Marketable {
 			v.MarketableCount += n
 		}
-		// Steam splits one market item across several descriptions when the
-		// copies differ in ways it tracks and we don't (applied stickers, a
-		// name tag, a trade hold). They are the same tradeable good at the same
-		// price, so they become one card carrying the full count — otherwise
-		// the grid shows "Tec-9 | Urban DDPAT x2" twice and React sees two
-		// children under one key.
+		// Merging is only for true commodities now. Steam splits one market
+		// item across descriptions for reasons we can't always see (a name
+		// tag, a trade hold) — those still merge so the grid doesn't repeat
+		// "Tec-9 | Urban DDPAT ×2" twice. But a copy carrying stickers, a
+		// charm, or its own float is a distinct object a collector owns ONE
+		// of, so it stands alone with its details rather than disappearing
+		// into a stack.
 		key := it.MarketName
 		if key == "" {
 			key = it.Name
 		}
-		if ex, seen := byName[key]; seen {
-			ex.Count += n
+		if len(it.Applied) == 0 && len(it.Copies) == 0 {
+			if ex, seen := byName["n:"+key]; seen {
+				ex.Count += n
+			} else {
+				cp := it
+				byName["n:"+key] = &cp
+				order = append(order, "n:"+key)
+			}
 		} else {
 			cp := it
-			byName[key] = &cp
-			order = append(order, key)
+			byName["i:"+gk] = &cp
+			order = append(order, "i:"+gk)
 		}
 
 		cat := it.Type

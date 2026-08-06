@@ -320,6 +320,101 @@ func TestBuildFollowsPagination(t *testing.T) {
 	}
 }
 
+// Collectors' detail: applied stickers parse out of the inner HTML, each
+// copy's float/seed/inspect payload attaches from asset_properties, and a copy
+// carrying either NEVER merges into its plain namesake — two AK Slates where
+// one wears tournament stickers are different objects.
+func TestBuildAttachesStickersAndCopies(t *testing.T) {
+	const body = `{"assets":[
+	   {"assetid":"901","classid":"c1","instanceid":"i1"},
+	   {"assetid":"902","classid":"c1","instanceid":"i2"}],
+	 "descriptions":[
+	   {"classid":"c1","instanceid":"i1","name":"AK-47 | Slate (Field-Tested)",
+	    "market_hash_name":"AK-47 | Slate (Field-Tested)","type":"Rifle","marketable":1,
+	    "descriptions":[{"value":"<br><div id=\"sticker_info\" class=\"sticker_info\"><center><img width=64 height=48 src=\"https://cdn.steamstatic.com/apps/730/icons/econ/stickers/a.png\" title=\"Sticker: Seeing Red\"><img src=\"https://cdn.steamstatic.com/apps/730/icons/econ/stickers/b.png\" title=\"Sticker: Assassin (Holo)\"></center></div>"}],
+	    "tags":[{"category":"Type","localized_tag_name":"Rifle"}]},
+	   {"classid":"c1","instanceid":"i2","name":"AK-47 | Slate (Field-Tested)",
+	    "market_hash_name":"AK-47 | Slate (Field-Tested)","type":"Rifle","marketable":1,
+	    "tags":[{"category":"Type","localized_tag_name":"Rifle"}]}],
+	 "asset_properties":[
+	   {"assetid":"901","asset_properties":[
+	     {"propertyid":1,"int_value":"420"},
+	     {"propertyid":2,"float_value":"0.21500000"},
+	     {"propertyid":6,"string_value":"ABCDEF0123"}]},
+	   {"assetid":"902","asset_properties":[
+	     {"propertyid":2,"float_value":"0.30100000"},
+	     {"propertyid":6,"string_value":"FEDCBA9876"}]}],
+	 "total_inventory_count":2,"success":1}`
+
+	hc := fixtureServers(t, body, http.StatusOK)
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// both copies carry per-asset data, so neither merges
+	if len(v.TopItems) != 2 {
+		t.Fatalf("want 2 separate entries (both carry copy data), got %d", len(v.TopItems))
+	}
+	var stickered, plain *Item
+	for i := range v.TopItems {
+		if len(v.TopItems[i].Applied) > 0 {
+			stickered = &v.TopItems[i]
+		} else {
+			plain = &v.TopItems[i]
+		}
+	}
+	if stickered == nil || plain == nil {
+		t.Fatalf("want one stickered and one plain entry: %+v", v.TopItems)
+	}
+	if stickered.ID == plain.ID || stickered.ID == "" {
+		t.Errorf("entries need distinct non-empty ids, got %q and %q", stickered.ID, plain.ID)
+	}
+	if len(stickered.Applied) != 2 ||
+		stickered.Applied[0].Name != "Seeing Red" || stickered.Applied[0].Kind != "sticker" ||
+		stickered.Applied[1].Name != "Assassin (Holo)" ||
+		!strings.HasPrefix(stickered.Applied[0].Icon, "https://cdn.steamstatic.com/") {
+		t.Errorf("stickers parsed wrong: %+v", stickered.Applied)
+	}
+	if len(stickered.Copies) != 1 || stickered.Copies[0].Float == nil ||
+		*stickered.Copies[0].Float != 0.215 || stickered.Copies[0].Seed != 420 ||
+		stickered.Copies[0].Inspect != "ABCDEF0123" {
+		t.Errorf("copy data wrong: %+v", stickered.Copies)
+	}
+	if len(plain.Copies) != 1 || plain.Copies[0].Float == nil || *plain.Copies[0].Float != 0.301 {
+		t.Errorf("plain copy data wrong: %+v", plain.Copies)
+	}
+	if v.DistinctCount != 2 || v.ItemCount != 2 {
+		t.Errorf("distinct=%d items=%d, want 2/2", v.DistinctCount, v.ItemCount)
+	}
+}
+
+// The fallback's 403 carries the private verdict (verified live: steamapis
+// answers private inventories with 403 + an explicit message, key problems
+// with 401) — otherwise private profiles sit in "fetching" for as long as
+// Steam itself is refusing us.
+func TestFallbackMapsForbiddenToPrivate(t *testing.T) {
+	hc := fixtureServers(t, `null`, http.StatusTooManyRequests)
+	t.Cleanup(steamGate.clear)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"Could not retrieve user inventory. Make sure profile and inventory is public. (403) (403)","code":403}`))
+	}))
+	t.Cleanup(srv.Close)
+	prevURL := steamapisURL
+	steamapisURL = srv.URL + "/v2/steam/users/%d/inventory/730/2"
+	SetFallbackKey("test-key")
+	t.Cleanup(func() { steamapisURL = prevURL; SetFallbackKey("") })
+
+	v, err := Build(context.Background(), hc, 76561198000000000)
+	if err != nil {
+		t.Fatalf("private via fallback should not error: %v", err)
+	}
+	if !v.Private {
+		t.Errorf("want private=true from the fallback's 403, got %+v", v)
+	}
+}
+
 // When Steam refuses and a steamapis key is configured, the read must go
 // through and come back marked with its source — a Steam penalty must not
 // take the whole feature down when a second road exists.
