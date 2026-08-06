@@ -167,11 +167,10 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
       wait >= 90 ? `about ${Math.round(wait / 60)} minutes` : wait > 0 ? `about a minute` : "a moment";
     return (
       <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-        <p className="text-base font-semibold text-ink">Steam isn&apos;t handing out this one yet</p>
+        <p className="text-base font-semibold text-ink">Fetching this inventory</p>
         <p className="max-w-md text-sm text-muted">
-          Steam limits how often anyone can read inventories, and it&apos;s turned us away for now.
-          Once we get one clean read we keep it, so this only bites the first time. Try again in{" "}
-          {when}.
+          Steam only lets us read a few inventories a minute, so this one is queued rather than
+          lost. We keep the first clean read, so it only waits once — check back in {when}.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <button type="button" onClick={() => setAttempt((n) => n + 1)} className="btn btn-ghost h-8 px-3 text-xs">
