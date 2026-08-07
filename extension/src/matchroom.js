@@ -121,11 +121,12 @@
     for (const r of rows) {
       const key = String(r.map || "").trim().toLowerCase();
       if (!key) continue;
-      const e = agg.get(key) || { n: 0, w: 0, kills: 0, kn: 0 };
+      const e = agg.get(key) || { n: 0, w: 0, kills: 0, deaths: 0, kn: 0 };
       e.n += 1;
       if (winOf(r)) e.w += 1;
       if (typeof r.kills === "number") {
         e.kills += r.kills;
+        e.deaths += typeof r.deaths === "number" ? r.deaths : 0;
         e.kn += 1;
       }
       agg.set(key, e);
@@ -503,108 +504,165 @@
 
   const R_SIZE = 260;
   const R_C = R_SIZE / 2;
-  const R_MAX = 74;
+  // Sized against the label ring below (LBL_R), not the box: the polygon should
+  // be the biggest thing in the panel, and it was drawing at 57% of its own box
+  // because the vertex captions used to be a full sentence wide.
+  const R_MAX = 90;
+  const LBL_R = 1.24;
 
-  function metricOf(e, metric) {
+  // total is the team's whole sample, so "pick" can be a share of it
+  function metricOf(e, metric, total) {
     if (!e || !e.n) return null;
     if (metric === "kills") return e.kn ? e.kills / e.kn : null;
+    if (metric === "kd") return e.kn && e.deaths > 0 ? e.kills / e.deaths : null;
+    if (metric === "pick") return total ? (e.n / total) * 100 : null;
     return (e.w / e.n) * 100;
+  }
+
+  const METRICS = [
+    { key: "winrate", label: "Win rate", unit: "%", head: "WR" },
+    { key: "pick", label: "Pick rate", unit: "%", head: "PICK" },
+    { key: "kd", label: "K/D", unit: "", head: "K/D" },
+    { key: "kills", label: "Avg kills", unit: "", head: "KILLS" },
+  ];
+  function metricDef(k) {
+    return METRICS.find((m) => m.key === k) || METRICS[0];
+  }
+  function fmtMetric(v, metric) {
+    if (v == null) return "—";
+    const d = metricDef(metric);
+    if (metric === "kd") return v.toFixed(2);
+    if (metric === "kills") return v.toFixed(1);
+    return Math.round(v) + d.unit;
+  }
+  function totalOf(agg) {
+    let t = 0;
+    for (const e of agg.values()) t += e.n;
+    return t;
   }
 
   function radarPanel(aggA, aggB, nameA, nameB) {
     const panel = el("section", "sr-veto-panel");
     let metric = "winrate";
+    let hot = null; // hovered/pinned map key — drives the cross-highlight
+    let pinned = null;
 
-    const keys = new Set([...aggA.keys(), ...aggB.keys()]);
-    if (!keys.size) {
-      panel.append(el("div", "sr-mr-empty", "No recent map data"));
-      return panel;
-    }
-
-    const head = el("div", "sr-mr-rhead");
-    const title = el("span", "sr-label", "Map form");
-    const toggle = el("div", "sr-mr-toggle");
-    const bWin = el("button", "sr-mr-tbtn sr-mr-tbtn--on", "Win rate");
-    const bKil = el("button", "sr-mr-tbtn", "Avg kills");
-    bWin.type = "button";
-    bKil.type = "button";
-    toggle.append(bWin, bKil);
-    const scope = el("span", "sr-label sr-mr-rscope", "Last 30");
-    head.append(title, toggle, scope);
-
-    const legend = el("div", "sr-mr-legend");
-    const lg = (name, side) => {
-      const s = el("span", "sr-mr-lg sr-mr-lg--" + side);
-      s.append(el("span", "sr-mr-lgdot"), el("span", null, String(name || (side === "a" ? "Team A" : "Team B"))));
-      s.title = String(name || "");
-      return s;
-    };
-    legend.append(lg(nameA, "a"), lg(nameB, "b"));
-
-    const holder = el("div", "sr-mr-radar");
-    const edges = el("div", "sr-mr-edges");
-    const body = el("div", "sr-mr-rbody");
-    body.append(holder, edges);
-    panel.append(head, legend, body);
+    const totalA = totalOf(aggA);
+    const totalB = totalOf(aggB);
+    const teamA = String(nameA || "Team A");
+    const teamB = String(nameB || "Team B");
 
     // Spokes are the active-duty pool ONLY, and only where BOTH teams have
     // played: a retired map nobody vetoes is noise, and a map one side has
     // never touched collapsed that side's polygon to the centre, which is
-    // what made the chart look broken. Alphabetical so the shape means the
-    // same thing from one room to the next.
-    const paired = POOL.filter((key) => {
-      const a = aggA.get(key);
-      const b = aggB.get(key);
+    // what made the chart look broken.
+    const maps = POOL.filter((k) => {
+      const a = aggA.get(k);
+      const b = aggB.get(k);
       return a && a.n > 0 && b && b.n > 0;
-    });
-    const maps = paired.map((key) => ({ key, a: aggA.get(key), b: aggB.get(key) }));
+    }).map((key) => ({ key, a: aggA.get(key), b: aggB.get(key) }));
 
-    // Maps one side has never played are the loudest veto signal there is, so
-    // they get said out loud instead of drawn as a spike.
+    // Never-played pool maps are the loudest veto signal in the data.
     const unplayed = POOL.map((key) => {
-      const a = aggA.get(key);
-      const b = aggB.get(key);
-      const aN = a ? a.n : 0;
-      const bN = b ? b.n : 0;
-      if (aN === 0 && bN === 0) return null; // neither plays it — not a signal
+      const aN = aggA.get(key) ? aggA.get(key).n : 0;
+      const bN = aggB.get(key) ? aggB.get(key).n : 0;
+      if (aN === 0 && bN === 0) return null;
       if (aN === 0) return { key, side: "a" };
       if (bN === 0) return { key, side: "b" };
       return null;
     }).filter(Boolean);
 
+    // ---- header: metric switcher ----
+    const head = el("div", "sr-mr-rhead");
+    head.append(el("span", "sr-label", "Map form"));
+    const toggle = el("div", "sr-mr-toggle");
+    const btns = {};
+    for (const m of METRICS) {
+      const b = el("button", "sr-mr-tbtn" + (m.key === metric ? " sr-mr-tbtn--on" : ""), m.label);
+      b.type = "button";
+      b.title =
+        m.key === "pick"
+          ? "How often each team actually queues this map — a low share is their de-facto ban"
+          : m.key === "kd"
+            ? "Team's combined kills / deaths on this map"
+            : m.key === "kills"
+              ? "Average kills per player per match on this map"
+              : "Share of matches won on this map";
+      b.addEventListener("click", () => setMetric(m.key));
+      btns[m.key] = b;
+      toggle.append(b);
+    }
+    head.append(toggle);
+    const scope = el("span", "sr-label sr-mr-rscope", "Last 30 each");
+    head.append(scope);
+
+    const legend = el("div", "sr-mr-legend");
+    const lg = (name, side) => {
+      const s = el("span", "sr-mr-lg sr-mr-lg--" + side);
+      s.append(el("span", "sr-mr-lgdot"), el("span", null, name));
+      s.title = name;
+      return s;
+    };
+    legend.append(lg(teamA, "a"), lg(teamB, "b"));
+
+    const holder = el("div", "sr-mr-radar");
+    const side = el("div", "sr-mr-side");
+    const body = el("div", "sr-mr-rbody");
+    body.append(holder, side);
+    panel.append(head, legend, body);
+
     if (maps.length < 3) {
-      // A polygon needs three points to say anything — fall back to a list.
-      holder.append(flatMapList(maps, metric));
+      holder.remove();
+      side.classList.add("sr-mr-side--wide");
+      drawTable(side);
       return panel;
     }
 
-    function draw() {
-      holder.textContent = "";
-      const N = maps.length;
+    // ---- geometry ----
+    const N = () => maps.length;
+    const ang = (i) => -Math.PI / 2 + (i / N()) * Math.PI * 2;
+    const pt = (i, f) => ({
+      x: R_C + Math.cos(ang(i)) * R_MAX * f,
+      y: R_C + Math.sin(ang(i)) * R_MAX * f,
+    });
+
+    function scale() {
       const vals = [];
       for (const m of maps) {
-        vals.push(metricOf(m.a, metric), metricOf(m.b, metric));
+        vals.push(metricOf(m.a, metric, totalA), metricOf(m.b, metric, totalB));
       }
       const real = vals.filter((v) => v != null);
-      const hi = metric === "kills" ? Math.max(24, Math.ceil(Math.max(...real) + 2)) : 100;
-      const lo = 0;
-      const frac = (v) => (v == null ? 0 : clampNum((v - lo) / (hi - lo), 0.04, 1));
+      if (!real.length) return { lo: 0, hi: 1 };
+      if (metric === "winrate") return { lo: 0, hi: 100 };
+      // pick / kd / kills: scale to the data so differences are visible
+      const hi = Math.max(...real);
+      return { lo: 0, hi: hi * 1.15 || 1 };
+    }
 
-      const ang = (i) => -Math.PI / 2 + (i / N) * Math.PI * 2;
-      const pt = (i, f) => ({
-        x: R_C + Math.cos(ang(i)) * R_MAX * f,
-        y: R_C + Math.sin(ang(i)) * R_MAX * f,
-      });
+    // Live handles into the rendered chart and table. Highlighting used to
+    // re-render both, which detached the very row the pointer was on: the
+    // mouseup landed on a replacement node so clicks never completed, and a
+    // focused row was destroyed by its own focus handler. Hot state is now a
+    // class toggle over these handles; only a metric change rebuilds.
+    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null };
 
+    function draw() {
+      holder.textContent = "";
+      refs.dots = [];
+      refs.vx = new Map();
+      refs.areas = [];
+      refs.spoke = null;
+      const { lo, hi } = scale();
+      const frac = (v) => (v == null ? 0.04 : clampNum((v - lo) / (hi - lo || 1), 0.04, 1));
+
+      const d = metricDef(metric);
       const svg = svgEl("svg", {
         viewBox: "0 0 " + R_SIZE + " " + R_SIZE,
         class: "sr-mr-rsvg",
         role: "img",
-        "aria-label":
-          "Per-map " + (metric === "kills" ? "average kills" : "win rate") + " for both teams over their last 30 matches",
+        "aria-label": d.label + " per map for both teams, last 30 matches each",
       });
 
-      // rings + spokes
       for (const f of [0.25, 0.5, 0.75, 1]) {
         svg.append(
           svgEl("polygon", {
@@ -617,128 +675,197 @@
         const p = pt(i, 1);
         svg.append(svgEl("line", { class: "sr-mr-spoke", x1: R_C, y1: R_C, x2: p.x.toFixed(1), y2: p.y.toFixed(1) }));
       });
+      // The highlighted axis reads through the polygons. One reusable line,
+      // moved on highlight rather than created — see refs above.
+      refs.spoke = svgEl("line", { class: "sr-mr-spoke sr-mr-spoke--hot", x1: R_C, y1: R_C, x2: R_C, y2: R_C });
+      refs.spoke.style.display = "none";
+      svg.append(refs.spoke);
 
-      const poly = (side) => {
-        const pts = maps.map((m, i) => pt(i, frac(metricOf(side === "a" ? m.a : m.b, metric))));
-        svg.append(
-          svgEl("polygon", {
-            class: "sr-mr-area sr-mr-area--" + side,
-            points: pts.map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" "),
-          }),
-        );
+      const poly = (which) => {
+        const pts = maps.map((m, i) => pt(i, frac(metricOf(which === "a" ? m.a : m.b, metric, which === "a" ? totalA : totalB))));
+        const area = svgEl("polygon", {
+          class: "sr-mr-area sr-mr-area--" + which,
+          points: pts.map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" "),
+        });
+        refs.areas.push(area);
+        svg.append(area);
         pts.forEach((p, i) => {
-          const e = side === "a" ? maps[i].a : maps[i].b;
-          if (!e || !e.n) return;
-          svg.append(svgEl("circle", { class: "sr-mr-dotpt sr-mr-dotpt--" + side, cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 2.5 }));
+          const dot = svgEl("circle", {
+            class: "sr-mr-dotpt sr-mr-dotpt--" + which,
+            cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 2.5,
+          });
+          refs.dots.push({ key: maps[i].key, node: dot });
+          svg.append(dot);
         });
       };
       poly("a");
       poly("b");
       holder.append(svg);
 
-      drawRead(edges, maps, unplayed, metric, nameA, nameB);
-
-      // vertex labels, positioned outside the ring
       maps.forEach((m, i) => {
-        const o = pt(i, 1.3);
+        const o = pt(i, LBL_R);
         const tag = el("div", "sr-mr-vx");
+        refs.vx.set(m.key, tag);
         tag.style.left = ((o.x / R_SIZE) * 100).toFixed(2) + "%";
         tag.style.top = ((o.y / R_SIZE) * 100).toFixed(2) + "%";
-        const val = (e, side) => {
-          const v = metricOf(e, metric);
-          const s = el("span", "sr-mr-vxv sr-mr-vxv--" + side);
-          s.textContent = v == null ? "—" : metric === "kills" ? v.toFixed(1) : Math.round(v) + "%";
-          s.title = e && e.n ? e.n + " played" : "Not played in the last 30";
-          return s;
-        };
         tag.append(el("span", "sr-mr-vxname", mapLabel(m.key)));
         const row = el("span", "sr-mr-vxrow");
-        row.append(val(m.a, "a"), el("span", "sr-mr-vxsep", "·"), val(m.b, "b"));
+        row.append(
+          el("span", "sr-mr-vxv--a", fmtMetric(metricOf(m.a, metric, totalA), metric)),
+          el("span", "sr-mr-vxsep", "·"),
+          el("span", "sr-mr-vxv--b", fmtMetric(metricOf(m.b, metric, totalB), metric)),
+        );
         tag.append(row);
-        const n = el("span", "sr-mr-vxn", (m.a ? m.a.n : 0) + " v " + (m.b ? m.b.n : 0));
-        n.title = "Matches played on this map in each team's last 30";
-        tag.append(n);
+        tag.append(el("span", "sr-mr-vxcount", m.a.n + " v " + m.b.n));
+        tag.title =
+          mapLabel(m.key) + " — " + teamA + " " + m.a.n + " matches, " + teamB + " " + m.b.n + " matches";
+        tag.addEventListener("mouseenter", () => setHot(m.key));
+        tag.addEventListener("mouseleave", () => setHot(pinned));
         holder.append(tag);
       });
     }
 
-    function setMetric(next, onBtn, offBtn) {
-      if (metric === next) return;
-      metric = next;
-      onBtn.classList.add("sr-mr-tbtn--on");
-      offBtn.classList.remove("sr-mr-tbtn--on");
-      draw();
+    // ---- the table: every pool map, all four numbers, cross-highlighting ----
+    function drawTable(box) {
+      box.textContent = "";
+      refs.rows = new Map();
+      const d = metricDef(metric);
+      const head2 = el("div", "sr-mr-trow sr-mr-trow--head");
+      const colHead = (which, team) => {
+        const s2 = el("span", "sr-label sr-mr-tnum sr-mr-vxv--" + which, d.head);
+        s2.title = team + " — " + d.label;
+        return s2;
+      };
+      head2.append(
+        el("span", "sr-label", "Map"),
+        colHead("a", teamA),
+        colHead("b", teamB),
+        el("span", "sr-label sr-mr-tgap", "Edge"),
+      );
+      box.append(head2);
+
+      const rows = POOL.map((key) => {
+        const a = aggA.get(key) || null;
+        const b = aggB.get(key) || null;
+        const va = metricOf(a, metric, totalA);
+        const vb = metricOf(b, metric, totalB);
+        return { key, a, b, va, vb, gap: va != null && vb != null ? va - vb : null };
+      }).filter((r) => (r.a && r.a.n) || (r.b && r.b.n));
+
+      rows.sort((x, y) => Math.abs(y.gap ?? -1) - Math.abs(x.gap ?? -1));
+      const worst = Math.max(1, ...rows.map((r) => Math.abs(r.gap || 0)));
+
+      for (const r of rows) {
+        const row = el("div", "sr-mr-trow");
+        row.tabIndex = 0;
+        refs.rows.set(r.key, row);
+        const name = el("span", "sr-mr-tmap", mapLabel(r.key));
+        if (!r.a || !r.a.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--b", "new to " + shortName(teamA)));
+        else if (!r.b || !r.b.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--a", "new to " + shortName(teamB)));
+        row.append(name);
+        const cell = (v, e, which) => {
+          const s = el("span", "sr-mr-tnum sr-mr-vxv--" + which, fmtMetric(v, metric));
+          s.title = e && e.n ? e.n + " of " + (which === "a" ? totalA : totalB) + " recent matches" : "Not played recently";
+          if (!e || !e.n) s.classList.add("sr-mr-dash");
+          return s;
+        };
+        row.append(cell(r.va, r.a, "a"), cell(r.vb, r.b, "b"));
+        const gapBox = el("span", "sr-mr-tgap");
+        if (r.gap != null) {
+          const bar = el("span", "sr-mr-etrack");
+          const fill = el("span", "sr-mr-efill sr-mr-efill--" + (r.gap >= 0 ? "a" : "b"));
+          fill.style.width = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100)) + "%";
+          bar.append(fill);
+          gapBox.append(bar);
+          gapBox.title =
+            (r.gap >= 0 ? teamA : teamB) + " ahead by " + fmtMetric(Math.abs(r.gap), metric) + " on " + mapLabel(r.key);
+        } else {
+          gapBox.append(el("span", "sr-mr-dash", "—"));
+        }
+        row.append(gapBox);
+
+        const on = () => setHot(r.key);
+        const off = () => setHot(pinned);
+        row.addEventListener("mouseenter", on);
+        row.addEventListener("mouseleave", off);
+        row.addEventListener("focus", on);
+        row.addEventListener("blur", off);
+        row.addEventListener("click", () => {
+          pinned = pinned === r.key ? null : r.key;
+          setHot(pinned);
+        });
+        box.append(row);
+      }
+
+      if (unplayed.length) {
+        const note = el("div", "sr-mr-tnote");
+        note.append(el("span", "sr-label", "Never played"));
+        note.append(
+          el(
+            "span",
+            null,
+            unplayed
+              .slice(0, 3)
+              .map((u) => mapLabel(u.key) + " (" + shortName(u.side === "a" ? teamA : teamB) + ")")
+              .join(" · "),
+          ),
+        );
+        note.title = "A pool map absent from a team's last 30 is their de-facto permaban";
+        box.append(note);
+      }
     }
-    bWin.addEventListener("click", () => setMetric("winrate", bWin, bKil));
-    bKil.addEventListener("click", () => setMetric("kills", bKil, bWin));
+
+    function shortName(n) {
+      return n.length > 14 ? n.slice(0, 14) + "…" : n;
+    }
+
+    // Toggle-only: nothing is re-created, so the node under the pointer (or
+    // holding focus) survives the highlight it just triggered.
+    function applyHot() {
+      for (const a of refs.areas) a.classList.toggle("sr-mr-area--muted", !!hot);
+      for (const d of refs.dots) {
+        const on = !!hot && d.key === hot;
+        d.node.classList.toggle("sr-mr-dotpt--hot", on);
+        d.node.setAttribute("r", on ? "4.5" : "2.5");
+      }
+      for (const [k, tag] of refs.vx) tag.classList.toggle("sr-mr-vx--hot", k === hot);
+      for (const [k, row] of refs.rows) {
+        row.classList.toggle("sr-mr-trow--hot", k === hot);
+        row.classList.toggle("sr-mr-trow--pin", !!pinned && k === pinned);
+      }
+      if (refs.spoke) {
+        const i = hot ? maps.findIndex((m) => m.key === hot) : -1;
+        if (i >= 0) {
+          const p = pt(i, 1.06);
+          refs.spoke.setAttribute("x2", p.x.toFixed(1));
+          refs.spoke.setAttribute("y2", p.y.toFixed(1));
+          refs.spoke.style.display = "";
+        } else {
+          refs.spoke.style.display = "none";
+        }
+      }
+    }
+
+    function setHot(key) {
+      if (hot === key) return;
+      hot = key;
+      applyHot();
+    }
+
+    function setMetric(next) {
+      if (metric === next) return;
+      for (const k in btns) btns[k].classList.toggle("sr-mr-tbtn--on", k === next);
+      metric = next;
+      draw();
+      drawTable(side);
+      applyHot();
+    }
 
     draw();
+    drawTable(side);
+    applyHot();
     return panel;
   }
-
-  // The radar shows the shape; this says what to DO with it. Deliberately NOT
-  // a re-listing of every map — the chart already names them, and repeating
-  // the same seven labels beside it read as duplication. Only the decisions:
-  // where each side is strongest, and any map a side has never played.
-  function drawRead(box, maps, unplayed, metric, nameA, nameB) {
-    box.textContent = "";
-    box.append(el("div", "sr-label", "Veto read"));
-
-    const rows = maps
-      .map((m) => {
-        const a = metricOf(m.a, metric);
-        const b = metricOf(m.b, metric);
-        return a == null || b == null ? null : { key: m.key, gap: a - b };
-      })
-      .filter(Boolean)
-      .sort((x, y) => y.gap - x.gap);
-
-    const teamA = String(nameA || "Team A");
-    const teamB = String(nameB || "Team B");
-    const unit = (v) => (metric === "kills" ? Math.abs(v).toFixed(1) : Math.round(Math.abs(v)) + "pp");
-
-    const line = (label, mapKey, amt, side, why) => {
-      const r = el("div", "sr-mr-read");
-      r.append(el("span", "sr-mr-readk", label));
-      const v = el("span", "sr-mr-readv");
-      v.append(el("span", "sr-mr-readmap", mapLabel(mapKey)));
-      if (amt != null) v.append(el("span", "sr-mr-eamt sr-mr-vxv--" + side, "+" + unit(amt)));
-      r.title = why;
-      r.append(v);
-      box.append(r);
-    };
-
-    if (rows.length) {
-      const best = rows[0];
-      const worst = rows[rows.length - 1];
-      if (best.gap > 0) {
-        line("Your edge", best.key, best.gap, "a", teamA + " is strongest here relative to " + teamB);
-      }
-      if (worst.gap < 0) {
-        line("Their edge", worst.key, worst.gap, "b", teamB + " is strongest here relative to " + teamA);
-      }
-      if (best.gap <= 0 && worst.gap >= 0) {
-        box.append(el("div", "sr-mr-empty", "No clear edge either way"));
-      }
-    }
-
-    for (const u of unplayed.slice(0, 3)) {
-      const who = u.side === "a" ? teamA : teamB;
-      const r = el("div", "sr-mr-read");
-      r.append(el("span", "sr-mr-readk", "Never played"));
-      const v = el("span", "sr-mr-readv");
-      v.append(el("span", "sr-mr-readmap", mapLabel(u.key)));
-      v.append(el("span", "sr-mr-eamt sr-mr-vxv--" + u.side, who.length > 12 ? who.slice(0, 12) + "…" : who));
-      r.title = who + " has not played " + mapLabel(u.key) + " in their last 30 matches";
-      r.append(v);
-      box.append(r);
-    }
-
-    if (!box.querySelector(".sr-mr-read")) {
-      box.append(el("div", "sr-mr-empty", "Not enough shared maps"));
-    }
-  }
-
   function clampNum(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
   }
