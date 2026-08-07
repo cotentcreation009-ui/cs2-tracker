@@ -33,6 +33,13 @@ func TestGetProfile(t *testing.T) {
 				"Current Win Streak":"2","Longest Win Streak":"12",
 				"Recent Results":["1","0","1","1","0"]
 			}}`))
+		case r.URL.Path == "/players/abc-123/games/cs2/stats":
+			// GetProfile also aggregates the last 30 matches, because the
+			// lifetime block above carries no ADR, K/R or assists.
+			w.Write([]byte(`{"items":[
+				{"stats":{"Kills":"20","Deaths":"16","Assists":"5","Rounds":"25","ADR":"84.2","Headshots %":"49","Result":"1"}},
+				{"stats":{"Kills":"14","Deaths":"18","Assists":"3","Rounds":"23","ADR":"71.0","Headshots %":"45","Result":"0"}}
+			]}`))
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -51,6 +58,18 @@ func TestGetProfile(t *testing.T) {
 	}
 	if p.Matches != 1234 || p.WinRatePct != 55 || p.KDRatio != 1.12 || p.HSPct != 48 {
 		t.Errorf("lifetime stats not parsed: %+v", p)
+	}
+	if p.Recent == nil {
+		t.Fatalf("recent aggregate missing: %+v", p)
+	}
+	if p.Recent.Matches != 2 {
+		t.Errorf("Recent.Matches = %d, want 2", p.Recent.Matches)
+	}
+	if want := (84.2 + 71.0) / 2; p.Recent.ADR != want {
+		t.Errorf("Recent.ADR = %v, want %v", p.Recent.ADR, want)
+	}
+	if want := 34.0 / 48.0; p.Recent.KR != want {
+		t.Errorf("Recent.KR = %v, want %v", p.Recent.KR, want)
 	}
 	if p.LongestWinStreak != 12 || len(p.RecentResults) != 5 {
 		t.Errorf("streak/recent not parsed: %+v", p)

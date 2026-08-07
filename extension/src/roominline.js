@@ -30,7 +30,21 @@
   // undos[] holds one restore fn per attached strip. placeInside writes inline
   // position/padding onto FACEIT's own card, so simply deleting our strips on
   // room change would leave that styling behind on their node.
-  const state = { id: null, gen: 0, timer: null, obs: null, undos: [] };
+  // Two players who keep turning up in each other's recent matches are queuing
+  // together. That is the single most useful thing to know about a roster you
+  // are about to play, and it is derivable from history we already hold.
+  const MAP_MIN_SAMPLE = 4; // below this the map split is shown but not coloured
+  const MAP_MIN_DELTA = 0.05; // smaller than this is noise, not an edge
+  const PARTY_MIN_SHARED = 3; // shared matches in the last HIST_N to call it a party
+  // Deliberately NOT from the CheatMeter band scale: an amber party tag beside
+  // an amber risk chip made two unrelated things look like one. These are
+  // identity hues (cool + violet), which the band scale never uses.
+  const PARTY_HEX = ["var(--sr-party-1)", "var(--sr-party-2)", "var(--sr-party-3)", "var(--sr-party-4)"];
+
+  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, cardW: null };
+  // strip -> redraw it with whatever is currently known. Party tags are worked
+  // out after the strips are already on the page, so they need a way back in.
+  const redraws = new WeakMap();
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -287,9 +301,17 @@
   // full strip wraps to four lines inside one — which doubles the card's
   // height and reads as a mess. The strip is measured against the card it is
   // annotating and drops to a denser form rather than overflowing it.
+  // Four tiers, set by the width of the card we are annotating. At the width
+  // a FACEIT roster card actually is, the strip shows exactly the eight
+  // numbers a competitor fits there plus elo; the extras that make CSRun worth
+  // running are given the room of a wider card rather than crushed into a
+  // narrow one.
   function density(w) {
-    if (!w || w >= 240) return "";
-    return w < 150 ? " sr-in--micro" : " sr-in--tight";
+    if (!w) return "";
+    if (w < 150) return " sr-in--micro";
+    if (w < 250) return " sr-in--tight";
+    if (w < 430) return "";
+    return " sr-in--wide";
   }
 
   // Everything the strip knows, in one sentence — so the denser forms hide
@@ -310,54 +332,235 @@
     return bits.join(" · ");
   }
 
-  function fillStrip(strip, p, form, cm, pending, cardW) {
+  // One cell of the metric grid: the number, with its name under it. Repeek
+  // proved the shape scans well at a glance; the ordering here is ours — the
+  // things that change your read of an opponent come first.
+  function cell(label, value, opts) {
+    const o = opts || {};
+    const c = el("span", "sr-in-cell" + (o.cls ? " " + o.cls : ""));
+    const v = el("span", "sr-in-cv", value);
+    if (o.hex) v.style.color = o.hex;
+    c.append(v, el("span", "sr-in-cl", label));
+    c.title = o.title || label;
+    return c;
+  }
+
+  function pct(v) {
+    return v == null ? null : Math.round(v) + "%";
+  }
+
+  function fillStrip(strip, p, form, cm, pending, cardW, mapForm) {
     strip.textContent = "";
     strip.className = "sr-reset sr-in" + density(cardW);
     const micro = / sr-in--micro/.test(strip.className);
+    const tight = / sr-in--tight/.test(strip.className);
+    const wide = / sr-in--wide/.test(strip.className);
     strip.title = summary(p, form, cm);
+    const st = (cm && cm.stats) || {};
 
-    if (typeof p.level === "number" && p.level > 0) {
+    const top = el("span", "sr-in-r1");
+    const badges = el("span", "sr-in-badges");
+
+    // Who they queue with, before any performance number — it changes how
+    // every number after it should be read.
+    const party = state.party.get(String(p.nick || "").toLowerCase());
+    if (party) {
+      const tag = el("span", "sr-in-party", String(party.size));
+      tag.style.setProperty("--sr-party", party.hex);
+      tag.title = party.size + "-stack \u2014 these players queue together";
+      tag.setAttribute("aria-label", tag.title);
+      badges.append(tag);
+    }
+    // FACEIT's own card already shows the level; on a card this narrow the
+    // space buys more as a number than as a duplicate badge.
+    if (!micro && typeof p.level === "number" && p.level > 0) {
       const lv = el("span", "sr-in-lvl sr-lvl sr-lvl-" + p.level, String(p.level));
       lv.title = "FACEIT level " + p.level;
-      strip.append(lv);
+      badges.append(lv);
     }
-    if (typeof p.elo === "number" && p.elo > 0) {
-      strip.append(stat("elo", p.elo.toLocaleString("en-US"), "sr-in-elo", "Current FACEIT elo"));
-    }
-    if (form) {
-      strip.append(stat("K/D", form.kd.toFixed(2), null, "K/D over the last " + form.matches + " matches"));
-      if (!micro) {
-        strip.append(stat("WR", Math.round(form.wr) + "%", null, "Win rate over the last " + form.matches + " matches"));
-        const st = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
-        st.title = (form.won ? "Winning" : "Losing") + " streak";
-        strip.append(st);
-      }
-    } else if (pending) {
-      strip.append(el("span", "sr-skel sr-in-skel"));
-    } else {
-      strip.append(stat("K/D", DASH), stat("WR", DASH));
-    }
+    if (badges.childNodes.length) top.append(badges);
 
+    // Every player renders the SAME slots in the SAME order, with a dash where
+    // a value is missing. Omitting a cell shifted every column after it, so
+    // reading a column down the roster — the entire point of a roster strip —
+    // did not work: the elo column measured 75/55/75/55/75 across five players.
+    const grid = el("span", "sr-in-grid");
+    const n = form ? form.matches : 0;
+    const over = " over their last " + n + " matches";
+    const win30 = " over their last " + (st.recentMatches || n || 30) + " matches";
+
+    // K/D is taken from the SAME window as K/D/A whenever that window exists,
+    // because printing "16/17/6" (0.94) beside a K/D of 1.16 makes both look
+    // wrong. Only when the Data API gave us nothing do we fall back.
+    const dataKD =
+      st.recentKills != null && st.avgDeaths > 0 ? st.recentKills / st.avgDeaths : null;
+    const kdVal = dataKD != null ? dataKD : form ? form.kd : null;
+
+    const SLOTS = [
+      { t: 1, label: "elo", v: () => (p.elo > 0 ? p.elo.toLocaleString("en-US") : null),
+        cls: "sr-in-c-elo", title: "Current FACEIT elo" },
+      { t: 2, label: "matches", v: () => (st.matches != null ? st.matches.toLocaleString("en-US") : null),
+        title: "FACEIT matches played, all time" },
+      { t: 1, label: "win", v: () => (form ? Math.round(form.wr) + "%" : null),
+        hex: () => (form ? rateHex(form.wr) : null), title: "Win rate" + over },
+      { t: 2, label: "rating", v: () => (st.rating != null ? st.rating.toFixed(2) : null),
+        hex: () => (st.rating != null ? ratingOneHex(st.rating) : null),
+        title: "HLTV Rating 1.0" + win30 },
+      { t: 0, label: "K/D", v: () => (kdVal != null ? kdVal.toFixed(2) : null),
+        hex: () => (kdVal != null ? kdHex(kdVal) : null), title: "Kills / deaths" + win30 },
+      { t: 2, label: "K/D/A",
+        v: () =>
+          st.recentKills != null && st.avgDeaths != null && st.avgAssists != null
+            ? Math.round(st.recentKills) + "/" + Math.round(st.avgDeaths) + "/" + Math.round(st.avgAssists)
+            : null,
+        title: "Average kills / deaths / assists per match" + win30 },
+      { t: 2, label: "K/R", v: () => (st.kr != null ? st.kr.toFixed(2) : null),
+        title: "Kills per round" + win30 },
+      { t: 1, label: "ADR", v: () => (st.adr != null ? String(Math.round(st.adr)) : null),
+        hex: () => (st.adr != null ? adrHex(st.adr) : null),
+        title: "Average damage per round" + win30 },
+      // Leetify's own rating — the number Repeek labels "Swing". Shown at the
+      // width a FACEIT card actually is, not only on a wide one.
+      { t: 2, label: "swing", v: () => (st.swing != null ? (st.swing >= 0 ? "+" : "") + st.swing.toFixed(2) + "%" : null),
+        hex: () => (st.swing != null ? (st.swing >= 0 ? "var(--sr-good)" : "var(--sr-bad)") : null),
+        title: "Leetify rating — how much better or worse than an average player they made each round" },
+      { t: 3, label: "HS", v: () => (st.hsPct != null ? Math.round(st.hsPct) + "%" : null),
+        title: "Headshot percentage, all time" },
+      { t: 3, label: "aim", v: () => (st.aim != null ? String(Math.round(st.aim)) : null),
+        hex: () => (st.aim != null ? ratingHex(st.aim) : null), title: "Leetify aim rating (0-100)" },
+    ];
+
+    const level = micro ? 0 : tight ? 1 : wide ? 3 : 2;
+    let shown = 0;
+    for (const sl of SLOTS) {
+      if (sl.t > level) continue;
+      shown += 1;
+      const raw = sl.v();
+      if (raw == null) {
+        const c = cell(sl.label, DASH, { cls: sl.cls, title: sl.title + " — not available" });
+        c.querySelector(".sr-in-cv").classList.add("sr-in-cv--none");
+        grid.append(c);
+      } else {
+        grid.append(cell(sl.label, raw, { cls: sl.cls, hex: sl.hex && sl.hex(), title: sl.title }));
+      }
+    }
+    // A fixed column count means every player's grid wraps identically, so the
+    // columns line up down the roster.
+    // Column count per tier, chosen so a value never has to wrap inside its
+    // own track: the widest cell is K/D/A ("16/17/6"), about 52px at 12px bold.
+    const maxCols = level === 0 ? 1 : level === 1 ? 4 : 6;
+    grid.style.setProperty("--sr-cols", String(Math.min(shown, maxCols)));
+    if (pending && !form) grid.append(el("span", "sr-skel sr-in-skel"));
+    top.append(grid);
+
+    const chips = el("span", "sr-in-chips");
+    if (form && !micro) {
+      const stk = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
+      stk.title = (form.won ? "Winning" : "Losing") + " streak";
+      chips.append(stk);
+    }
     if (cm && cm.banned) {
-      const b = el("span", "sr-in-ban", "BAN");
-      b.title = "VAC or game ban on record";
-      b.setAttribute("aria-label", b.title);
-      strip.append(b);
+      const ban = el("span", "sr-in-ban", "BAN");
+      ban.title = "VAC or game ban on record";
+      ban.setAttribute("aria-label", ban.title);
+      chips.append(ban);
     } else if (cm && cm.cheat) {
       const c = el("span", "sr-in-cm", String(cm.cheat.score));
       c.style.setProperty("--sr-cm", bandHex(cm.cheat.band));
       c.title = "CheatMeter " + cm.cheat.score + "% (" + cm.cheat.band + ")";
       c.setAttribute("aria-label", c.title);
       if (cm.cheat.lowConfidence) c.classList.add("sr-in-cm--dim");
-      strip.append(c);
+      chips.append(c);
     }
     if (!micro && cm && typeof cm.premier === "number" && cm.premier > 0) {
       const pr = el("span", "sr-in-prem", cm.premier.toLocaleString("en-US"));
       pr.style.setProperty("--sr-tier", tierHex(cm.premier));
       pr.title = "CS2 Premier rating";
-      strip.append(pr);
+      chips.append(pr);
     }
-    if (!strip.childNodes.length) strip.append(el("span", "sr-in-none", "No data"));
+    strip.append(top);
+
+    // How they do on the map actually being played, and whether that is above
+    // or below their own baseline. A raw map win rate means little without
+    // knowing what the player normally does.
+    // The context line: which map, and the status chips. Keeping the chips out
+    // of the metric line gives the numbers the full width of the card, which
+    // is what let nine of them wrap in two rows instead of three.
+    const bottom = el("span", "sr-in-r2");
+    if (!micro && mapForm && state.map) {
+      const row = el("span", "sr-in-mapwrap");
+      const name = el("span", "sr-in-mapname", mapShort(state.map));
+      name.title = "Performance on " + mapShort(state.map) + ", the map being played";
+      row.append(name);
+      if (!mapForm.matches) {
+        const none = el("span", "sr-in-mapnew", "not played recently");
+        none.title = "No games on this map in their last " + HIST_N;
+        row.append(none);
+      } else {
+        // A 100% win rate off one game is not a 100% win rate. Below a usable
+        // sample the numbers are still shown but stop being coloured, which is
+        // the same "real but thin" treatment the CheatMeter chip already uses.
+        const thin = mapForm.matches < MAP_MIN_SAMPLE;
+        const note = thin ? " — only " + mapForm.matches + " game" + (mapForm.matches === 1 ? "" : "s") + ", read with care" : "";
+        if (thin) row.classList.add("sr-in-mapwrap--thin");
+        row.append(
+          cell("K/D", mapForm.kd.toFixed(2), { hex: thin ? null : kdHex(mapForm.kd), title: "K/D on this map" + note }),
+          cell("win", Math.round(mapForm.wr) + "%", { hex: thin ? null : rateHex(mapForm.wr), title: "Win rate on this map" + note }),
+        );
+        // A 0.01 difference is noise; giving it the same arrow and colour as a
+        // real edge tells the reader something that is not there.
+        if (form && form.kd > 0 && !thin && Math.abs(mapForm.kd - form.kd) >= MAP_MIN_DELTA) {
+          const d = mapForm.kd - form.kd;
+          const arrow = el(
+            "span",
+            "sr-in-delta " + (d >= 0 ? "sr-in-delta--up" : "sr-in-delta--down"),
+            (d >= 0 ? "▲" : "▼") + Math.abs(d).toFixed(2),
+          );
+          arrow.title =
+            "K/D on this map versus their overall \u2014 " +
+            (d >= 0 ? "this map suits them" : "below their usual");
+          row.append(arrow);
+        }
+        const g = el("span", "sr-in-mapn", mapForm.matches + "g");
+        g.title = mapForm.matches + " games on this map in their last " + HIST_N;
+        row.append(g);
+      }
+      bottom.append(row);
+    }
+    if (chips.childNodes.length) (micro ? top : bottom).append(chips);
+    if (bottom.childNodes.length) strip.append(bottom);
+
+    if (!top.childNodes.length && !strip.childNodes.length) {
+      strip.append(el("span", "sr-in-none", "No data"));
+    }
+  }
+
+  // Colour is a second channel, never the only one \u2014 every value stays
+  // legible in monochrome and carries its meaning in the tooltip.
+  function kdHex(v) {
+    if (v >= 1.15) return "var(--sr-good)";
+    if (v < 0.9) return "var(--sr-bad)";
+    return "var(--sr-ink)";
+  }
+  function rateHex(v) {
+    if (v >= 60) return "var(--sr-good)";
+    if (v < 45) return "var(--sr-bad)";
+    return "var(--sr-ink)";
+  }
+  function ratingOneHex(v) {
+    if (v >= 1.1) return "var(--sr-good)";
+    if (v < 0.95) return "var(--sr-bad)";
+    return "var(--sr-ink)";
+  }
+  function adrHex(v) {
+    if (v >= 85) return "var(--sr-good)";
+    if (v < 65) return "var(--sr-bad)";
+    return "var(--sr-ink)";
+  }
+  function ratingHex(v) {
+    if (v >= 75) return "var(--sr-good)";
+    if (v < 50) return "var(--sr-bad)";
+    return "var(--sr-ink)";
   }
 
   const TIERS = [
@@ -376,14 +579,35 @@
     return BAND_HEX[b] || "#9aa7bd";
   }
 
+  // The same numbers, restricted to one map. A player's overall K/D says
+  // little about whether THIS map suits them, which is the question a match
+  // room actually poses.
+  function mapShort(m) {
+    return String(m).replace(/^de_/, "").replace(/^[a-z]/, (c) => c.toUpperCase());
+  }
+
+  function computeMapForm(rows, map) {
+    if (!Array.isArray(rows) || !map) return null;
+    const want = String(map).toLowerCase();
+    const on = rows.filter((r) => r && r.map && String(r.map).toLowerCase() === want);
+    if (!on.length) return { kd: null, wr: null, matches: 0 };
+    const f = computeForm(on);
+    return f ? { kd: f.kd, wr: f.wr, matches: on.length } : null;
+  }
+
   function computeForm(rows) {
     if (!Array.isArray(rows) || !rows.length) return null;
-    let k = 0, d = 0, w = 0;
+    let k = 0, d = 0, w = 0, a = 0, rnd = 0, withA = 0, withR = 0;
     const won = (r) => r.win === true || r.win === 1 || r.win === "1";
     for (const r of rows) {
       k += r.kills || 0;
       d += r.deaths || 0;
       if (won(r)) w += 1;
+      // assists and round counts are read defensively from FACEIT's positional
+      // stat columns, so they are counted only where they actually arrived —
+      // averaging a present value over an absent one would understate it.
+      if (r.assists != null) { a += r.assists; withA += 1; }
+      if (r.rounds != null) { rnd += r.rounds; withR += 1; }
     }
     const top = won(rows[0]);
     let streak = 0;
@@ -391,7 +615,17 @@
       if (won(r) === top) streak += 1;
       else break;
     }
-    return { kd: k / Math.max(1, d), wr: (w / rows.length) * 100, streak: (top ? "W" : "L") + streak, won: top, matches: rows.length };
+    return {
+      kd: k / Math.max(1, d),
+      wr: (w / rows.length) * 100,
+      avgKills: k / rows.length,
+      avgDeaths: d / rows.length,
+      avgAssists: withA ? a / withA : null,
+      kr: withR && rnd > 0 ? k / rnd : null,
+      streak: (top ? "W" : "L") + streak,
+      won: top,
+      matches: rows.length,
+    };
   }
 
   // ---- attach -------------------------------------------------------------
@@ -436,7 +670,7 @@
     // already drew instead of a strip of grey boxes.
     // Filled BEFORE attaching so the layout check below measures real content
     // and the strip's real height, not an empty box.
-    const cardW = card.getBoundingClientRect().width;
+    const cardW = state.cardW || card.getBoundingClientRect().width;
     fillStrip(strip, p, null, null, true, cardW);
     if (!attach(card, strip)) return;
 
@@ -444,9 +678,10 @@
     if (!A) return;
     let form = null;
     let cm = null;
+    let mapForm = null;
     const paint = () => {
       if (gen === state.gen && strip.isConnected) {
-        fillStrip(strip, p, form, cm, false, card.getBoundingClientRect().width);
+        fillStrip(strip, p, form, cm, false, state.cardW || card.getBoundingClientRect().width, mapForm);
         // The strip just changed size. Re-reserve the room it needs and
         // re-check that it still disturbs nothing.
         const s = settle.get(strip);
@@ -470,12 +705,15 @@
       }
     }
 
+    redraws.set(strip, paint);
+
     const jobs = [];
     if (p.uuid) {
       jobs.push(
         A.eloHistory(p.uuid, HIST_N)
           .then((rows) => {
             form = computeForm(rows);
+            mapForm = computeMapForm(rows, state.map);
             paint();
           })
           .catch(() => {}),
@@ -523,12 +761,15 @@
     if (!A || !(await allowed())) return;
     const room = await A.room(id).catch(() => null);
     if (gen !== state.gen) return;
+    state.map = (room && room.map) || null;
 
     let roster = [];
     if (room && Array.isArray(room.teams)) {
-      for (const team of room.teams) {
-        for (const p of team.roster || []) if (p && p.nick) roster.push(p);
-      }
+      room.teams.forEach((team, side) => {
+        for (const p of team.roster || []) {
+          if (p && p.nick) roster.push(Object.assign({}, p, { team: side }));
+        }
+      });
     }
     // A Matchmaking room is not a FACEIT match, and /api/match/v2 does not
     // describe one — which is why no strip ever appeared on a Premier room
@@ -545,8 +786,101 @@
     const nodes = dom ? dom.nameNodes(roster.map((r) => r.nick)) : new Map();
     const all = [...nodes.values()];
 
+    // One density for the whole roster, taken from the NARROWEST card. Cards
+    // in a row are auto-sized, so the player with the longest nickname gets a
+    // wider one — and deciding density per card let that single player cross
+    // into a richer tier, whose taller strip then set the height of the entire
+    // row. A roster should read as one thing.
+    let narrowest = Infinity;
+    if (dom) {
+      for (const node of all) {
+        const c = dom.cardFor(node, all);
+        if (c) narrowest = Math.min(narrowest, c.getBoundingClientRect().width);
+      }
+    }
+    state.cardW = Number.isFinite(narrowest) ? narrowest : null;
+
     for (const p of roster) {
       void decorate(Object.assign({}, p, { node: p.node || nodes.get(p.nick) || null }), gen, all);
+    }
+    void detectParties(roster, gen);
+  }
+
+  // ---- who is queuing together --------------------------------------------
+
+  // Every player's recent match ids, then a union-find over the pairs that
+  // overlap. The histories are the same ones the strips fetch, through the
+  // same cache, so this costs nothing extra.
+  async function detectParties(roster, gen) {
+    const A = api();
+    if (!A || roster.length < 2) return;
+
+    const people = (
+      await Promise.all(
+        roster.map(async (p) => {
+          try {
+            const uuid = p.uuid || (await A.user(p.nick).then((u) => (u ? u.uuid : null)));
+            if (!uuid) return null;
+            const rows = await A.eloHistory(uuid, HIST_N);
+            if (!Array.isArray(rows)) return null;
+            const ids = new Set();
+            for (const r of rows) if (r && r.matchId) ids.add(r.matchId);
+            return ids.size ? { nick: p.nick, team: p.team, ids } : null;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter(Boolean);
+
+    if (gen !== state.gen || people.length < 2) return;
+
+    const parent = people.map((_, i) => i);
+    const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const union = (i, j) => {
+      const a = find(i);
+      const b = find(j);
+      if (a !== b) parent[a] = b;
+    };
+
+    for (let i = 0; i < people.length; i++) {
+      for (let j = i + 1; j < people.length; j++) {
+        // A premade in THIS match is on one side of it, so when we know the
+        // sides we only look within them.
+        if (people[i].team != null && people[j].team != null && people[i].team !== people[j].team) continue;
+        let shared = 0;
+        const small = people[i].ids.size <= people[j].ids.size ? people[i].ids : people[j].ids;
+        const big = small === people[i].ids ? people[j].ids : people[i].ids;
+        for (const id of small) if (big.has(id)) shared += 1;
+        if (shared >= PARTY_MIN_SHARED) union(i, j);
+      }
+    }
+
+    const groups = new Map();
+    people.forEach((_, i) => {
+      const root = find(i);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(i);
+    });
+
+    const party = new Map();
+    let colour = 0;
+    for (const members of groups.values()) {
+      if (members.length < 2) continue; // a solo queue is not a party
+      const hex = PARTY_HEX[colour % PARTY_HEX.length];
+      colour += 1;
+      for (const i of members) {
+        party.set(people[i].nick.toLowerCase(), { size: members.length, hex });
+      }
+    }
+
+    if (gen !== state.gen) return;
+    state.party = party;
+    // Repaint whatever is already on the page — the tag arrives after the
+    // strips do, and a strip is cheap to redraw.
+    for (const strip of document.querySelectorAll("[" + OWNER + "]")) {
+      const repaint = redraws.get(strip);
+      if (repaint) repaint();
     }
   }
 

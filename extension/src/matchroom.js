@@ -458,31 +458,39 @@
     const name = el("h3", "sr-mr-teamname", String(team.name || "Team"));
     name.title = String(team.name || "Team");
     const right = el("div", "sr-mr-headright");
-    const avg = el("span", "sr-mr-avg");
-    avg.append(el("span", "sr-label", "avg"));
-    avg.append(
-      ownAvg != null
-        ? el("span", "sr-mr-avgval sr-num", fmtInt(ownAvg))
-        : el("span", "sr-mr-dash", "—"),
-    );
-    avg.title = "Average FACEIT elo of this roster";
-    right.append(avg);
-    if (ownAvg != null && oppAvg != null) {
-      const p = predict(ownAvg, oppAvg);
-      const chip = el("span", "sr-mr-pred sr-num");
-      chip.append(
-        el("span", "sr-mr-pred-gain", "+" + p.gain),
-        el("span", "sr-mr-pred-sep", "/"),
-        el("span", "sr-mr-pred-loss", "−" + p.loss),
-        el("span", "sr-mr-pred-est", "est"),
+    // Rebuildable: a Premier roster arrives without elo, so the average and the
+    // prediction that depends on it can only be drawn once the per-player
+    // lookups come back. Redrawing this strip is cheaper than blocking the
+    // whole panel on them.
+    const renderRight = (own, opp) => {
+      right.textContent = "";
+      const avg = el("span", "sr-mr-avg");
+      avg.append(el("span", "sr-label", "avg"));
+      avg.append(
+        own != null
+          ? el("span", "sr-mr-avgval sr-num", fmtInt(own))
+          : el("span", "sr-mr-dash", "—"),
       );
-      chip.title =
-        "Estimated elo change for this team: +" + p.gain + " on a win, −" + p.loss + " on a loss";
-      right.append(chip);
-    }
+      avg.title = "Average FACEIT elo of this roster";
+      right.append(avg);
+      if (own != null && opp != null) {
+        const p = predict(own, opp);
+        const chip = el("span", "sr-mr-pred sr-num");
+        chip.append(
+          el("span", "sr-mr-pred-gain", "+" + p.gain),
+          el("span", "sr-mr-pred-sep", "/"),
+          el("span", "sr-mr-pred-loss", "−" + p.loss),
+          el("span", "sr-mr-pred-est", "est"),
+        );
+        chip.title =
+          "Estimated elo change for this team: +" + p.gain + " on a win, −" + p.loss + " on a loss";
+        right.append(chip);
+      }
+    };
+    renderRight(ownAvg, oppAvg);
     head.append(name, right);
     card.append(head);
-    if (SUMMARY_ONLY) return { card, handles: [] };
+    if (SUMMARY_ONLY) return { card, handles: [], renderRight };
 
     const cols = el("div", "sr-mr-cols");
     const lab = (text, cls, title) => {
@@ -648,6 +656,22 @@
     const body = el("div", "sr-mr-rbody");
     body.append(holder, side);
     panel.append(head, legend, body);
+
+    // Nothing to say at all. Saying so is the point: an empty panel with a
+    // heading and a footer reads as broken, and this panel HAS shipped looking
+    // exactly like that when the rosters carried no usable history.
+    if (!maps.length && !unplayed.length) {
+      holder.remove();
+      side.classList.add("sr-mr-side--wide");
+      side.textContent = "";
+      const note = el("div", "sr-mr-tnote");
+      note.append(
+        el("span", "sr-label", "No map history"),
+        el("span", null, "Neither roster has recent matches CSRun can read."),
+      );
+      side.append(note);
+      return panel;
+    }
 
     if (maps.length < 3) {
       holder.remove();
@@ -983,8 +1007,8 @@
     }
 
     const [ta, tb] = room.teams;
-    const avgA = avgElo(ta.roster);
-    const avgB = avgElo(tb.roster);
+    let avgA = avgElo(ta.roster);
+    let avgB = avgElo(tb.roster);
 
     // Now that the roster is known, walk the panel to it. The room shell and
     // the player cards paint at different times, so this is retried a couple
@@ -1011,6 +1035,33 @@
     let veto = vetoSkeleton();
     mount.append(teams, veto, footer());
 
+    // Fill in an average the roster did not carry. Same lookup, same cache as
+    // the history fetch below, so this is free once that has run.
+    if (avgA == null || avgB == null) {
+      const resolve = (team) =>
+        Promise.all(
+          (team.roster || []).slice(0, MAX_PER_TEAM).map((m) =>
+            m.elo != null
+              ? m.elo
+              : m.nick
+                ? SRApi.user(m.nick).then((u) => (u ? u.elo : null)).catch(() => null)
+                : null,
+          ),
+        ).then((elos) => {
+          const real = elos.filter((e) => typeof e === "number" && e > 0);
+          return real.length ? Math.round(real.reduce((x, y) => x + y, 0) / real.length) : null;
+        });
+      Promise.all([avgA == null ? resolve(ta) : avgA, avgB == null ? resolve(tb) : avgB])
+        .then(([a2, b2]) => {
+          if (g !== state.gen || !A.card.isConnected) return;
+          avgA = a2;
+          avgB = b2;
+          A.renderRight(avgA, avgB);
+          B.renderRight(avgB, avgA);
+        })
+        .catch(() => {});
+    }
+
     // The radar needs every player's last-30 maps. Per-player DISPLAY now
     // happens inline under FACEIT's own cards (roominline.js), so this only
     // aggregates — and the two modules share api.js's cache, so asking for
@@ -1018,12 +1069,19 @@
     const aggA = new Map();
     const aggB = new Map();
     const histJobs = [];
+    // A Premier room's roster names its players but does not always carry
+    // their FACEIT ids, and history is keyed by id — so skipping the ones
+    // without a uuid meant fetching nothing at all and rendering an empty
+    // chart. Resolve the id from the nickname first; it is the same lookup the
+    // strips do, through the same cache, so it costs one request per player at
+    // most and usually none.
     const spawn = (team, agg) => {
       for (const p of (team.roster || []).slice(0, MAX_PER_TEAM)) {
-        if (!p.uuid) continue;
+        if (!p.uuid && !p.nick) continue;
         histJobs.push(
           Promise.resolve()
-            .then(() => SRApi.eloHistory(p.uuid, HIST_N))
+            .then(() => (p.uuid ? p.uuid : SRApi.user(p.nick).then((u) => (u ? u.uuid : null))))
+            .then((uuid) => (uuid ? SRApi.eloHistory(uuid, HIST_N) : null))
             .then((rows) => {
               if (g !== state.gen) return;
               if (Array.isArray(rows)) addMaps(agg, rows);
