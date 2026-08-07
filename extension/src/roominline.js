@@ -4,10 +4,15 @@
 //
 // Anchoring is deliberately NOT class-based. FACEIT ships styled-components
 // hashes (styles__Foo-sc-1fbfad92-7) that change on every deploy; matching
-// them would break weekly. Instead we resolve each roster nickname from the
-// match API and find the DOM node whose own text IS that nickname, then walk
-// up to the smallest ancestor that looks like a card. Nicknames are the one
-// thing the page and the API agree on.
+// them would break weekly. We work from profile links instead: a player card
+// is the smallest ancestor of a /players/<nick> link that owns an avatar and
+// sits beside other cards like it. That is stable across deploys.
+//
+// The roster comes from the match API when it describes the room, and from the
+// page itself when it does not — a CS2 Matchmaking/Premier room is not a
+// FACEIT match, so /api/match/v2 says nothing about it even though the page is
+// full of players. Names on the page plus the nickname lookup carry the same
+// information, so both room types are served by one path.
 //
 // Data comes from SRApi only. Every failure is a silent no-op.
 
@@ -18,6 +23,7 @@
   const MARK = "data-sr-inline"; // on the strip
   const OWNER = "data-sr-owner"; // on the host card
   const HIST_N = 30;
+  const MAX_ROSTER = 20; // two teams of five, with headroom — never a leaderboard
   const DEBOUNCE_MS = 400;
 
   const DASH = "—";
@@ -471,7 +477,10 @@
       existing.remove();
     }
 
-    const nameNode = nodeForNick(nick);
+    // A DOM-derived entry already carries the exact node it came from, which
+    // is better than searching for it again: FACEIT's displayed name and the
+    // nickname in the profile URL are not always the same string.
+    const nameNode = (p.node && p.node.isConnected && p.node) || nodeForNick(nick);
     if (!nameNode) return; // roster not painted yet — the observer retries
     const card = cardFor(nameNode);
     if (!card) return;
@@ -503,6 +512,23 @@
         if (s) s();
       }
     };
+    // A roster read off the page is only a list of names. Everything else —
+    // uuid, elo, level, steam id — comes from the nickname lookup, the same
+    // endpoint the profile widget uses.
+    if (!p.uuid) {
+      const who = await A.user(nick).catch(() => null);
+      if (gen !== state.gen || !strip.isConnected) return;
+      if (who) {
+        p = Object.assign({}, p, {
+          uuid: who.uuid,
+          steam64: p.steam64 || who.steam64,
+          elo: p.elo != null ? p.elo : who.elo,
+          level: p.level != null ? p.level : who.level,
+        });
+        paint();
+      }
+    }
+
     const jobs = [];
     if (p.uuid) {
       jobs.push(
@@ -555,10 +581,47 @@
     const A = api();
     if (!A || !(await allowed())) return;
     const room = await A.room(id).catch(() => null);
-    if (gen !== state.gen || !room || !Array.isArray(room.teams)) return;
-    for (const team of room.teams) {
-      for (const p of team.roster || []) void decorate(p, gen);
+    if (gen !== state.gen) return;
+
+    let roster = [];
+    if (room && Array.isArray(room.teams)) {
+      for (const team of room.teams) {
+        for (const p of team.roster || []) if (p && p.nick) roster.push(p);
+      }
     }
+    // A Matchmaking room is not a FACEIT match, and /api/match/v2 does not
+    // describe one — which is why no strip ever appeared on a Premier room
+    // even though the page is full of players. The page itself is the more
+    // reliable source: every player on it links to their own profile, and the
+    // nickname lookup fills in everything the match payload would have.
+    if (!roster.length) roster = domRoster();
+
+    for (const p of roster) void decorate(p, gen);
+  }
+
+  // Players named by the page, in DOM order, each paired with the node it was
+  // read from. A link only counts when it sits in something card-shaped, which
+  // keeps chat mentions and navigation out.
+  function domRoster() {
+    const out = [];
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href*="/players/"]')) {
+      if (out.length >= MAX_ROSTER) break;
+      if (isOurs(a) || a.offsetParent === null) continue;
+      const m = /\/players\/([^/?#]+)/.exec(a.getAttribute("href") || "");
+      if (!m) continue;
+      let nick;
+      try {
+        nick = decodeURIComponent(m[1]);
+      } catch {
+        nick = m[1];
+      }
+      const key = nick.toLowerCase();
+      if (seen.has(key) || !cardFor(a)) continue;
+      seen.add(key);
+      out.push({ nick, node: a });
+    }
+    return out;
   }
 
   // ---- routing ------------------------------------------------------------
