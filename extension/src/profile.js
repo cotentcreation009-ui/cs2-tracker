@@ -78,8 +78,10 @@
     ".sr-elo-wordmark b{color:var(--sr-brand);font-weight:700;}",
     ".sr-elo-wordmark:focus-visible{outline:2px solid var(--sr-brand);outline-offset:2px;}",
     ".sr-elo-list{margin-top:12px;border-top:1px solid var(--sr-line);padding-top:8px;}",
-    ".sr-elo-rows{margin-top:4px;}",
-    ".sr-elo-row{display:grid;grid-template-columns:12px minmax(0,1fr) 52px 44px;align-items:center;gap:8px;height:24px;padding:0 4px;margin:0 -4px;border-radius:var(--sr-r-chip);font-size:11px;color:var(--sr-ink);text-decoration:none;}",
+    ".sr-elo-row--head{height:16px;margin-top:6px;}",
+    ".sr-elo-row--head .sr-label{font-size:10px;}",
+    ".sr-elo-rows{margin-top:2px;}",
+    ".sr-elo-row{display:grid;grid-template-columns:12px minmax(0,1fr) 52px 34px 44px;align-items:center;gap:8px;height:24px;padding:0 4px;margin:0 -4px;border-radius:var(--sr-r-chip);font-size:11px;color:var(--sr-ink);text-decoration:none;}",
     "a.sr-elo-row{cursor:pointer;transition:background-color 120ms ease-out;}",
     "a.sr-elo-row:hover{background:var(--sr-panel2);}",
     "a.sr-elo-row:focus-visible{outline:2px solid var(--sr-brand);outline-offset:-2px;}",
@@ -89,6 +91,7 @@
     ".sr-elo-dot--u{background:transparent;border:1px solid var(--sr-line2);}",
     ".sr-elo-map{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
     ".sr-elo-kd{text-align:right;color:var(--sr-muted);font-variant-numeric:tabular-nums;}",
+    ".sr-elo-when{text-align:right;color:var(--sr-faint);font-variant-numeric:tabular-nums;}",
     ".sr-elo-rowdelta{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;}",
     ".sr-elo-empty{padding:16px 12px;font-size:11px;color:var(--sr-faint);text-align:center;}",
     /* loading skeleton */
@@ -148,6 +151,35 @@
 
   function deltaClass(n) {
     return n > 0 ? "sr-elo-delta--up" : n < 0 ? "sr-elo-delta--down" : "sr-elo-delta--flat";
+  }
+
+  // Compact age for the match list: "2h", "3d", "5w". Short enough for a
+  // 34px column, precise enough to tell three Nuke games apart.
+  function shortAgo(date) {
+    const t = date instanceof Date ? date.getTime() : +date;
+    if (!isFinite(t) || t <= 0) return DASH;
+    const mins = Math.floor((Date.now() - t) / 60000);
+    if (mins < 1) return "now";
+    if (mins < 60) return mins + "m";
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "h";
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return days + "d";
+    const wks = Math.floor(days / 7);
+    return wks < 9 ? wks + "w" : Math.floor(days / 30) + "mo";
+  }
+
+  // Exact local time, for the row's tooltip.
+  function absTime(date) {
+    const t = date instanceof Date ? date.getTime() : +date;
+    if (!isFinite(t) || t <= 0) return null;
+    try {
+      return new Date(t).toLocaleString(undefined, {
+        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      });
+    } catch {
+      return null;
+    }
   }
 
   function mapName(raw) {
@@ -245,15 +277,22 @@
     const hasKd = r && r.kills != null && r.deaths != null;
     const kd = el("span", "sr-elo-kd", hasKd ? r.kills + NDASH + r.deaths : DASH);
 
+    // When. Without it a player who queues the same map three times in a
+    // night reads as three identical rows — the list looked duplicated when
+    // it was simply undated.
+    const when = el("span", "sr-elo-when", shortAgo(r && r.date));
+    const abs = absTime(r && r.date);
+    if (abs) when.title = abs;
+
     const d = r && typeof r.delta === "number" && isFinite(r.delta) ? r.delta : null;
     const dEl = el(
       "span",
       "sr-elo-rowdelta " + (d == null ? "sr-elo-delta--none" : deltaClass(d)),
       d == null ? DASH : fmtSigned(d),
     );
-    if (d == null) dEl.title = "Elo not posted yet";
+    if (d == null) dEl.title = "FACEIT hasn't posted the elo for this match yet";
 
-    node.append(dot, map, kd, dEl);
+    node.append(dot, map, kd, when, dEl);
     return node;
   }
 
@@ -324,6 +363,17 @@
     const list = el("div", "sr-elo-list");
     list.append(el("div", "sr-label", "Recent matches"));
     if (Array.isArray(rows) && rows.length) {
+      // Column headers: without them K–D reads as a score and the bare "2h"
+      // has no meaning. Same grid as the rows, so they align exactly.
+      const head = el("div", "sr-elo-row sr-elo-row--head");
+      head.append(
+        el("span"),
+        el("span", "sr-label", "Map"),
+        el("span", "sr-label sr-elo-kd", "K–D"),
+        el("span", "sr-label sr-elo-when", "When"),
+        el("span", "sr-label sr-elo-rowdelta", "Elo"),
+      );
+      list.append(head);
       const box = el("div", "sr-elo-rows");
       rows.slice(0, LIST_N).forEach((r) => box.append(rowEl(r)));
       list.append(box);
