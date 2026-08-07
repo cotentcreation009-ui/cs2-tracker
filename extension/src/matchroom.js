@@ -183,13 +183,51 @@
     );
   }
 
-  function insertMount() {
+  // The roster block, if the page has painted one: the smallest element that
+  // contains every player's name. The panel is about those two teams, so
+  // directly above them is where it belongs.
+  function rosterEl(nicks) {
+    const dom = window.SRDom;
+    if (!dom || !nicks || !nicks.length) return null;
+    const nodes = [...dom.nameNodes(nicks).values()];
+    if (nodes.length < 2) return null;
+    const box = dom.commonAncestor(nodes);
+    if (!box || box.id === "canvas-body") return null;
+    return box;
+  }
+
+  // Falls back through the room's own containers, and #__next only as a last
+  // resort — prepending to that puts the panel above FACEIT's entire app,
+  // header and all, which is exactly what it did on a Premier room where the
+  // earlier selectors matched nothing.
+  // Move an already-rendered panel to sit above the roster. Separate from
+  // insertMount because the roster paints after we mount: the panel has to go
+  // up immediately with its skeleton, and then walk to the right place once
+  // the page tells us where the players are.
+  function placeByRoster(mount, nicks) {
+    if (!mount || !mount.isConnected) return false;
+    const roster = rosterEl(nicks);
+    if (!roster || !roster.parentElement) return false;
+    if (roster.previousElementSibling === mount) return true; // already there
+    if (mount.contains(roster)) return false; // never reparent into ourselves
+    roster.parentElement.insertBefore(mount, roster);
+    return true;
+  }
+
+  function insertMount(nicks) {
     const old = document.getElementById(MOUNT_ID);
     if (old) old.remove();
-    const host = hostEl();
-    if (!host) return null; // no stable anchor — degrade to nothing
     const mount = el("div", "sr-reset sr-mr");
     mount.id = MOUNT_ID;
+
+    const roster = rosterEl(nicks);
+    if (roster && roster.parentElement) {
+      roster.parentElement.insertBefore(mount, roster);
+      return mount;
+    }
+
+    const host = hostEl();
+    if (!host) return null; // no stable anchor — degrade to nothing
     const anchor = host.firstElementChild;
     if (anchor) host.insertBefore(mount, anchor);
     else host.appendChild(mount);
@@ -947,6 +985,22 @@
     const [ta, tb] = room.teams;
     const avgA = avgElo(ta.roster);
     const avgB = avgElo(tb.roster);
+
+    // Now that the roster is known, walk the panel to it. The room shell and
+    // the player cards paint at different times, so this is retried a couple
+    // of times rather than assumed to work on the first attempt — without it
+    // the panel stays wherever the fallback host put it, which on a Premier
+    // room is above FACEIT's entire app.
+    const nicks = [...(ta.roster || []), ...(tb.roster || [])]
+      .map((m) => m && m.nick)
+      .filter(Boolean);
+    if (!placeByRoster(mount, nicks)) {
+      for (const wait of [600, 1800, 4000]) {
+        setTimeout(() => {
+          if (g === state.gen) placeByRoster(mount, nicks);
+        }, wait);
+      }
+    }
 
     mount.textContent = "";
     const teams = el("div", "sr-mr-teams");

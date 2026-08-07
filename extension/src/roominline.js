@@ -66,75 +66,16 @@
   }
 
   function nodeForNick(nick) {
-    const want = nick.trim().toLowerCase();
-    if (!want) return null;
-    // Prefer a profile link — that is unambiguously the player.
-    const links = document.querySelectorAll('a[href*="/players/"]');
-    for (const a of links) {
-      const t = (a.textContent || "").trim().toLowerCase();
-      if (t === want && a.offsetParent !== null && !isOurs(a)) return a;
-    }
-    // Fall back to any small element whose text is exactly the nickname.
-    const all = document.querySelectorAll("span,div,p,h1,h2,h3,h4,strong,b");
-    for (const n of all) {
-      if (n.children.length > 2) continue;
-      const t = (n.textContent || "").trim().toLowerCase();
-      if (t === want && n.offsetParent !== null && !isOurs(n)) return n;
-    }
-    return null;
+    return window.SRDom ? window.SRDom.nodeForNick(nick) : null;
   }
 
-  // Walk up from the name to the card that holds it: the first ancestor that
-  // is meaningfully wider/taller than the name itself, capped so we never
-  // escape into the whole roster column.
-  // A size heuristic stopped INSIDE the row, so inserting "after" it landed
-  // mid-flex and squeezed the nickname. The real card is the ancestor that
-  // owns an avatar AND sits in a list of siblings shaped like it.
-  //
-  // "Shaped like it" used to mean "the same height", which was self-defeating:
-  // decorating a card makes it taller, so after the first player the remaining
-  // cards no longer matched their decorated neighbours and were skipped. Peers
-  // are now recognised by what they CONTAIN — an avatar and a profile link —
-  // which is exactly as true after we have annotated them as before.
-  // Which players a subtree links to. One card is about exactly one player —
-  // this is what tells a card apart from the roster that contains it, and it
-  // holds whatever the cards are sized like. A minimum-width rule did that job
-  // before and got it wrong: a finished room's cards are ~90-120px, under the
-  // floor, so the walk sailed past them and anchored the whole team column.
-  function playerSlugs(n) {
-    const set = new Set();
-    if (!n.querySelectorAll) return set;
-    for (const a of n.querySelectorAll('a[href*="/players/"]')) {
-      const m = /\/players\/([^/?#]+)/.exec(a.getAttribute("href") || "");
-      if (m) set.add(m[1].toLowerCase());
-    }
-    return set;
-  }
-
-  // Starts AT the resolved node, not at its parent. When FACEIT makes the whole
-  // card one big <a href="/players/…">, that anchor's own text is the nickname,
-  // so it is what the lookup returns — and stepping straight to its parent
-  // walked into the roster and gave up.
-  function cardFor(node) {
-    let n = node;
-    for (let i = 0; i < 9 && n; i++, n = n.parentElement) {
-      if (n === document.body || n.id === "canvas-body") break;
-      const r = n.getBoundingClientRect();
-      if (r.width < 60 || r.height < 24) continue;
-      if (!n.querySelector("img")) continue; // a player card shows an avatar
-      // Two players in scope means we have walked out of the card and into the
-      // roster. Anchoring there is what stacked five strips on one column.
-      if (playerSlugs(n).size > 1) return null;
-      const p = n.parentElement;
-      if (!p) continue;
-      let peers = 0;
-      for (const c of p.children) {
-        if (c === n || isOurs(c) || !c.querySelector) continue;
-        if (c.querySelector("img") && playerSlugs(c).size === 1) peers += 1;
-      }
-      if (peers >= 1) return n; // a roster: at least one more card beside it
-    }
-    return null; // no confident anchor — leave the page alone
+  // Delegates to SRDom: a card is the smallest box holding exactly one roster
+  // name and sitting beside boxes holding the others. The old rule here wanted
+  // an <img> avatar and a /players/ link inside the card, and a Premier room's
+  // cards have decorative avatar frames and unlinked names — so it matched
+  // nothing and no strip was ever drawn on one.
+  function cardFor(node, all) {
+    return window.SRDom ? window.SRDom.cardFor(node, all) : null;
   }
 
   // ---- attaching without disturbing the host ------------------------------
@@ -464,7 +405,7 @@
     return !!(host.querySelector && host.querySelector("img")); // placeInside
   }
 
-  async function decorate(p, gen) {
+  async function decorate(p, gen, all) {
     const nick = String(p.nick || "").trim();
     if (!nick) return;
     // One strip per player, document-wide: cardFor can resolve differently as
@@ -482,7 +423,7 @@
     // nickname in the profile URL are not always the same string.
     const nameNode = (p.node && p.node.isConnected && p.node) || nodeForNick(nick);
     if (!nameNode) return; // roster not painted yet — the observer retries
-    const card = cardFor(nameNode);
+    const card = cardFor(nameNode, all);
     if (!card) return;
 
     const strip = el("div", "sr-reset sr-in");
@@ -596,17 +537,27 @@
     // nickname lookup fills in everything the match payload would have.
     if (!roster.length) roster = domRoster();
 
-    for (const p of roster) void decorate(p, gen);
+    // Resolve every roster name on the page FIRST. Knowing where all ten sit
+    // is what lets cardFor tell a card from the roster around it without
+    // depending on an avatar image or a profile link, neither of which a
+    // Premier room reliably has.
+    const dom = window.SRDom || null;
+    const nodes = dom ? dom.nameNodes(roster.map((r) => r.nick)) : new Map();
+    const all = [...nodes.values()];
+
+    for (const p of roster) {
+      void decorate(Object.assign({}, p, { node: p.node || nodes.get(p.nick) || null }), gen, all);
+    }
   }
 
   // Players named by the page, in DOM order, each paired with the node it was
   // read from. A link only counts when it sits in something card-shaped, which
   // keeps chat mentions and navigation out.
   function domRoster() {
-    const out = [];
+    const found = [];
     const seen = new Set();
     for (const a of document.querySelectorAll('a[href*="/players/"]')) {
-      if (out.length >= MAX_ROSTER) break;
+      if (found.length >= MAX_ROSTER) break;
       if (isOurs(a) || a.offsetParent === null) continue;
       const m = /\/players\/([^/?#]+)/.exec(a.getAttribute("href") || "");
       if (!m) continue;
@@ -617,11 +568,15 @@
         nick = m[1];
       }
       const key = nick.toLowerCase();
-      if (seen.has(key) || !cardFor(a)) continue;
+      if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ nick, node: a });
+      found.push({ nick, node: a });
     }
-    return out;
+    // The card test needs to see every candidate at once — that is how it
+    // tells one player's card from the roster holding all of them — so it can
+    // only run once the whole list is collected.
+    const all = found.map((f) => f.node);
+    return found.filter((f) => cardFor(f.node, all));
   }
 
   // ---- routing ------------------------------------------------------------
