@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 // Social unfurl card for the site root + any page without its own OG image.
-export const alt = "StatRun — every rank in one place";
+export const alt = "CSRun — every rank in one place";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -42,7 +42,7 @@ export default function Image() {
             <div style={{ width: 11, height: 36, borderRadius: 5, background: "#07131b" }} />
             <div style={{ width: 11, height: 50, borderRadius: 5, background: "#07131b" }} />
           </div>
-          <div style={{ fontSize: "44px", fontWeight: 800 }}>StatRun</div>
+          <div style={{ fontSize: "44px", fontWeight: 800 }}>CSRun</div>
         </div>
         <div style={{ display: "flex", fontSize: "76px", fontWeight: 800 }}>
           Every CS2 rank in one place.

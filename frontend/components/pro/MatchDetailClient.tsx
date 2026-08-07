@@ -51,7 +51,7 @@ export function MatchDetailClient({
     const rb = lm ? (lm.scoreByTeam?.[tb.gridId] ?? 0) : mapsWon(data, tb.gridId);
     const pt = pointState(data, lm);
     const urgent = pt ? (pt.kind === "match" ? " · MATCH POINT" : " · MAP POINT") : "";
-    document.title = `🔴 ${ta.shortName || ta.name} ${ra}–${rb} ${tb.shortName || tb.name}${urgent} | StatRun`;
+    document.title = `🔴 ${ta.shortName || ta.name} ${ra}–${rb} ${tb.shortName || tb.name}${urgent} | CSRun`;
     return () => {
       if (baseTitle.current) document.title = baseTitle.current;
     };
@@ -174,7 +174,7 @@ export function MatchDetailClient({
             {isFinished ? (
               <Link
                 href="/demos"
-                title="Grab this match's .dem from HLTV.org (or the event page) and drop it into StatRun's demo analyzer for round-by-round breakdowns, utility maps and duel stats"
+                title="Grab this match's .dem from HLTV.org (or the event page) and drop it into CSRun's demo analyzer for round-by-round breakdowns, utility maps and duel stats"
                 className="btn btn-ghost h-8 gap-1.5 px-3 text-xs"
               >
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>

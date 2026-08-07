@@ -52,7 +52,7 @@ const SR = {
 
     if (data && data.banned) {
       a.classList.add("sr-chip--ban");
-      a.title = "VAC/game ban on record — view on StatRun";
+      a.title = "VAC/game ban on record — view on CSRun";
       a.setAttribute("aria-label", a.title);
       a.textContent = "BAN";
       return a;
@@ -66,14 +66,14 @@ const SR = {
         `CheatMeter ${data.cheat.score}% (${b.label})` +
         (data.cheat.lowConfidence ? " · low confidence" : "") +
         (data.gap != null ? ` · cross-platform gap ${data.gap >= 0 ? "+" : ""}${data.gap.toFixed(2)}` : "") +
-        " — view on StatRun";
+        " — view on CSRun";
       a.setAttribute("aria-label", a.title);
       a.innerHTML = `<span class="sr-dot"></span>${data.cheat.score}`;
       return a;
     }
-    // no data → neutral "view on StatRun" mark
+    // no data → neutral "view on CSRun" mark
     a.classList.add("sr-chip--neutral");
-    a.title = "View this player on StatRun";
+    a.title = "View this player on CSRun";
     a.setAttribute("aria-label", a.title);
     a.textContent = "SR";
     return a;

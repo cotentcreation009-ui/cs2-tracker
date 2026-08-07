@@ -915,7 +915,7 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFaceitResolve maps a FACEIT nickname to its SteamID64 — the browser
-// extension uses it to turn a match-room player into a StatRun profile lookup.
+// extension uses it to turn a match-room player into a CSRun profile lookup.
 func (s *Server) handleFaceitResolve(w http.ResponseWriter, r *http.Request) {
 	nick := strings.TrimSpace(r.URL.Query().Get("nickname"))
 	if nick == "" {

@@ -22,7 +22,7 @@ export async function generateMetadata({
       const name = d.team?.name || d.team?.shortName;
       if (name) {
         return {
-          title: `${name} — roster, stats & results — StatRun`,
+          title: `${name} — roster, stats & results — CSRun`,
           description: `${name}'s CS2 roster, recent player stats and series results.`,
           robots: { index: false, follow: true },
         };
@@ -31,7 +31,7 @@ export async function generateMetadata({
   } catch {
     // fall through to the generic title
   }
-  return { title: "Team — StatRun", robots: { index: false, follow: true } };
+  return { title: "Team — CSRun", robots: { index: false, follow: true } };
 }
 
 export default async function ProTeamPage({

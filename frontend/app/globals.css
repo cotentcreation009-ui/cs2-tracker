@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ------------------------------------------------------------------ *
- * StatRun "Holo" theme — deep-space / holographic command console.
+ * CSRun "Holo" theme — deep-space / holographic command console.
  * Tailwind v4 turns these tokens into utilities (bg-panel, text-ink, …).
  * ------------------------------------------------------------------ */
 @theme {

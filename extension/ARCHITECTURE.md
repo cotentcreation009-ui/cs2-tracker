@@ -1,4 +1,4 @@
-# StatRun Extension — Architecture Contract
+# CSRun Extension — Architecture Contract
 
 Plain MV3, no build step. Module boundaries are hard: each file below has ONE
 owner; modules communicate only through the documented contracts.
@@ -40,7 +40,7 @@ Two data planes, both cached (in-page Map, 5-min TTL, inflight dedupe):
    Frontend-API calls MUST go through `srFetch()` in api.js which sets
    `Accept: application/json`, tolerates `{payload}` wrapping, and returns
    null on any non-200 (UI shows honest empty states, never throws).
-2. **StatRun public API — via background worker** (host_permissions):
+2. **CSRun public API — via background worker** (host_permissions):
    `GET {base}/api/public/cheatmeter?steamid=|faceit=` →
    `{cheat:{score,band}, premier, faceitElo, kd, gap, banned, profileUrl}`.
    Message `{type:"lookup", steamid|faceit}` → background caches 5 min.

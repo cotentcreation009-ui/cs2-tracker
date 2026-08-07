@@ -213,7 +213,7 @@ export function parseImportPayload(json: unknown): { name: string; savedAt: numb
   const one = (d: unknown, fallbackName: string) => {
     const x = d as Partial<ExportedMatch> | null;
     if (!x || !isMeta(x.meta) || !isRounds(x.rounds)) {
-      throw new Error("Not a StatRun demo export — missing or malformed meta/rounds.");
+      throw new Error("Not a CSRun demo export — missing or malformed meta/rounds.");
     }
     return {
       name: typeof x.name === "string" && x.name.trim() ? x.name : fallbackName,
@@ -250,7 +250,7 @@ export function parseImportPayload(json: unknown): { name: string; savedAt: numb
       },
     ];
   }
-  throw new Error("Unrecognized file — expected a StatRun demo or library export.");
+  throw new Error("Unrecognized file — expected a CSRun demo or library export.");
 }
 
 /** Write validated matches into the library under fresh ids. Returns them. */

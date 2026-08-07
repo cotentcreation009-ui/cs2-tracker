@@ -17,11 +17,11 @@ export async function generateMetadata({
     const { player } = await getProfile(steamid);
     const name = player.personaName || steamid;
     return {
-      title: `${name} — recent matches — StatRun`,
+      title: `${name} — recent matches — CSRun`,
       alternates: { canonical: `/profiles/${player.steamId64}/matches` },
     };
   } catch {
-    return { title: "Recent matches — StatRun" };
+    return { title: "Recent matches — CSRun" };
   }
 }
 

@@ -54,7 +54,7 @@ const STEPS: { n: string; t: string; d: string }[] = [
   {
     n: "2",
     t: "We pull it live",
-    d: "StatRun fetches the account from Leetify, FACEIT and the Steam Web API.",
+    d: "CSRun fetches the account from Leetify, FACEIT and the Steam Web API.",
   },
   {
     n: "3",
@@ -69,7 +69,7 @@ const STEPS: { n: string; t: string; d: string }[] = [
 const HOME_FAQ: { q: string; a: string }[] = [
   {
     q: "How do I find someone's CS2 stats?",
-    a: "Paste their SteamID, Steam vanity URL or full profile link into the search box above. StatRun instantly pulls that account's Leetify, FACEIT and Steam data into one page — no login required.",
+    a: "Paste their SteamID, Steam vanity URL or full profile link into the search box above. CSRun instantly pulls that account's Leetify, FACEIT and Steam data into one page — no login required.",
   },
   {
     q: "What do Leetify ratings mean?",
@@ -77,11 +77,11 @@ const HOME_FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How do FACEIT levels and ELO work?",
-    a: "FACEIT levels run from 1 to 10 and are driven by ELO: level 1 is the entry tier and level 10 begins at 2001 ELO. StatRun shows both the level badge and the exact ELO, so you can see how close a player is to the next tier.",
+    a: "FACEIT levels run from 1 to 10 and are driven by ELO: level 1 is the entry tier and level 10 begins at 2001 ELO. CSRun shows both the level badge and the exact ELO, so you can see how close a player is to the next tier.",
   },
   {
     q: "Can I tell if a player is smurfing or cheating?",
-    a: "StatRun's CheatMeter, together with Steam trust signals like account age, VAC/ban status and cross-platform rank gaps, helps flag suspicious accounts. Treat it as a prompt to look closer — a starting point, not proof.",
+    a: "CSRun's CheatMeter, together with Steam trust signals like account age, VAC/ban status and cross-platform rank gaps, helps flag suspicious accounts. Treat it as a prompt to look closer — a starting point, not proof.",
   },
 ];
 
@@ -172,7 +172,7 @@ export default async function HomePage() {
           <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">
             Every CS2 player leaves a trail across three services — Steam for
             identity and bans, Leetify for the deep aim and utility numbers, and
-            FACEIT for level and ELO. StatRun pulls all three together, so sizing
+            FACEIT for level and ELO. CSRun pulls all three together, so sizing
             up a teammate or scouting an opponent takes one search instead of five
             browser tabs.
           </p>
@@ -193,7 +193,7 @@ export default async function HomePage() {
               href="/about"
               className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
             >
-              Learn more about StatRun →
+              Learn more about CSRun →
             </Link>
           </p>
 

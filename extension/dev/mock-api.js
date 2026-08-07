@@ -1,4 +1,4 @@
-// Deterministic mock of the StatRun data layer for the dev fixtures. It
+// Deterministic mock of the CSRun data layer for the dev fixtures. It
 // replaces NETWORK only (SRApi, SRSettings, the SR badge global) — never
 // markup: fixtures must render through the real module code paths.
 //

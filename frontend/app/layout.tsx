@@ -40,14 +40,14 @@ const cfBeaconToken = process.env.CF_BEACON_TOKEN;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "StatRun — CS2 Leetify, FACEIT & Steam stats for any player",
+  title: "CSRun — CS2 Leetify, FACEIT & Steam stats for any player",
   description:
-    "StatRun looks up any Counter-Strike 2 player: Leetify rating, FACEIT level & ELO, Premier/Wingman ranks, aim & utility stats, and Steam identity — all from one SteamID.",
-  applicationName: "StatRun",
+    "CSRun looks up any Counter-Strike 2 player: Leetify rating, FACEIT level & ELO, Premier/Wingman ranks, aim & utility stats, and Steam identity — all from one SteamID.",
+  applicationName: "CSRun",
   openGraph: {
     type: "website",
-    siteName: "StatRun",
-    title: "StatRun — CS2 Leetify, FACEIT & Steam stats for any player",
+    siteName: "CSRun",
+    title: "CSRun — CS2 Leetify, FACEIT & Steam stats for any player",
     description:
       "Look up any CS2 player's Leetify rating, FACEIT level, ranks and Steam identity in one place.",
   },
@@ -123,7 +123,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <footer className="border-t border-line">
           <div className="mx-auto flex max-w-[1800px] flex-col gap-2 px-4 py-6 text-xs text-faint sm:flex-row sm:items-center sm:justify-between lg:px-8">
             <span>
-              StatRun · independent CS2 analytics · not affiliated with Valve,
+              CSRun · independent CS2 analytics · not affiliated with Valve,
               Steam, Leetify or FACEIT.
             </span>
             <span className="flex items-center gap-3">

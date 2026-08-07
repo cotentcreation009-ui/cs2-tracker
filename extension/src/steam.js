@@ -1,4 +1,4 @@
-// Steam profile content script — injects the StatRun sr-steam-panel under the
+// Steam profile content script — injects the CSRun sr-steam-panel under the
 // profile header. The SteamID64 comes from the URL on /profiles/{id} pages;
 // /id/ vanity pages embed it in the inline g_rgProfileData JSON blob (with
 // g_steamID and report links as fallbacks) — all read from script text, no
@@ -227,7 +227,7 @@
 
   function header(cheat, band) {
     const head = el("div", "sr-steam-head");
-    const brand = el("span", "sr-steam-brand", "Stat");
+    const brand = el("span", "sr-steam-brand", "CS");
     brand.appendChild(el("b", null, "Run"));
     head.appendChild(brand);
     head.appendChild(el("span", "sr-steam-sub", "· CS2 report"));

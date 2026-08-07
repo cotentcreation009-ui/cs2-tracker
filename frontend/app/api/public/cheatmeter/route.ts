@@ -69,7 +69,7 @@ export async function GET(req: Request): Promise<Response> {
     profileUrl: `${SITE}/profiles/${steamid}`,
     name: leetify?.name || faceit?.nickname || null,
     // Null when there isn't enough data to say anything (the extension then
-    // shows a neutral "view on StatRun" chip instead of a fake score).
+    // shows a neutral "view on CSRun" chip instead of a fake score).
     cheat:
       sus && sus.hasEnough
         ? {

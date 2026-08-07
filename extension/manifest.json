@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "StatRun for FACEIT — CheatMeter, Elo & Cross-Platform Stats",
+  "name": "CSRun for FACEIT — CheatMeter, Elo & Cross-Platform Stats",
   "version": "2.0.0",
   "description": "Elo deltas, win prediction, map veto stats, CheatMeter risk scores and Premier/Leetify cross-platform ranks — inside FACEIT match rooms and Steam profiles.",
   "icons": {

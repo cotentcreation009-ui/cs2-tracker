@@ -1,4 +1,4 @@
-// StatRun flagship: the match-room panel. Watches FACEIT's SPA for
+// CSRun flagship: the match-room panel. Watches FACEIT's SPA for
 // /cs2/room/{id} routes, mounts #statrun-room above the room content and
 // renders two team cards (roster, last-30 form, CheatMeter / Premier /
 // Leetify), an elo prediction per side, and a shared map-form panel below.
@@ -334,7 +334,7 @@
     a.href = (data && data.profileUrl) || "https://csrun.win";
     if (data && data.banned) {
       a.classList.add("sr-mr-cm--ban");
-      a.title = "VAC/game ban on record — view on StatRun";
+      a.title = "VAC/game ban on record — view on CSRun";
       a.textContent = "BAN";
       return a;
     }
@@ -347,13 +347,13 @@
       a.title =
         "CheatMeter " + cheat.score + "% (" + b.label + ")" +
         (cheat.lowConfidence ? " · low confidence" : "") +
-        " — view on StatRun";
+        " — view on CSRun";
       a.setAttribute("aria-label", a.title);
       a.append(el("span", "sr-mr-cmdot"), el("span", null, String(cheat.score)));
       return a;
     }
     a.classList.add("sr-mr-cm--neutral");
-    a.title = "View this player on StatRun";
+    a.title = "View this player on CSRun";
     a.textContent = "SR";
     return a;
   }
@@ -549,8 +549,8 @@
     brand.href = "https://csrun.win";
     brand.target = "_blank";
     brand.rel = "noreferrer";
-    brand.title = "StatRun — csrun.win";
-    brand.append(el("span", null, "Stat"), el("b", null, "Run"));
+    brand.title = "CSRun — csrun.win";
+    brand.append(el("span", null, "CS"), el("b", null, "Run"));
     foot.append(brand, el("span", "sr-mr-note", "estimates, not betting advice"));
     return foot;
   }

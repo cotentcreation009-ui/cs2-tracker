@@ -207,8 +207,8 @@
       render(
         message(
           unreachable
-            ? "StatRun is unreachable right now"
-            : "No StatRun data for that account",
+            ? "CSRun is unreachable right now"
+            : "No CSRun data for that account",
         ),
       );
       return;

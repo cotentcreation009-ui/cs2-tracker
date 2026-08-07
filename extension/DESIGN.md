@@ -1,12 +1,12 @@
-# StatRun Extension — Design Contract
+# CSRun Extension — Design Contract
 
 Every module obeys this file. If a module wants something this file doesn't
 define, the module is wrong or this file gets amended — never improvise tokens.
 
 ## Identity
 
-StatRun ("csrun.win") injected INTO faceit.com and steamcommunity.com. The UI
-must read as a premium native layer: FACEIT's dark chrome, StatRun's accent
+CSRun ("csrun.win") injected INTO faceit.com and steamcommunity.com. The UI
+must read as a premium native layer: FACEIT's dark chrome, CSRun's accent
 language. Never clash with the host page; never look bolted-on.
 
 ## Tokens (tokens.css — the only source of colors/spacing)
@@ -17,7 +17,7 @@ with host-page CSS:
 - Surfaces: `--sr-bg #0b0f1a`, `--sr-panel #10182b`, `--sr-panel2 #141d33`,
   `--sr-line #22314f`, `--sr-line2 #31456b`
 - Ink: `--sr-ink #e8edf6`, `--sr-muted #9aa7bd`, `--sr-faint #66748c`
-- Accents: `--sr-brand #38d6ff` (StatRun cyan — links/identity),
+- Accents: `--sr-brand #38d6ff` (CSRun cyan — links/identity),
   `--sr-orange #ff8a50` (FACEIT/elo), `--sr-good #46d369`, `--sr-mid #f5b942`,
   `--sr-bad #f5694a`
 - CheatMeter bands: low `--sr-good`, guarded `--sr-mid`, high `#ff7a3d`,
@@ -61,7 +61,7 @@ with host-page CSS:
 1. **Cohesion** — every surface reads as one system; zero default-styled elements.
 2. **Typography** — sizes/weights/tabular numerals per spec; no orphan px values.
 3. **Color discipline** — tokens only; accents mean something (orange=elo,
-   cyan=StatRun, band colors=risk); never decorative rainbow.
+   cyan=CSRun, band colors=risk); never decorative rainbow.
 4. **Density & alignment** — 10 players scannable in one glance; columns align
    to the pixel; nothing jitters on hover.
 5. **Native fit** — sits inside FACEIT's page like FACEIT shipped it; spacing
@@ -76,5 +76,5 @@ with host-page CSS:
   never fetch.
 - All injected roots use `#statrun-` ids and `.sr-` classes exclusively.
 - Copy tone: honest and short. "No data yet" not "Oops!". No exclamation marks.
-- Attribution: tiny "StatRun" wordmark link on the match-room panel only.
+- Attribution: tiny "CSRun" wordmark link on the match-room panel only.
 - NEVER copy Repeek's name, assets, icons, or distinctive UI layouts.

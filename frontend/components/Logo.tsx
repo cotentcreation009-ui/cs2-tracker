@@ -1,4 +1,4 @@
-// StatRun brand logo. The mark is three ascending bars (stats) on the brand
+// CSRun brand logo. The mark is three ascending bars (stats) on the brand
 // gradient; the wordmark sets "Run" in the gradient. Pure SVG/CSS = crisp at any
 // size, no image asset needed.
 
@@ -16,7 +16,7 @@ export function BrandMark({
       viewBox="0 0 32 32"
       className={className}
       role="img"
-      aria-label="StatRun"
+      aria-label="CSRun"
     >
       <defs>
         <linearGradient
@@ -48,7 +48,7 @@ export function Logo({ className = "" }: { className?: string }) {
         <BrandMark size={30} />
       </span>
       <span className="text-lg font-extrabold tracking-tight">
-        Stat<span className="gradient-text">Run</span>
+        CS<span className="gradient-text">Run</span>
       </span>
     </span>
   );

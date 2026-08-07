@@ -40,12 +40,12 @@ export async function generateMetadata({
   // them would bloat the index with near-duplicates.
   const alternates = { canonical: "/compare" };
   if (ids.length >= 2) {
-    const title = `Compare ${ids.length} players — StatRun`;
+    const title = `Compare ${ids.length} players — CSRun`;
     const description =
       "Side-by-side CS2 comparison: Leetify rating, ranks, win rate, aim, utility and more.";
     return { title, description, alternates, openGraph: { title, description }, twitter: { card: "summary" } };
   }
-  const title = "Compare CS2 players side by side — StatRun";
+  const title = "Compare CS2 players side by side — CSRun";
   const description =
     "Compare up to 6 Counter-Strike 2 players at once: Leetify rating, FACEIT level & ELO, Premier rank, win rate, aim, opening duels and utility — all side by side.";
   return {

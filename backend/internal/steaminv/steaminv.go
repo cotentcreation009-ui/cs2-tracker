@@ -225,7 +225,7 @@ func fetchSkinport(ctx context.Context, hc *http.Client, url string, out any) er
 	// "Accept-Encoding: gzip". Setting the header ourselves also turns off
 	// the transport's transparent decompression, so we unwrap the body below.
 	req.Header.Set("Accept-Encoding", "br, gzip")
-	req.Header.Set("User-Agent", "StatRun/1.0 (https://csrun.win)")
+	req.Header.Set("User-Agent", "CSRun/1.0 (https://csrun.win)")
 	resp, err := hc.Do(req)
 	if err != nil {
 		return err
