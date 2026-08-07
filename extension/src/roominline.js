@@ -181,6 +181,30 @@
     return () => strip.remove();
   }
 
+  // Does the strip sit on top of the card's own avatar/nickname? This is the
+  // question both the initial placement and the post-data re-check care about.
+  // (In sibling mode the strip is not a child of the card, so the card's own
+  // content always ends above it and this is trivially false.)
+  function overlapsContent(card, strip) {
+    let bottom = 0;
+    for (const c of card.children) {
+      if (c === strip || isOurs(c)) continue;
+      const b2 = c.getBoundingClientRect().bottom;
+      if (b2 > bottom) bottom = b2;
+    }
+    return !!bottom && strip.getBoundingClientRect().top < bottom - 1;
+  }
+
+  // Re-measure hooks, one per attached strip. The strip is attached holding a
+  // placeholder and refilled when the requests land, and the refilled strip is
+  // taller — in a narrow card it wraps to a second line. Reserving the card's
+  // padding once, against the placeholder, left that second line to grow
+  // UPWARD (the strip is anchored to the card's bottom edge) straight over the
+  // player's avatar and name.
+  const resettle = new WeakMap();
+  // strip -> re-establish the layout guarantees after its content changed
+  const settle = new WeakMap();
+
   // Inside the card, taken out of flow and given room by the card's own
   // padding. Absolute positioning is the point: an out-of-flow child cannot
   // contribute to its parent's intrinsic width, so a row of cards cannot be
@@ -221,7 +245,13 @@
       return null;
     }
 
-    card.style.paddingBottom = basePad + sh + 4 + "px";
+    // Reserve room for whatever the strip currently is. Re-runnable, because
+    // what the strip is changes when the requests land.
+    const reserve = () => {
+      card.style.paddingBottom = basePad + strip.getBoundingClientRect().height + 4 + "px";
+    };
+    reserve();
+    resettle.set(strip, reserve);
 
     // The thing that actually matters is that we did not land on top of the
     // card's own content. Testing that the card grew by the strip's height
@@ -229,13 +259,7 @@
     // decorated card raises the whole row, so every later card is already tall
     // enough and appears not to have grown — which rejected every player after
     // the first. Ask the real question instead.
-    let contentBottom = 0;
-    for (const c of card.children) {
-      if (c === strip || isOurs(c)) continue;
-      const b = c.getBoundingClientRect().bottom;
-      if (b > contentBottom) contentBottom = b;
-    }
-    if (contentBottom && strip.getBoundingClientRect().top < contentBottom - 1) {
+    if (overlapsContent(card, strip)) {
       undo();
       return null;
     }
@@ -275,6 +299,20 @@
       if (!undo) continue;
       if (same(before, widths(card)) && strip.getBoundingClientRect().height > 0) {
         state.undos.push(undo);
+        // Everything above was measured against the placeholder. Once the real
+        // numbers arrive the strip changes size, so both guarantees have to be
+        // re-established — and if they cannot be, the strip goes rather than
+        // sitting on top of the card it was meant to annotate.
+        settle.set(strip, () => {
+          const re = resettle.get(strip);
+          if (re) re();
+          if (!same(before, widths(card)) || overlapsContent(card, strip)) {
+            undo();
+            settle.delete(strip);
+            const i = state.undos.indexOf(undo);
+            if (i >= 0) state.undos.splice(i, 1);
+          }
+        });
         return true;
       }
       undo();
@@ -459,6 +497,10 @@
     const paint = () => {
       if (gen === state.gen && strip.isConnected) {
         fillStrip(strip, p, form, cm, false, card.getBoundingClientRect().width);
+        // The strip just changed size. Re-reserve the room it needs and
+        // re-check that it still disturbs nothing.
+        const s = settle.get(strip);
+        if (s) s();
       }
     };
     const jobs = [];
