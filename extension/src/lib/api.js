@@ -255,6 +255,95 @@
 
   // ---- export ------------------------------------------------------------
 
+  // ---- SRDom: finding FACEIT's player cards -----------------------------
+  //
+  // Shared because both the panel and the inline strips need the same answer:
+  // the panel wants to sit next to the roster, the strips want to sit on each
+  // card in it. Earlier versions each guessed separately, and both guessed by
+  // looking for an <img> avatar and an <a href="/players/…"> — neither of
+  // which FACEIT guarantees. A Premier room's cards carry decorative avatar
+  // frames rather than a plain image, and its names are not always links, so
+  // the walk found nothing and the panel fell back to mounting above the
+  // entire app.
+  //
+  // The reliable signal is the roster itself. We already know the ten
+  // nicknames, so a card is simply "the smallest box containing exactly one of
+  // them, sitting beside boxes that each contain one of the others". That
+  // needs no avatar, no link, and no class name.
+
+  function ourNode(node) {
+    return !!(
+      node.closest &&
+      node.closest("#statrun-room, [data-sr-inline], .sr-reset, .sr-mr, .sr-chip")
+    );
+  }
+
+  // The node whose OWN text is exactly this nickname, ignoring nodes that
+  // merely contain it — so a chat line mentioning the name never wins.
+  function nodeForNick(nick) {
+    const want = String(nick || "").trim().toLowerCase();
+    if (!want) return null;
+    for (const a of document.querySelectorAll('a[href*="/players/"]')) {
+      if (a.offsetParent === null || ourNode(a)) continue;
+      if ((a.textContent || "").trim().toLowerCase() === want) return a;
+    }
+    for (const n of document.querySelectorAll("span,div,p,h1,h2,h3,h4,strong,b,a")) {
+      if (n.children.length > 2 || n.offsetParent === null || ourNode(n)) continue;
+      if ((n.textContent || "").trim().toLowerCase() === want) return n;
+    }
+    return null;
+  }
+
+  // Map of nickname -> the node naming that player on this page.
+  function nameNodes(nicks) {
+    const out = new Map();
+    for (const nick of nicks || []) {
+      const n = nodeForNick(nick);
+      if (n) out.set(nick, n);
+    }
+    return out;
+  }
+
+  // The card holding `node`, given every roster name-node on the page.
+  function cardFor(node, all) {
+    const others = all || [];
+    let n = node;
+    for (let i = 0; i < 10 && n; i++, n = n.parentElement) {
+      if (n === document.body || n === document.documentElement) break;
+      const r = n.getBoundingClientRect();
+      if (r.width < 60 || r.height < 24) continue;
+      let inside = 0;
+      for (const o of others) if (n.contains(o)) inside += 1;
+      if (inside > 1) return null; // walked out of the card and into the roster
+      if (inside !== 1) continue;
+      const p = n.parentElement;
+      if (!p) continue;
+      let peers = 0;
+      for (const c of p.children) {
+        if (c === n || ourNode(c)) continue;
+        for (const o of others) {
+          if (c.contains(o)) { peers += 1; break; }
+        }
+      }
+      if (peers >= 1) return n; // a roster: at least one more card beside it
+    }
+    return null;
+  }
+
+  // Smallest element containing all of `nodes` — the roster block itself.
+  function commonAncestor(nodes) {
+    const list = (nodes || []).filter(Boolean);
+    if (!list.length) return null;
+    let a = list[0];
+    for (let i = 1; i < list.length; i++) {
+      let b = list[i];
+      while (a && !a.contains(b)) a = a.parentElement;
+      if (!a) return null;
+    }
+    return a === document.body || a === document.documentElement ? null : a;
+  }
+
   window.SRApi = { user, eloHistory, room, cheatmeter };
+  window.SRDom = { nodeForNick, nameNodes, cardFor, commonAncestor };
   window.SRSettings = { get: settingsGet, onChange: settingsOnChange };
 })();

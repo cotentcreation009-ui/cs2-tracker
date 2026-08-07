@@ -55,6 +55,23 @@ Two data planes, both cached (in-page Map, 5-min TTL, inflight dedupe):
   elo, level}]}]} | null`
 - `SRApi.cheatmeter({steamid|faceit})` → background lookup passthrough
 - `SRBadge.chip(data)` → element (exists in badge.js as `SR.chip`)
+
+`SRDom` (also exported by api.js) is the shared answer to "where are FACEIT's
+player cards" — the panel needs it to sit beside the roster, the inline strips
+need it to sit on each card in it. Both modules used to guess separately, and
+both guessed by looking for an `<img>` avatar and an `<a href="/players/…">`;
+a Premier room has decorative avatar frames instead of a plain image and does
+not always link its names, so both guesses failed there. The reliable signal is
+the roster we already hold:
+
+- `SRDom.nodeForNick(nick)` → the node whose OWN text is exactly that nickname
+- `SRDom.nameNodes(nicks)` → `Map<nick, node>` for a whole roster
+- `SRDom.cardFor(node, allNameNodes)` → the smallest box containing exactly ONE
+  roster name and sitting beside boxes containing the others, else `null`.
+  Passing every name-node is required — that is what distinguishes a card from
+  the roster around it. No avatar, link, or class name is involved.
+- `SRDom.commonAncestor(nodes)` → smallest element containing all of them (the
+  roster block; the panel mounts directly above it)
 - Settings: `chrome.storage.sync` keys — `enabled` (master, default true),
   `feature.matchroom`, `feature.profile`, `feature.steam`,
   `feature.chips` (default true), `auto.accept`, `auto.closeModals`,
