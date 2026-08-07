@@ -24,6 +24,11 @@
   --sr-bad: #f5694a;
   --sr-high: #ff7a3d;    /* cheatmeter "high" band */
 
+  /* The two sides of a match. Deliberately NOT good/bad (those mean win/loss)
+     and not orange (that means elo) — a team is an identity, not a verdict. */
+  --sr-teamA: #38d6ff;
+  --sr-teamB: #ff5c8a;
+
   /* geometry */
   --sr-r-chip: 4px;
   --sr-r-card: 10px;

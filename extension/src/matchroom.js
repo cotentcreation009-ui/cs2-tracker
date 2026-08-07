@@ -121,9 +121,13 @@
     for (const r of rows) {
       const key = String(r.map || "").trim().toLowerCase();
       if (!key) continue;
-      const e = agg.get(key) || { n: 0, w: 0 };
+      const e = agg.get(key) || { n: 0, w: 0, kills: 0, kn: 0 };
       e.n += 1;
       if (winOf(r)) e.w += 1;
+      if (typeof r.kills === "number") {
+        e.kills += r.kills;
+        e.kn += 1;
+      }
       agg.set(key, e);
     }
   }
@@ -468,21 +472,33 @@
 
   // ---- veto / map-form panel ---------------------------------------------
 
-  function vetoPanel(aggA, aggB, nameA, nameB) {
-    const panel = el("section", "sr-veto-panel");
+  // ---- map radar ---------------------------------------------------------
+  //
+  // A two-team overlay: each spoke is a map, each polygon a team, so the shape
+  // difference IS the veto read — where their shape juts out is their comfort
+  // map, where it collapses is the ban. A stacked bar table made you compare
+  // numbers row by row; this makes the mismatch a shape you see at once.
 
-    const head = el("div", "sr-mr-vhead");
-    const hA = el("span", "sr-mr-vteam sr-mr-vteam--a", String(nameA || "Team A"));
-    hA.title = String(nameA || "Team A");
-    const hB = el("span", "sr-mr-vteam sr-mr-vteam--b", String(nameB || "Team B"));
-    hB.title = String(nameB || "Team B");
-    head.append(
-      el("span", "sr-label sr-mr-vh-map", "Map"),
-      hA,
-      el("span", "sr-label sr-mr-vh-mid", "Last 30"),
-      hB,
-    );
-    panel.append(head);
+  const NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  const R_SIZE = 260;
+  const R_C = R_SIZE / 2;
+  const R_MAX = 74;
+
+  function metricOf(e, metric) {
+    if (!e || !e.n) return null;
+    if (metric === "kills") return e.kn ? e.kills / e.kn : null;
+    return (e.w / e.n) * 100;
+  }
+
+  function radarPanel(aggA, aggB, nameA, nameB) {
+    const panel = el("section", "sr-veto-panel");
+    let metric = "winrate";
 
     const keys = new Set([...aggA.keys(), ...aggB.keys()]);
     if (!keys.size) {
@@ -490,55 +506,206 @@
       return panel;
     }
 
-    const maps = [...keys].map((key) => ({
-      key,
-      a: aggA.get(key) || { n: 0, w: 0 },
-      b: aggB.get(key) || { n: 0, w: 0 },
-    }));
-    maps.sort((x, y) => y.a.n + y.b.n - (x.a.n + x.b.n) || x.key.localeCompare(y.key));
+    const head = el("div", "sr-mr-rhead");
+    const title = el("span", "sr-label", "Map form");
+    const toggle = el("div", "sr-mr-toggle");
+    const bWin = el("button", "sr-mr-tbtn sr-mr-tbtn--on", "Win rate");
+    const bKil = el("button", "sr-mr-tbtn", "Avg kills");
+    bWin.type = "button";
+    bKil.type = "button";
+    toggle.append(bWin, bKil);
+    const scope = el("span", "sr-label sr-mr-rscope", "Last 30");
+    head.append(title, toggle, scope);
 
-    const maxN = Math.max(1, ...maps.map((m) => Math.max(m.a.n, m.b.n)));
-    const topA = Math.max(...maps.map((m) => m.a.n));
-    const topB = Math.max(...maps.map((m) => m.b.n));
-
-    const num = (e, top, side) => {
-      const s = el("span", "sr-mr-vnum sr-num sr-mr-vnum--" + side);
-      if (!e.n) {
-        s.classList.add("sr-mr-dash");
-        s.textContent = "—";
-        s.title = "Not played in the last 30";
-      } else {
-        s.textContent = e.n + " · " + Math.round((e.w / e.n) * 100) + "%";
-        s.title = e.n + " played, " + e.w + " won" + (top ? " — most played" : "");
-        if (top) s.classList.add("sr-mr-vnum--top");
-      }
+    const legend = el("div", "sr-mr-legend");
+    const lg = (name, side) => {
+      const s = el("span", "sr-mr-lg sr-mr-lg--" + side);
+      s.append(el("span", "sr-mr-lgdot"), el("span", null, String(name || (side === "a" ? "Team A" : "Team B"))));
+      s.title = String(name || "");
       return s;
     };
-    const half = (n, top, side) => {
-      const wrap = el("span", "sr-mr-vhalf sr-mr-vhalf--" + side);
-      if (n > 0) {
-        const bar = el("span", "sr-mr-vbar" + (top ? " sr-mr-vbar--top" : ""));
-        bar.style.width = Math.max(4, Math.round((n / maxN) * 100)) + "%";
-        wrap.append(bar);
-      }
-      return wrap;
-    };
+    legend.append(lg(nameA, "a"), lg(nameB, "b"));
 
+    const holder = el("div", "sr-mr-radar");
+    const edges = el("div", "sr-mr-edges");
+    const body = el("div", "sr-mr-rbody");
+    body.append(holder, edges);
+    panel.append(head, legend, body);
+
+    // Order spokes by combined volume so the busiest maps sit top-of-clock,
+    // then keep that order fixed as the metric toggles.
+    const maps = [...keys]
+      .map((key) => ({ key, a: aggA.get(key) || null, b: aggB.get(key) || null }))
+      .sort((x, y) => (y.a?.n || 0) + (y.b?.n || 0) - ((x.a?.n || 0) + (x.b?.n || 0)) || x.key.localeCompare(y.key))
+      .slice(0, 9);
+    if (maps.length < 3) {
+      // A polygon needs three points to say anything — fall back to a list.
+      holder.append(flatMapList(maps, metric));
+      return panel;
+    }
+
+    function draw() {
+      holder.textContent = "";
+      const N = maps.length;
+      const vals = [];
+      for (const m of maps) {
+        vals.push(metricOf(m.a, metric), metricOf(m.b, metric));
+      }
+      const real = vals.filter((v) => v != null);
+      const hi = metric === "kills" ? Math.max(24, Math.ceil(Math.max(...real) + 2)) : 100;
+      const lo = 0;
+      const frac = (v) => (v == null ? 0 : clampNum((v - lo) / (hi - lo), 0.04, 1));
+
+      const ang = (i) => -Math.PI / 2 + (i / N) * Math.PI * 2;
+      const pt = (i, f) => ({
+        x: R_C + Math.cos(ang(i)) * R_MAX * f,
+        y: R_C + Math.sin(ang(i)) * R_MAX * f,
+      });
+
+      const svg = svgEl("svg", {
+        viewBox: "0 0 " + R_SIZE + " " + R_SIZE,
+        class: "sr-mr-rsvg",
+        role: "img",
+        "aria-label":
+          "Per-map " + (metric === "kills" ? "average kills" : "win rate") + " for both teams over their last 30 matches",
+      });
+
+      // rings + spokes
+      for (const f of [0.25, 0.5, 0.75, 1]) {
+        svg.append(
+          svgEl("polygon", {
+            class: "sr-mr-ring" + (f === 0.5 ? " sr-mr-ring--mid" : ""),
+            points: maps.map((_, i) => { const p = pt(i, f); return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" "),
+          }),
+        );
+      }
+      maps.forEach((_, i) => {
+        const p = pt(i, 1);
+        svg.append(svgEl("line", { class: "sr-mr-spoke", x1: R_C, y1: R_C, x2: p.x.toFixed(1), y2: p.y.toFixed(1) }));
+      });
+
+      const poly = (side) => {
+        const pts = maps.map((m, i) => pt(i, frac(metricOf(side === "a" ? m.a : m.b, metric))));
+        svg.append(
+          svgEl("polygon", {
+            class: "sr-mr-area sr-mr-area--" + side,
+            points: pts.map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" "),
+          }),
+        );
+        pts.forEach((p, i) => {
+          const e = side === "a" ? maps[i].a : maps[i].b;
+          if (!e || !e.n) return;
+          svg.append(svgEl("circle", { class: "sr-mr-dotpt sr-mr-dotpt--" + side, cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 2.5 }));
+        });
+      };
+      poly("a");
+      poly("b");
+      holder.append(svg);
+
+      drawEdges(edges, maps, metric, nameA, nameB);
+
+      // vertex labels, positioned outside the ring
+      maps.forEach((m, i) => {
+        const o = pt(i, 1.3);
+        const tag = el("div", "sr-mr-vx");
+        tag.style.left = ((o.x / R_SIZE) * 100).toFixed(2) + "%";
+        tag.style.top = ((o.y / R_SIZE) * 100).toFixed(2) + "%";
+        const val = (e, side) => {
+          const v = metricOf(e, metric);
+          const s = el("span", "sr-mr-vxv sr-mr-vxv--" + side);
+          s.textContent = v == null ? "—" : metric === "kills" ? v.toFixed(1) : Math.round(v) + "%";
+          s.title = e && e.n ? e.n + " played" : "Not played in the last 30";
+          return s;
+        };
+        tag.append(el("span", "sr-mr-vxname", mapLabel(m.key)));
+        const row = el("span", "sr-mr-vxrow");
+        row.append(val(m.a, "a"), el("span", "sr-mr-vxsep", "·"), val(m.b, "b"));
+        tag.append(row);
+        holder.append(tag);
+      });
+    }
+
+    function setMetric(next, onBtn, offBtn) {
+      if (metric === next) return;
+      metric = next;
+      onBtn.classList.add("sr-mr-tbtn--on");
+      offBtn.classList.remove("sr-mr-tbtn--on");
+      draw();
+    }
+    bWin.addEventListener("click", () => setMetric("winrate", bWin, bKil));
+    bKil.addEventListener("click", () => setMetric("kills", bKil, bWin));
+
+    draw();
+    return panel;
+  }
+
+  // The radar shows the shape; this says what to DO with it. Maps ranked by
+  // how lopsided they are, so the ban and the pick are the top and bottom of
+  // one list instead of something you eyeball off a polygon.
+  function drawEdges(box, maps, metric, nameA, nameB) {
+    box.textContent = "";
+    box.append(el("div", "sr-label", metric === "kills" ? "Kill edge" : "Win-rate edge"));
+
+    const rows = maps
+      .map((m) => {
+        const a = metricOf(m.a, metric);
+        const b = metricOf(m.b, metric);
+        if (a == null || b == null) return null;
+        return { key: m.key, a, b, gap: a - b };
+      })
+      .filter(Boolean)
+      .sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap))
+      .slice(0, 6);
+
+    if (!rows.length) {
+      box.append(el("div", "sr-mr-empty", "Not enough shared maps"));
+      return;
+    }
+
+    const worst = Math.max(...rows.map((r) => Math.abs(r.gap))) || 1;
+    for (const r of rows) {
+      const side = r.gap >= 0 ? "a" : "b";
+      const row = el("div", "sr-mr-edge");
+      row.append(el("span", "sr-mr-emap", mapLabel(r.key)));
+
+      const track = el("span", "sr-mr-etrack");
+      const fill = el("span", "sr-mr-efill sr-mr-efill--" + side);
+      fill.style.width = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100)) + "%";
+      track.append(fill);
+      row.append(track);
+
+      const amt = el("span", "sr-mr-eamt sr-mr-vxv--" + side);
+      amt.textContent =
+        (r.gap >= 0 ? "+" : "−") +
+        (metric === "kills" ? Math.abs(r.gap).toFixed(1) : Math.round(Math.abs(r.gap)) + "pp");
+      const who = String((side === "a" ? nameA : nameB) || (side === "a" ? "Team A" : "Team B"));
+      amt.title = who + " ahead on " + mapLabel(r.key);
+      row.append(amt);
+      box.append(row);
+    }
+  }
+
+  function clampNum(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  // Fewer than three shared maps: a radar would be a line. Say the numbers.
+  function flatMapList(maps, metric) {
+    const box = el("div", "sr-mr-flat");
     for (const m of maps) {
-      const isTopA = m.a.n > 0 && m.a.n === topA;
-      const isTopB = m.b.n > 0 && m.b.n === topB;
       const row = el("div", "sr-mr-vrow");
-      const bars = el("span", "sr-mr-vbars");
-      bars.append(half(m.a.n, isTopA, "a"), half(m.b.n, isTopB, "b"));
+      const fmt = (e) => {
+        const v = metricOf(e, metric);
+        return v == null ? "—" : metric === "kills" ? v.toFixed(1) : Math.round(v) + "%";
+      };
       row.append(
         el("span", "sr-mr-vmap", mapLabel(m.key)),
-        num(m.a, isTopA, "a"),
-        bars,
-        num(m.b, isTopB, "b"),
+        el("span", "sr-mr-vnum sr-mr-vnum--a sr-num", fmt(m.a)),
+        el("span", "sr-mr-vnum sr-mr-vnum--b sr-num", fmt(m.b)),
       );
-      panel.append(row);
+      box.append(row);
     }
-    return panel;
+    return box;
   }
 
   // ---- footer ------------------------------------------------------------
@@ -651,7 +818,7 @@
 
     Promise.allSettled(histJobs).then(() => {
       if (g !== state.gen || !veto.isConnected) return;
-      const built = vetoPanel(aggA, aggB, ta.name, tb.name);
+      const built = radarPanel(aggA, aggB, ta.name, tb.name);
       veto.replaceWith(built);
       veto = built;
     });

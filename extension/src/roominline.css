@@ -1,0 +1,107 @@
+/* Inline match-room strip — sits directly under each of FACEIT's own player
+   cards. Deliberately quiet: it is an annotation on their card, not a card of
+   its own, so no panel background and no border box. Tokens only. */
+
+.sr-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--sr-line2);
+  font: 400 11px/1 var(--sr-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--sr-muted);
+}
+
+.sr-in-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+.sr-in-k {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sr-faint);
+}
+.sr-in-v {
+  font-weight: 700;
+  color: var(--sr-ink);
+}
+.sr-in-elo .sr-in-v {
+  color: var(--sr-orange);
+}
+
+.sr-in-lvl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.sr-in-streak {
+  padding: 1px 5px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+}
+.sr-in-streak--w {
+  color: var(--sr-good);
+  background: color-mix(in srgb, var(--sr-good) 14%, transparent);
+}
+.sr-in-streak--l {
+  color: var(--sr-bad);
+  background: color-mix(in srgb, var(--sr-bad) 14%, transparent);
+}
+
+.sr-in-cm {
+  padding: 1px 5px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--sr-cm);
+  background: color-mix(in srgb, var(--sr-cm) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-cm) 45%, transparent);
+}
+.sr-in-cm--dim {
+  background: transparent;
+  border-style: dashed;
+}
+
+.sr-in-ban {
+  padding: 1px 5px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--sr-bg);
+  background: var(--sr-bad);
+}
+
+.sr-in-prem {
+  padding: 1px 5px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--sr-tier) 62%, white);
+  background: color-mix(in srgb, var(--sr-tier) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-tier) 45%, transparent);
+}
+
+.sr-in-none {
+  color: var(--sr-faint);
+}
+
+.sr-in-skel {
+  width: 44px;
+  height: 10px;
+}
+.sr-in-skel:nth-child(2) { width: 56px; }
+.sr-in-skel:nth-child(3) { width: 38px; }
