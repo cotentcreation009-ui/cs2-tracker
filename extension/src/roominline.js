@@ -78,17 +78,26 @@
   // Walk up from the name to the card that holds it: the first ancestor that
   // is meaningfully wider/taller than the name itself, capped so we never
   // escape into the whole roster column.
+  // A size heuristic stopped INSIDE the row, so inserting "after" it landed
+  // mid-flex and squeezed the nickname. The real card is the ancestor that
+  // owns the avatar AND sits in a list of siblings shaped like it — walk until
+  // both hold, and refuse to guess if neither does.
   function cardFor(node) {
     let n = node;
-    const nameRect = node.getBoundingClientRect();
-    for (let i = 0; i < 6 && n && n.parentElement; i++) {
-      const p = n.parentElement;
-      const r = p.getBoundingClientRect();
-      if (r.height > nameRect.height * 6 || r.width > nameRect.width * 6) break;
-      n = p;
-      if (r.height >= 40 && r.width >= 140) return n;
+    for (let i = 0; i < 8 && n && n.parentElement; i++) {
+      n = n.parentElement;
+      if (n === document.body || n.id === "canvas-body") break;
+      const r = n.getBoundingClientRect();
+      if (r.width < 140 || r.height < 32) continue;
+      const hasAvatar = !!n.querySelector("img");
+      if (!hasAvatar) continue;
+      // siblings of the same rough height = a roster list, so this is one row
+      const sibs = [...(n.parentElement ? n.parentElement.children : [])].filter(
+        (c) => c !== n && Math.abs(c.getBoundingClientRect().height - r.height) < 12,
+      );
+      if (sibs.length >= 1) return n;
     }
-    return n && n !== node ? n : node.parentElement || node;
+    return null; // no confident anchor — leave the page alone
   }
 
   // ---- the strip ----------------------------------------------------------
@@ -107,7 +116,7 @@
     return strip;
   }
 
-  function fillStrip(strip, p, form, cm) {
+  function fillStrip(strip, p, form, cm, pending) {
     strip.textContent = "";
 
     if (typeof p.level === "number" && p.level > 0) {
@@ -126,6 +135,8 @@
       const st = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
       st.title = (form.won ? "Winning" : "Losing") + " streak";
       strip.append(st);
+    } else if (pending) {
+      strip.append(el("span", "sr-skel sr-in-skel"));
     } else {
       strip.append(stat("K/D", DASH), stat("WR", DASH));
     }
@@ -191,22 +202,61 @@
   async function decorate(p, gen) {
     const nick = String(p.nick || "").trim();
     if (!nick) return;
+    // One strip per player, document-wide: cardFor can resolve differently as
+    // the SPA re-renders, and without this each pass added another copy.
+    if (document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]')) return;
+
     const nameNode = nodeForNick(nick);
     if (!nameNode) return; // roster not painted yet — the observer retries
     const card = cardFor(nameNode);
-    if (!card || card.getAttribute(OWNER) === nick) return; // already ours
+    if (!card) return;
 
-    card.setAttribute(OWNER, nick);
-    const strip = skeletonStrip();
+    const strip = el("div", "sr-reset sr-in");
+    strip.setAttribute(MARK, "1");
+    strip.setAttribute(OWNER, nick);
     card.insertAdjacentElement("afterend", strip);
 
+    // Draw immediately from the roster — level and elo arrive with the match
+    // payload, so there is no reason to show a spinner for them. Anything
+    // slower fills in behind, and a stalled request degrades to what we
+    // already drew instead of a strip of grey boxes.
+    fillStrip(strip, p, null, null, true);
+
     const A = api();
-    const [rows, cm] = await Promise.all([
-      p.uuid && A ? A.eloHistory(p.uuid, HIST_N).catch(() => null) : null,
-      p.steam64 && A ? A.cheatmeter({ steamid: p.steam64 }).catch(() => null) : null,
-    ]);
-    if (gen !== state.gen || !strip.isConnected) return;
-    fillStrip(strip, p, computeForm(rows), cm);
+    if (!A) return;
+    let form = null;
+    let cm = null;
+    const paint = () => {
+      if (gen === state.gen && strip.isConnected) fillStrip(strip, p, form, cm, false);
+    };
+    const jobs = [];
+    if (p.uuid) {
+      jobs.push(
+        A.eloHistory(p.uuid, HIST_N)
+          .then((rows) => {
+            form = computeForm(rows);
+            paint();
+          })
+          .catch(() => {}),
+      );
+    }
+    if (p.steam64 || nick) {
+      jobs.push(
+        A.cheatmeter(p.steam64 ? { steamid: String(p.steam64) } : { faceit: nick })
+          .then((d) => {
+            cm = d;
+            paint();
+          })
+          .catch(() => {}),
+      );
+    }
+    await Promise.allSettled(jobs);
+    paint();
+  }
+
+  // Attribute-selector-safe nickname (nicks contain quotes, brackets, dots).
+  function cssEscape(v) {
+    return String(v).replace(/["\\]/g, "\\$&");
   }
 
   function clearAll() {
@@ -215,7 +265,12 @@
   }
 
   async function run(id) {
-    const gen = ++state.gen;
+    // The generation marks WHICH ROOM the in-flight requests belong to, and it
+    // is bumped in tick() when that changes — never here. It used to increment
+    // per scan, and since our own strips are DOM mutations that schedule the
+    // next scan, every pass invalidated the previous pass's pending requests:
+    // the strips painted level and elo and then sat on skeletons forever.
+    const gen = state.gen;
     const A = api();
     if (!A || !(await allowed())) return;
     const room = await A.room(id).catch(() => null);
@@ -250,9 +305,24 @@
     }, DEBOUNCE_MS);
   }
 
+  // Our own strips are DOM mutations. Reacting to them re-scans the page for
+  // ever, so anything we authored is not a reason to look again.
+  function foreign(records) {
+    for (const r of records) {
+      if (r.target && isOurs(r.target)) continue;
+      for (const n of r.addedNodes) {
+        if (n.nodeType === 1 && !isOurs(n)) return true;
+      }
+      if (r.removedNodes.length) return true;
+    }
+    return false;
+  }
+
   function init() {
     tick();
-    state.obs = new MutationObserver(schedule);
+    state.obs = new MutationObserver((records) => {
+      if (foreign(records)) schedule();
+    });
     state.obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
   }
