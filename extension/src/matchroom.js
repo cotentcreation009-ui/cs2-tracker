@@ -213,7 +213,7 @@
     const head = el("header", "sr-mr-head");
     head.append(skel("sr-mr-skel-title"), skel("sr-mr-skel-chip"));
     card.append(head);
-    for (let i = 0; i < MAX_PER_TEAM; i++) card.append(skelRow());
+    if (!SUMMARY_ONLY) for (let i = 0; i < MAX_PER_TEAM; i++) card.append(skelRow());
     return card;
   }
 
@@ -405,6 +405,13 @@
 
   // ---- team card ---------------------------------------------------------
 
+  // Per-player rows moved to roominline.js, which attaches them under
+  // FACEIT's OWN player cards — the numbers belong on the player, not in a
+  // second table you have to cross-reference. The panel keeps what is
+  // genuinely team-level: identity, average elo, the elo estimate, and the
+  // map radar.
+  const SUMMARY_ONLY = true;
+
   function teamCard(team, ownAvg, oppAvg) {
     const card = el("section", "sr-mr-card");
 
@@ -436,6 +443,7 @@
     }
     head.append(name, right);
     card.append(head);
+    if (SUMMARY_ONLY) return { card, handles: [] };
 
     const cols = el("div", "sr-mr-cols");
     const lab = (text, cls, title) => {
@@ -478,6 +486,13 @@
   // difference IS the veto read — where their shape juts out is their comfort
   // map, where it collapses is the ban. A stacked bar table made you compare
   // numbers row by row; this makes the mismatch a shape you see at once.
+
+  // CS2 active-duty pool. Retired maps still show up in 30-match history and
+  // are pure noise on a veto chart — nobody bans Vertigo.
+  const POOL = [
+    "de_ancient", "de_anubis", "de_cache", "de_dust2",
+    "de_inferno", "de_mirage", "de_nuke",
+  ];
 
   const NS = "http://www.w3.org/2000/svg";
   function svgEl(tag, attrs) {
@@ -532,12 +547,31 @@
     body.append(holder, edges);
     panel.append(head, legend, body);
 
-    // Order spokes by combined volume so the busiest maps sit top-of-clock,
-    // then keep that order fixed as the metric toggles.
-    const maps = [...keys]
-      .map((key) => ({ key, a: aggA.get(key) || null, b: aggB.get(key) || null }))
-      .sort((x, y) => (y.a?.n || 0) + (y.b?.n || 0) - ((x.a?.n || 0) + (x.b?.n || 0)) || x.key.localeCompare(y.key))
-      .slice(0, 9);
+    // Spokes are the active-duty pool ONLY, and only where BOTH teams have
+    // played: a retired map nobody vetoes is noise, and a map one side has
+    // never touched collapsed that side's polygon to the centre, which is
+    // what made the chart look broken. Alphabetical so the shape means the
+    // same thing from one room to the next.
+    const paired = POOL.filter((key) => {
+      const a = aggA.get(key);
+      const b = aggB.get(key);
+      return a && a.n > 0 && b && b.n > 0;
+    });
+    const maps = paired.map((key) => ({ key, a: aggA.get(key), b: aggB.get(key) }));
+
+    // Maps one side has never played are the loudest veto signal there is, so
+    // they get said out loud instead of drawn as a spike.
+    const unplayed = POOL.map((key) => {
+      const a = aggA.get(key);
+      const b = aggB.get(key);
+      const aN = a ? a.n : 0;
+      const bN = b ? b.n : 0;
+      if (aN === 0 && bN === 0) return null; // neither plays it — not a signal
+      if (aN === 0) return { key, side: "a" };
+      if (bN === 0) return { key, side: "b" };
+      return null;
+    }).filter(Boolean);
+
     if (maps.length < 3) {
       // A polygon needs three points to say anything — fall back to a list.
       holder.append(flatMapList(maps, metric));
@@ -602,7 +636,7 @@
       poly("b");
       holder.append(svg);
 
-      drawEdges(edges, maps, metric, nameA, nameB);
+      drawRead(edges, maps, unplayed, metric, nameA, nameB);
 
       // vertex labels, positioned outside the ring
       maps.forEach((m, i) => {
@@ -621,6 +655,9 @@
         const row = el("span", "sr-mr-vxrow");
         row.append(val(m.a, "a"), el("span", "sr-mr-vxsep", "·"), val(m.b, "b"));
         tag.append(row);
+        const n = el("span", "sr-mr-vxn", (m.a ? m.a.n : 0) + " v " + (m.b ? m.b.n : 0));
+        n.title = "Matches played on this map in each team's last 30";
+        tag.append(n);
         holder.append(tag);
       });
     }
@@ -639,49 +676,66 @@
     return panel;
   }
 
-  // The radar shows the shape; this says what to DO with it. Maps ranked by
-  // how lopsided they are, so the ban and the pick are the top and bottom of
-  // one list instead of something you eyeball off a polygon.
-  function drawEdges(box, maps, metric, nameA, nameB) {
+  // The radar shows the shape; this says what to DO with it. Deliberately NOT
+  // a re-listing of every map — the chart already names them, and repeating
+  // the same seven labels beside it read as duplication. Only the decisions:
+  // where each side is strongest, and any map a side has never played.
+  function drawRead(box, maps, unplayed, metric, nameA, nameB) {
     box.textContent = "";
-    box.append(el("div", "sr-label", metric === "kills" ? "Kill edge" : "Win-rate edge"));
+    box.append(el("div", "sr-label", "Veto read"));
 
     const rows = maps
       .map((m) => {
         const a = metricOf(m.a, metric);
         const b = metricOf(m.b, metric);
-        if (a == null || b == null) return null;
-        return { key: m.key, a, b, gap: a - b };
+        return a == null || b == null ? null : { key: m.key, gap: a - b };
       })
       .filter(Boolean)
-      .sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap))
-      .slice(0, 6);
+      .sort((x, y) => y.gap - x.gap);
 
-    if (!rows.length) {
-      box.append(el("div", "sr-mr-empty", "Not enough shared maps"));
-      return;
+    const teamA = String(nameA || "Team A");
+    const teamB = String(nameB || "Team B");
+    const unit = (v) => (metric === "kills" ? Math.abs(v).toFixed(1) : Math.round(Math.abs(v)) + "pp");
+
+    const line = (label, mapKey, amt, side, why) => {
+      const r = el("div", "sr-mr-read");
+      r.append(el("span", "sr-mr-readk", label));
+      const v = el("span", "sr-mr-readv");
+      v.append(el("span", "sr-mr-readmap", mapLabel(mapKey)));
+      if (amt != null) v.append(el("span", "sr-mr-eamt sr-mr-vxv--" + side, "+" + unit(amt)));
+      r.title = why;
+      r.append(v);
+      box.append(r);
+    };
+
+    if (rows.length) {
+      const best = rows[0];
+      const worst = rows[rows.length - 1];
+      if (best.gap > 0) {
+        line("Your edge", best.key, best.gap, "a", teamA + " is strongest here relative to " + teamB);
+      }
+      if (worst.gap < 0) {
+        line("Their edge", worst.key, worst.gap, "b", teamB + " is strongest here relative to " + teamA);
+      }
+      if (best.gap <= 0 && worst.gap >= 0) {
+        box.append(el("div", "sr-mr-empty", "No clear edge either way"));
+      }
     }
 
-    const worst = Math.max(...rows.map((r) => Math.abs(r.gap))) || 1;
-    for (const r of rows) {
-      const side = r.gap >= 0 ? "a" : "b";
-      const row = el("div", "sr-mr-edge");
-      row.append(el("span", "sr-mr-emap", mapLabel(r.key)));
+    for (const u of unplayed.slice(0, 3)) {
+      const who = u.side === "a" ? teamA : teamB;
+      const r = el("div", "sr-mr-read");
+      r.append(el("span", "sr-mr-readk", "Never played"));
+      const v = el("span", "sr-mr-readv");
+      v.append(el("span", "sr-mr-readmap", mapLabel(u.key)));
+      v.append(el("span", "sr-mr-eamt sr-mr-vxv--" + u.side, who.length > 12 ? who.slice(0, 12) + "…" : who));
+      r.title = who + " has not played " + mapLabel(u.key) + " in their last 30 matches";
+      r.append(v);
+      box.append(r);
+    }
 
-      const track = el("span", "sr-mr-etrack");
-      const fill = el("span", "sr-mr-efill sr-mr-efill--" + side);
-      fill.style.width = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100)) + "%";
-      track.append(fill);
-      row.append(track);
-
-      const amt = el("span", "sr-mr-eamt sr-mr-vxv--" + side);
-      amt.textContent =
-        (r.gap >= 0 ? "+" : "−") +
-        (metric === "kills" ? Math.abs(r.gap).toFixed(1) : Math.round(Math.abs(r.gap)) + "pp");
-      const who = String((side === "a" ? nameA : nameB) || (side === "a" ? "Team A" : "Team B"));
-      amt.title = who + " ahead on " + mapLabel(r.key);
-      row.append(amt);
-      box.append(row);
+    if (!box.querySelector(".sr-mr-read")) {
+      box.append(el("div", "sr-mr-empty", "Not enough shared maps"));
     }
   }
 
@@ -776,45 +830,29 @@
     let veto = vetoSkeleton();
     mount.append(teams, veto, footer());
 
-    // Per player (max 10, all in parallel): last-30 form + CheatMeter read.
-    // Rows fill progressively as each promise lands.
+    // The radar needs every player's last-30 maps. Per-player DISPLAY now
+    // happens inline under FACEIT's own cards (roominline.js), so this only
+    // aggregates — and the two modules share api.js's cache, so asking for
+    // the same history twice costs one request, not two.
     const aggA = new Map();
     const aggB = new Map();
     const histJobs = [];
-    const spawn = (handles, agg) => {
-      for (const h of handles) {
-        const p = h.p;
+    const spawn = (team, agg) => {
+      for (const p of (team.roster || []).slice(0, MAX_PER_TEAM)) {
+        if (!p.uuid) continue;
         histJobs.push(
           Promise.resolve()
-            .then(() => (p.uuid ? SRApi.eloHistory(p.uuid, HIST_N) : null))
+            .then(() => SRApi.eloHistory(p.uuid, HIST_N))
             .then((rows) => {
               if (g !== state.gen) return;
-              fillForm(h.cells, computeForm(rows));
               if (Array.isArray(rows)) addMaps(agg, rows);
             })
-            .catch(() => {
-              if (g === state.gen) fillForm(h.cells, null);
-            }),
+            .catch(() => {}),
         );
-        Promise.resolve()
-          .then(() => {
-            const q = p.steam64
-              ? { steamid: String(p.steam64) }
-              : p.nick
-                ? { faceit: String(p.nick) }
-                : null;
-            return q ? SRApi.cheatmeter(q) : null;
-          })
-          .then((data) => {
-            if (g === state.gen) fillCM(h.cells, data);
-          })
-          .catch(() => {
-            if (g === state.gen) fillCM(h.cells, null);
-          });
       }
     };
-    spawn(A.handles, aggA);
-    spawn(B.handles, aggB);
+    spawn(ta, aggA);
+    spawn(tb, aggB);
 
     Promise.allSettled(histJobs).then(() => {
       if (g !== state.gen || !veto.isConnected) return;

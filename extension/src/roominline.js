@@ -49,6 +49,13 @@
 
   // The node whose OWN text is exactly this nickname (ignoring nodes that
   // merely contain it, so a chat line mentioning the name never wins).
+  // Our own panel lists the same nicknames and sits ABOVE the roster, so an
+  // unguarded search matched our rows and stapled every strip inside our own
+  // card. Anything we rendered is off-limits by definition.
+  function isOurs(node) {
+    return !!(node.closest && node.closest("#statrun-room, [data-sr-inline], .sr-reset, .sr-mr, .sr-chip"));
+  }
+
   function nodeForNick(nick) {
     const want = nick.trim().toLowerCase();
     if (!want) return null;
@@ -56,14 +63,14 @@
     const links = document.querySelectorAll('a[href*="/players/"]');
     for (const a of links) {
       const t = (a.textContent || "").trim().toLowerCase();
-      if (t === want && a.offsetParent !== null) return a;
+      if (t === want && a.offsetParent !== null && !isOurs(a)) return a;
     }
     // Fall back to any small element whose text is exactly the nickname.
     const all = document.querySelectorAll("span,div,p,h1,h2,h3,h4,strong,b");
     for (const n of all) {
       if (n.children.length > 2) continue;
       const t = (n.textContent || "").trim().toLowerCase();
-      if (t === want && n.offsetParent !== null) return n;
+      if (t === want && n.offsetParent !== null && !isOurs(n)) return n;
     }
     return null;
   }
