@@ -15,6 +15,28 @@
   color: var(--sr-muted);
 }
 
+/* Denser forms for the narrow cards a finished match room uses. The labels go
+   first because they are the most repetitive ink on the strip and the values
+   keep their own colours; the full sentence stays on the strip's tooltip, so
+   nothing is actually lost. */
+.sr-in--tight,
+.sr-in--micro {
+  gap: 5px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+.sr-in--tight .sr-in-k,
+.sr-in--micro .sr-in-k {
+  display: none;
+}
+/* Deliberately still wrapping. Holding the micro strip to one line meant
+   clipping it, which turned a CheatMeter of 12 into a "1" — a wrong number is
+   far worse than a second line. It wraps only in the very narrowest cards. */
+.sr-in--micro {
+  gap: 4px;
+  row-gap: 2px;
+}
+
 .sr-in-stat {
   display: inline-flex;
   align-items: baseline;

@@ -21,7 +21,10 @@
   const DEBOUNCE_MS = 400;
 
   const DASH = "—";
-  const state = { id: null, gen: 0, timer: null, obs: null };
+  // undos[] holds one restore fn per attached strip. placeInside writes inline
+  // position/padding onto FACEIT's own card, so simply deleting our strips on
+  // room change would leave that styling behind on their node.
+  const state = { id: null, gen: 0, timer: null, obs: null, undos: [] };
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -80,24 +83,241 @@
   // escape into the whole roster column.
   // A size heuristic stopped INSIDE the row, so inserting "after" it landed
   // mid-flex and squeezed the nickname. The real card is the ancestor that
-  // owns the avatar AND sits in a list of siblings shaped like it — walk until
-  // both hold, and refuse to guess if neither does.
+  // owns an avatar AND sits in a list of siblings shaped like it.
+  //
+  // "Shaped like it" used to mean "the same height", which was self-defeating:
+  // decorating a card makes it taller, so after the first player the remaining
+  // cards no longer matched their decorated neighbours and were skipped. Peers
+  // are now recognised by what they CONTAIN — an avatar and a profile link —
+  // which is exactly as true after we have annotated them as before.
+  // Which players a subtree links to. One card is about exactly one player —
+  // this is what tells a card apart from the roster that contains it, and it
+  // holds whatever the cards are sized like. A minimum-width rule did that job
+  // before and got it wrong: a finished room's cards are ~90-120px, under the
+  // floor, so the walk sailed past them and anchored the whole team column.
+  function playerSlugs(n) {
+    const set = new Set();
+    if (!n.querySelectorAll) return set;
+    for (const a of n.querySelectorAll('a[href*="/players/"]')) {
+      const m = /\/players\/([^/?#]+)/.exec(a.getAttribute("href") || "");
+      if (m) set.add(m[1].toLowerCase());
+    }
+    return set;
+  }
+
+  // Starts AT the resolved node, not at its parent. When FACEIT makes the whole
+  // card one big <a href="/players/…">, that anchor's own text is the nickname,
+  // so it is what the lookup returns — and stepping straight to its parent
+  // walked into the roster and gave up.
   function cardFor(node) {
     let n = node;
-    for (let i = 0; i < 8 && n && n.parentElement; i++) {
-      n = n.parentElement;
+    for (let i = 0; i < 9 && n; i++, n = n.parentElement) {
       if (n === document.body || n.id === "canvas-body") break;
       const r = n.getBoundingClientRect();
-      if (r.width < 140 || r.height < 32) continue;
-      const hasAvatar = !!n.querySelector("img");
-      if (!hasAvatar) continue;
-      // siblings of the same rough height = a roster list, so this is one row
-      const sibs = [...(n.parentElement ? n.parentElement.children : [])].filter(
-        (c) => c !== n && Math.abs(c.getBoundingClientRect().height - r.height) < 12,
-      );
-      if (sibs.length >= 1) return n;
+      if (r.width < 60 || r.height < 24) continue;
+      if (!n.querySelector("img")) continue; // a player card shows an avatar
+      // Two players in scope means we have walked out of the card and into the
+      // roster. Anchoring there is what stacked five strips on one column.
+      if (playerSlugs(n).size > 1) return null;
+      const p = n.parentElement;
+      if (!p) continue;
+      let peers = 0;
+      for (const c of p.children) {
+        if (c === n || isOurs(c) || !c.querySelector) continue;
+        if (c.querySelector("img") && playerSlugs(c).size === 1) peers += 1;
+      }
+      if (peers >= 1) return n; // a roster: at least one more card beside it
     }
     return null; // no confident anchor — leave the page alone
+  }
+
+  // ---- attaching without disturbing the host ------------------------------
+  //
+  // A live room stacks its roster vertically, so a sibling inserted after a
+  // card simply reflows below it. A FINISHED room lays the same roster out
+  // HORIZONTALLY — and there a sibling becomes a peer column: it takes a share
+  // of the row's width, stretches to the row's height, and squeezes the real
+  // cards down to a sliver. That is what turned the scoreboard into a set of
+  // black columns.
+  //
+  // So the mode is measured, never assumed, and whichever mode we pick is
+  // checked against an invariant that holds for both: annotating a card must
+  // not change any card's WIDTH. If it did, we put the page back.
+
+  // Only "true" licenses a sibling insert, so every uncertain case answers
+  // false and takes the placeInside route, which cannot disturb a row.
+  function laysOutVertically(box) {
+    if (!box) return false;
+    const cs = getComputedStyle(box);
+    const d = cs.display;
+    if (d === "flex" || d === "inline-flex") {
+      // column-reverse stacks upwards, so "after the card" would render ABOVE
+      // it — correct by the width invariant but wrong to the eye.
+      return cs.flexDirection === "column";
+    }
+    if (d === "grid" || d === "inline-grid") {
+      // A grid with no explicit columns still flows horizontally when
+      // grid-auto-flow is column — "none" does not mean one column.
+      if (cs.gridAutoFlow.indexOf("column") === 0) return false;
+      const t = cs.gridTemplateColumns;
+      return !t || t === "none" || t.trim().split(/\s+/).length <= 1;
+    }
+    // A table row lays its cells out across; every other table box stacks.
+    if (d === "table-row") return false;
+    // display:contents has no box of its own — the real parent is further up.
+    if (d === "contents" || d.indexOf("inline") === 0) return false;
+    return true; // block, flow-root, list-item, table, table-cell, …
+  }
+
+  // Sibling directly after the card. Correct wherever the flow is vertical.
+  // Clears anything a rejected placeInside attempt left on the strip.
+  function placeAfter(card, strip) {
+    strip.style.position = "";
+    strip.style.left = "";
+    strip.style.right = "";
+    strip.style.bottom = "";
+    strip.style.margin = "";
+    card.insertAdjacentElement("afterend", strip);
+    return () => strip.remove();
+  }
+
+  // Does the strip sit on top of the card's own avatar/nickname? This is the
+  // question both the initial placement and the post-data re-check care about.
+  // (In sibling mode the strip is not a child of the card, so the card's own
+  // content always ends above it and this is trivially false.)
+  function overlapsContent(card, strip) {
+    let bottom = 0;
+    for (const c of card.children) {
+      if (c === strip || isOurs(c)) continue;
+      const b2 = c.getBoundingClientRect().bottom;
+      if (b2 > bottom) bottom = b2;
+    }
+    return !!bottom && strip.getBoundingClientRect().top < bottom - 1;
+  }
+
+  // Re-measure hooks, one per attached strip. The strip is attached holding a
+  // placeholder and refilled when the requests land, and the refilled strip is
+  // taller — in a narrow card it wraps to a second line. Reserving the card's
+  // padding once, against the placeholder, left that second line to grow
+  // UPWARD (the strip is anchored to the card's bottom edge) straight over the
+  // player's avatar and name.
+  const resettle = new WeakMap();
+  // strip -> re-establish the layout guarantees after its content changed
+  const settle = new WeakMap();
+
+  // Inside the card, taken out of flow and given room by the card's own
+  // padding. Absolute positioning is the point: an out-of-flow child cannot
+  // contribute to its parent's intrinsic width, so a row of cards cannot be
+  // re-proportioned by anything we add. The padding reserves exactly the
+  // height we need, so nothing is overlapped either.
+  function placeInside(card, strip) {
+    const cs = getComputedStyle(card);
+    const prevPos = card.style.position;
+    const prevPad = card.style.paddingBottom;
+    const basePad = parseFloat(cs.paddingBottom) || 0;
+    const h0 = card.getBoundingClientRect().height;
+
+    if (cs.position === "static") card.style.position = "relative";
+    // FACEIT sometimes makes the whole card one anchor. Sitting inside it, our
+    // strip would navigate to the player's profile on any click — including the
+    // click that is only trying to read a tooltip.
+    if (card.closest("a[href]")) {
+      strip.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
+    strip.style.position = "absolute";
+    strip.style.left = "0";
+    strip.style.right = "0";
+    strip.style.bottom = "0";
+    strip.style.margin = "0";
+    card.appendChild(strip);
+
+    const sh = strip.getBoundingClientRect().height;
+    const undo = () => {
+      strip.remove();
+      card.style.position = prevPos;
+      card.style.paddingBottom = prevPad;
+    };
+    if (!sh) {
+      undo();
+      return null;
+    }
+
+    // Reserve room for whatever the strip currently is. Re-runnable, because
+    // what the strip is changes when the requests land.
+    const reserve = () => {
+      card.style.paddingBottom = basePad + strip.getBoundingClientRect().height + 4 + "px";
+    };
+    reserve();
+    resettle.set(strip, reserve);
+
+    // The thing that actually matters is that we did not land on top of the
+    // card's own content. Testing that the card grew by the strip's height
+    // looked equivalent but is not: under `align-items: stretch` the first
+    // decorated card raises the whole row, so every later card is already tall
+    // enough and appears not to have grown — which rejected every player after
+    // the first. Ask the real question instead.
+    if (overlapsContent(card, strip)) {
+      undo();
+      return null;
+    }
+    return undo;
+  }
+
+  // Widths of the card and everything beside it — the thing that must not move.
+  // Our own strip is skipped: in sibling mode it joins this very list, and
+  // counting it made the "did anything move?" check fail on a layout that was
+  // in fact perfectly fine.
+  function widths(card) {
+    const p = card.parentElement;
+    const kids = p ? p.children : [card];
+    const out = [];
+    for (const k of kids) {
+      if (!isOurs(k)) out.push(Math.round(k.getBoundingClientRect().width));
+    }
+    return out;
+  }
+
+  function same(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1) return false;
+    return true;
+  }
+
+  // Try the mode that suits the measured layout, then the other one, and if
+  // both move the page, attach nothing at all. A missing strip is a far
+  // smaller failure than a broken match room.
+  function attach(card, strip) {
+    const order = laysOutVertically(card.parentElement)
+      ? [placeAfter, placeInside]
+      : [placeInside, placeAfter];
+    for (const place of order) {
+      const before = widths(card);
+      const undo = place(card, strip);
+      if (!undo) continue;
+      if (same(before, widths(card)) && strip.getBoundingClientRect().height > 0) {
+        state.undos.push(undo);
+        // Everything above was measured against the placeholder. Once the real
+        // numbers arrive the strip changes size, so both guarantees have to be
+        // re-established — and if they cannot be, the strip goes rather than
+        // sitting on top of the card it was meant to annotate.
+        settle.set(strip, () => {
+          const re = resettle.get(strip);
+          if (re) re();
+          if (!same(before, widths(card)) || overlapsContent(card, strip)) {
+            undo();
+            settle.delete(strip);
+            const i = state.undos.indexOf(undo);
+            if (i >= 0) state.undos.splice(i, 1);
+          }
+        });
+        return true;
+      }
+      undo();
+    }
+    return false;
   }
 
   // ---- the strip ----------------------------------------------------------
@@ -116,8 +336,38 @@
     return strip;
   }
 
-  function fillStrip(strip, p, form, cm, pending) {
+  // A finished room's cards are a third the width of a live room's, and the
+  // full strip wraps to four lines inside one — which doubles the card's
+  // height and reads as a mess. The strip is measured against the card it is
+  // annotating and drops to a denser form rather than overflowing it.
+  function density(w) {
+    if (!w || w >= 240) return "";
+    return w < 150 ? " sr-in--micro" : " sr-in--tight";
+  }
+
+  // Everything the strip knows, in one sentence — so the denser forms hide
+  // presentation, never information.
+  function summary(p, form, cm) {
+    const bits = [];
+    if (p.level > 0) bits.push("FACEIT level " + p.level);
+    if (p.elo > 0) bits.push(p.elo.toLocaleString("en-US") + " elo");
+    if (form) {
+      bits.push("K/D " + form.kd.toFixed(2));
+      bits.push(Math.round(form.wr) + "% win rate");
+      bits.push((form.won ? "won " : "lost ") + form.streak.slice(1) + " in a row");
+      bits.push("last " + form.matches + " matches");
+    }
+    if (cm && cm.banned) bits.push("VAC or game ban on record");
+    else if (cm && cm.cheat) bits.push("CheatMeter " + cm.cheat.score + "% (" + cm.cheat.band + ")");
+    if (cm && cm.premier > 0) bits.push("Premier " + cm.premier.toLocaleString("en-US"));
+    return bits.join(" · ");
+  }
+
+  function fillStrip(strip, p, form, cm, pending, cardW) {
     strip.textContent = "";
+    strip.className = "sr-reset sr-in" + density(cardW);
+    const micro = / sr-in--micro/.test(strip.className);
+    strip.title = summary(p, form, cm);
 
     if (typeof p.level === "number" && p.level > 0) {
       const lv = el("span", "sr-in-lvl sr-lvl sr-lvl-" + p.level, String(p.level));
@@ -128,13 +378,13 @@
       strip.append(stat("elo", p.elo.toLocaleString("en-US"), "sr-in-elo", "Current FACEIT elo"));
     }
     if (form) {
-      strip.append(
-        stat("K/D", form.kd.toFixed(2), null, "K/D over the last " + form.matches + " matches"),
-        stat("WR", Math.round(form.wr) + "%", null, "Win rate over the last " + form.matches + " matches"),
-      );
-      const st = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
-      st.title = (form.won ? "Winning" : "Losing") + " streak";
-      strip.append(st);
+      strip.append(stat("K/D", form.kd.toFixed(2), null, "K/D over the last " + form.matches + " matches"));
+      if (!micro) {
+        strip.append(stat("WR", Math.round(form.wr) + "%", null, "Win rate over the last " + form.matches + " matches"));
+        const st = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
+        st.title = (form.won ? "Winning" : "Losing") + " streak";
+        strip.append(st);
+      }
     } else if (pending) {
       strip.append(el("span", "sr-skel sr-in-skel"));
     } else {
@@ -154,7 +404,7 @@
       if (cm.cheat.lowConfidence) c.classList.add("sr-in-cm--dim");
       strip.append(c);
     }
-    if (cm && typeof cm.premier === "number" && cm.premier > 0) {
+    if (!micro && cm && typeof cm.premier === "number" && cm.premier > 0) {
       const pr = el("span", "sr-in-prem", cm.premier.toLocaleString("en-US"));
       pr.style.setProperty("--sr-tier", tierHex(cm.premier));
       pr.title = "CS2 Premier rating";
@@ -199,12 +449,27 @@
 
   // ---- attach -------------------------------------------------------------
 
+  // Is this strip still attached to something that looks like a player card?
+  function anchored(strip) {
+    const host = strip.parentElement;
+    if (!host) return false;
+    const near = strip.previousElementSibling;
+    if (near && near.querySelector && near.querySelector("img")) return true; // placeAfter
+    return !!(host.querySelector && host.querySelector("img")); // placeInside
+  }
+
   async function decorate(p, gen) {
     const nick = String(p.nick || "").trim();
     if (!nick) return;
     // One strip per player, document-wide: cardFor can resolve differently as
     // the SPA re-renders, and without this each pass added another copy.
-    if (document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]')) return;
+    // A strip whose card React has since replaced is an orphan, though — it
+    // would otherwise block its own replacement and sit there stale for ever.
+    const existing = document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]');
+    if (existing) {
+      if (existing.isConnected && anchored(existing)) return;
+      existing.remove();
+    }
 
     const nameNode = nodeForNick(nick);
     if (!nameNode) return; // roster not painted yet — the observer retries
@@ -214,20 +479,29 @@
     const strip = el("div", "sr-reset sr-in");
     strip.setAttribute(MARK, "1");
     strip.setAttribute(OWNER, nick);
-    card.insertAdjacentElement("afterend", strip);
 
     // Draw immediately from the roster — level and elo arrive with the match
     // payload, so there is no reason to show a spinner for them. Anything
     // slower fills in behind, and a stalled request degrades to what we
     // already drew instead of a strip of grey boxes.
-    fillStrip(strip, p, null, null, true);
+    // Filled BEFORE attaching so the layout check below measures real content
+    // and the strip's real height, not an empty box.
+    const cardW = card.getBoundingClientRect().width;
+    fillStrip(strip, p, null, null, true, cardW);
+    if (!attach(card, strip)) return;
 
     const A = api();
     if (!A) return;
     let form = null;
     let cm = null;
     const paint = () => {
-      if (gen === state.gen && strip.isConnected) fillStrip(strip, p, form, cm, false);
+      if (gen === state.gen && strip.isConnected) {
+        fillStrip(strip, p, form, cm, false, card.getBoundingClientRect().width);
+        // The strip just changed size. Re-reserve the room it needs and
+        // re-check that it still disturbs nothing.
+        const s = settle.get(strip);
+        if (s) s();
+      }
     };
     const jobs = [];
     if (p.uuid) {
@@ -260,6 +534,13 @@
   }
 
   function clearAll() {
+    // Restore first — each undo removes its own strip AND unwinds the inline
+    // styles we put on FACEIT's card.
+    const undos = state.undos;
+    state.undos = [];
+    for (const u of undos) {
+      try { u(); } catch { /* node already gone with a React re-render */ }
+    }
     document.querySelectorAll("[" + MARK + "]").forEach((n) => n.remove());
     document.querySelectorAll("[" + OWNER + "]").forEach((n) => n.removeAttribute(OWNER));
   }
@@ -325,6 +606,24 @@
     });
     state.obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
+
+    // The density class and the padding that reserves the strip's height are
+    // both measured against the card's width at attach time. A resize changes
+    // that width, so the only honest response is to put the cards back and
+    // measure again.
+    let rtimer = null;
+    window.addEventListener(
+      "resize",
+      () => {
+        if (rtimer) clearTimeout(rtimer);
+        rtimer = setTimeout(() => {
+          rtimer = null;
+          clearAll();
+          tick();
+        }, 250);
+      },
+      { passive: true },
+    );
   }
 
   init();
