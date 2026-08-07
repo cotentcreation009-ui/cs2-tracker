@@ -223,6 +223,24 @@ export interface FaceitProfile {
   currentWinStreak: number;
   longestWinStreak: number;
   recentResults: string[]; // most-recent-first; "1" = win, "0" = loss
+  // Aggregate over the last 30 matches, from the Data API's NAMED per-match
+  // fields. The lifetime block has no ADR, K/R or assists, and FACEIT's
+  // frontend stat rows are positional and undocumented. Absent when the
+  // per-match feed could not be read.
+  recent?: FaceitRecentStats;
+}
+
+export interface FaceitRecentStats {
+  Matches: number;
+  Kills: number; // per match
+  Deaths: number; // per match
+  Assists: number; // per match
+  KD: number;
+  KR: number; // kills per round
+  ADR: number;
+  HSPct: number;
+  WinRatePct: number;
+  Rating: number; // HLTV Rating 1.0; 0 when FACEIT withheld the multi-kill columns
 }
 
 export interface SteamGameStats {

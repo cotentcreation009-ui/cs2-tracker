@@ -29,6 +29,14 @@
   --sr-teamA: #38d6ff;
   --sr-teamB: #ff5c8a;
 
+  /* Party/stack identity. Deliberately a different family from the CheatMeter
+     band scale (green→red) and the Premier tier scale: a party colour says
+     WHO, never HOW RISKY, and the two were sharing literal hex values. */
+  --sr-party-1: #6ad0ff;
+  --sr-party-2: #b58cff;
+  --sr-party-3: #4fd1c5;
+  --sr-party-4: #ffa6d2;
+
   /* geometry */
   --sr-r-chip: 4px;
   --sr-r-card: 10px;

@@ -4,15 +4,111 @@
 
 .sr-in {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   margin: 2px 0 8px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   border-left: 2px solid var(--sr-line2);
   font: 400 11px/1 var(--sr-font);
   font-variant-numeric: tabular-nums;
   color: var(--sr-muted);
+}
+
+/* the identity + metrics line */
+/* badges, then the numbers, then the chips — the badges and chips are fixed
+   so the metric grid is the only thing that reflows, which keeps its columns
+   aligned instead of ragged. */
+.sr-in-r1 {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* A CONSTANT width whether it holds two badges, one, or none. Shrink-to-fit
+   moved the metric grid's origin per player, so a party tag on one player
+   knocked their whole row of numbers out of line with everyone else's. */
+.sr-in-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  width: 40px;
+}
+/* On a card this narrow the reserved box is a bigger share of the width than
+   the numbers are, and reserving it pushed the grid so tight that values
+   wrapped inside their own tracks — leaving each strip a different height and
+   the roster ragged. Alignment matters less than fitting here. */
+.sr-in--micro .sr-in-badges { width: auto; }
+.sr-in--micro .sr-in-r1 { flex-wrap: nowrap; }
+.sr-in--micro .sr-in-grid { gap: 2px 6px; }
+
+/* Repeek's value-over-label shape, which genuinely scans better than an
+   inline "K/D 1.06" run — the eye reads one row of numbers, then only drops
+   to the labels when it needs to. Ours is ordered by what changes your read
+   of an opponent rather than alphabetically. */
+/* A fixed column count, not auto-fit: every player renders the same slots, so
+   a fixed count makes every grid wrap at the same place and every column line
+   up down the roster. max-content sized tracks per card, which did not. */
+.sr-in-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--sr-cols, 4), minmax(0, 1fr));
+  align-items: start;
+  gap: 4px 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sr-in-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+}
+/* a value we do not have, shown as a placeholder so the column still holds */
+.sr-in-cv--none { color: var(--sr-faint); font-weight: 400; }
+.sr-in-cv {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sr-ink);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.sr-in-cl {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sr-faint);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.sr-in-c-elo .sr-in-cv { color: var(--sr-orange); }
+
+/* badges live to the right of the numbers, never inside the reading rhythm */
+.sr-in-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex: none;
+}
+
+/* the context line: the map being played, and status chips pushed right */
+.sr-in-r2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--sr-line);
+}
+.sr-in-r2 .sr-in-mapwrap {
+  padding-top: 0;
+  border-top: 0;
+  flex: 1 1 auto;
 }
 
 /* Denser forms for the narrow cards a finished match room uses. The labels go
@@ -32,10 +128,20 @@
 /* Deliberately still wrapping. Holding the micro strip to one line meant
    clipping it, which turned a CheatMeter of 12 into a "1" — a wrong number is
    far worse than a second line. It wraps only in the very narrowest cards. */
-.sr-in--micro {
-  gap: 4px;
-  row-gap: 2px;
+/* A card this narrow cannot hold a row of badges, numbers and chips side by
+   side, so it is allowed to stack them rather than push them past its edge. */
+.sr-in--micro .sr-in-r1,
+.sr-in--tight .sr-in-r1 { flex-wrap: wrap; }
+.sr-in--micro .sr-in-chips,
+.sr-in--tight .sr-in-chips { margin-left: 0; }
+.sr-in--micro { gap: 3px; }
+.sr-in--micro .sr-in-grid {
+  gap: 2px 8px;
+  grid-template-columns: repeat(auto-fit, minmax(34px, max-content));
 }
+.sr-in--micro .sr-in-cv { font-size: 11px; }
+.sr-in--micro .sr-in-cl { font-size: 7px; }
+.sr-in--micro .sr-in-chips { margin-left: 0; }
 
 .sr-in-stat {
   display: inline-flex;
@@ -127,3 +233,62 @@
 }
 .sr-in-skel:nth-child(2) { width: 56px; }
 .sr-in-skel:nth-child(3) { width: 38px; }
+
+/* ---- party tag ---------------------------------------------------------- */
+/* Who queues with whom, stated before any performance number, because it
+   changes how every number after it should be read. Colour identifies the
+   group; the digit is how many of them are in this room. */
+.sr-in-party {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--sr-r-chip);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--sr-party);
+  background: color-mix(in srgb, var(--sr-party) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sr-party) 55%, transparent);
+}
+
+/* ---- the map being played ---------------------------------------------- */
+/* A second line, set apart by a rule rather than a box: it is the same player,
+   narrowed to one map, not a separate subject. */
+.sr-in-mapwrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--sr-line);
+}
+/* map numbers off a thin sample: kept, but not dressed as a finding */
+.sr-in-mapwrap--thin .sr-in-cv { color: var(--sr-muted); }
+.sr-in-mapname {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sr-brand);
+}
+.sr-in-mapn {
+  font-size: 10px;
+  color: var(--sr-faint);
+}
+.sr-in-mapnew {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--sr-faint);
+}
+.sr-in-delta {
+  font-size: 10px;
+  font-weight: 700;
+}
+.sr-in-delta--up { color: var(--sr-good); }
+.sr-in-delta--down { color: var(--sr-bad); }
+
+/* Narrow cards wrap the map split onto its own line rather than shrinking it */
+.sr-in--tight .sr-in-grid { gap: 2px 9px; }
+.sr-in--tight .sr-in-cv { font-size: 11px; }

@@ -94,15 +94,27 @@
   // Newest first. Recent rows may omit elo (FACEIT lags) — they are included
   // with elo:null so per-map aggregation still counts them.
 
+  // A genuine 0 is a reading, not a gap — only absent/NaN becomes null.
+  function statNum(v) {
+    if (v == null || v === "") return null;
+    const n = +v;
+    return Number.isFinite(n) ? n : null;
+  }
+
   function mapHistoryRow(r) {
     r = r || {};
+    // ONLY i1/i6/i8/i10 are confirmed against live responses. FACEIT's stat
+    // columns are positional and undocumented, and a wrong index yields a
+    // plausible-looking wrong number — the worst possible failure for a stats
+    // tool. Assists, rounds and ADR therefore come from the official Data API
+    // via our own backend (see the public cheatmeter route), not from guesses
+    // at this row's remaining slots.
     return {
       matchId: r.matchId || null,
       date: new Date(+r.date),
       map: r.i1 || null,
-      // a genuine 0-kill game is a reading, not a gap — only absent/NaN → null
-      kills: r.i6 != null && r.i6 !== "" && !isNaN(+r.i6) ? +r.i6 : null,
-      deaths: r.i8 != null && r.i8 !== "" && !isNaN(+r.i8) ? +r.i8 : null,
+      kills: statNum(r.i6),
+      deaths: statNum(r.i8),
       win: r.i10 === "1",
       elo: r.elo ? +r.elo : null,
       delta: r.elo_delta ? +r.elo_delta : null,
@@ -154,6 +166,23 @@
     };
   }
 
+  // Which map is actually being played. FACEIT states it in more than one
+  // shape depending on how the match was made, so every known location is
+  // tried and anything unrecognised simply yields null.
+  function pickedMap(p) {
+    const v = p && p.voting && p.voting.map;
+    if (v && Array.isArray(v.pick) && v.pick.length) return String(v.pick[0]);
+    if (v && Array.isArray(v.entities) && v.entities.length === 1 && v.entities[0]) {
+      return String(v.entities[0].guid || v.entities[0].game_map_id || "") || null;
+    }
+    const tree = p && p.matchCustom && p.matchCustom.tree && p.matchCustom.tree.map;
+    const val = tree && tree.values && tree.values.value;
+    if (Array.isArray(val) && val.length === 1 && val[0]) {
+      return String(val[0].guid || val[0].game_map_id || "") || null;
+    }
+    return null;
+  }
+
   function room(roomId) {
     return cached(`r:${roomId}`, async () => {
       const p = await srFetch(
@@ -162,6 +191,7 @@
       if (!p || !p.teams) return null;
       return {
         state: p.state || null,
+        map: pickedMap(p),
         teams: [mapTeam(p.teams.faction1), mapTeam(p.teams.faction2)],
       };
     });

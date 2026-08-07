@@ -132,6 +132,12 @@ type Profile struct {
 	CurrentWinStreak int      `json:"currentWinStreak"`
 	LongestWinStreak int      `json:"longestWinStreak"`
 	RecentResults    []string `json:"recentResults"` // most-recent-first "1"=win, "0"=loss
+
+	// Aggregate over the last 30 matches. The lifetime block above has no ADR,
+	// no kills-per-round and no assists, and FACEIT's frontend stat rows are
+	// positional and undocumented — so these come from the Data API's named
+	// per-match fields instead of a guess. Best-effort: nil when unavailable.
+	Recent *RecentStats `json:"recent,omitempty"`
 }
 
 // players?game=cs2&game_player_id=<steam64> response (subset).
@@ -212,6 +218,12 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	p.CurrentWinStreak = atoi(l.CurStreak)
 	p.LongestWinStreak = atoi(l.LongStreak)
 	p.RecentResults = l.Recent
+
+	// Supplementary — a player with a profile but no readable per-match feed
+	// still gets everything above.
+	if rs, err := c.RecentMatchStats(ctx, pr.PlayerID, 30); err == nil {
+		p.Recent = rs
+	}
 	return p, nil
 }
 
