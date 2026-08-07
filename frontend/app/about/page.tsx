@@ -1,4 +1,4 @@
-// About page. Editorial/trust content that establishes what StatRun is, where
+// About page. Editorial/trust content that establishes what CSRun is, where
 // its data comes from, and who stands behind it — the E-E-A-T anchor for SEO and
 // a prerequisite for ad-network review. Static (no data fetching) so it renders
 // as fully-crawlable HTML. Copy is intentionally honest: independent project,
@@ -138,7 +138,7 @@ export default function AboutPage() {
         </span>
       </div>
 
-      {/* What StatRun is */}
+      {/* What CSRun is */}
       <H>What {SITE_NAME} is</H>
       <P>
         {SITE_NAME} brings a Counter-Strike 2 player&apos;s scattered stats into a

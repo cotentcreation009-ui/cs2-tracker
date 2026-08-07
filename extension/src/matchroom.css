@@ -1,4 +1,4 @@
-/* StatRun match-room panel. Tokens (tokens.css) only — no raw values except
+/* CSRun match-room panel. Tokens (tokens.css) only — no raw values except
    the 4px-grid geometry this module owns. Injected root: #statrun-room. */
 
 #statrun-room {

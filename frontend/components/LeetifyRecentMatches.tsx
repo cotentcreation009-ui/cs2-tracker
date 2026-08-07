@@ -562,7 +562,7 @@ function useGameDeep(steamId: string, gameId?: string): GameDeep | null | undefi
 // The full 10-player board for the expanded game: viewer's team first with a
 // W/L chip and outcome-tinted header, players sorted by rating, the match's
 // top player starred, an ADR bar under each damage number, and every name
-// linking to its own StatRun profile.
+// linking to its own CSRun profile.
 function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie: boolean }) {
   const teams = deep.scoreboard ?? [];
   if (teams.length !== 2) return null;
@@ -645,7 +645,7 @@ function MiniScoreboard({ deep, won, tie }: { deep: GameDeep; won: boolean; tie:
                               href={`/profiles/${p.steam_id}`}
                               onClick={(e) => e.stopPropagation()}
                               className={`hover:underline ${p.me ? "font-bold text-ink" : "font-medium text-muted group-hover/srow:text-ink"}`}
-                              title={`${p.name} — open their StatRun profile`}
+                              title={`${p.name} — open their CSRun profile`}
                             >
                               {p.name || "—"}
                             </a>

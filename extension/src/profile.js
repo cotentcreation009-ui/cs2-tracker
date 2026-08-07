@@ -339,7 +339,7 @@
     mark.href = "https://csrun.win";
     mark.target = "_blank";
     mark.rel = "noreferrer";
-    mark.append(document.createTextNode("Stat"));
+    mark.append(document.createTextNode("CS"));
     const markB = el("b", null, "Run");
     mark.append(markB);
     foot.append(mark, el("span", "sr-label", "Source · FACEIT"));

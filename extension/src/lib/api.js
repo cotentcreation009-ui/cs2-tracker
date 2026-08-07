@@ -1,6 +1,6 @@
-// StatRun data layer — the ONLY fetch surface in the extension.
+// CSRun data layer — the ONLY fetch surface in the extension.
 // Two planes: FACEIT's frontend API (same-origin from the content script, no
-// key, the visitor's own session) and the StatRun public API (proxied through
+// key, the visitor's own session) and the CSRun public API (proxied through
 // the background worker via {type:"lookup"} messages). Every call is cached
 // in-memory for 5 minutes with inflight-promise dedupe, and every failure
 // resolves to null — callers render honest empty states, never throw.

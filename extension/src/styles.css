@@ -1,4 +1,4 @@
-/* Injected StatRun styles. Namespaced under .sr-* + scoped selectors so they
+/* Injected CSRun styles. Namespaced under .sr-* + scoped selectors so they
    don't collide with FACEIT's or Steam's CSS. Chip geometry/typography come
    from tokens.css vars so the inline chip matches every other chip. */
 

@@ -1,4 +1,4 @@
-# StatRun browser extension
+# CSRun browser extension
 
 Elo deltas, win prediction, map-veto stats, CheatMeter risk scores and
 cross-platform Premier/Leetify ranks — inside **FACEIT match rooms**, **FACEIT
@@ -33,7 +33,7 @@ Two planes, both cached 5 minutes in-page with inflight dedupe:
 1. **FACEIT's own frontend API, same-origin from the content script** — no key, no
    CORS, and it runs on the visitor's own IP, so the rate limits that hit a
    server never apply. `users/v1/nicknames`, `stats/v1/stats/time`, `match/v2/match`.
-2. **StatRun's public endpoint** via the background worker —
+2. **CSRun's public endpoint** via the background worker —
    `GET csrun.win/api/public/cheatmeter?steamid=|faceit=` for the CheatMeter score,
    Premier rank, ban flag and cross-platform gap. This is the layer no other FACEIT
    extension has.

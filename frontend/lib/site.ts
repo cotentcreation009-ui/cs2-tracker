@@ -3,7 +3,7 @@
 // ⚠️ EDIT THESE BEFORE LAUNCH, and have a lawyer review the page wording — the
 // content in app/privacy and app/terms is a solid template tailored to what this
 // site does, not legal advice.
-export const SITE_NAME = "StatRun";
+export const SITE_NAME = "CSRun";
 export const SITE_DOMAIN = "csrun.win";
 
 // Real, monitored inbox for privacy / data-removal / legal / ad-network (AdSense)

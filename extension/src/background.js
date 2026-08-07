@@ -1,4 +1,4 @@
-// Background service worker — the only place that talks to the StatRun API.
+// Background service worker — the only place that talks to the CSRun API.
 // Content scripts message it with a steamid or FACEIT nickname; it fetches the
 // public CheatMeter endpoint (host_permissions grant cross-origin, so no page
 // CORS), caches results in memory to dedupe a 10-player room, and replies.
@@ -17,7 +17,7 @@ function notify({ title, message }) {
   chrome.notifications.create({
     type: "basic",
     iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-    title: String(title || "StatRun"),
+    title: String(title || "CSRun"),
     message: String(message || ""),
   });
 }

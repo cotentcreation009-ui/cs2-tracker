@@ -33,7 +33,7 @@ var ErrRateLimited = errors.New("liquipedia: backing off after 429")
 
 const (
 	apiURL    = "https://liquipedia.net/counterstrike/api.php"
-	userAgent = "StatRun/1.0 (https://csrun.win; cotentcreation009@gmail.com)"
+	userAgent = "CSRun/1.0 (https://csrun.win; cotentcreation009@gmail.com)"
 	// maxPhotoBytes caps a fetched thumbnail; 256px event photos are ~10-30KB.
 	maxPhotoBytes = 1 << 20
 )

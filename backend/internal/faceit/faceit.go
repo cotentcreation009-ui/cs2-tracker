@@ -217,7 +217,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 
 // ResolveNickname maps a FACEIT nickname to the player's SteamID64 (their CS2
 // game_player_id). Used by the browser extension to turn a match-room player
-// into a StatRun lookup.
+// into a CSRun lookup.
 func (c *Client) ResolveNickname(ctx context.Context, nickname string) (uint64, error) {
 	if c.apiKey == "" {
 		return 0, ErrNoAPIKey

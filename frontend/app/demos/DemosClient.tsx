@@ -520,7 +520,7 @@ export function DemosClient() {
               type="button"
               onClick={() => importRef.current?.click()}
               disabled={importBusy}
-              title="Import a StatRun demo or library .json export"
+              title="Import a CSRun demo or library .json export"
               className="btn btn-ghost px-2.5 py-1 text-xs disabled:opacity-50"
             >
               {importBusy ? "Importing…" : "⇪ Import"}

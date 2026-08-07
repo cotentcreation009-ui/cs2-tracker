@@ -157,10 +157,10 @@ export function PlayerStatsDrawer({
           <span className="flex items-center gap-1.5">
             <Link
               href={`/profiles/${steamId}`}
-              title={`Open ${nick}'s player page on StatRun — matchmaking/FACEIT stats, friends and more (public data only)`}
+              title={`Open ${nick}'s player page on CSRun — matchmaking/FACEIT stats, friends and more (public data only)`}
               className="btn btn-primary h-7 px-2.5 text-[11px]"
             >
-              {nick} on StatRun
+              {nick} on CSRun
             </Link>
             <a
               href={`https://steamcommunity.com/profiles/${steamId}`}

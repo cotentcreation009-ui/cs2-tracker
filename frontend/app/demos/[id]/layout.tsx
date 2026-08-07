@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 // index so Google doesn't burn crawl budget on it or log it as
 // "Crawled – currently not indexed". Links are still followed.
 export const metadata: Metadata = {
-  title: "Demo analysis — StatRun",
+  title: "Demo analysis — CSRun",
   robots: { index: false, follow: true },
 };
 

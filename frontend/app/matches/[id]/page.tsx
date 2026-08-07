@@ -19,10 +19,10 @@ export async function generateMetadata({
   try {
     const { match } = await getMatch(id);
     return {
-      title: `${mapLabel(match.map)} ${match.teamAScore}-${match.teamBScore} — StatRun`,
+      title: `${mapLabel(match.map)} ${match.teamAScore}-${match.teamBScore} — CSRun`,
     };
   } catch {
-    return { title: "Match — StatRun" };
+    return { title: "Match — CSRun" };
   }
 }
 

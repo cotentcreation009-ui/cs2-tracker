@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-// Browser-tab favicon: the StatRun ascending-bars mark on the brand gradient.
+// Browser-tab favicon: the CSRun ascending-bars mark on the brand gradient.
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
