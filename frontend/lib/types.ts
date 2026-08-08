@@ -230,17 +230,22 @@ export interface FaceitProfile {
   recent?: FaceitRecentStats;
 }
 
+// Field names are the Go struct's JSON TAGS, not its field names. They were
+// capitalised here to match an untagged version of that struct; when the Go
+// side gained tags every one of these became undefined, and because this type
+// described the wrong usage rather than the wire format, tsc reported nothing
+// while four columns silently went blank in production.
 export interface FaceitRecentStats {
-  Matches: number;
-  Kills: number; // per match
-  Deaths: number; // per match
-  Assists: number; // per match
-  KD: number;
-  KR: number; // kills per round
-  ADR: number;
-  HSPct: number;
-  WinRatePct: number;
-  Rating: number; // HLTV Rating 1.0; 0 when FACEIT withheld the multi-kill columns
+  matches: number; // the SAMPLE size, not their career match count
+  kills: number; // per match
+  deaths: number; // per match
+  assists: number; // per match
+  kd: number;
+  kr: number; // kills per round
+  adr: number;
+  hsPct: number;
+  winRatePct: number;
+  rating: number; // HLTV Rating 1.0; 0 when FACEIT withheld the multi-kill columns
 }
 
 export interface SteamGameStats {
