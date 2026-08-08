@@ -33,6 +33,7 @@
   // Two players who keep turning up in each other's recent matches are queuing
   // together. That is the single most useful thing to know about a roster you
   // are about to play, and it is derivable from history we already hold.
+  const SITE = "https://csrun.win";
   const MAP_MIN_SAMPLE = 4; // below this the map split is shown but not coloured
   const MAP_MIN_DELTA = 0.05; // smaller than this is noise, not an edge
   const PARTY_MIN_SHARED = 3; // shared matches in the last HIST_N to call it a party
@@ -184,6 +185,12 @@
     // click that is only trying to read a tooltip.
     if (card.closest("a[href]")) {
       strip.addEventListener("click", (e) => {
+        // ...except on our own link, which is the one click here that SHOULD
+        // navigate. Swallowing it too made the CSRun button do nothing.
+        if (e.target && e.target.closest && e.target.closest("[data-sr-link]")) {
+          e.stopPropagation();
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
       });
@@ -349,6 +356,19 @@
     return v == null ? null : Math.round(v) + "%";
   }
 
+  // A chip says what it is. "22" and "27,290" sitting bare next to each other
+  // are unreadable without hovering both — one is a risk score out of 100 and
+  // the other a Premier rating, and nothing on screen said so.
+  function chip(cls, label, value, title) {
+    const c = el("span", "sr-in-chip " + cls);
+    c.append(el("span", "sr-in-chipk", label), el("span", "sr-in-chipv", value));
+    if (title) {
+      c.title = title;
+      c.setAttribute("aria-label", title);
+    }
+    return c;
+  }
+
   function fillStrip(strip, p, form, cm, pending, cardW, mapForm) {
     strip.textContent = "";
     strip.className = "sr-reset sr-in" + density(cardW);
@@ -452,41 +472,16 @@
     grid.style.setProperty("--sr-cols", String(Math.min(shown, maxCols)));
     if (pending && !form) grid.append(el("span", "sr-skel sr-in-skel"));
     top.append(grid);
-
-    const chips = el("span", "sr-in-chips");
-    if (form && !micro) {
-      const stk = el("span", "sr-in-streak " + (form.won ? "sr-in-streak--w" : "sr-in-streak--l"), form.streak);
-      stk.title = (form.won ? "Winning" : "Losing") + " streak";
-      chips.append(stk);
-    }
-    if (cm && cm.banned) {
-      const ban = el("span", "sr-in-ban", "BAN");
-      ban.title = "VAC or game ban on record";
-      ban.setAttribute("aria-label", ban.title);
-      chips.append(ban);
-    } else if (cm && cm.cheat) {
-      const c = el("span", "sr-in-cm", String(cm.cheat.score));
-      c.style.setProperty("--sr-cm", bandHex(cm.cheat.band));
-      c.title = "CheatMeter " + cm.cheat.score + "% (" + cm.cheat.band + ")";
-      c.setAttribute("aria-label", c.title);
-      if (cm.cheat.lowConfidence) c.classList.add("sr-in-cm--dim");
-      chips.append(c);
-    }
-    if (!micro && cm && typeof cm.premier === "number" && cm.premier > 0) {
-      const pr = el("span", "sr-in-prem", cm.premier.toLocaleString("en-US"));
-      pr.style.setProperty("--sr-tier", tierHex(cm.premier));
-      pr.title = "CS2 Premier rating";
-      chips.append(pr);
-    }
     strip.append(top);
+
+    // The context line: the map being played, then the status chips. Keeping
+    // the chips off the metric line gives the numbers the full width of the
+    // card, which is what lets nine of them wrap in two rows instead of three.
+    const bottom = el("span", "sr-in-r2");
 
     // How they do on the map actually being played, and whether that is above
     // or below their own baseline. A raw map win rate means little without
     // knowing what the player normally does.
-    // The context line: which map, and the status chips. Keeping the chips out
-    // of the metric line gives the numbers the full width of the card, which
-    // is what let nine of them wrap in two rows instead of three.
-    const bottom = el("span", "sr-in-r2");
     if (!micro && mapForm && state.map) {
       const row = el("span", "sr-in-mapwrap");
       const name = el("span", "sr-in-mapname", mapShort(state.map));
@@ -501,7 +496,9 @@
         // sample the numbers are still shown but stop being coloured, which is
         // the same "real but thin" treatment the CheatMeter chip already uses.
         const thin = mapForm.matches < MAP_MIN_SAMPLE;
-        const note = thin ? " — only " + mapForm.matches + " game" + (mapForm.matches === 1 ? "" : "s") + ", read with care" : "";
+        const note = thin
+          ? " — only " + mapForm.matches + " game" + (mapForm.matches === 1 ? "" : "s") + ", read with care"
+          : "";
         if (thin) row.classList.add("sr-in-mapwrap--thin");
         row.append(
           cell("K/D", mapForm.kd.toFixed(2), { hex: thin ? null : kdHex(mapForm.kd), title: "K/D on this map" + note }),
@@ -517,7 +514,7 @@
             (d >= 0 ? "▲" : "▼") + Math.abs(d).toFixed(2),
           );
           arrow.title =
-            "K/D on this map versus their overall \u2014 " +
+            "K/D on this map versus their overall — " +
             (d >= 0 ? "this map suits them" : "below their usual");
           row.append(arrow);
         }
@@ -526,6 +523,54 @@
         row.append(g);
       }
       bottom.append(row);
+    }
+
+    const chips = el("span", "sr-in-chips");
+    if (form && !micro) {
+      chips.append(
+        chip(
+          form.won ? "sr-in-chip--w" : "sr-in-chip--l",
+          form.won ? "won" : "lost",
+          form.streak.slice(1),
+          (form.won ? "Won " : "Lost ") + form.streak.slice(1) + " in a row",
+        ),
+      );
+    }
+    if (cm && cm.banned) {
+      chips.append(chip("sr-in-chip--ban", "ban", "VAC", "VAC or game ban on record"));
+    } else if (cm && cm.cheat) {
+      const c = chip(
+        "sr-in-chip--cm",
+        "risk",
+        cm.cheat.score + "%",
+        "CheatMeter " + cm.cheat.score + "% — " + cm.cheat.band.replace("very", "very ") + " risk",
+      );
+      c.style.setProperty("--sr-cm", bandHex(cm.cheat.band));
+      if (cm.cheat.lowConfidence) c.classList.add("sr-in-chip--dim");
+      chips.append(c);
+    }
+    if (!micro && !tight && cm && typeof cm.premier === "number" && cm.premier > 0) {
+      const pr = chip("sr-in-chip--prem", "premier", cm.premier.toLocaleString("en-US"), "CS2 Premier rating");
+      pr.style.setProperty("--sr-tier", tierHex(cm.premier));
+      chips.append(pr);
+    }
+
+    // The way through to the full picture. Built from the endpoint's own
+    // profile URL when we have it, and from the SteamID otherwise, so the
+    // button is there even when the risk lookup came back thin.
+    const href =
+      (cm && cm.profileUrl) ||
+      (p.steam64 ? SITE + "/profiles/" + encodeURIComponent(String(p.steam64)) : null);
+    if (href) {
+      const a = el("a", "sr-in-chip sr-in-chip--site");
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.setAttribute("data-sr-link", "1");
+      a.append(el("span", "sr-in-chipv", "CSRun"), el("span", "sr-in-arrow", "\u2197"));
+      a.title = "Open " + (p.nick || "this player") + "'s full stats on CSRun";
+      a.setAttribute("aria-label", a.title);
+      chips.append(a);
     }
     if (chips.childNodes.length) (micro ? top : bottom).append(chips);
     if (bottom.childNodes.length) strip.append(bottom);

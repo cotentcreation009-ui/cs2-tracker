@@ -175,53 +175,9 @@
   font-weight: 700;
 }
 
-.sr-in-streak {
-  padding: 1px 5px;
-  border-radius: var(--sr-r-chip);
-  font-size: 10px;
-  font-weight: 700;
-}
-.sr-in-streak--w {
-  color: var(--sr-good);
-  background: color-mix(in srgb, var(--sr-good) 14%, transparent);
-}
-.sr-in-streak--l {
-  color: var(--sr-bad);
-  background: color-mix(in srgb, var(--sr-bad) 14%, transparent);
-}
 
-.sr-in-cm {
-  padding: 1px 5px;
-  border-radius: var(--sr-r-chip);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--sr-cm);
-  background: color-mix(in srgb, var(--sr-cm) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--sr-cm) 45%, transparent);
-}
-.sr-in-cm--dim {
-  background: transparent;
-  border-style: dashed;
-}
 
-.sr-in-ban {
-  padding: 1px 5px;
-  border-radius: var(--sr-r-chip);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--sr-bg);
-  background: var(--sr-bad);
-}
 
-.sr-in-prem {
-  padding: 1px 5px;
-  border-radius: var(--sr-r-chip);
-  font-size: 10px;
-  font-weight: 700;
-  color: color-mix(in srgb, var(--sr-tier) 62%, white);
-  background: color-mix(in srgb, var(--sr-tier) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--sr-tier) 45%, transparent);
-}
 
 .sr-in-none {
   color: var(--sr-faint);
@@ -292,3 +248,79 @@
 /* Narrow cards wrap the map split onto its own line rather than shrinking it */
 .sr-in--tight .sr-in-grid { gap: 2px 9px; }
 .sr-in--tight .sr-in-cv { font-size: 11px; }
+
+
+/* ---- status chips ------------------------------------------------------- */
+/* Each chip states what it is. Bare "22" and "27,290" side by side were a risk
+   score and a Premier rating, and nothing on screen distinguished them — you
+   had to hover both to find out. The label is small and dimmed so the value
+   still carries the glance. */
+.sr-in-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--sr-r-chip);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.sr-in-chipk {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.sr-in-chipv {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-in-chip--w {
+  color: var(--sr-good);
+  background: color-mix(in srgb, var(--sr-good) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sr-good) 40%, transparent);
+}
+.sr-in-chip--l {
+  color: var(--sr-bad);
+  background: color-mix(in srgb, var(--sr-bad) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sr-bad) 40%, transparent);
+}
+.sr-in-chip--cm {
+  color: var(--sr-cm);
+  background: color-mix(in srgb, var(--sr-cm) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sr-cm) 45%, transparent);
+}
+.sr-in-chip--dim { background: transparent; border-style: dashed; }
+.sr-in-chip--ban {
+  color: var(--sr-bg);
+  background: var(--sr-bad);
+  border-color: var(--sr-bad);
+}
+.sr-in-chip--prem {
+  color: color-mix(in srgb, var(--sr-tier) 62%, white);
+  background: color-mix(in srgb, var(--sr-tier) 12%, transparent);
+  border-color: color-mix(in srgb, var(--sr-tier) 45%, transparent);
+}
+
+/* The way through to the full profile. Styled as the one actionable thing on
+   the strip rather than a fifth reading, so it does not compete with them. */
+.sr-in-chip--site {
+  color: var(--sr-brand);
+  background: color-mix(in srgb, var(--sr-brand) 12%, transparent);
+  border-color: color-mix(in srgb, var(--sr-brand) 45%, transparent);
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+.sr-in-chip--site:hover,
+.sr-in-chip--site:focus-visible {
+  background: color-mix(in srgb, var(--sr-brand) 24%, transparent);
+}
+.sr-in-chip--site:focus-visible {
+  outline: 2px solid var(--sr-brand);
+  outline-offset: 1px;
+}
+.sr-in-arrow { font-size: 9px; opacity: 0.8; }
