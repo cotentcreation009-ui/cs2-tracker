@@ -123,13 +123,13 @@ export async function GET(req: Request): Promise<Response> {
       // Last-30 aggregate from the Data API's named per-match fields — the
       // only place ADR, kills-per-round and assists actually exist for an
       // arbitrary player. Absent rather than guessed when FACEIT withholds it.
-      adr: faceit?.recent?.ADR || null,
-      kr: faceit?.recent?.KR || null,
-      avgAssists: faceit?.recent?.Assists ?? null,
-      avgDeaths: faceit?.recent?.Deaths ?? null,
-      recentKills: faceit?.recent?.Kills ?? null,
-      recentMatches: faceit?.recent?.Matches ?? null,
-      rating: faceit?.recent?.Rating || null,
+      adr: faceit?.recent?.adr || null,
+      kr: faceit?.recent?.kr || null,
+      avgAssists: faceit?.recent?.assists ?? null,
+      avgDeaths: faceit?.recent?.deaths ?? null,
+      recentKills: faceit?.recent?.kills ?? null,
+      recentMatches: faceit?.recent?.matches ?? null,
+      rating: faceit?.recent?.rating || null,
       // Leetify — what Repeek shows as "Swing" is Leetify's own rating, and we
       // have it per match, so the mean over the recent window is the same read.
       swing: avgLeetifyRating(leetify),
