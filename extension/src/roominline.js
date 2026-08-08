@@ -393,9 +393,14 @@
     }
     // FACEIT's own card already shows the level; on a card this narrow the
     // space buys more as a number than as a duplicate badge.
-    if (!micro && typeof p.level === "number" && p.level > 0) {
-      const lv = el("span", "sr-in-lvl sr-lvl sr-lvl-" + p.level, String(p.level));
-      lv.title = "FACEIT level " + p.level;
+    // The CheatMeter payload's level is the authoritative FACEIT one. A
+    // Matchmaking roster's gameSkillLevel is NOT a FACEIT level — a player
+    // reading 2916 elo (level 10) was being drawn as a level 4, in level-4
+    // colours. Prefer the number that is actually the thing we label it.
+    const lvl = cm && cm.faceitLevel > 0 ? cm.faceitLevel : p.level > 0 ? p.level : 0;
+    if (!micro && lvl > 0) {
+      const lv = el("span", "sr-in-lvl sr-lvl sr-lvl-" + lvl, String(lvl));
+      lv.title = "FACEIT level " + lvl;
       badges.append(lv);
     }
     if (badges.childNodes.length) top.append(badges);
@@ -417,7 +422,15 @@
     const kdVal = dataKD != null ? dataKD : form ? form.kd : null;
 
     const SLOTS = [
-      { t: 1, label: "elo", v: () => (p.elo > 0 ? p.elo.toLocaleString("en-US") : null),
+      // A Matchmaking roster carries a skill level but no elo, and the elo
+      // lookup only ran when the uuid was also missing — so on a Premier room
+      // this sat empty even though the CheatMeter payload had the number all
+      // along. Take it from whichever source actually has it.
+      { t: 1, label: "elo",
+        v: () => {
+          const e = p.elo > 0 ? p.elo : cm && cm.faceitElo > 0 ? cm.faceitElo : null;
+          return e ? e.toLocaleString("en-US") : null;
+        },
         cls: "sr-in-c-elo", title: "Current FACEIT elo" },
       { t: 2, label: "matches", v: () => (st.matches != null ? st.matches.toLocaleString("en-US") : null),
         title: "FACEIT matches played, all time" },
