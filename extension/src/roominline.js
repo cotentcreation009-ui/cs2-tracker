@@ -313,11 +313,15 @@
   // numbers a competitor fits there plus elo; the extras that make CSRun worth
   // running are given the room of a wider card rather than crushed into a
   // narrow one.
+  // Measured against the CARD ELEMENT we anchor to, which on FACEIT includes
+  // the avatar frame beside the name — so these sit ~50px above the width of
+  // the visible card body. Calibrated against real rooms and the probe matrix
+  // rather than guessed: one step too generous and the chips run off the edge.
   function density(w) {
     if (!w) return "";
-    if (w < 150) return " sr-in--micro";
-    if (w < 250) return " sr-in--tight";
-    if (w < 430) return "";
+    if (w < 200) return " sr-in--micro";
+    if (w < 300) return " sr-in--tight";
+    if (w < 470) return "";
     return " sr-in--wide";
   }
 
@@ -412,14 +416,17 @@
     const grid = el("span", "sr-in-grid");
     const n = form ? form.matches : 0;
     const over = " over their last " + n + " matches";
+    // The sampled figures come from a handful of scoreboards, not the whole
+    // window — each says so rather than borrowing the window's authority.
     const win30 = " over their last " + (st.recentMatches || n || 30) + " matches";
 
-    // K/D is taken from the SAME window as K/D/A whenever that window exists,
-    // because printing "16/17/6" (0.94) beside a K/D of 1.16 makes both look
-    // wrong. Only when the Data API gave us nothing do we fall back.
-    const dataKD =
-      st.recentKills != null && st.avgDeaths > 0 ? st.recentKills / st.avgDeaths : null;
-    const kdVal = dataKD != null ? dataKD : form ? form.kd : null;
+    // K/D stays on the thirty-match window, which is the better sample. K/D/A
+    // is built from that SAME window's kills and deaths, taking only assists
+    // from the smaller per-match sample — so the ratio it implies always
+    // agrees with the K/D printed beside it. Sourcing the whole triple from
+    // the sample would have made "16/17/6" say 0.94 next to a K/D of 1.16.
+    const kdVal = form ? form.kd : null;
+    const sampleN = st.recentMatches || 0;
 
     const SLOTS = [
       // A Matchmaking roster carries a skill level but no elo, and the elo
@@ -443,10 +450,12 @@
         hex: () => (kdVal != null ? kdHex(kdVal) : null), title: "Kills / deaths" + win30 },
       { t: 2, label: "K/D/A",
         v: () =>
-          st.recentKills != null && st.avgDeaths != null && st.avgAssists != null
-            ? Math.round(st.recentKills) + "/" + Math.round(st.avgDeaths) + "/" + Math.round(st.avgAssists)
+          form && st.avgAssists != null
+            ? Math.round(form.avgKills) + "/" + Math.round(form.avgDeaths) + "/" + Math.round(st.avgAssists)
             : null,
-        title: "Average kills / deaths / assists per match" + win30 },
+        title:
+          "Average kills / deaths per match" + over +
+          (sampleN ? "; assists over their last " + sampleN : "") },
       { t: 2, label: "K/R", v: () => (st.kr != null ? st.kr.toFixed(2) : null),
         title: "Kills per round" + win30 },
       { t: 1, label: "ADR", v: () => (st.adr != null ? String(Math.round(st.adr)) : null),
@@ -562,7 +571,7 @@
       if (cm.cheat.lowConfidence) c.classList.add("sr-in-chip--dim");
       chips.append(c);
     }
-    if (!micro && !tight && cm && typeof cm.premier === "number" && cm.premier > 0) {
+    if (wide && cm && typeof cm.premier === "number" && cm.premier > 0) {
       const pr = chip("sr-in-chip--prem", "premier", cm.premier.toLocaleString("en-US"), "CS2 Premier rating");
       pr.style.setProperty("--sr-tier", tierHex(cm.premier));
       chips.append(pr);
