@@ -16,8 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -37,6 +37,11 @@ var (
 	// revoked, rotated or mistyped). Distinct from ErrNoAPIKey so operators get
 	// "replace the key" rather than "configure a key".
 	ErrInvalidKey = errors.New("faceit: api key was rejected (invalid_token)")
+
+	// ErrRateLimited is FACEIT asking us to slow down. Distinguished from a
+	// generic bad status because it is the one failure here that is our own
+	// fault and our own to fix, rather than something about the player.
+	ErrRateLimited = errors.New("faceit: rate limited (429)")
 	// ErrNoDownloadScope means the API key was rejected by FACEIT's Download API —
 	// demo downloads need the separate "Download API" scope enabled for the key in
 	// the FACEIT developer portal (demo CDN URLs are not directly fetchable).
@@ -63,6 +68,18 @@ type Client struct {
 	// configured separately and falls back to apiKey when unset.
 	downloadKey string
 	http        *http.Client
+
+	// Data API pacing. Reading recent stats for a ten-player match room fires
+	// one history call plus five scoreboard calls per player — sixty requests
+	// arriving at once. FACEIT answers some of those with 429, the retry gave
+	// up after 200ms, and the per-board failure is swallowed by design, so the
+	// result was a room where roughly seven players had numbers and the rest
+	// had em-dashes: the same code succeeding or failing purely on where each
+	// request landed in the burst.
+	sem      chan struct{}
+	rateMu   sync.Mutex
+	nextAt   time.Time
+	minSpace time.Duration
 
 	// Scoreboards for finished matches, which never change. Kept per-client
 	// rather than package-wide so one client cannot serve another's data —
@@ -111,6 +128,8 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		apiKey:      apiKey,
 		http:        &http.Client{Timeout: 10 * time.Second},
 		boardCache:  map[string]*matchStatsResp{},
+		sem:         make(chan struct{}, 4),
+		minSpace:    90 * time.Millisecond, // ~11 req/s sustained
 	}
 	for _, o := range opts {
 		o(c)
@@ -148,6 +167,14 @@ type Profile struct {
 	// positional and undocumented — so these come from the Data API's named
 	// per-match fields instead of a guess. Best-effort: nil when unavailable.
 	Recent *RecentStats `json:"recent,omitempty"`
+
+	// RecentUnavailable marks a profile whose recent aggregate FAILED, as
+	// distinct from a player who genuinely has no readable history. Without
+	// the distinction a rate-limited request looked exactly like an answer,
+	// and the caching layer stored it as one — so a single unlucky call in a
+	// ten-player burst blanked four columns for that player for the whole
+	// cache TTL, which is why the same players stayed empty across reloads.
+	RecentUnavailable bool `json:"recentUnavailable,omitempty"`
 }
 
 // players?game=cs2&game_player_id=<steam64> response (subset).
@@ -238,6 +265,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	if err != nil {
 		slog.Warn("faceit recent match stats unavailable",
 			"player", pr.Nickname, "err", err)
+		p.RecentUnavailable = true
 	}
 	p.Recent = rs
 	return p, nil
@@ -349,6 +377,12 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
+	release, err := c.pace(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	resp, err := c.doWithRetry(req)
 	if err != nil {
 		return fmt.Errorf("faceit: request failed: %w", err)
@@ -373,9 +407,50 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 			return ErrInvalidKey
 		}
 		return fmt.Errorf("faceit: unexpected status %d", resp.StatusCode)
+	case http.StatusTooManyRequests:
+		// Named, because "unexpected status 429" in a log reads like a bug in
+		// our request rather than the one thing it actually is.
+		return ErrRateLimited
 	default:
 		return fmt.Errorf("faceit: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// pace bounds both how many Data API requests are in flight and how closely
+// they follow one another. Each caller reserves the next slot under the lock
+// and then waits for it outside, so ten goroutines starting together are spread
+// rather than stacked.
+func (c *Client) pace(ctx context.Context) (func(), error) {
+	if c.sem == nil {
+		return func() {}, nil
+	}
+	select {
+	case c.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	release := func() { <-c.sem }
+
+	c.rateMu.Lock()
+	now := time.Now()
+	if c.nextAt.Before(now) {
+		c.nextAt = now
+	}
+	at := c.nextAt
+	c.nextAt = at.Add(c.minSpace)
+	c.rateMu.Unlock()
+
+	if d := time.Until(at); d > 0 {
+		t := time.NewTimer(d)
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			t.Stop()
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	return release, nil
 }
 
 // isInvalidToken spots FACEIT's "the key itself is bad" response body.
@@ -396,7 +471,7 @@ func transientStatus(code int) bool {
 // doWithRetry performs req with one bounded retry on transient failures (network
 // error or 429/502/503/504), with a short ctx-aware backoff.
 func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
-	const attempts = 2
+	const attempts = 3
 	var resp *http.Response
 	var err error
 	for i := 0; i < attempts; i++ {
@@ -407,10 +482,18 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 		if i == attempts-1 {
 			return resp, err
 		}
+		back := time.Duration(250*(1<<i)) * time.Millisecond
 		if resp != nil {
+			// FACEIT often says exactly how long to wait; guessing shorter just
+			// spends another attempt earning another 429.
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && secs > 0 && secs <= 10 {
+					back = time.Duration(secs) * time.Second
+				}
+			}
 			resp.Body.Close()
 		}
-		t := time.NewTimer(time.Duration(200*(i+1)) * time.Millisecond)
+		t := time.NewTimer(back)
 		select {
 		case <-req.Context().Done():
 			t.Stop()

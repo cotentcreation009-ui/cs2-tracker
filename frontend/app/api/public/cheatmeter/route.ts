@@ -81,6 +81,9 @@ export async function GET(req: Request): Promise<Response> {
     (steamExtras?.numberOfGameBans ?? 0) > 0;
 
   const payload = {
+    // True when a lookup FAILED rather than came back empty. The extension
+    // uses it to avoid caching a bad moment for five minutes.
+    partial: faceit?.recentUnavailable === true,
     steamId64: steamid,
     profileUrl: `${SITE}/profiles/${steamid}`,
     name: leetify?.name || faceit?.nickname || null,

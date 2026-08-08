@@ -894,8 +894,12 @@ func (s *Server) handleFaceit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "faceit integration not configured (set FACEIT_API_KEY)")
 		return
 	}
-	prof, notFound, err := cachedExternal(s, r.Context(), cache.FaceitKey(id),
-		func() (*faceit.Profile, error) { return s.faceit.GetProfile(r.Context(), id) })
+	// A profile whose recent aggregate failed is NOT cached: it is a snapshot
+	// of one unlucky moment, and storing it would keep four columns blank for
+	// that player until the TTL expired even though the next call would work.
+	prof, notFound, err := cachedExternalCond(s, r.Context(), cache.FaceitKey(id),
+		func() (*faceit.Profile, error) { return s.faceit.GetProfile(r.Context(), id) },
+		func(p *faceit.Profile) bool { return p == nil || !p.RecentUnavailable })
 	if notFound {
 		writeError(w, http.StatusNotFound, "no FACEIT profile for this player")
 		return
@@ -1146,7 +1150,15 @@ func clampInt(v, lo, hi int) int {
 // and a long-lived "stale" copy; ErrNotFound is cached briefly as negative; any
 // other upstream failure falls back to the last-known-good stale copy so a slow/
 // down provider degrades to minutes-old data rather than a missing panel.
+// cachedExternal caches every successful fetch. Use cachedExternalCond when a
+// "success" can still be incomplete — caching a partial answer stores a
+// transient upstream failure as though it were the truth.
 func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch func() (T, error)) (T, bool, error) {
+	return cachedExternalCond(s, ctx, key, fetch, func(T) bool { return true })
+}
+
+// cachedExternalCond is cachedExternal with a say over what deserves caching.
+func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch func() (T, error), cacheable func(T) bool) (T, bool, error) {
 	var zero T
 	missKey := key + ":miss"
 	staleKey := key + ":stale"
@@ -1166,7 +1178,7 @@ func cachedExternal[T any](s *Server, ctx context.Context, key string, fetch fun
 		if err != nil {
 			return nil, err
 		}
-		if s.cache != nil {
+		if s.cache != nil && cacheable(val) {
 			_ = s.cache.SetJSONTTL(ctx, key, val, s.cfg.ExternalCacheTTL)
 			_ = s.cache.SetJSONTTL(ctx, staleKey, val, staleCacheTTL)
 		}
