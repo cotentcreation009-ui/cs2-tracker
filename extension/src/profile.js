@@ -11,7 +11,11 @@
 
   // Official level floors (ARCHITECTURE.md): index i = floor of level i+1.
   const FLOORS = [100, 501, 751, 901, 1051, 1201, 1351, 1531, 1751, 2001];
-  const HISTORY_N = 30; // fetch enough to cover "today" reliably
+  // One page either way — eloHistory's page size is 100 — so the wider window
+  // is free, and thirty matches cannot support a per-map or per-hour read.
+  const HISTORY_N = 100;
+  const MAP_MIN = 4; // matches on a map before its rate is worth showing
+  const HOUR_MIN = 6; // matches in a time band before it is worth showing
   const LIST_N = 10;
   const DEBOUNCE_MS = 400;
 
@@ -105,6 +109,74 @@
     ".sr-elo-skel-row:nth-child(2){width:92%;}",
     ".sr-elo-skel-row:nth-child(3){width:97%;}",
     ".sr-elo-skel-row:nth-child(4){width:88%;}",
+    // ---- overhaul: chips, tabs, chart, grid, bars, insights, maps ----------
+    ".sr-p-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;}",
+    ".sr-p-chip{display:inline-flex;align-items:baseline;gap:4px;height:20px;padding:0 7px;border-radius:var(--sr-r-chip);border:1px solid transparent;white-space:nowrap;text-decoration:none;}",
+    ".sr-p-chipk{font-size:8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;opacity:.75;}",
+    ".sr-p-chipv{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;}",
+    ".sr-p-chip--prem{color:var(--sr-brand);background:color-mix(in srgb,var(--sr-brand) 12%,transparent);border-color:color-mix(in srgb,var(--sr-brand) 40%,transparent);}",
+    ".sr-p-chip--cm{color:var(--sr-cm);background:color-mix(in srgb,var(--sr-cm) 14%,transparent);border-color:color-mix(in srgb,var(--sr-cm) 45%,transparent);}",
+    ".sr-p-chip--ban{color:var(--sr-bg);background:var(--sr-bad);border-color:var(--sr-bad);}",
+    // the one actionable thing in the header, so it is the only filled control
+    ".sr-p-chip--site{margin-left:auto;color:var(--sr-brand);background:color-mix(in srgb,var(--sr-brand) 14%,transparent);border-color:color-mix(in srgb,var(--sr-brand) 45%,transparent);cursor:pointer;transition:background 120ms ease-out;}",
+    ".sr-p-chip--site:hover,.sr-p-chip--site:focus-visible{background:color-mix(in srgb,var(--sr-brand) 26%,transparent);}",
+    ".sr-p-arrow{font-size:9px;opacity:.8;}",
+
+    ".sr-p-tabs{display:flex;gap:2px;margin-top:12px;padding:2px;background:var(--sr-panel2);border:1px solid var(--sr-line);border-radius:var(--sr-r-chip);}",
+    ".sr-p-tab{flex:1 1 0;appearance:none;border:0;background:transparent;color:var(--sr-muted);font:700 10px/1 var(--sr-font);letter-spacing:.06em;text-transform:uppercase;padding:6px 4px;border-radius:3px;cursor:pointer;}",
+    ".sr-p-tab:hover{color:var(--sr-ink);}",
+    ".sr-p-tab--on{background:var(--sr-panel);color:var(--sr-ink);box-shadow:0 1px 2px rgb(0 0 0/.3);}",
+    ".sr-p-tab:focus-visible{outline:2px solid var(--sr-brand);outline-offset:-2px;}",
+    ".sr-p-panel{margin-top:10px;}",
+    ".sr-p-sec{margin-top:12px;}",
+    ".sr-p-sec:first-child{margin-top:0;}",
+
+    ".sr-p-chartmeta{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;}",
+    ".sr-p-net{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;}",
+    ".sr-p-chart{width:100%;height:46px;}",
+    ".sr-p-svg{display:block;width:100%;height:46px;}",
+    ".sr-p-line{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round;}",
+    ".sr-p-line--up{stroke:var(--sr-good);}",
+    ".sr-p-line--down{stroke:var(--sr-bad);}",
+    ".sr-p-area{stroke:none;}",
+    ".sr-p-area--up{fill:color-mix(in srgb,var(--sr-good) 14%,transparent);}",
+    ".sr-p-area--down{fill:color-mix(in srgb,var(--sr-bad) 14%,transparent);}",
+
+    // value over label, the same idiom as the match-room strip
+    ".sr-p-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:10px 8px;margin-top:12px;}",
+    ".sr-p-cell{min-width:0;}",
+    ".sr-p-cv{font-size:14px;font-weight:700;line-height:1.1;color:var(--sr-ink);font-variant-numeric:tabular-nums;white-space:nowrap;}",
+    ".sr-p-cv--none{color:var(--sr-faint);font-weight:400;}",
+    ".sr-p-cl{margin-top:2px;font-size:8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--sr-faint);}",
+
+    ".sr-p-bars{margin-top:6px;display:flex;flex-direction:column;gap:5px;}",
+    ".sr-p-bar{display:grid;grid-template-columns:70px 1fr 28px;align-items:center;gap:8px;}",
+    ".sr-p-barlabel{font-size:10px;color:var(--sr-muted);}",
+    ".sr-p-track{height:5px;border-radius:3px;background:var(--sr-panel2);overflow:hidden;}",
+    ".sr-p-fill{display:block;height:100%;border-radius:3px;}",
+    ".sr-p-barval{font-size:11px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:var(--sr-ink);}",
+
+    ".sr-p-insights{margin-top:6px;display:flex;flex-direction:column;gap:4px;}",
+    ".sr-p-ins{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--sr-line);}",
+    ".sr-p-ins:last-child{border-bottom:0;}",
+    ".sr-p-insk{font-size:10px;color:var(--sr-faint);white-space:nowrap;}",
+    ".sr-p-insv{font-size:11px;font-weight:600;color:var(--sr-ink);text-align:right;}",
+    ".sr-p-insv--good{color:var(--sr-good);}",
+    ".sr-p-insv--bad{color:var(--sr-bad);}",
+
+    ".sr-p-fine{margin-top:10px;display:flex;flex-wrap:wrap;gap:4px 10px;}",
+    ".sr-p-finebit{font-size:10px;color:var(--sr-faint);font-variant-numeric:tabular-nums;}",
+
+    ".sr-p-maprow{display:grid;grid-template-columns:1fr 44px 44px 40px 40px 64px;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--sr-line);}",
+    ".sr-p-maprow--head{border-bottom:1px solid var(--sr-line2);padding-bottom:4px;}",
+    ".sr-p-maprow:last-child{border-bottom:0;}",
+    // a map with too few games keeps its numbers but loses its colour
+    ".sr-p-maprow--thin .sr-p-num,.sr-p-maprow--thin .sr-p-mapname{color:var(--sr-muted);}",
+    ".sr-p-mapname{font-size:11px;font-weight:600;color:var(--sr-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+    ".sr-p-num{font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--sr-ink);}",
+    ".sr-p-bar2{height:5px;border-radius:3px;background:var(--sr-panel2);overflow:hidden;}",
+    ".sr-p-bar2fill{display:block;height:100%;border-radius:3px;background:var(--sr-line2);}",
+    "@media (max-width:520px){.sr-p-maprow{grid-template-columns:1fr 36px 40px 36px 52px;}.sr-p-maprow>span:nth-child(3){display:none;}}",
     "@media (prefers-reduced-motion:reduce){a.sr-elo-row{transition:none;}}",
   ].join("\n");
 
@@ -222,6 +294,96 @@
     return known ? sum : null;
   }
 
+  // ---- analysis ----------------------------------------------------------
+  //
+  // Everything below is derived from history the widget already fetches. None
+  // of it costs a request, and none of it is available anywhere on FACEIT's
+  // own profile — which is the point of showing it here.
+
+  // Per-map record. Returns newest-first order preserved, sorted by volume.
+  function mapAgg(rows) {
+    const by = new Map();
+    for (const r of rows || []) {
+      if (!r || !r.map) continue;
+      const key = String(r.map);
+      let e = by.get(key);
+      if (!e) {
+        e = { map: key, n: 0, w: 0, k: 0, d: 0 };
+        by.set(key, e);
+      }
+      e.n += 1;
+      if (wonOf(r)) e.w += 1;
+      e.k += r.kills || 0;
+      e.d += r.deaths || 0;
+    }
+    return [...by.values()].sort((a, b) => b.n - a.n);
+  }
+
+  // Which part of the day they actually play well in. Bands are the viewer's
+  // local time, which is the only clock they can act on.
+  const BANDS = [
+    { key: "morning", label: "Morning", from: 6, to: 12 },
+    { key: "afternoon", label: "Afternoon", from: 12, to: 18 },
+    { key: "evening", label: "Evening", from: 18, to: 24 },
+    { key: "night", label: "Late night", from: 0, to: 6 },
+  ];
+
+  function hourAgg(rows) {
+    const out = BANDS.map((b) => ({ ...b, n: 0, w: 0 }));
+    for (const r of rows || []) {
+      if (!r || !(r.date instanceof Date) || isNaN(r.date)) continue;
+      const h = r.date.getHours();
+      const band = out.find((b) => h >= b.from && h < b.to);
+      if (!band) continue;
+      band.n += 1;
+      if (wonOf(r)) band.w += 1;
+    }
+    return out;
+  }
+
+  // How they play the match AFTER a loss, against the match after a win. rows
+  // are newest-first, so the match preceding rows[i] is rows[i + 1].
+  function tiltRead(rows) {
+    if (!Array.isArray(rows) || rows.length < 8) return null;
+    let afterLoss = 0, afterLossW = 0, afterWin = 0, afterWinW = 0;
+    for (let i = 0; i < rows.length - 1; i++) {
+      const prevWon = wonOf(rows[i + 1]);
+      const won = wonOf(rows[i]);
+      if (prevWon) {
+        afterWin += 1;
+        if (won) afterWinW += 1;
+      } else {
+        afterLoss += 1;
+        if (won) afterLossW += 1;
+      }
+    }
+    if (afterLoss < 5 || afterWin < 5) return null;
+    return {
+      afterLoss: (afterLossW / afterLoss) * 100,
+      afterWin: (afterWinW / afterWin) * 100,
+      nLoss: afterLoss,
+      nWin: afterWin,
+    };
+  }
+
+  // The elo line, oldest-first, from the rows that actually carry one.
+  function eloSeries(rows) {
+    const pts = [];
+    for (let i = (rows || []).length - 1; i >= 0; i--) {
+      const v = rows[i] && rows[i].elo;
+      if (typeof v === "number" && isFinite(v)) pts.push(v);
+    }
+    return pts;
+  }
+
+  const BAND_HEX = {
+    verylow: "#46d369", low: "#8fd14f", moderate: "#f5b942",
+    high: "#ff8a3d", veryhigh: "#f5694a",
+  };
+  function bandHex(b) {
+    return BAND_HEX[b] || "var(--sr-muted)";
+  }
+
   function levelFor(elo) {
     let lvl = 1;
     for (let i = 0; i < FLOORS.length; i++) if (elo >= FLOORS[i]) lvl = i + 1;
@@ -296,7 +458,228 @@
     return node;
   }
 
-  function renderCard(target, user, rows) {
+  // ---- sections -----------------------------------------------------------
+
+  function statCell(label, value, opts) {
+    const o = opts || {};
+    const c = el("div", "sr-p-cell");
+    const v = el("div", "sr-p-cv", value == null ? DASH : String(value));
+    if (value == null) v.classList.add("sr-p-cv--none");
+    else if (o.hex) v.style.color = o.hex;
+    c.append(v, el("div", "sr-p-cl", label));
+    c.title = o.title || label;
+    return c;
+  }
+
+  function gradeHex(v, good, bad) {
+    if (v == null) return null;
+    if (v >= good) return "var(--sr-good)";
+    if (v < bad) return "var(--sr-bad)";
+    return "var(--sr-ink)";
+  }
+
+  // The elo line. A number tells you where they are; the shape tells you
+  // whether they are climbing into this lobby or falling into it.
+  function eloChart(rows) {
+    const pts = eloSeries(rows);
+    if (pts.length < 5) return null;
+    const w = 300, h = 46, pad = 3;
+    const lo = Math.min(...pts), hi = Math.max(...pts);
+    const span = hi - lo || 1;
+    const x = (i) => pad + (i / (pts.length - 1)) * (w - pad * 2);
+    const y = (v) => h - pad - ((v - lo) / span) * (h - pad * 2);
+
+    const box = el("div", "sr-p-chart");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", "sr-p-svg");
+    svg.setAttribute("role", "img");
+    const net = pts[pts.length - 1] - pts[0];
+    svg.setAttribute(
+      "aria-label",
+      "Elo over the last " + pts.length + " rated matches, " + fmtSigned(net) + " net",
+    );
+
+    const line = pts.map((v, i) => x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+    const area = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    area.setAttribute("points", pad + "," + (h - pad) + " " + line + " " + (w - pad) + "," + (h - pad));
+    area.setAttribute("class", "sr-p-area" + (net >= 0 ? " sr-p-area--up" : " sr-p-area--down"));
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    path.setAttribute("points", line);
+    path.setAttribute("class", "sr-p-line" + (net >= 0 ? " sr-p-line--up" : " sr-p-line--down"));
+    svg.append(area, path);
+    box.append(svg);
+
+    const meta = el("div", "sr-p-chartmeta");
+    meta.append(
+      el("span", "sr-label", "Last " + pts.length + " rated"),
+      el("span", "sr-p-net " + deltaClass(net), fmtSigned(net)),
+    );
+    const wrap = el("div", "sr-p-sec");
+    wrap.append(meta, box);
+    return wrap;
+  }
+
+  // Leetify's skill ratings, which FACEIT does not show anywhere.
+  // Only the ratings that genuinely share a 0-100 scale. Leetify's clutch and
+  // opening are fractions of rounds; putting them on this bar forced a made-up
+  // number beside them, so they live on the detail line in their own unit.
+  const SKILLS = [
+    ["aim", "Aim"],
+    ["positioning", "Positioning"],
+    ["utility", "Utility"],
+  ];
+
+  function skillBars(st) {
+    const have = SKILLS.filter(([k]) => typeof st[k] === "number" && isFinite(st[k]));
+    if (have.length < 2) return null;
+    const sec = el("div", "sr-p-sec");
+    sec.append(el("div", "sr-label", "Skill breakdown · Leetify"));
+    const list = el("div", "sr-p-bars");
+    for (const [k, label] of have) {
+      const v = st[k];
+      const row = el("div", "sr-p-bar");
+      row.append(el("span", "sr-p-barlabel", label));
+      const track = el("span", "sr-p-track");
+      const fill = el("span", "sr-p-fill");
+      fill.style.width = Math.max(2, Math.min(100, v)) + "%";
+      fill.style.background = gradeHex(v, 70, 45) || "var(--sr-brand)";
+      track.append(fill);
+      row.append(track, el("span", "sr-p-barval", Math.round(v)));
+      row.title = label + " rating: " + Math.round(v) + " out of 100";
+      list.append(row);
+    }
+    sec.append(list);
+    return sec;
+  }
+
+  // Things a player can act on, each stated as a sentence rather than a number
+  // they have to interpret.
+  function insights(rows, st) {
+    const out = [];
+    const maps = mapAgg(rows).filter((m) => m.n >= MAP_MIN);
+    if (maps.length >= 2) {
+      const byWr = [...maps].sort((a, b) => b.w / b.n - a.w / a.n);
+      const best = byWr[0], worst = byWr[byWr.length - 1];
+      if (best.w / best.n > worst.w / worst.n) {
+        out.push({
+          k: "Best map",
+          v: mapName(best.map) + " · " + Math.round((best.w / best.n) * 100) + "% of " + best.n,
+          good: true,
+        });
+        out.push({
+          k: "Weakest map",
+          v: mapName(worst.map) + " · " + Math.round((worst.w / worst.n) * 100) + "% of " + worst.n,
+          good: false,
+        });
+      }
+    }
+
+    const bands = hourAgg(rows).filter((b) => b.n >= HOUR_MIN);
+    if (bands.length >= 2) {
+      const best = bands.reduce((a, b) => (b.w / b.n > a.w / a.n ? b : a));
+      out.push({
+        k: "Plays best",
+        v: best.label.toLowerCase() + " · " + Math.round((best.w / best.n) * 100) + "% of " + best.n,
+        good: true,
+      });
+    }
+
+    const tilt = tiltRead(rows);
+    if (tilt) {
+      const drop = tilt.afterWin - tilt.afterLoss;
+      out.push({
+        k: "After a loss",
+        v: Math.round(tilt.afterLoss) + "% vs " + Math.round(tilt.afterWin) + "% after a win",
+        good: drop <= 5,
+        title:
+          "Win rate in the match immediately after a loss (" + tilt.nLoss +
+          " of them) against the match after a win (" + tilt.nWin + ")",
+      });
+    }
+
+    if (typeof st.avgPartySize === "number" && st.avgPartySize > 0) {
+      out.push({
+        k: "Queues with",
+        v: st.avgPartySize < 1.15 ? "solo, mostly" : st.avgPartySize.toFixed(1) + " players on average",
+      });
+    }
+    if (st.firstMatch) {
+      const d = new Date(st.firstMatch);
+      if (!isNaN(d)) {
+        const yrs = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
+        out.push({
+          k: "Playing since",
+          v: d.getFullYear() + (yrs >= 1 ? " · " + Math.floor(yrs) + "y" : ""),
+        });
+      }
+    }
+    if (typeof st.peakPremier === "number" && st.peakPremier > 0) {
+      out.push({ k: "Peak Premier", v: st.peakPremier.toLocaleString("en-US") });
+    }
+    if (!out.length) return null;
+
+    const sec = el("div", "sr-p-sec");
+    sec.append(el("div", "sr-label", "Read"));
+    const list = el("div", "sr-p-insights");
+    for (const i of out) {
+      const row = el("div", "sr-p-ins");
+      row.append(el("span", "sr-p-insk", i.k));
+      const v = el("span", "sr-p-insv", i.v);
+      if (i.good === true) v.classList.add("sr-p-insv--good");
+      if (i.good === false) v.classList.add("sr-p-insv--bad");
+      row.append(v);
+      if (i.title) row.title = i.title;
+      list.append(row);
+    }
+    sec.append(list);
+    return sec;
+  }
+
+  function mapTable(rows) {
+    const maps = mapAgg(rows);
+    if (!maps.length) return el("div", "sr-elo-empty", "No map data yet");
+    const sec = el("div", "sr-p-sec");
+    const head = el("div", "sr-p-maprow sr-p-maprow--head");
+    head.append(
+      el("span", "sr-label", "Map"),
+      el("span", "sr-label sr-p-num", "Played"),
+      el("span", "sr-label sr-p-num", "W–L"),
+      el("span", "sr-label sr-p-num", "Win"),
+      el("span", "sr-label sr-p-num", "K/D"),
+      el("span", "sr-label sr-p-bar2", ""),
+    );
+    sec.append(head);
+    for (const m of maps) {
+      const wr = (m.w / m.n) * 100;
+      const kd = m.d > 0 ? m.k / m.d : null;
+      const thin = m.n < MAP_MIN;
+      const row = el("div", "sr-p-maprow" + (thin ? " sr-p-maprow--thin" : ""));
+      row.append(el("span", "sr-p-mapname", mapName(m.map)));
+      row.append(el("span", "sr-p-num", String(m.n)));
+      row.append(el("span", "sr-p-num", m.w + NDASH + (m.n - m.w)));
+      const wrEl = el("span", "sr-p-num", Math.round(wr) + "%");
+      if (!thin) wrEl.style.color = gradeHex(wr, 55, 45);
+      row.append(wrEl);
+      const kdEl = el("span", "sr-p-num", kd == null ? DASH : kd.toFixed(2));
+      if (!thin && kd != null) kdEl.style.color = gradeHex(kd, 1.1, 0.9);
+      row.append(kdEl);
+      const track = el("span", "sr-p-bar2");
+      const fill = el("span", "sr-p-bar2fill");
+      fill.style.width = Math.max(2, Math.min(100, wr)) + "%";
+      if (!thin) fill.style.background = gradeHex(wr, 55, 45) || "var(--sr-line2)";
+      track.append(fill);
+      row.append(track);
+      row.title = thin
+        ? mapName(m.map) + " — only " + m.n + " match" + (m.n === 1 ? "" : "es") + ", read with care"
+        : mapName(m.map) + " — " + m.w + " of " + m.n + " won";
+      sec.append(row);
+    }
+    return sec;
+  }
+
+  function renderCard(target, user, rows, cm) {
     clear(target);
     const elo = Math.round(user.elo);
     const lvl = levelFor(elo);
@@ -320,6 +703,37 @@
     todayBox.append(el("div", "sr-label", "Today"), tEl);
     top.append(badge, main, todayBox);
     card.append(top);
+
+    // Everything the CheatMeter lookup already knows, stated once at the top:
+    // the two ranks, the risk read, and the way through to the full profile.
+    const st = (cm && cm.stats) || {};
+    const chips = el("div", "sr-p-chips");
+    if (cm && typeof cm.premier === "number" && cm.premier > 0) {
+      const pr = el("span", "sr-p-chip sr-p-chip--prem");
+      pr.append(el("span", "sr-p-chipk", "premier"), el("span", "sr-p-chipv", cm.premier.toLocaleString("en-US")));
+      pr.title = "CS2 Premier rating";
+      chips.append(pr);
+    }
+    if (cm && cm.banned) {
+      const b = el("span", "sr-p-chip sr-p-chip--ban");
+      b.append(el("span", "sr-p-chipk", "ban"), el("span", "sr-p-chipv", "VAC"));
+      b.title = "VAC or game ban on record";
+      chips.append(b);
+    } else if (cm && cm.cheat) {
+      const c = el("span", "sr-p-chip sr-p-chip--cm");
+      c.append(el("span", "sr-p-chipk", "risk"), el("span", "sr-p-chipv", cm.cheat.score + "%"));
+      c.style.setProperty("--sr-cm", bandHex(cm.cheat.band));
+      c.title = "CheatMeter " + cm.cheat.score + "% (" + cm.cheat.band + ")";
+      chips.append(c);
+    }
+    const site = el("a", "sr-p-chip sr-p-chip--site");
+    site.href = (cm && cm.profileUrl) || "https://csrun.win";
+    site.target = "_blank";
+    site.rel = "noopener noreferrer";
+    site.append(el("span", "sr-p-chipv", "Full profile on CSRun"), el("span", "sr-p-arrow", "\u2197"));
+    site.title = "Open this player's full CSRun profile";
+    chips.append(site);
+    card.append(chips);
 
     const floor = FLOORS[lvl - 1];
     const next = lvl >= 10 ? null : FLOORS[lvl];
@@ -359,28 +773,124 @@
       card.append(meta);
     }
 
-    // recent matches
-    const list = el("div", "sr-elo-list");
-    list.append(el("div", "sr-label", "Recent matches"));
-    if (Array.isArray(rows) && rows.length) {
-      // Column headers: without them K–D reads as a score and the bare "2h"
-      // has no meaning. Same grid as the rows, so they align exactly.
-      const head = el("div", "sr-elo-row sr-elo-row--head");
-      head.append(
-        el("span"),
-        el("span", "sr-label", "Map"),
-        el("span", "sr-label sr-elo-kd", "K–D"),
-        el("span", "sr-label sr-elo-when", "When"),
-        el("span", "sr-label sr-elo-rowdelta", "Elo"),
-      );
-      list.append(head);
-      const box = el("div", "sr-elo-rows");
-      rows.slice(0, LIST_N).forEach((r) => box.append(rowEl(r)));
-      list.append(box);
-    } else {
-      list.append(el("div", "sr-elo-empty", "No data yet"));
+    // Three views rather than one long scroll: the numbers you glance at, the
+    // maps you act on, and the match list. Only the first is drawn up front.
+    const tabs = el("div", "sr-p-tabs");
+    const panel = el("div", "sr-p-panel");
+    const VIEWS = [
+      ["overview", "Overview"],
+      ["maps", "Maps"],
+      ["matches", "Matches"],
+    ];
+    const btns = {};
+
+    function matchList() {
+      const list = el("div", "sr-elo-list");
+      if (Array.isArray(rows) && rows.length) {
+        const head = el("div", "sr-elo-row sr-elo-row--head");
+        head.append(
+          el("span"),
+          el("span", "sr-label", "Map"),
+          el("span", "sr-label sr-elo-kd", "K" + NDASH + "D"),
+          el("span", "sr-label sr-elo-when", "When"),
+          el("span", "sr-label sr-elo-rowdelta", "Elo"),
+        );
+        list.append(head);
+        const box = el("div", "sr-elo-rows");
+        rows.slice(0, LIST_N).forEach((r) => box.append(rowEl(r)));
+        list.append(box);
+      } else {
+        list.append(el("div", "sr-elo-empty", "No data yet"));
+      }
+      return list;
     }
-    card.append(list);
+
+    function overview() {
+      const wrap = el("div");
+      const chart = eloChart(rows);
+      if (chart) wrap.append(chart);
+
+      // The headline numbers. Sourced from the same aggregate the match room
+      // uses, so a player reads the same figures in both places.
+      const grid = el("div", "sr-p-grid");
+      grid.append(
+        statCell("rating", st.rating != null ? st.rating.toFixed(2) : null, {
+          hex: gradeHex(st.rating, 1.1, 0.95),
+          title: "HLTV Rating 1.0 over their last " + (st.recentMatches || "few") + " matches",
+        }),
+        statCell("ADR", st.adr != null ? Math.round(st.adr) : null, {
+          hex: gradeHex(st.adr, 85, 65),
+          title: "Average damage per round",
+        }),
+        statCell("K/R", st.kr != null ? st.kr.toFixed(2) : null, { title: "Kills per round" }),
+        statCell("K/D", st.kd != null ? st.kd.toFixed(2) : null, {
+          hex: gradeHex(st.kd, 1.15, 0.9),
+          title: "Kills / deaths, all time",
+        }),
+        statCell("HS", st.hsPct != null ? Math.round(st.hsPct) + "%" : null, { title: "Headshot percentage" }),
+        statCell("win", st.winRatePct != null ? Math.round(st.winRatePct) + "%" : null, {
+          hex: gradeHex(st.winRatePct, 55, 45),
+          title: "Win rate, all time",
+        }),
+        statCell("matches", st.matches != null ? st.matches.toLocaleString("en-US") : null, {
+          title: "FACEIT matches played",
+        }),
+        statCell("swing", st.swing != null ? (st.swing >= 0 ? "+" : "") + st.swing.toFixed(2) + "%" : null, {
+          hex: st.swing == null ? null : st.swing >= 0 ? "var(--sr-good)" : "var(--sr-bad)",
+          title: "Leetify rating — how much better or worse than an average player they made each round",
+        }),
+      );
+      wrap.append(grid);
+
+      const bars = skillBars(st);
+      if (bars) wrap.append(bars);
+      const ins = insights(rows, st);
+      if (ins) wrap.append(ins);
+      // Aim detail is the deepest thing here, so it goes last and stays quiet.
+      if (st.preaim != null || st.reactionMs != null || st.sprayAccuracy != null) {
+        const fine = el("div", "sr-p-fine");
+        const bit = (label, v, unit) =>
+          v == null ? null : el("span", "sr-p-finebit", label + " " + (Math.round(v * 10) / 10) + unit);
+        // Leetify reports clutch and opening as fractions of rounds, so they
+        // are shown as the percentages they are rather than forced onto the
+        // 0-100 rating scale the bars above use.
+        const pctBit = (label, v) =>
+          typeof v !== "number" ? null : el("span", "sr-p-finebit", label + " " + (v * 100).toFixed(1) + "%");
+        for (const n of [
+          bit("preaim", st.preaim, "°"),
+          bit("reaction", st.reactionMs, "ms"),
+          bit("spray", st.sprayAccuracy, "%"),
+          bit("opening CT", st.openingCt, "%"),
+          bit("opening T", st.openingT, "%"),
+          bit("traded", st.tradedDeaths, "%"),
+          pctBit("clutch", st.clutch),
+          pctBit("opening", st.opening),
+        ]) {
+          if (n) fine.append(n);
+        }
+        if (fine.childNodes.length) {
+          fine.title = "Leetify aim and duel detail";
+          wrap.append(fine);
+        }
+      }
+      return wrap;
+    }
+
+    function draw(view) {
+      clear(panel);
+      for (const k in btns) btns[k].classList.toggle("sr-p-tab--on", k === view);
+      panel.append(view === "maps" ? mapTable(rows) : view === "matches" ? matchList() : overview());
+    }
+
+    for (const [key, label] of VIEWS) {
+      const b = el("button", "sr-p-tab", label);
+      b.type = "button";
+      b.addEventListener("click", () => draw(key));
+      btns[key] = b;
+      tabs.append(b);
+    }
+    card.append(tabs, panel);
+    draw("overview");
 
     // Attribution: this card appears unannounced on someone's own profile, so
     // it says who put it there — matching the match-room and Steam surfaces.
@@ -407,13 +917,31 @@
       if (!api || typeof api.user !== "function") return false;
       const user = await api.user(nick);
       if (!user || user.elo == null || !isFinite(Number(user.elo))) return false;
-      let rows = null;
-      if (user.uuid && typeof api.eloHistory === "function") {
-        rows = await api.eloHistory(user.uuid, HISTORY_N);
-      }
-      renderCard(target, { uuid: user.uuid, elo: Number(user.elo) }, rows);
+      // History and the CheatMeter aggregate in parallel — the card needs both
+      // and neither depends on the other. A failed lookup is not fatal: the
+      // sections it feeds simply do not render.
+      const [rows, cm] = await Promise.all([
+        user.uuid && typeof api.eloHistory === "function"
+          ? api.eloHistory(user.uuid, HISTORY_N).catch(() => null)
+          : Promise.resolve(null),
+        typeof api.cheatmeter === "function"
+          ? api
+              .cheatmeter(user.steam64 ? { steamid: String(user.steam64) } : { faceit: nick })
+              .catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      renderCard(target, { uuid: user.uuid, elo: Number(user.elo) }, rows, cm);
       return true;
-    } catch {
+    } catch (e) {
+      // A throw in here used to remove the whole card without a word — a
+      // single typo made the widget simply not exist, which is indistinguish-
+      // able from "this player has no data". Still non-fatal, but no longer
+      // silent: anyone with the console open can see why it went.
+      try {
+        console.warn("[CSRun] profile card failed to render:", e);
+      } catch {
+        /* console unavailable */
+      }
       return false;
     }
   }
