@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -61,6 +63,13 @@ type Client struct {
 	// configured separately and falls back to apiKey when unset.
 	downloadKey string
 	http        *http.Client
+
+	// Scoreboards for finished matches, which never change. Kept per-client
+	// rather than package-wide so one client cannot serve another's data —
+	// as package state it leaked between tests, and would have leaked between
+	// differently-configured clients in the same process.
+	boardMu    sync.Mutex
+	boardCache map[string]*matchStatsResp
 }
 
 // Option customises a Client.
@@ -101,6 +110,7 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		downloadURL: defaultDownloadURL,
 		apiKey:      apiKey,
 		http:        &http.Client{Timeout: 10 * time.Second},
+		boardCache:  map[string]*matchStatsResp{},
 	}
 	for _, o := range opts {
 		o(c)
@@ -220,10 +230,16 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	p.RecentResults = l.Recent
 
 	// Supplementary — a player with a profile but no readable per-match feed
-	// still gets everything above.
-	if rs, err := c.RecentMatchStats(ctx, pr.PlayerID, 30); err == nil {
-		p.Recent = rs
+	// still gets everything above. The failure is LOGGED rather than dropped:
+	// the previous version swallowed it, so when the endpoint turned out not
+	// to exist, four columns went blank in production with nothing anywhere to
+	// say why, and it took a manual dig against the live API to find.
+	rs, err := c.RecentMatchStats(ctx, pr.PlayerID, recentSample)
+	if err != nil {
+		slog.Warn("faceit recent match stats unavailable",
+			"player", pr.Nickname, "err", err)
 	}
+	p.Recent = rs
 	return p, nil
 }
 

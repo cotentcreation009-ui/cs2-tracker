@@ -41,7 +41,10 @@
    wrapped inside their own tracks — leaving each strip a different height and
    the roster ragged. Alignment matters less than fitting here. */
 .sr-in--micro .sr-in-badges { width: auto; }
-.sr-in--micro .sr-in-r1 { flex-wrap: nowrap; }
+/* Wrapping, not nowrap: holding one line here pushed the risk chip and the
+   button past the card's edge, and content outside the card it annotates is a
+   worse failure than a second line. */
+.sr-in--micro .sr-in-r1 { flex-wrap: wrap; }
 .sr-in--micro .sr-in-grid { gap: 2px 6px; }
 
 /* Repeek's value-over-label shape, which genuinely scans better than an
@@ -324,3 +327,7 @@
   outline-offset: 1px;
 }
 .sr-in-arrow { font-size: 9px; opacity: 0.8; }
+/* on the narrowest cards the button keeps only its arrow — still a 16px hit
+   target, still the same tooltip and accessible name */
+.sr-in-chip--icon { padding: 0 5px; }
+.sr-in-chip--icon .sr-in-arrow { font-size: 11px; opacity: 1; }

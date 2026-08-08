@@ -6,48 +6,74 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cs2tracker/server/internal/stats"
 )
 
 // Per-match statistics from the official Data API v4. This is the only source
-// we have for ADR, kills-per-round and assists: FACEIT's frontend stats rows
-// are positional and undocumented (i1/i6/i8/i10 are the only slots confirmed
-// live), and guessing at the rest would print plausible but wrong numbers,
-// which for a stats tool is worse than printing nothing. The Data API names
-// its fields, so this is verifiable.
+// we have for ADR, kills-per-round and assists: FACEIT's frontend stat rows are
+// positional and undocumented (i1/i6/i8/i10 are the only slots confirmed live),
+// and guessing at the rest would print plausible but WRONG numbers, which for a
+// stats tool is worse than printing nothing. The Data API names its fields.
 //
-// The catch is the mirror image of elohistory.go: the Data API carries no
-// per-match elo, and the frontend API carries no ADR. Each is used for what it
-// actually has.
+// It takes two calls to get there, because v4 has no "recent stats for a
+// player" endpoint — an earlier version of this file invented one, and every
+// column it fed sat empty in production without a word in the logs. The
+// documented route is:
+//
+//	GET /players/{id}/history?game=cs2   -> the match ids
+//	GET /matches/{id}/stats              -> the scoreboard for one match
+//
+// so the cost is 1 + sample calls per player. That is why only a SAMPLE of
+// recent matches is read rather than all thirty, why a finished match's board
+// is cached for the life of the process (a played match never changes), and
+// why the sample size travels with the numbers instead of being implied.
 
-// RecentStats is a player's aggregate over their last N CS2 matches.
+const (
+	// Matches sampled per player. Each is a separate upstream call, so this
+	// trades precision for a request budget that survives a ten-player room.
+	recentSample = 5
+	// Concurrent per-match fetches for one player.
+	recentWorkers = 3
+)
+
+// RecentStats is a player's aggregate over their last few CS2 matches.
 type RecentStats struct {
-	Matches    int
-	Kills      float64 // per match
-	Deaths     float64 // per match
-	Assists    float64 // per match
-	KD         float64
-	KR         float64 // kills per round
-	ADR        float64
-	HSPct      float64
-	WinRatePct float64
-	// HLTV Rating 1.0, computed with the same function the rest of CSRun uses.
-	// Zero when FACEIT withheld the multi-kill columns it needs — the formula
-	// is exact or it is absent, never approximated.
-	Rating float64
+	// Matches is the SAMPLE size, not their match count — the caller reports
+	// it so nobody reads a five-match average as a career figure.
+	Matches    int     `json:"matches"`
+	Kills      float64 `json:"kills"` // per match
+	Deaths     float64 `json:"deaths"`
+	Assists    float64 `json:"assists"`
+	KD         float64 `json:"kd"`
+	KR         float64 `json:"kr"` // kills per round
+	ADR        float64 `json:"adr"`
+	HSPct      float64 `json:"hsPct"`
+	WinRatePct float64 `json:"winRatePct"`
+	// Rating is HLTV Rating 1.0, computed with the same function the rest of
+	// CSRun uses. Zero when FACEIT withheld the multi-kill columns it needs —
+	// the formula is exact or it is absent, never approximated.
+	Rating float64 `json:"rating"`
 }
 
-// statsItem is one match in the Data API's stats feed. Every value arrives as
-// a string, and the key set differs between CS:GO-era and CS2 matches, so each
-// field is looked up under the names FACEIT has actually used.
-type statsItem struct {
-	Stats map[string]string `json:"stats"`
+type historyResp struct {
+	Items []struct {
+		MatchID string `json:"match_id"`
+	} `json:"items"`
 }
 
-// name kept distinct from statsResp in faceit.go, which is the LIFETIME shape
+// /matches/{id}/stats — a scoreboard, nested rounds > teams > players.
 type matchStatsResp struct {
-	Items []statsItem `json:"items"`
+	Rounds []struct {
+		RoundStats map[string]string `json:"round_stats"`
+		Teams      []struct {
+			Players []struct {
+				PlayerID string            `json:"player_id"`
+				Stats    map[string]string `json:"player_stats"`
+			} `json:"players"`
+		} `json:"teams"`
+	} `json:"rounds"`
 }
 
 // firstNum returns the first key that is present and parses as a number.
@@ -65,9 +91,37 @@ func firstNum(m map[string]string, keys ...string) (float64, bool) {
 	return 0, false
 }
 
-// RecentMatchStats aggregates a player's last `limit` CS2 matches. Returns
-// (nil, nil) when the player has no rated CS2 history — an empty record is not
-// an error. Requires an API key.
+// A finished match's scoreboard never changes, so it is cached on the client.
+// Players in a room who queue together share matches, and without this each of
+// them would refetch the same boards.
+func (c *Client) matchBoard(ctx context.Context, matchID string) (*matchStatsResp, error) {
+	c.boardMu.Lock()
+	if b, ok := c.boardCache[matchID]; ok {
+		c.boardMu.Unlock()
+		return b, nil
+	}
+	c.boardMu.Unlock()
+
+	var b matchStatsResp
+	if err := c.get(ctx, "/matches/"+url.PathEscape(matchID)+"/stats", &b); err != nil {
+		return nil, err
+	}
+
+	c.boardMu.Lock()
+	if c.boardCache == nil {
+		c.boardCache = map[string]*matchStatsResp{}
+	}
+	if len(c.boardCache) > 4000 { // crude ceiling, cleared wholesale
+		c.boardCache = map[string]*matchStatsResp{}
+	}
+	c.boardCache[matchID] = &b
+	c.boardMu.Unlock()
+	return &b, nil
+}
+
+// RecentMatchStats aggregates a sample of a player's recent CS2 matches.
+// Returns (nil, nil) when they have no readable history — an empty record is
+// not an error. Requires an API key.
 func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit int) (*RecentStats, error) {
 	if c.apiKey == "" {
 		return nil, ErrNoAPIKey
@@ -75,38 +129,72 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 	if playerID == "" {
 		return nil, ErrNotFound
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 30
+	if limit <= 0 || limit > recentSample {
+		limit = recentSample
 	}
 
 	q := url.Values{}
+	q.Set("game", "cs2")
 	q.Set("offset", "0")
 	q.Set("limit", strconv.Itoa(limit))
 
-	var resp matchStatsResp
-	path := fmt.Sprintf("/players/%s/games/cs2/stats?%s", url.PathEscape(playerID), q.Encode())
-	if err := c.get(ctx, path, &resp); err != nil {
-		return nil, err
+	var hist historyResp
+	if err := c.get(ctx, "/players/"+url.PathEscape(playerID)+"/history?"+q.Encode(), &hist); err != nil {
+		return nil, fmt.Errorf("faceit history: %w", err)
 	}
-	if len(resp.Items) == 0 {
+	if len(hist.Items) == 0 {
 		return nil, nil
 	}
 
+	type row struct {
+		stats map[string]string
+		round map[string]string
+	}
+	rows := make([]row, len(hist.Items))
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, recentWorkers)
+	for i, it := range hist.Items {
+		if it.MatchID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, mid string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			b, err := c.matchBoard(ctx, mid)
+			if err != nil || b == nil {
+				return // one unreadable board must not lose the others
+			}
+			for _, r := range b.Rounds {
+				for _, t := range r.Teams {
+					for _, p := range t.Players {
+						if p.PlayerID == playerID && len(p.Stats) > 0 {
+							rows[i] = row{stats: p.Stats, round: r.RoundStats}
+							return
+						}
+					}
+				}
+			}
+		}(i, it.MatchID)
+	}
+	wg.Wait()
+
 	out := &RecentStats{}
 	var kills, deaths, assists, rounds, adrSum, hsSum, wins float64
-	var adrN, hsN float64
+	var adrN, hsN, winN float64
 	// Rounds with exactly N kills, for Rating 1.0. Every kill belongs to a
 	// round classified by its kill count, so single-kill rounds follow from
 	// the rest: k1 = kills - 2*k2 - 3*k3 - 4*k4 - 5*k5.
 	var k2, k3, k4, k5, ratedRounds, ratedKills, ratedDeaths float64
 	multiOK := true
-	// kills counted ONLY from rows that also reported rounds — mixing kills
-	// from roundless rows into the numerator inflates kills-per-round, which
-	// is exactly what the test caught.
+	// kills counted ONLY from matches that also reported rounds — mixing kills
+	// from roundless matches into the numerator inflates kills-per-round.
 	var killsWithRounds float64
 
-	for _, it := range resp.Items {
-		s := it.Stats
+	for _, r := range rows {
+		s := r.stats
 		if len(s) == 0 {
 			continue
 		}
@@ -121,17 +209,28 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 		if a, ok := firstNum(s, "Assists"); ok {
 			assists += a
 		}
-		// FACEIT has shipped this as "Rounds" and, on CS2 items, as
-		// "Rounds Played"; either is fine, neither is guessed at.
-		if r, ok := firstNum(s, "Rounds", "Rounds Played"); ok && r > 0 {
-			rounds += r
-			killsWithRounds += k
+		if w, ok := firstNum(s, "Result"); ok {
+			winN++
+			if w == 1 {
+				wins++
+			}
+		}
+		if h, ok := firstNum(s, "Headshots %"); ok {
+			hsSum += h
+			hsN++
 		}
 		if a, ok := firstNum(s, "ADR", "Average Damage per Round"); ok && a > 0 {
 			adrSum += a
 			adrN++
 		}
-		if r, ok := firstNum(s, "Rounds", "Rounds Played"); ok && r > 0 {
+		// Rounds live on the round_stats block, not the player's row.
+		rd, okR := firstNum(r.round, "Rounds")
+		if !okR {
+			rd, okR = firstNum(s, "Rounds", "Rounds Played")
+		}
+		if okR && rd > 0 {
+			rounds += rd
+			killsWithRounds += k
 			d2, ok2 := firstNum(s, "Double Kills")
 			t3, ok3 := firstNum(s, "Triple Kills")
 			q4, ok4 := firstNum(s, "Quadro Kills")
@@ -141,19 +240,12 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 				k3 += t3
 				k4 += q4
 				k5 += p5
-				ratedRounds += r
+				ratedRounds += rd
 				ratedKills += k
 				ratedDeaths += d
 			} else {
 				multiOK = false
 			}
-		}
-		if h, ok := firstNum(s, "Headshots %"); ok {
-			hsSum += h
-			hsN++
-		}
-		if w, ok := firstNum(s, "Result"); ok && w == 1 {
-			wins++
 		}
 	}
 	if out.Matches == 0 {
@@ -164,12 +256,14 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 	out.Kills = kills / n
 	out.Deaths = deaths / n
 	out.Assists = assists / n
-	out.WinRatePct = wins / n * 100
 	if deaths > 0 {
 		out.KD = kills / deaths
 	}
-	// Only report the rates we actually have rounds/values for — averaging a
-	// present value across absent ones would understate every one of them.
+	// Only report the rates we actually have values for — averaging a present
+	// value across absent ones would understate every one of them.
+	if winN > 0 {
+		out.WinRatePct = wins / winN * 100
+	}
 	if rounds > 0 {
 		out.KR = killsWithRounds / rounds
 	}
