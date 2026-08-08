@@ -3,7 +3,9 @@ package faceit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -143,6 +145,10 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 		return nil, fmt.Errorf("faceit history: %w", err)
 	}
 	if len(hist.Items) == 0 {
+		// Not an error, but it IS the difference between "this player has no
+		// history" and "we are asking the wrong question". Logged with the
+		// distinction, because silence here looked identical to success.
+		slog.Warn("faceit history returned no matches", "player", playerID)
 		return nil, nil
 	}
 
@@ -249,6 +255,30 @@ func (c *Client) RecentMatchStats(ctx context.Context, playerID string, limit in
 		}
 	}
 	if out.Matches == 0 {
+		// Boards came back but none of them yielded a usable row for this
+		// player. That is either a player_id that never appears on the board,
+		// or stat keys that are not named what we expect — and the two are
+		// told apart by whether ANY row was found at all. The key names of the
+		// first row we did see settle it in one look.
+		var found int
+		var sample []string
+		for _, r := range rows {
+			if len(r.stats) == 0 {
+				continue
+			}
+			found++
+			if sample == nil {
+				for k := range r.stats {
+					sample = append(sample, k)
+				}
+				sort.Strings(sample)
+			}
+		}
+		slog.Warn("faceit per-match stats unusable",
+			"player", playerID,
+			"historyItems", len(hist.Items),
+			"rowsMatchingPlayer", found,
+			"firstRowKeys", strings.Join(sample, ","))
 		return nil, nil
 	}
 
