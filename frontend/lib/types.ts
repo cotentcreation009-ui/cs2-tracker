@@ -228,6 +228,9 @@ export interface FaceitProfile {
   // frontend stat rows are positional and undocumented. Absent when the
   // per-match feed could not be read.
   recent?: FaceitRecentStats;
+  // Set when the recent aggregate failed, as opposed to the player simply
+  // having no readable history — the two must not be cached alike.
+  recentUnavailable?: boolean;
 }
 
 // Field names are the Go struct's JSON TAGS, not its field names. They were

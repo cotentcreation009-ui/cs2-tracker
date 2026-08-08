@@ -40,12 +40,15 @@ async function lookup({ steamid, faceit }) {
     headers: { accept: "application/json" },
   });
   if (!res.ok) {
-    const err = { error: `http ${res.status}` };
-    cache.set(key, { at: Date.now(), data: err });
-    return err;
+    // Errors are not cached either — a 500 or a rate-limited moment should not
+    // stick to a player for five minutes.
+    return { error: `http ${res.status}` };
   }
   const data = await res.json();
-  cache.set(key, { at: Date.now(), data });
+  // A partial answer means an upstream lookup failed, not that the player has
+  // no data. Caching it would hold four blank columns for this player for the
+  // full TTL even though the very next request would succeed.
+  if (!data || !data.partial) cache.set(key, { at: Date.now(), data });
   return data;
 }
 
