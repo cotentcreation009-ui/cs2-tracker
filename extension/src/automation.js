@@ -27,6 +27,11 @@
   const ACCEPT_RE = /^(accept|ready)\b/i;
   // Absolute never-click guard, applied to every candidate before any click.
   const NEVER_RE = /leave|cancel match|report/i;
+  // A cookie or consent dialog also carries a button whose text starts with
+  // "Accept", and consent banners are routinely rendered as role="dialog". A
+  // feature the user enabled to accept MATCHES must never end up granting
+  // tracking consent on their behalf — that is a decision only they can make.
+  const CONSENT_RE = /cookie|consent|privacy|gdpr|tracking|advertis/i;
   // auto.closeModals clicks ONLY elements matching this allowlist — stable ids
   // of known cookie-consent platforms plus narrow test-id patterns that require
   // both tokens (e.g. "cookie"+"accept") in the same attribute.
@@ -131,10 +136,26 @@
 
   // ---- behaviors -----------------------------------------------------------
 
+  // Does this dialog look like a consent notice rather than a match prompt?
+  // Checked on the dialog's own text and attributes, not the button's, because
+  // "Accept all" alone is indistinguishable from a match accept.
+  function isConsentDialog(dlg) {
+    try {
+      const txt = (dlg.textContent || "").slice(0, 400);
+      if (CONSENT_RE.test(txt)) return true;
+      const attrs = (dlg.id || "") + " " + (dlg.className || "") + " " +
+        (dlg.getAttribute("aria-label") || "") + " " + (dlg.getAttribute("data-testid") || "");
+      return CONSENT_RE.test(attrs);
+    } catch {
+      return true; // unreadable → treat as consent and leave it alone
+    }
+  }
+
   function scanReadyDialogs() {
     const dialogs = document.querySelectorAll(DIALOG_SELECTOR);
     for (const dlg of dialogs) {
       if (!isVisible(dlg)) continue;
+      if (isConsentDialog(dlg)) continue;
       const btn = findAcceptButton(dlg);
       if (!btn) continue;
 
