@@ -47,3 +47,4 @@ gc-bot/node_modules/
 
 # Chrome Web Store upload artifacts (built by extension/package.mjs)
 extension/dist/
+extension/store/
