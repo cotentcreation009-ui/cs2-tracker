@@ -6,16 +6,37 @@
 // to reviewers, and dev/mock-api.js in particular reads like a second data
 // source to anyone auditing the package.
 //
-//   node package.mjs        -> dist/csrun-<version>.zip
+//   node package.mjs                 -> dist/csrun-<version>.zip
+//   node package.mjs --bump patch    -> bump manifest version first, then zip
+//
+// The store refuses an upload whose version is not HIGHER than the last one
+// published, so every update starts with a bump. Doing it here means the
+// version in the manifest and the version in the filename can never disagree.
 //
 // Uses PowerShell's Compress-Archive so there is no dependency to install.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, cpSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname);
-const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+const manifestPath = join(root, "manifest.json");
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+const bumpIdx = process.argv.indexOf("--bump");
+if (bumpIdx !== -1) {
+  const kind = process.argv[bumpIdx + 1] || "patch";
+  const parts = String(manifest.version).split(".").map((n) => parseInt(n, 10) || 0);
+  while (parts.length < 3) parts.push(0);
+  if (kind === "major") { parts[0] += 1; parts[1] = 0; parts[2] = 0; }
+  else if (kind === "minor") { parts[1] += 1; parts[2] = 0; }
+  else if (kind === "patch") { parts[2] += 1; }
+  else throw new Error(`--bump takes major, minor or patch (got "${kind}")`);
+  const next = parts.join(".");
+  console.log(`version      ${manifest.version} -> ${next}`);
+  manifest.version = next;
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+}
 
 // Everything shipped, and nothing else.
 const INCLUDE = ["manifest.json", "src", "icons"];
