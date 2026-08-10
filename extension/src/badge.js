@@ -68,7 +68,13 @@ const SR = {
         (data.gap != null ? ` · cross-platform gap ${data.gap >= 0 ? "+" : ""}${data.gap.toFixed(2)}` : "") +
         " — view on CSRun";
       a.setAttribute("aria-label", a.title);
-      a.innerHTML = `<span class="sr-dot"></span>${data.cheat.score}`;
+      // Built as nodes, not markup. The score is a number from our own API, so
+      // this was not exploitable — but it is the one innerHTML in the package,
+      // it contradicts the rule stated at the top of every sibling file, and a
+      // reviewer scanning for injection sinks finds it in seconds.
+      const dot = document.createElement("span");
+      dot.className = "sr-dot";
+      a.append(dot, document.createTextNode(String(data.cheat.score)));
       return a;
     }
     // no data → neutral "view on CSRun" mark

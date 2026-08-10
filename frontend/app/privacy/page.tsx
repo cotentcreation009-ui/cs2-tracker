@@ -81,6 +81,11 @@ export default function PrivacyPage() {
 
       <H>Advertising</H>
       <P>
+        <strong>This section applies to the csrun.win website only.</strong> The
+        browser extension shows no advertising, and nothing the extension sends
+        us is used for advertising or shared with any ad vendor.
+      </P>
+      <P>
         We may display ads served by third-party vendors (for example Google
         AdSense). With your consent, these vendors may use cookies/identifiers to
         show and measure ads, including personalized ads. You can review Google&apos;s
@@ -112,6 +117,63 @@ export default function PrivacyPage() {
           youronlinechoices.eu
         </a>
         .
+      </P>
+
+      <H>The CSRun browser extension</H>
+      <P>
+        CSRun also publishes a browser extension that adds statistics to
+        FACEIT match rooms, FACEIT player profiles and Steam profiles. It is
+        optional and separate from this website. This section describes it
+        specifically.
+      </P>
+      <P>
+        <strong>What it sends to us:</strong> when you view a page showing a
+        player, the extension asks our server for that player&apos;s CheatMeter
+        summary. The only thing it sends is that player&apos;s SteamID64 or
+        FACEIT nickname. It never sends your Steam or FACEIT account details,
+        your cookies, your session, page contents, form data, or any address you
+        visit. Requests carry no identifier of you.
+      </P>
+      <P>
+        <strong>What stays in your browser:</strong> your settings are held in
+        Chrome&apos;s own extension storage and are never transmitted to us; if
+        you have Chrome Sync enabled they sync through Google, not through
+        CSRun. Results are held in memory for about five minutes to avoid
+        repeating the same lookup and are not written to disk.
+      </P>
+      <P>
+        <strong>What it never does:</strong> the extension does not collect
+        browsing history, does not read or transmit the content of pages you
+        visit, contains no analytics or tracking of any kind, shows no
+        advertising, and loads no remote code — all of its logic ships inside
+        the extension package. It reads FACEIT&apos;s own public endpoints from
+        the page you are already on, using the session you already have; those
+        requests go to FACEIT, not to us.
+      </P>
+      <P>
+        <strong>Optional automation:</strong> the extension can accept a match
+        prompt for you and dismiss promotional pop-ups. Both are off unless you
+        switch them on, both act only on the page in front of you, and neither
+        sends anything anywhere. Accepting matches automatically may conflict
+        with FACEIT&apos;s own terms of service, so consider that before
+        enabling it.
+      </P>
+      <P>
+        CSRun&apos;s use and transfer of information received from the extension
+        adheres to the{" "}
+        <a
+          className="text-brand hover:underline"
+          href="https://developer.chrome.com/docs/webstore/program-policies/user-data-faq"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Chrome Web Store User Data Policy
+        </a>
+        , including the Limited Use requirements. Data the extension sends is
+        used solely to return the statistics you asked for, is never sold, is
+        never transferred to third parties except as needed to provide that
+        feature, and is never used for advertising or for any purpose unrelated
+        to the extension&apos;s single purpose.
       </P>
 
       <H>Third-party data sources</H>

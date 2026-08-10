@@ -56,7 +56,12 @@
     if (!v) return DEFAULT_API;
     try {
       const u = new URL(v);
-      if (u.protocol !== "http:" && u.protocol !== "https:") return DEFAULT_API;
+      // HTTPS only. A plaintext base would send the SteamID of every player
+      // looked up over the wire in the clear, and the manifest grants host
+      // access to csrun.win alone — so an http:// or third-party base is both
+      // insecure and non-functional, while still reading to a reviewer as an
+      // undeclared data path.
+      if (u.protocol !== "https:") return DEFAULT_API;
       const path = u.pathname.replace(/\/+$/, "");
       return u.origin + (path === "" ? "" : path);
     } catch {
