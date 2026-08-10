@@ -164,8 +164,11 @@
     ".sr-p-insv--good{color:var(--sr-good);}",
     ".sr-p-insv--bad{color:var(--sr-bad);}",
 
-    ".sr-p-fine{margin-top:10px;display:flex;flex-wrap:wrap;gap:4px 10px;}",
-    ".sr-p-finebit{font-size:10px;color:var(--sr-faint);font-variant-numeric:tabular-nums;}",
+    // The aim/duel figures are a shade smaller than the headline row — they are
+    // supporting detail — but nowhere near the 10px they used to be, and they
+    // now spread across the full width instead of bunching at the left.
+    ".sr-p-grid--fine{gap:10px 8px;}",
+    ".sr-p-grid--fine .sr-p-cv{font-size:12px;color:var(--sr-muted);}",
 
     ".sr-p-maprow{display:grid;grid-template-columns:1fr 44px 44px 40px 40px 64px;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--sr-line);}",
     ".sr-p-maprow--head{border-bottom:1px solid var(--sr-line2);padding-bottom:4px;}",
@@ -846,32 +849,29 @@
       if (bars) wrap.append(bars);
       const ins = insights(rows, st);
       if (ins) wrap.append(ins);
-      // Aim detail is the deepest thing here, so it goes last and stays quiet.
-      if (st.preaim != null || st.reactionMs != null || st.sprayAccuracy != null) {
-        const fine = el("div", "sr-p-fine");
-        const bit = (label, v, unit) =>
-          v == null ? null : el("span", "sr-p-finebit", label + " " + (Math.round(v * 10) / 10) + unit);
-        // Leetify reports clutch and opening as fractions of rounds, so they
-        // are shown as the percentages they are rather than forced onto the
-        // 0-100 rating scale the bars above use.
-        const pctBit = (label, v) =>
-          typeof v !== "number" ? null : el("span", "sr-p-finebit", label + " " + (v * 100).toFixed(1) + "%");
-        for (const n of [
-          bit("preaim", st.preaim, "°"),
-          bit("reaction", st.reactionMs, "ms"),
-          bit("spray", st.sprayAccuracy, "%"),
-          bit("opening CT", st.openingCt, "%"),
-          bit("opening T", st.openingT, "%"),
-          bit("traded", st.tradedDeaths, "%"),
-          pctBit("clutch", st.clutch),
-          pctBit("opening", st.opening),
-        ]) {
-          if (n) fine.append(n);
+      // Aim and duel detail. This was a single 10px line wrapped tight against
+      // the left edge — the numbers were the hardest thing on the card to read
+      // and half the width sat empty. Same value-over-label grid as the row
+      // above, so it scans the same way and uses the space it has.
+      const AIM = [
+        ["preaim", st.preaim, (v) => v.toFixed(1) + "\u00b0", "Where the crosshair sits before a duel — lower is better"],
+        ["reaction", st.reactionMs, (v) => Math.round(v) + "ms", "Time to react once an enemy is visible — lower is better"],
+        ["spray", st.sprayAccuracy, (v) => Math.round(v) + "%", "Accuracy while spraying"],
+        ["open CT", st.openingCt, (v) => Math.round(v) + "%", "Opening duels won on CT"],
+        ["open T", st.openingT, (v) => Math.round(v) + "%", "Opening duels won on T"],
+        ["traded", st.tradedDeaths, (v) => Math.round(v) + "%", "Deaths that a teammate traded back"],
+        ["clutch", st.clutch, (v) => (v * 100).toFixed(1) + "%", "Leetify clutch rating — rounds won from a losing position"],
+      ].filter(([, v]) => typeof v === "number" && isFinite(v));
+
+      if (AIM.length) {
+        const sec = el("div", "sr-p-sec");
+        sec.append(el("div", "sr-label", "Aim & duels · Leetify"));
+        const grid = el("div", "sr-p-grid sr-p-grid--fine");
+        for (const [label, v, fmt, title] of AIM) {
+          grid.append(statCell(label, fmt(v), { title }));
         }
-        if (fine.childNodes.length) {
-          fine.title = "Leetify aim and duel detail";
-          wrap.append(fine);
-        }
+        sec.append(grid);
+        wrap.append(sec);
       }
       return wrap;
     }
