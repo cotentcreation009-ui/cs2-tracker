@@ -44,3 +44,6 @@ Thumbs.db
 # vendored copy of the previous demo-parser app (reference only)
 demo parser app/
 gc-bot/node_modules/
+
+# Chrome Web Store upload artifacts (built by extension/package.mjs)
+extension/dist/
