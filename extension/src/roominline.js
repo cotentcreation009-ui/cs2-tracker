@@ -19,7 +19,12 @@
 (function () {
   "use strict";
 
-  const ROOM_RE = /\/cs2\/room\/([^/?#]+)/i;
+  // Anchored to the END of the path on purpose. FACEIT's match room has tabbed
+  // sub-routes, and the STATS tab renders its own full scoreboard — ours landed
+  // on top of it and covered FACEIT's numbers. The bare room path is the
+  // OVERVIEW tab and the pre-game lobby (map and server veto), which are the
+  // two places this belongs; any sub-route is left alone.
+  const ROOM_RE = /\/cs2\/room\/([^/?#]+)\/?$/i;
   const MARK = "data-sr-inline"; // on the strip
   const OWNER = "data-sr-owner"; // on the host card
   const HIST_N = 30;
