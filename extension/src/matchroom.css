@@ -22,10 +22,12 @@
 }
 
 .sr-mr-card {
-  background: var(--sr-panel);
+  /* the lit-surface treatment every CSRun card now wears — gradient with a
+     hairline top highlight, so panels read as objects rather than flat fills */
+  background: linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 88%,var(--sr-brand)) 0%,var(--sr-panel) 34%,color-mix(in srgb,var(--sr-bg) 30%,var(--sr-panel)) 100%);
   border: 1px solid var(--sr-line);
   border-radius: var(--sr-r-card);
-  box-shadow: var(--sr-shadow);
+  box-shadow: var(--sr-shadow), inset 0 1px 0 rgb(255 255 255 / 0.05);
   overflow: hidden;
   /* one fixed template shared by header labels + every row in BOTH cards */
   --sr-mr-grid: 24px minmax(0, 1fr) 20px 42px 34px 34px 34px 44px 48px 28px;
@@ -109,7 +111,7 @@
 
 .sr-mr-row {
   min-height: 32px;
-  border-top: 1px solid var(--sr-line);
+  border-top: 1px solid color-mix(in srgb, var(--sr-line) 65%, transparent);
   transition: background 120ms ease-out;
 }
 .sr-mr-row:not(.sr-mr-row--skel):hover {
@@ -305,10 +307,10 @@
 
 .sr-veto-panel {
   margin-top: 12px;
-  background: var(--sr-panel);
+  background: linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 88%,var(--sr-brand)) 0%,var(--sr-panel) 34%,color-mix(in srgb,var(--sr-bg) 30%,var(--sr-panel)) 100%);
   border: 1px solid var(--sr-line);
   border-radius: var(--sr-r-card); /* sibling of the team cards — same radius */
-  box-shadow: var(--sr-shadow);
+  box-shadow: var(--sr-shadow), inset 0 1px 0 rgb(255 255 255 / 0.05);
   overflow: hidden;
   --sr-mr-vgrid: 76px 88px minmax(0, 1fr) 88px;
 }
