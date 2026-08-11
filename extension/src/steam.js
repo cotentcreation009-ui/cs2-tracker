@@ -57,35 +57,35 @@
   }
 
   const CSS = `
-.sr-steam-panel{width:100%;margin:12px 0;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 70%,var(--sr-panel)) 0%,var(--sr-panel) 42%);border:1px solid var(--sr-line);border-radius:var(--sr-r-panel);box-shadow:var(--sr-shadow);color:var(--sr-ink);font-family:var(--sr-font);font-size:12px;line-height:1.35;font-variant-numeric:tabular-nums;text-align:left;overflow:hidden}
+.sr-steam-panel{width:100%;margin:12px 0;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 88%,var(--sr-brand)) 0%,var(--sr-panel) 34%,color-mix(in srgb,var(--sr-bg) 30%,var(--sr-panel)) 100%);border:1px solid var(--sr-line);border-radius:var(--sr-r-panel);box-shadow:var(--sr-shadow),inset 0 1px 0 rgb(255 255 255/.05);color:var(--sr-ink);font-family:var(--sr-font);font-size:12px;line-height:1.35;font-variant-numeric:tabular-nums;text-align:left;overflow:hidden}
 
 /* hero: the rank badge, who they are, and the one verdict — the shape the
    reference card gets right. The badge is the anchor and everything else
    hangs off it, rather than a row of equal-weight cells with no focal point. */
-.sr-steam-hero{display:flex;align-items:center;gap:14px;padding:14px 16px 12px}
+.sr-steam-hero{display:flex;align-items:center;gap:16px;padding:16px 18px 14px}
 /* Drawn with a conic gradient rather than SVG on purpose: tokens.css resets
    every descendant with all:revert, and in Chrome an SVG circle's r/cx/cy
    ARE css properties — so the reset collapsed the ring to r=0 and it silently
    never appeared. A gradient background survives the same reset. The inner
    disc is a pseudo-element, which the universal selector does not match. */
-.sr-steam-ring{position:relative;flex:none;width:54px;height:54px;border-radius:50%;background:conic-gradient(var(--lvl,var(--sr-brand)) calc(var(--pct,0) * 1%), var(--sr-line2) 0)}
-.sr-steam-ring::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--sr-panel)}
+.sr-steam-ring{position:relative;flex:none;width:62px;height:62px;border-radius:50%;background:conic-gradient(var(--lvl,var(--sr-brand)) calc(var(--pct,0) * 1%), var(--sr-line2) 0);box-shadow:0 0 20px color-mix(in srgb,var(--lvl,var(--sr-brand)) 22%,transparent)}
+.sr-steam-ring::after{content:"";position:absolute;inset:5px;border-radius:50%;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 80%,var(--sr-panel)),var(--sr-panel))}
 .sr-steam-ring--na{background:var(--sr-line)}
-.sr-steam-ringnum{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;line-height:1;color:var(--lvl,var(--sr-ink))}
+.sr-steam-ringnum{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;font-size:23px;font-weight:800;line-height:1;color:var(--lvl,var(--sr-ink));text-shadow:0 0 12px color-mix(in srgb,var(--lvl,var(--sr-ink)) 35%,transparent)}
 .sr-steam-ringnum--na{font-size:15px;font-weight:700;color:var(--sr-faint)}
 .sr-steam-id{min-width:0;flex:1 1 auto}
-.sr-steam-name{display:flex;align-items:center;gap:6px;font-size:16px;font-weight:700;color:var(--sr-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-steam-name{display:flex;align-items:center;gap:7px;font-size:18px;font-weight:800;letter-spacing:-0.01em;color:var(--sr-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sr-steam-flag{flex:none;padding:1px 5px;border-radius:3px;background:var(--sr-panel2);border:1px solid var(--sr-line2);font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--sr-muted)}
-.sr-steam-meta{margin-top:3px;font-size:11px;color:var(--sr-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-steam-meta{margin-top:4px;font-size:11px;letter-spacing:.01em;color:var(--sr-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sr-steam-meta b{color:var(--sr-orange);font-weight:700}
 
 /* the divided figure strip */
-.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bg) 35%,transparent)}
-.sr-steam-cell{min-width:0;padding:11px 14px}
-.sr-steam-cell+.sr-steam-cell{border-left:1px solid var(--sr-line)}
-.sr-steam-cell .sr-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;letter-spacing:.09em;order:2;margin-top:4px}
+.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bg) 45%,transparent)}
+.sr-steam-cell{min-width:0;padding:13px 18px}
+.sr-steam-cell+.sr-steam-cell{border-left:1px solid color-mix(in srgb,var(--sr-line) 65%,transparent)}
+.sr-steam-cell .sr-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;letter-spacing:.11em;order:2;margin-top:5px}
 .sr-steam-cell{display:flex;flex-direction:column}
-.sr-steam-val{display:flex;align-items:center;gap:5px;order:1;font-size:17px;font-weight:700;color:var(--sr-ink);white-space:nowrap;line-height:1.1}
+.sr-steam-val{display:flex;align-items:center;gap:5px;order:1;font-size:18px;font-weight:700;color:var(--sr-ink);white-space:nowrap;line-height:1.1}
 .sr-steam-val--na{color:var(--sr-faint);font-weight:400;font-size:15px}
 .sr-steam-score{font-size:17px;font-weight:700;color:var(--band)}
 .sr-steam-plate{display:inline-flex;align-items:center;padding:1px 7px;border-radius:var(--sr-r-chip);font-size:15px;font-weight:700;color:color-mix(in srgb, var(--tier) 62%, white);background:color-mix(in srgb,var(--tier) 12%,transparent);border:1px solid color-mix(in srgb,var(--tier) 45%,transparent)}
@@ -93,14 +93,14 @@
 .sr-steam-elo{color:var(--sr-orange)}
 
 /* rank by year */
-.sr-steam-years{border-top:1px solid var(--sr-line);padding:11px 14px 12px}
-.sr-steam-yearrow{display:grid;grid-template-columns:46px 26px 1fr auto;align-items:center;gap:10px;padding:4px 0}
-.sr-steam-yearrow+.sr-steam-yearrow{border-top:1px solid color-mix(in srgb,var(--sr-line) 60%,transparent)}
+.sr-steam-years{border-top:1px solid var(--sr-line);padding:12px 18px 14px}
+.sr-steam-yearrow{display:grid;grid-template-columns:42px 24px 1fr auto;align-items:center;gap:12px;padding:6px 0}
+
 .sr-steam-year{font-size:12px;font-weight:700;color:var(--sr-muted)}
 .sr-steam-ylvl{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:var(--sr-r-chip);font-size:11px;font-weight:700;line-height:1}
-.sr-steam-ybar{height:5px;border-radius:3px;background:var(--sr-line);overflow:hidden}
-.sr-steam-ybarfill{display:block;height:100%;border-radius:3px;background:var(--lvl,var(--sr-brand))}
-.sr-steam-ymeta{font-size:11px;color:var(--sr-faint);white-space:nowrap}
+.sr-steam-ybar{position:relative;height:6px;border-radius:3px;background:color-mix(in srgb,var(--sr-line) 55%,transparent)}
+.sr-steam-ybarfill{position:absolute;left:0;top:0;height:100%;border-radius:3px;background:linear-gradient(90deg,color-mix(in srgb,var(--lvl,var(--sr-brand)) 25%,transparent),var(--lvl,var(--sr-brand)))}.sr-steam-ybarfill::after{content:"";position:absolute;right:-2px;top:50%;transform:translateY(-50%);width:10px;height:10px;border-radius:50%;background:var(--lvl,var(--sr-brand));box-shadow:0 0 10px color-mix(in srgb,var(--lvl,var(--sr-brand)) 65%,transparent),inset 0 0 0 2px color-mix(in srgb,#fff 25%,transparent)}
+.sr-steam-ymeta{font-size:11px;color:var(--sr-faint);white-space:nowrap;text-align:right}
 .sr-steam-ymeta b{color:var(--sr-orange);font-weight:700}
 
 .sr-steam-bandchip{display:inline-flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border-radius:var(--sr-r-chip);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:var(--band);background:color-mix(in srgb,var(--band) 12%,transparent);border:1px solid color-mix(in srgb,var(--band) 40%,transparent)}
@@ -343,32 +343,59 @@
     if (!Array.isArray(rows) || !rows.length) return null;
     const wrap = el("div", "sr-steam-years");
     wrap.appendChild(el("span", "sr-label", "FACEIT rank by year"));
-    const peak = Math.max(1, ...rows.map((r) => posNum(r.peakElo) || 0));
+
+    // A shared elo scale across the years shown. Scaling each bar to the best
+    // peak looked broken for a stable player: four years within a hundred elo
+    // of each other all rendered as full-width bars. The scale is therefore
+    // anchored to the data BUT never allowed to span less than 400 elo — one
+    // level's worth — so a flat career reads as markers clustered mid-track
+    // (which is the truth) instead of tiny differences stretched to the full
+    // width (which would be noise dressed as movement).
+    const peaks = rows.map((r) => posNum(r.peakElo) || 0).filter(Boolean);
+    let lo = 0, hi = 1;
+    if (peaks.length) {
+      hi = Math.max.apply(null, peaks);
+      lo = Math.min.apply(null, peaks);
+      const MIN_SPAN = 400;
+      if (hi - lo < MIN_SPAN) {
+        const mid = (hi + lo) / 2;
+        lo = Math.max(0, mid - MIN_SPAN / 2);
+        hi = lo + MIN_SPAN;
+      }
+      const pad = Math.round((hi - lo) * 0.08);
+      lo = Math.max(0, lo - pad);
+      hi = hi + pad;
+    }
+
     for (const r of rows) {
       const row = el("div", "sr-steam-yearrow");
       row.appendChild(el("span", "sr-steam-year", String(r.year)));
 
       const lvl = posNum(r.peakLevel) || (posNum(r.peakElo) ? levelFromElo(r.peakElo) : 0);
-      const badge = el("span", "sr-steam-ylvl" + (lvl ? " sr-lvl sr-lvl-" + lvl : ""), lvl ? String(lvl) : "—");
+      const badge = el("span", "sr-steam-ylvl" + (lvl ? " sr-lvl sr-lvl-" + lvl : ""), lvl ? String(lvl) : "\u2014");
       badge.title = lvl ? "Highest level reached in " + r.year : "No level recorded";
       row.appendChild(badge);
 
       const track = el("span", "sr-steam-ybar");
-      const fill = el("span", "sr-steam-ybarfill");
-      fill.style.width = Math.max(3, Math.round(((posNum(r.peakElo) || 0) / peak) * 100)) + "%";
-      if (lvl) track.style.setProperty("--lvl", LEVEL_HEX[lvl - 1]);
-      track.appendChild(fill);
+      const peakElo = posNum(r.peakElo) || 0;
+      if (peakElo) {
+        const fill = el("span", "sr-steam-ybarfill");
+        const pct = Math.max(6, Math.min(100, Math.round(((peakElo - lo) / (hi - lo)) * 100)));
+        fill.style.width = pct + "%";
+        if (lvl) fill.style.setProperty("--lvl", LEVEL_HEX[lvl - 1]);
+        track.appendChild(fill);
+      }
       row.appendChild(track);
 
       const meta = el("span", "sr-steam-ymeta");
-      if (posNum(r.peakElo)) {
-        meta.appendChild(el("b", null, Number(r.peakElo).toLocaleString("en-US")));
-        meta.appendChild(document.createTextNode(" peak · "));
+      if (peakElo) {
+        meta.appendChild(el("b", null, Number(peakElo).toLocaleString("en-US")));
+        meta.appendChild(document.createTextNode(" peak \u00b7 "));
       }
-      meta.appendChild(document.createTextNode(r.matches + " games · " + r.winRatePct + "%"));
+      meta.appendChild(document.createTextNode(r.matches + " games \u00b7 " + r.winRatePct + "%"));
       row.title =
         r.year + ": " + r.matches + " FACEIT matches, " + r.winRatePct + "% won" +
-        (posNum(r.peakElo) ? ", peak " + Number(r.peakElo).toLocaleString("en-US") + " elo" : "");
+        (peakElo ? ", peak " + Number(peakElo).toLocaleString("en-US") + " elo" : "");
       row.appendChild(meta);
       wrap.appendChild(row);
     }
