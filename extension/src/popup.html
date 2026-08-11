@@ -9,7 +9,9 @@
       body {
         width: 320px;
         margin: 0;
-        background: var(--sr-bg);
+        /* the popup window IS the card, so it wears the same lit surface as
+           every panel the extension injects */
+        background: linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 88%,var(--sr-brand)) 0%,var(--sr-panel) 40%,color-mix(in srgb,var(--sr-bg) 30%,var(--sr-panel)) 100%);
         color: var(--sr-ink);
         font: 400 12px/1.35 var(--sr-font);
         -webkit-font-smoothing: antialiased;
@@ -27,7 +29,7 @@
         align-items: center;
         gap: 8px;
         padding: 12px;
-        border-bottom: 1px solid var(--sr-line);
+        border-bottom: 1px solid color-mix(in srgb, var(--sr-line) 75%, transparent);
       }
       .sr-word { font-size: 13px; font-weight: 700; color: var(--sr-ink); }
       .sr-word b { color: var(--sr-brand); font-weight: 700; }

@@ -162,13 +162,15 @@
     ".sr-p-fill{display:block;height:100%;border-radius:3px;}",
     ".sr-p-barval{font-size:11px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:var(--sr-ink);}",
 
-    ".sr-p-insights{margin-top:6px;display:flex;flex-direction:column;gap:4px;}",
-    ".sr-p-ins{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--sr-line);}",
-    ".sr-p-ins:last-child{border-bottom:0;}",
-    ".sr-p-insk{font-size:10px;color:var(--sr-faint);white-space:nowrap;}",
-    ".sr-p-insv{font-size:11px;font-weight:600;color:var(--sr-ink);text-align:right;}",
-    ".sr-p-insv--good{color:var(--sr-good);}",
-    ".sr-p-insv--bad{color:var(--sr-bad);}",
+    ".sr-p-tiles{margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;}",
+    ".sr-p-tile{position:relative;min-width:0;padding:9px 12px 10px 14px;border-radius:var(--sr-r-chip);background:color-mix(in srgb,var(--sr-bg) 40%,transparent);border:1px solid color-mix(in srgb,var(--sr-line) 80%,transparent);overflow:hidden;}",
+    ".sr-p-tile::before{content:\"\";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tone,var(--sr-line2));}",
+    ".sr-p-tile--good{--tone:var(--sr-good);}",
+    ".sr-p-tile--bad{--tone:var(--sr-bad);}",
+    ".sr-p-tilelabel{font-size:8px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--sr-faint);}",
+    ".sr-p-tilev{margin-top:3px;font-size:14px;font-weight:700;line-height:1.15;color:var(--tone,var(--sr-ink));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+    ".sr-p-tilesub{margin-top:2px;font-size:10px;color:var(--sr-muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
+    ".sr-p-facts{margin-top:9px;font-size:10px;color:var(--sr-faint);font-variant-numeric:tabular-nums;}",
 
     // The aim/duel figures are a shade smaller than the headline row — they are
     // supporting detail — but nowhere near the 10px they used to be, and they
@@ -566,21 +568,27 @@
   // Things a player can act on, each stated as a sentence rather than a number
   // they have to interpret.
   function insights(rows, st) {
-    const out = [];
+    // The four tendencies become tiles in the card's own value-over-label
+    // idiom. The old rendering was seven hairline rows with the label hard
+    // left and the value hard right — a settings form gatecrashing a stats
+    // card, with the whole width of the panel between a name and its number.
+    const tiles = [];
     const maps = mapAgg(rows).filter((m) => m.n >= MAP_MIN);
     if (maps.length >= 2) {
       const byWr = [...maps].sort((a, b) => b.w / b.n - a.w / a.n);
       const best = byWr[0], worst = byWr[byWr.length - 1];
       if (best.w / best.n > worst.w / worst.n) {
-        out.push({
-          k: "Best map",
-          v: mapName(best.map) + " · " + Math.round((best.w / best.n) * 100) + "% of " + best.n,
-          good: true,
+        tiles.push({
+          label: "Best map",
+          value: mapName(best.map),
+          sub: Math.round((best.w / best.n) * 100) + "% win \u00b7 " + best.n + " games",
+          tone: "good",
         });
-        out.push({
-          k: "Weakest map",
-          v: mapName(worst.map) + " · " + Math.round((worst.w / worst.n) * 100) + "% of " + worst.n,
-          good: false,
+        tiles.push({
+          label: "Weakest map",
+          value: mapName(worst.map),
+          sub: Math.round((worst.w / worst.n) * 100) + "% win \u00b7 " + worst.n + " games",
+          tone: "bad",
         });
       }
     }
@@ -588,61 +596,66 @@
     const bands = hourAgg(rows).filter((b) => b.n >= HOUR_MIN);
     if (bands.length >= 2) {
       const best = bands.reduce((a, b) => (b.w / b.n > a.w / a.n ? b : a));
-      out.push({
-        k: "Plays best",
-        v: best.label.toLowerCase() + " · " + Math.round((best.w / best.n) * 100) + "% of " + best.n,
-        good: true,
+      tiles.push({
+        label: "Plays best",
+        value: best.label,
+        sub: Math.round((best.w / best.n) * 100) + "% win \u00b7 " + best.n + " games",
+        tone: "good",
       });
     }
 
     const tilt = tiltRead(rows);
     if (tilt) {
       const drop = tilt.afterWin - tilt.afterLoss;
-      out.push({
-        k: "After a loss",
-        v: Math.round(tilt.afterLoss) + "% vs " + Math.round(tilt.afterWin) + "% after a win",
-        good: drop <= 5,
+      tiles.push({
+        label: "After a loss",
+        value: Math.round(tilt.afterLoss) + "% win",
+        sub: "vs " + Math.round(tilt.afterWin) + "% after a win",
+        tone: drop <= 5 ? "good" : "bad",
         title:
           "Win rate in the match immediately after a loss (" + tilt.nLoss +
           " of them) against the match after a win (" + tilt.nWin + ")",
       });
     }
 
+    // Identity facts are not tendencies; they get one quiet line, not a row
+    // of the card each.
+    const facts = [];
     if (typeof st.avgPartySize === "number" && st.avgPartySize > 0) {
-      out.push({
-        k: "Queues with",
-        v: st.avgPartySize < 1.15 ? "solo, mostly" : st.avgPartySize.toFixed(1) + " players on average",
-      });
+      facts.push("queues with " + (st.avgPartySize < 1.15 ? "solo, mostly" : st.avgPartySize.toFixed(1) + " avg"));
     }
     if (st.firstMatch) {
       const d = new Date(st.firstMatch);
       if (!isNaN(d)) {
         const yrs = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
-        out.push({
-          k: "Playing since",
-          v: d.getFullYear() + (yrs >= 1 ? " · " + Math.floor(yrs) + "y" : ""),
-        });
+        facts.push("playing since " + d.getFullYear() + (yrs >= 1 ? " (" + Math.floor(yrs) + "y)" : ""));
       }
     }
     if (typeof st.peakPremier === "number" && st.peakPremier > 0) {
-      out.push({ k: "Peak Premier", v: st.peakPremier.toLocaleString("en-US") });
+      facts.push("peak Premier " + st.peakPremier.toLocaleString("en-US"));
     }
-    if (!out.length) return null;
+
+    if (!tiles.length && !facts.length) return null;
 
     const sec = el("div", "sr-p-sec");
-    sec.append(el("div", "sr-label", "Read"));
-    const list = el("div", "sr-p-insights");
-    for (const i of out) {
-      const row = el("div", "sr-p-ins");
-      row.append(el("span", "sr-p-insk", i.k));
-      const v = el("span", "sr-p-insv", i.v);
-      if (i.good === true) v.classList.add("sr-p-insv--good");
-      if (i.good === false) v.classList.add("sr-p-insv--bad");
-      row.append(v);
-      if (i.title) row.title = i.title;
-      list.append(row);
+    if (tiles.length) {
+      sec.append(el("div", "sr-label", "Tendencies"));
+      const grid = el("div", "sr-p-tiles");
+      for (const t of tiles) {
+        const tile = el("div", "sr-p-tile sr-p-tile--" + t.tone);
+        tile.append(el("div", "sr-p-tilelabel", t.label));
+        tile.append(el("div", "sr-p-tilev", t.value));
+        tile.append(el("div", "sr-p-tilesub", t.sub));
+        if (t.title) tile.title = t.title;
+        grid.append(tile);
+      }
+      sec.append(grid);
     }
-    sec.append(list);
+    if (facts.length) {
+      const line = el("div", "sr-p-facts", facts.join("  \u00b7  "));
+      line.title = "Lifetime context";
+      sec.append(line);
+    }
     return sec;
   }
 

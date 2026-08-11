@@ -87,9 +87,17 @@
 }
 
 .sr-card {
-  background: var(--sr-panel);
+  /* the lit surface every CSRun card wears: a gradient with a hairline top
+     highlight, so a panel reads as an object rather than a flat fill */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sr-panel2) 88%, var(--sr-brand)) 0%,
+    var(--sr-panel) 40%,
+    color-mix(in srgb, var(--sr-bg) 30%, var(--sr-panel)) 100%
+  );
   border: 1px solid var(--sr-line);
   border-radius: var(--sr-r-card);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
 .sr-panel {
