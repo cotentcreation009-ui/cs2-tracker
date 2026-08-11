@@ -162,6 +162,25 @@
 
   // ---- id resolution ----------------------------------------------------
 
+  // The persona name, from the same inline blob the SteamID comes from. When
+  // the lookup returns no name (Leetify and FACEIT both unaware of the
+  // account), the card said "This player" while the page banner right above it
+  // said who they are — read from script text, never executed.
+  function personaName() {
+    for (const sc of document.scripts) {
+      const t = sc.textContent || "";
+      const m = t.match(/g_rgProfileData\s*=\s*\{[^]*?"personaname"\s*:\s*"((?:[^"\\]|\\.){1,64})"/);
+      if (m) {
+        try {
+          return JSON.parse('"' + m[1] + '"');
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
   function steamId64() {
     const m = location.pathname.match(/\/profiles\/(\d{17})/);
     if (m) return m[1];
@@ -304,7 +323,7 @@
 
     const id = el("div", "sr-steam-id");
     const name = el("div", "sr-steam-name");
-    name.appendChild(document.createTextNode(String(d.name || "This player")));
+    name.appendChild(document.createTextNode(String(d.name || personaName() || "This player")));
     if (typeof d.country === "string" && /^[a-z]{2}$/i.test(d.country)) {
       // Windows ships no flag glyphs, so an emoji flag degrades to two bare
       // capitals floating beside the name. The country code as a small tag is
