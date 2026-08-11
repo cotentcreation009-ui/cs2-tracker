@@ -31,6 +31,16 @@
                 kd: 1.18,
                 gap: 0.14,
                 banned: false,
+                country: "de",
+                // Exercises the rank-by-year block, including the shape that
+                // used to render broken: a career whose peaks sit within one
+                // level of each other alongside a genuine climb.
+                rankHistory: [
+                  { year: 2026, matches: 96, winRatePct: 54, peakElo: 2247, endElo: 2247, peakLevel: 10 },
+                  { year: 2025, matches: 301, winRatePct: 51, peakElo: 2140, endElo: 2050, peakLevel: 10 },
+                  { year: 2024, matches: 187, winRatePct: 50, peakElo: 1795, endElo: 1720, peakLevel: 9 },
+                  { year: 2023, matches: 44, winRatePct: 45, peakElo: 1350, endElo: 1290, peakLevel: 7 },
+                ],
               }
             : {};
         if (cb) setTimeout(() => cb(reply), 350);

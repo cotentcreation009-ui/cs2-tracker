@@ -114,12 +114,21 @@
   (function () {
     var FIXTURES = {
       "76561198084152880": {
+        name: "ka1do",
+        country: "se",
         cheat: { score: 12, band: "low" },
         premier: 18432,
+        faceitLevel: 10,
         faceitElo: 2247,
         kd: 1.18,
         gap: 0.14,
         banned: false,
+        rankHistory: [
+          { year: 2026, matches: 96, winRatePct: 54, peakElo: 2247, endElo: 2247, peakLevel: 10 },
+          { year: 2025, matches: 301, winRatePct: 51, peakElo: 2140, endElo: 2050, peakLevel: 10 },
+          { year: 2024, matches: 187, winRatePct: 50, peakElo: 1795, endElo: 1720, peakLevel: 9 },
+          { year: 2023, matches: 44, winRatePct: 45, peakElo: 1350, endElo: 1290, peakLevel: 7 }
+        ],
         profileUrl: "https://csrun.win/player/76561198084152880"
       }
     };
@@ -140,8 +149,11 @@
   // Extra states rendered through the real code paths (SRSteam is exported by
   // steam.js for exactly this harness — mock data in, real DOM out).
   document.getElementById("fx-banned").appendChild(SRSteam.render({
+    name: "v1rt_master",
+    country: "ru",
     cheat: { score: 88, band: "severe" },
     premier: 27750,
+    faceitLevel: 6,
     faceitElo: 1204,
     kd: 1.71,
     gap: 0.88,
