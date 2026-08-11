@@ -544,9 +544,14 @@
   background: var(--sr-panel2);
   overflow: hidden;
 }
-.sr-mr-efill { display: block; height: 100%; border-radius: 2px; }
-.sr-mr-efill--a { background: var(--sr-teamA); }
-.sr-mr-efill--b { background: var(--sr-teamB); }
+.sr-mr-efill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.35s cubic-bezier(0.22, 0.9, 0.35, 1);
+}
+.sr-mr-efill--a { background: linear-gradient(90deg, color-mix(in srgb, var(--sr-teamA) 55%, transparent), var(--sr-teamA)); }
+.sr-mr-efill--b { background: linear-gradient(90deg, color-mix(in srgb, var(--sr-teamB) 55%, transparent), var(--sr-teamB)); }
 .sr-mr-eamt {
   text-align: right;
   font-weight: 700;
@@ -561,13 +566,77 @@
 
 .sr-mr-ring { fill: none; stroke: var(--sr-line); stroke-width: 1; }
 .sr-mr-ring--mid { stroke-dasharray: 3 3; stroke: var(--sr-line2); }
+.sr-mr-ring--outer { stroke: var(--sr-line2); }
 .sr-mr-spoke { stroke: var(--sr-line); stroke-width: 1; }
 
-.sr-mr-area { stroke-width: 2; stroke-linejoin: round; }
-.sr-mr-area--a { fill: color-mix(in srgb, var(--sr-teamA) 18%, transparent); stroke: var(--sr-teamA); }
-.sr-mr-area--b { fill: color-mix(in srgb, var(--sr-teamB) 18%, transparent); stroke: var(--sr-teamB); }
+/* fill arrives inline from matchroom.js — url(#gradient) with a flat-colour
+   fallback. In this stylesheet a url() would resolve against the css file,
+   not the page, and paint the polygon black. */
+.sr-mr-area { stroke-width: 2.25; stroke-linejoin: round; }
+.sr-mr-area--a { stroke: var(--sr-teamA); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--sr-teamA) 40%, transparent)); }
+.sr-mr-area--b { stroke: var(--sr-teamB); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--sr-teamB) 40%, transparent)); }
+.sr-mr-dotpt { stroke: var(--sr-bg); stroke-width: 1.25; }
 .sr-mr-dotpt--a { fill: var(--sr-teamA); }
 .sr-mr-dotpt--b { fill: var(--sr-teamB); }
+
+/* soft ground behind the chart so the polygons sit IN something */
+.sr-mr-radar::before {
+  content: "";
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--sr-brand) 6%, transparent) 0%,
+    color-mix(in srgb, var(--sr-panel2) 45%, transparent) 52%,
+    transparent 70%);
+  pointer-events: none;
+}
+
+/* per-axis hover/click targets — invisible, but they make the whole chart
+   surface interactive instead of only the small captions */
+.sr-mr-hit { fill: transparent; stroke: none; cursor: pointer; }
+
+/* the centre readout for the hovered/pinned axis */
+.sr-mr-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.96);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 10px 6px;
+  border-radius: var(--sr-r-chip);
+  background: color-mix(in srgb, var(--sr-bg) 80%, transparent);
+  border: 1px solid var(--sr-line);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+}
+.sr-mr-center--on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.sr-mr-cmap {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sr-muted);
+}
+.sr-mr-cvals { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sr-mr-cedge { font-size: 9px; font-weight: 700; color: var(--sr-faint); }
+.sr-mr-cedge--a { color: var(--sr-teamA); }
+.sr-mr-cedge--b { color: var(--sr-teamB); }
+
+/* legend hover isolates a team */
+.sr-mr-area,
+.sr-mr-dotpt { transition: fill-opacity 0.15s ease, stroke-opacity 0.15s ease, opacity 0.15s ease; }
+.sr-mr-solo-a .sr-mr-area--b,
+.sr-mr-solo-b .sr-mr-area--a { fill-opacity: 0.22; stroke-opacity: 0.3; filter: none; }
+.sr-mr-solo-a .sr-mr-dotpt--b,
+.sr-mr-solo-b .sr-mr-dotpt--a { opacity: 0.3; }
 
 .sr-mr-vx {
   position: absolute;
@@ -676,4 +745,16 @@
 .sr-mr-area--muted { fill-opacity: 0.55; }
 .sr-mr-spoke--hot { stroke: var(--sr-line2); stroke-width: 2; }
 .sr-mr-dotpt--hot { stroke: var(--sr-bg); stroke-width: 1.5; }
+.sr-mr-dotpt--hot.sr-mr-dotpt--a { filter: drop-shadow(0 0 4px var(--sr-teamA)); }
+.sr-mr-dotpt--hot.sr-mr-dotpt--b { filter: drop-shadow(0 0 4px var(--sr-teamB)); }
+/* wedge hover marks the caption too, so it lights up without being under
+   the pointer itself */
+.sr-mr-vx--hot { background: color-mix(in srgb, var(--sr-ink) 7%, transparent); }
 .sr-mr-vx--hot .sr-mr-vxname { color: var(--sr-brand); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-mr-efill,
+  .sr-mr-center,
+  .sr-mr-area,
+  .sr-mr-dotpt { transition: none; }
+}
