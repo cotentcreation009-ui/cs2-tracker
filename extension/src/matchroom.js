@@ -593,6 +593,17 @@
   }
 
   function radarPanel(aggA, aggB, nameA, nameB) {
+    // Pinning a map is also a SELECTION the per-player strips listen for:
+    // click Dust2 here and every strip below re-tunes to Dust2. A plain DOM
+    // event keeps the two modules decoupled — either works without the other.
+    function announce(key) {
+      try {
+        document.dispatchEvent(new CustomEvent("sr-map-select", { detail: { map: key || null } }));
+      } catch {
+        /* CustomEvent unavailable — selection simply stays local */
+      }
+    }
+
     const panel = el("section", "sr-veto-panel");
     let metric = "winrate";
     let hot = null; // hovered/pinned map key — drives the cross-highlight
@@ -788,6 +799,11 @@
           mapLabel(m.key) + " — " + teamA + " " + m.a.n + " matches, " + teamB + " " + m.b.n + " matches";
         tag.addEventListener("mouseenter", () => setHot(m.key));
         tag.addEventListener("mouseleave", () => setHot(pinned));
+        tag.addEventListener("click", () => {
+          pinned = pinned === m.key ? null : m.key;
+          setHot(pinned);
+          announce(pinned);
+        });
         holder.append(tag);
       });
     }
@@ -860,6 +876,7 @@
         row.addEventListener("click", () => {
           pinned = pinned === r.key ? null : r.key;
           setHot(pinned);
+          announce(pinned);
         });
         box.append(row);
       }

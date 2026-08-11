@@ -225,6 +225,12 @@
 }
 /* map numbers off a thin sample: kept, but not dressed as a finding */
 .sr-in-mapwrap--thin .sr-in-cv { color: var(--sr-muted); }
+/* a map chosen from the chart, as opposed to the room's own — underlined so
+   the state is visible without hovering, in the same brand colour */
+.sr-in-mapname--sel {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .sr-in-mapname {
   font-size: 9px;
   font-weight: 700;
