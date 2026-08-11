@@ -538,6 +538,25 @@
           cell("K/D", mapForm.kd.toFixed(2), { hex: thin ? null : kdHex(mapForm.kd), title: "K/D on this map" + note }),
           cell("win", Math.round(mapForm.wr) + "%", { hex: thin ? null : rateHex(mapForm.wr), title: "Win rate on this map" + note }),
         );
+        // The deeper read, where the card has room for it: how hard they hit,
+        // what the map has actually cost or paid them, and whether they are
+        // current on it or rusty. All from rows already fetched.
+        if (!tight) {
+          if (typeof mapForm.avgKills === "number" && isFinite(mapForm.avgKills)) {
+            row.append(cell("avg K", mapForm.avgKills.toFixed(1), { title: "Average kills per match on this map" + note }));
+          }
+          if (mapForm.netElo != null) {
+            row.append(
+              cell("elo", (mapForm.netElo > 0 ? "+" : "") + mapForm.netElo, {
+                hex: thin ? null : mapForm.netElo >= 0 ? "var(--sr-good)" : "var(--sr-bad)",
+                title: "Net elo won or lost across their games on this map" + note,
+              }),
+            );
+          }
+          if (mapForm.lastAt) {
+            row.append(cell("last", agoShort(mapForm.lastAt), { title: "Most recent match on this map" }));
+          }
+        }
         // A 0.01 difference is noise; giving it the same arrow and colour as a
         // real edge tells the reader something that is not there.
         if (form && form.kd > 0 && !thin && Math.abs(mapForm.kd - form.kd) >= MAP_MIN_DELTA) {
@@ -665,13 +684,40 @@
     return String(m).replace(/^de_/, "").replace(/^[a-z]/, (c) => c.toUpperCase());
   }
 
+  // How long ago, in the shortest honest unit.
+  function agoShort(ts) {
+    const sec = Math.max(0, (Date.now() - ts) / 1000);
+    if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + "m";
+    if (sec < 86400) return Math.round(sec / 3600) + "h";
+    if (sec < 86400 * 30) return Math.round(sec / 86400) + "d";
+    return Math.round(sec / (86400 * 30)) + "mo";
+  }
+
   function computeMapForm(rows, map) {
     if (!Array.isArray(rows) || !map) return null;
     const want = String(map).toLowerCase();
     const on = rows.filter((r) => r && r.map && String(r.map).toLowerCase() === want);
     if (!on.length) return { kd: null, wr: null, matches: 0 };
     const f = computeForm(on);
-    return f ? { kd: f.kd, wr: f.wr, matches: on.length } : null;
+    if (!f) return null;
+    // Net elo on the map and when they last touched it — both derivable from
+    // rows already in hand, and neither shown anywhere by FACEIT. Deltas are
+    // summed only where FACEIT recorded one, and reported as null rather than
+    // zero when it recorded none.
+    let net = 0, netN = 0, lastAt = 0;
+    for (const r of on) {
+      if (typeof r.delta === "number" && isFinite(r.delta)) { net += r.delta; netN += 1; }
+      const t = r.date instanceof Date ? r.date.getTime() : NaN;
+      if (isFinite(t) && t > lastAt) lastAt = t;
+    }
+    return {
+      kd: f.kd,
+      wr: f.wr,
+      avgKills: f.avgKills,
+      matches: on.length,
+      netElo: netN ? Math.round(net) : null,
+      lastAt: lastAt || null,
+    };
   }
 
   function computeForm(rows) {
