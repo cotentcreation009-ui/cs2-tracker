@@ -31,14 +31,28 @@
 
   const cache = new Map();
 
+  // Failures expire fast. A fetch that dies while the page is still booting —
+  // FACEIT's app not settled, a 429, a dropped connection — used to be cached
+  // as null for the full five minutes, which is exactly the "nothing shows up
+  // until I refresh" report: the refresh worked only because it reset this
+  // cache. A null now lives eight seconds — long enough to absorb a burst of
+  // strips asking for the same failing player, short enough that the callers'
+  // first retry (matchroom at 8s, steam at 9s) reaches the network.
+  const NEG_TTL_MS = 8 * 1000;
+
   function cached(key, make) {
     const hit = cache.get(key);
-    if (hit && Date.now() - hit.at < TTL_MS) return hit.promise;
-    const promise = Promise.resolve()
+    if (hit && Date.now() - hit.at < (hit.neg ? NEG_TTL_MS : TTL_MS)) return hit.promise;
+    const entry = { at: Date.now(), neg: false, promise: null };
+    entry.promise = Promise.resolve()
       .then(make)
-      .catch(() => null); // the data layer never throws
-    cache.set(key, { at: Date.now(), promise });
-    return promise;
+      .catch(() => null) // the data layer never throws
+      .then((v) => {
+        if (v == null || (typeof v === "object" && v.error)) entry.neg = true;
+        return v;
+      });
+    cache.set(key, entry);
+    return entry.promise;
   }
 
   function sleep(ms) {

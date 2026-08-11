@@ -30,7 +30,11 @@
   let observer = null;
   // Nicks with no usable data → stay silent, no refetch loop. Entries expire
   // so a transient failure doesn't hide the card for the whole session.
-  const FAILED_TTL_MS = 5 * 60 * 1000;
+  // Was five minutes, which turned one boot-race failure into a card that
+  // stayed missing until a refresh. The api layer now expires failures in
+  // fifteen seconds, so a short pause here is enough to prevent loops while
+  // still self-healing within a minute.
+  const FAILED_TTL_MS = 45 * 1000;
   const failed = new Map(); // nick(lower) -> timestamp
 
   function recentlyFailed(nick) {
@@ -1140,6 +1144,7 @@
       observer = new MutationObserver(schedule);
       observer.observe(document.documentElement, { childList: true, subtree: true });
       window.addEventListener("popstate", schedule);
+  window.addEventListener("pageshow", () => schedule()); // bfcache restores fire no mutations
       checkPage();
     } else if (!on && observer) {
       observer.disconnect();

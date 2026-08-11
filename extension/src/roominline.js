@@ -1088,6 +1088,8 @@
     });
     state.obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
+    // bfcache restores repaint the page without a single mutation firing.
+    window.addEventListener("pageshow", schedule);
 
     // The veto chart announces map selections; every strip retunes. Works in
     // the pre-game lobby too, where no map is picked yet — clicking candidates

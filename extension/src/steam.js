@@ -648,7 +648,13 @@
         data = null;
       }
       if (!data || data.error) {
-        skel.remove(); // error → silent no-op, page never looks broken
+        skel.remove(); // silent no-op, page never looks broken —
+        // — but not a permanent one: a cold service worker or a backend blip
+        // at load is transient, and giving up forever is why the card
+        // sometimes needed a refresh to appear. Two spaced retries, timed to
+        // outlive the api layer's 8s negative cache so each one is real.
+        retries += 1;
+        if (retries <= 2) setTimeout(init, 9000 * retries);
         return;
       }
       const panel = render(data);
@@ -663,6 +669,15 @@
   // render path — mocks replace the network, never markup.
   window.SRSteam = { render, skeleton };
 
-  // Steam profiles are server-rendered (not an SPA): one pass at idle is enough.
+  // Steam profiles are server-rendered (not an SPA): one pass at idle is
+  // enough — plus a bounded retry on transient failure, and a re-run when the
+  // page returns from the bfcache with our panel gone.
+  let retries = 0;
   init();
+  window.addEventListener("pageshow", () => {
+    if (!document.getElementById(ROOT_ID)) {
+      retries = 0;
+      void init();
+    }
+  });
 })();
