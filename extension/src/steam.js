@@ -436,6 +436,20 @@
     } else {
       meta.appendChild(document.createTextNode("No FACEIT rank on record"));
     }
+    // Volume and age — the two numbers anyone suspicious of an account checks
+    // first. A thousand matches since 2019 and thirty matches since last month
+    // are different players wearing the same level.
+    const st = d.stats || {};
+    const matches = posNum(st.matches);
+    if (matches) {
+      meta.appendChild(document.createTextNode(" · " + matches.toLocaleString("en-US") + " matches"));
+    }
+    if (typeof st.firstMatch === "string") {
+      const t = Date.parse(st.firstMatch);
+      if (isFinite(t)) {
+        meta.appendChild(document.createTextNode(" · since " + new Date(t).getFullYear()));
+      }
+    }
     id.appendChild(meta);
     wrap.appendChild(id);
 
