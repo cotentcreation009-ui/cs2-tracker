@@ -659,10 +659,14 @@
     head.append(scope);
 
     const legend = el("div", "sr-mr-legend");
-    const lg = (name, side) => {
-      const s = el("span", "sr-mr-lg sr-mr-lg--" + side);
+    // Hovering a team's chip lifts that team's shape and fades the other —
+    // the quickest possible answer to "which blob is us?".
+    const lg = (name, which) => {
+      const s = el("span", "sr-mr-lg sr-mr-lg--" + which);
       s.append(el("span", "sr-mr-lgdot"), el("span", null, name));
       s.title = name;
+      s.addEventListener("mouseenter", () => body.classList.add("sr-mr-solo-" + which));
+      s.addEventListener("mouseleave", () => body.classList.remove("sr-mr-solo-" + which));
       return s;
     };
     legend.append(lg(teamA, "a"), lg(teamB, "b"));
@@ -696,7 +700,14 @@
     // class toggle over these handles; only a metric change rebuilds.
     // Declared before the few-maps early return: drawTable reads refs too,
     // and on a roster with under three known maps it runs first.
-    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null };
+    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null, center: null };
+    // The shape currently on screen, as per-axis fractions — the "from" pose
+    // when a metric change tweens the polygons to their new values.
+    let lastShown = null;
+    let anim = 0;
+    const REDUCED = (() => {
+      try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+    })();
 
     if (maps.length < 3) {
       holder.remove();
@@ -728,6 +739,7 @@
 
     function draw() {
       holder.textContent = "";
+      if (anim) { cancelAnimationFrame(anim); anim = 0; }
       refs.dots = [];
       refs.vx = new Map();
       refs.areas = [];
@@ -743,10 +755,27 @@
         "aria-label": d.label + " per map for both teams, last 30 matches each",
       });
 
+      // Team-coloured gradient fills. stop-color goes on as inline style so
+      // it can carry a CSS variable — and inline style is also the only thing
+      // that reliably outranks .sr-reset's `all: revert`.
+      const defs = svgEl("defs", {});
+      for (const [id, v] of [["sr-mr-grad-a", "var(--sr-teamA)"], ["sr-mr-grad-b", "var(--sr-teamB)"]]) {
+        const g = svgEl("linearGradient", { id, x1: "0", y1: "0", x2: "0", y2: "1" });
+        const s1 = svgEl("stop", { offset: "0" });
+        s1.style.stopColor = v;
+        s1.style.stopOpacity = "0.32";
+        const s2 = svgEl("stop", { offset: "1" });
+        s2.style.stopColor = v;
+        s2.style.stopOpacity = "0.05";
+        g.append(s1, s2);
+        defs.append(g);
+      }
+      svg.append(defs);
+
       for (const f of [0.25, 0.5, 0.75, 1]) {
         svg.append(
           svgEl("polygon", {
-            class: "sr-mr-ring" + (f === 0.5 ? " sr-mr-ring--mid" : ""),
+            class: "sr-mr-ring" + (f === 0.5 ? " sr-mr-ring--mid" : "") + (f === 1 ? " sr-mr-ring--outer" : ""),
             points: maps.map((_, i) => { const p = pt(i, f); return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" "),
           }),
         );
@@ -761,26 +790,92 @@
       refs.spoke.style.display = "none";
       svg.append(refs.spoke);
 
-      const poly = (which) => {
-        const pts = maps.map((m, i) => pt(i, frac(metricOf(which === "a" ? m.a : m.b, metric, which === "a" ? totalA : totalB))));
-        const area = svgEl("polygon", {
-          class: "sr-mr-area sr-mr-area--" + which,
-          points: pts.map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" "),
-        });
+      const fracsOf = (which) =>
+        maps.map((m) => frac(metricOf(which === "a" ? m.a : m.b, metric, which === "a" ? totalA : totalB)));
+      const target = { a: fracsOf("a"), b: fracsOf("b") };
+      const from = lastShown;
+
+      const build = (which) => {
+        const area = svgEl("polygon", { class: "sr-mr-area sr-mr-area--" + which });
+        // fill inline, with a flat-colour fallback: a url() in the extension's
+        // stylesheet would resolve against the css file rather than the page
+        // and paint black, and an attribute would lose to `all: revert`.
+        area.style.fill = "url(#sr-mr-grad-" + which + ") color-mix(in srgb, var(--sr-team" + which.toUpperCase() + ") 18%, transparent)";
         refs.areas.push(area);
         svg.append(area);
-        pts.forEach((p, i) => {
-          const dot = svgEl("circle", {
-            class: "sr-mr-dotpt sr-mr-dotpt--" + which,
-            cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 2.5,
-          });
-          refs.dots.push({ key: maps[i].key, node: dot });
+        const dots = maps.map((m) => {
+          const dot = svgEl("circle", { class: "sr-mr-dotpt sr-mr-dotpt--" + which });
+          // Geometry as inline style, never attributes: this SVG sits inside
+          // .sr-reset, whose `all: revert` rolls Chrome's cx/cy/r geometry
+          // properties back to 0 — which is why these dots had never actually
+          // rendered. Inline style outranks the revert.
+          dot.style.r = "3px";
+          refs.dots.push({ key: m.key, node: dot });
           svg.append(dot);
+          return dot;
         });
+        return { area, dots };
       };
-      poly("a");
-      poly("b");
+      const shapes = { a: build("a"), b: build("b") };
+
+      const pose = (t) => {
+        for (const which of ["a", "b"]) {
+          const pts = maps.map((m, i) => {
+            const f0 = from ? from[which][i] : target[which][i];
+            return pt(i, f0 + (target[which][i] - f0) * t);
+          });
+          shapes[which].area.setAttribute("points", pts.map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" "));
+          pts.forEach((p, i) => {
+            shapes[which].dots[i].style.cx = p.x.toFixed(1) + "px";
+            shapes[which].dots[i].style.cy = p.y.toFixed(1) + "px";
+          });
+        }
+      };
+
+      // A metric change MORPHS the shapes instead of blinking to new ones —
+      // the eye keeps hold of which team is which while the values move.
+      if (from && !REDUCED) {
+        const t0 = performance.now();
+        const DUR = 300;
+        const ease = (t) => 1 - Math.pow(1 - t, 3);
+        const step = (now) => {
+          const t = Math.min(1, (now - t0) / DUR);
+          pose(ease(t));
+          anim = t < 1 ? requestAnimationFrame(step) : 0;
+        };
+        pose(0);
+        anim = requestAnimationFrame(step);
+      } else {
+        pose(1);
+      }
+      lastShown = target;
+
+      // The whole chart is a control, not just the captions: an invisible
+      // wedge per axis catches hover and click anywhere near it.
+      maps.forEach((m, i) => {
+        const half = Math.PI / N();
+        const P = (a, f) => (R_C + Math.cos(a) * R_MAX * f).toFixed(1) + "," + (R_C + Math.sin(a) * R_MAX * f).toFixed(1);
+        const wedge = svgEl("polygon", {
+          class: "sr-mr-hit",
+          points: [R_C + "," + R_C, P(ang(i) - half, 1.14), P(ang(i), 1.2), P(ang(i) + half, 1.14)].join(" "),
+        });
+        wedge.addEventListener("mouseenter", () => setHot(m.key));
+        wedge.addEventListener("mouseleave", () => setHot(pinned));
+        wedge.addEventListener("click", () => {
+          pinned = pinned === m.key ? null : m.key;
+          setHot(pinned);
+          applyHot();
+          announce(pinned);
+        });
+        svg.append(wedge);
+      });
       holder.append(svg);
+
+      // The centre readout: the hovered axis said plainly where the eye
+      // already is — both values, and who leads. applyHot fills it.
+      refs.center = el("div", "sr-mr-center");
+      refs.center.setAttribute("aria-hidden", "true");
+      holder.append(refs.center);
 
       maps.forEach((m, i) => {
         const o = pt(i, LBL_R);
@@ -803,7 +898,10 @@
         tag.addEventListener("mouseleave", () => setHot(pinned));
         tag.addEventListener("click", () => {
           pinned = pinned === m.key ? null : m.key;
+          // setHot alone no-ops when the pinned map is already hot — but the
+          // pin marker still has to move.
           setHot(pinned);
+          applyHot();
           announce(pinned);
         });
         holder.append(tag);
@@ -859,7 +957,11 @@
         if (r.gap != null) {
           const bar = el("span", "sr-mr-etrack");
           const fill = el("span", "sr-mr-efill sr-mr-efill--" + (r.gap >= 0 ? "a" : "b"));
-          fill.style.width = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100)) + "%";
+          const w = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100));
+          // start at zero and let the bar's own transition carry it in; the
+          // double rAF guarantees a painted zero-width frame first
+          fill.style.width = "0%";
+          requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = w + "%"; }));
           bar.append(fill);
           gapBox.append(bar);
           gapBox.title =
@@ -878,6 +980,7 @@
         row.addEventListener("click", () => {
           pinned = pinned === r.key ? null : r.key;
           setHot(pinned);
+          applyHot();
           announce(pinned);
         });
         box.append(row);
@@ -912,7 +1015,7 @@
       for (const d of refs.dots) {
         const on = !!hot && d.key === hot;
         d.node.classList.toggle("sr-mr-dotpt--hot", on);
-        d.node.setAttribute("r", on ? "4.5" : "2.5");
+        d.node.style.r = on ? "4.5px" : "3px"; // style, not attribute — see draw()
       }
       for (const [k, tag] of refs.vx) tag.classList.toggle("sr-mr-vx--hot", k === hot);
       for (const [k, row] of refs.rows) {
@@ -928,6 +1031,35 @@
           refs.spoke.style.display = "";
         } else {
           refs.spoke.style.display = "none";
+        }
+      }
+      if (refs.center) {
+        const m = hot ? maps.find((x) => x.key === hot) : null;
+        if (m) {
+          const va = metricOf(m.a, metric, totalA);
+          const vb = metricOf(m.b, metric, totalB);
+          refs.center.textContent = "";
+          refs.center.append(el("span", "sr-mr-cmap", mapLabel(m.key)));
+          const vals = el("span", "sr-mr-cvals");
+          vals.append(
+            el("span", "sr-mr-vxv--a", fmtMetric(va, metric)),
+            el("span", "sr-mr-vxsep", "·"),
+            el("span", "sr-mr-vxv--b", fmtMetric(vb, metric)),
+          );
+          refs.center.append(vals);
+          const gap = va != null && vb != null ? va - vb : null;
+          if (gap == null) {
+            refs.center.append(el("span", "sr-mr-cedge", m.a.n + " v " + m.b.n + " matches"));
+          } else if (Math.abs(gap) < (metric === "kd" ? 0.02 : 1)) {
+            refs.center.append(el("span", "sr-mr-cedge", "dead even"));
+          } else {
+            const lead = gap > 0 ? "a" : "b";
+            refs.center.append(el("span", "sr-mr-cedge sr-mr-cedge--" + lead,
+              shortName(lead === "a" ? teamA : teamB) + " +" + fmtMetric(Math.abs(gap), metric)));
+          }
+          refs.center.classList.add("sr-mr-center--on");
+        } else {
+          refs.center.classList.remove("sr-mr-center--on");
         }
       }
     }
