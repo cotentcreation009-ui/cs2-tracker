@@ -47,7 +47,7 @@
   // identity hues (cool + violet), which the band scale never uses.
   const PARTY_HEX = ["var(--sr-party-1)", "var(--sr-party-2)", "var(--sr-party-3)", "var(--sr-party-4)"];
 
-  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, cardW: null };
+  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, selMap: null, cardW: null };
   // strip -> redraw it with whatever is currently known. Party tags are worked
   // out after the strips are already on the page, so they need a way back in.
   const redraws = new WeakMap();
@@ -509,10 +509,17 @@
     // How they do on the map actually being played, and whether that is above
     // or below their own baseline. A raw map win rate means little without
     // knowing what the player normally does.
-    if (!micro && mapForm && state.map) {
+    const effMap = state.selMap || state.map;
+    if (!micro && mapForm && effMap) {
       const row = el("span", "sr-in-mapwrap");
-      const name = el("span", "sr-in-mapname", mapShort(state.map));
-      name.title = "Performance on " + mapShort(state.map) + ", the map being played";
+      const name = el("span", "sr-in-mapname", mapShort(effMap));
+      if (state.selMap) {
+        name.classList.add("sr-in-mapname--sel");
+        name.title =
+          "Selected from the map chart \u2014 click " + mapShort(effMap) + " there again to clear";
+      } else {
+        name.title = "Performance on " + mapShort(effMap) + ", the map being played";
+      }
       row.append(name);
       if (!mapForm.matches) {
         const none = el("span", "sr-in-mapnew", "not played recently");
@@ -750,9 +757,13 @@
     if (!A) return;
     let form = null;
     let cm = null;
-    let mapForm = null;
+    let histRows = null;
     const paint = () => {
       if (gen === state.gen && strip.isConnected) {
+        // Recomputed on every paint rather than cached: the map in question
+        // changes when someone clicks the veto chart, and the rows are already
+        // in hand — the strips retune to the selected map for free.
+        const mapForm = histRows ? computeMapForm(histRows, state.selMap || state.map) : null;
         fillStrip(strip, p, form, cm, false, state.cardW || card.getBoundingClientRect().width, mapForm);
         // The strip just changed size. Re-reserve the room it needs and
         // re-check that it still disturbs nothing.
@@ -784,8 +795,8 @@
       jobs.push(
         A.eloHistory(p.uuid, HIST_N)
           .then((rows) => {
+            histRows = rows;
             form = computeForm(rows);
-            mapForm = computeMapForm(rows, state.map);
             paint();
           })
           .catch(() => {}),
@@ -997,6 +1008,7 @@
     if (id !== state.id) {
       state.id = id;
       state.gen += 1;
+      state.selMap = null; // a selection belongs to the room it was made in
       clearAll();
     }
     if (id) void run(id);
@@ -1030,6 +1042,19 @@
     });
     state.obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
+
+    // The veto chart announces map selections; every strip retunes. Works in
+    // the pre-game lobby too, where no map is picked yet — clicking candidates
+    // during the ban phase compares the rosters map by map.
+    document.addEventListener("sr-map-select", (e) => {
+      const map = e && e.detail && e.detail.map ? String(e.detail.map) : null;
+      if (map === state.selMap) return;
+      state.selMap = map;
+      for (const strip of document.querySelectorAll("[" + OWNER + "]")) {
+        const repaint = redraws.get(strip);
+        if (repaint) repaint();
+      }
+    });
 
     // The density class and the padding that reserves the strip's height are
     // both measured against the card's width at attach time. A resize changes
