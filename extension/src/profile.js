@@ -60,12 +60,18 @@
     // fills the host content column — a capped width leaves a ragged right
     // edge against FACEIT's own full-width cards and marks it as injected
     ".sr-elo-root{margin:12px 0;width:100%;}",
-    ".sr-elo-widget{box-sizing:border-box;background:var(--sr-panel);border:1px solid var(--sr-line);border-radius:var(--sr-r-card);padding:12px;color:var(--sr-ink);font:400 11px/1.35 var(--sr-font);}",
+    ".sr-elo-widget{box-sizing:border-box;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 88%,var(--sr-brand)) 0%,var(--sr-panel) 34%,color-mix(in srgb,var(--sr-bg) 30%,var(--sr-panel)) 100%);border:1px solid var(--sr-line);border-radius:var(--sr-r-card);box-shadow:var(--sr-shadow),inset 0 1px 0 rgb(255 255 255/.05);padding:14px;color:var(--sr-ink);font:400 11px/1.35 var(--sr-font);}",
     ".sr-elo-widget *{box-sizing:border-box;}",
-    ".sr-elo-top{display:flex;align-items:center;gap:8px;}",
+    ".sr-elo-top{display:flex;align-items:center;gap:14px;}",
+".sr-elo-ring{position:relative;flex:none;width:54px;height:54px;border-radius:50%;background:conic-gradient(var(--lvl,var(--sr-brand)) calc(var(--pct,0) * 1%), var(--sr-line2) 0);box-shadow:0 0 18px color-mix(in srgb,var(--lvl,var(--sr-brand)) 22%,transparent);}",
+".sr-elo-ring::after{content:\"\";position:absolute;inset:5px;border-radius:50%;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 80%,var(--sr-panel)),var(--sr-panel));}",
+".sr-elo-ringnum{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;line-height:1;color:var(--lvl,var(--sr-ink));text-shadow:0 0 12px color-mix(in srgb,var(--lvl,var(--sr-ink)) 35%,transparent);}",
     ".sr-elo-lvl{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:var(--sr-r-chip);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;}",
     ".sr-elo-main{min-width:0;}",
-    ".sr-elo-cur{margin-top:2px;font-size:13px;font-weight:700;line-height:1;color:var(--sr-orange);font-variant-numeric:tabular-nums;}",
+    ".sr-elo-cur{font-size:19px;font-weight:800;line-height:1;color:var(--sr-orange);font-variant-numeric:tabular-nums;}",
+".sr-elo-curunit{font-size:11px;font-weight:600;color:var(--sr-muted);}",
+".sr-elo-herometa{margin-top:4px;font-size:11px;color:var(--sr-muted);}",
+".sr-elo-herometa b{color:var(--sr-ink);font-weight:700;font-variant-numeric:tabular-nums;}",
     ".sr-elo-today{margin-left:auto;flex:none;text-align:right;}",
     ".sr-elo-delta{margin-top:2px;font-size:12px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;}",
     ".sr-elo-delta--up{color:var(--sr-good);}",
@@ -682,6 +688,36 @@
     return sec;
   }
 
+
+  // The official ladder colours, as VALUES — the .sr-lvl chip class carries a
+  // border and tinted fill that would turn the ring into a square.
+  const LEVEL_HEX = [
+    "#eeeeee", "#47e36c", "#47e36c", "#ffc659", "#ffc659",
+    "#ffc659", "#ffc659", "#ff8a50", "#ff8a50", "#fe1f00",
+  ];
+
+  // The same conic-gradient ring the Steam card wears: filled to the player's
+  // progress through their current level, in the level's own colour. Drawn
+  // without SVG on purpose — tokens.css resets descendants with all:revert,
+  // and in Chrome an SVG circle's r/cx/cy are CSS properties, so an SVG ring
+  // silently collapses to nothing (measured on the Steam card first).
+  function levelRing(lvl, elo) {
+    const box = el("div", "sr-elo-ring");
+    box.style.setProperty("--lvl", LEVEL_HEX[lvl - 1]);
+    let pct = 100;
+    if (lvl < 10) {
+      const floor = FLOORS[lvl - 1];
+      const next = FLOORS[lvl];
+      pct = Math.max(4, Math.min(100, Math.round(((elo - floor) / (next - floor)) * 100)));
+    }
+    box.style.setProperty("--pct", String(pct));
+    box.append(el("div", "sr-elo-ringnum", String(lvl)));
+    box.title =
+      "FACEIT level " + lvl +
+      (lvl < 10 ? " \u00b7 " + pct + "% of the way to level " + (lvl + 1) : " \u00b7 top of the ladder");
+    return box;
+  }
+
   function renderCard(target, user, rows, cm) {
     clear(target);
     const elo = Math.round(user.elo);
@@ -689,12 +725,33 @@
 
     const card = el("div", "sr-elo-widget");
 
-    // top: level badge · elo · today's net change
+    // Hero: the ring is the anchor, exactly as on the Steam card — one visual
+    // language across every surface the extension touches.
     const top = el("div", "sr-elo-top");
-    const badge = el("span", "sr-elo-lvl sr-lvl sr-lvl-" + lvl, String(lvl));
-    badge.title = "Level " + lvl;
+    top.append(levelRing(lvl, elo));
     const main = el("div", "sr-elo-main");
-    main.append(el("div", "sr-label", "Faceit elo"), el("div", "sr-elo-cur", elo.toLocaleString("en-US")));
+    const eloLine = el("div", "sr-elo-cur");
+    eloLine.append(
+      document.createTextNode(elo.toLocaleString("en-US")),
+      el("span", "sr-elo-curunit", " elo"),
+    );
+    main.append(eloLine);
+    const heroMeta = el("div", "sr-elo-herometa");
+    if (lvl < 10) {
+      const next = FLOORS[lvl];
+      heroMeta.append(
+        document.createTextNode("Level " + lvl + " \u00b7 "),
+        el("b", null, (next - elo).toLocaleString("en-US")),
+        document.createTextNode(" to level " + (lvl + 1)),
+      );
+    } else {
+      heroMeta.append(
+        document.createTextNode("Level 10 \u00b7 "),
+        el("b", null, "+" + (elo - FLOORS[9]).toLocaleString("en-US")),
+        document.createTextNode(" above the " + FLOORS[9].toLocaleString("en-US") + " floor"),
+      );
+    }
+    main.append(heroMeta);
     const todayBox = el("div", "sr-elo-today");
     const t = todayDelta(rows);
     const tEl = el(
@@ -704,7 +761,7 @@
     );
     tEl.title = t == null ? "No elo change posted today" : "Net elo change today";
     todayBox.append(el("div", "sr-label", "Today"), tEl);
-    top.append(badge, main, todayBox);
+    top.append(main, todayBox);
     card.append(top);
 
     // Everything the CheatMeter lookup already knows, stated once at the top:
@@ -738,43 +795,6 @@
     chips.append(site);
     card.append(chips);
 
-    const floor = FLOORS[lvl - 1];
-    const next = lvl >= 10 ? null : FLOORS[lvl];
-    if (next) {
-      // progress toward the next level floor
-      const pct = Math.max(0, Math.min(100, Math.round(((elo - floor) / (next - floor)) * 100)));
-      const bar = el("div", "sr-elo-bar");
-      bar.setAttribute("role", "progressbar");
-      bar.setAttribute("aria-valuemin", String(floor));
-      bar.setAttribute("aria-valuemax", String(next));
-      bar.setAttribute("aria-valuenow", String(elo));
-      bar.setAttribute("aria-label", "Progress to level " + (lvl + 1));
-      const fill = el("div", "sr-elo-bar-fill");
-      fill.style.width = pct + "%";
-      bar.append(fill);
-      const meta = el("div", "sr-elo-bar-meta");
-      meta.append(
-        el("span", "sr-elo-bar-floor", floor.toLocaleString("en-US")),
-        el("span", "sr-elo-bar-note", next - elo + " to level " + (lvl + 1)),
-        el("span", "sr-elo-bar-next", next.toLocaleString("en-US")),
-      );
-      card.append(bar, meta);
-    } else {
-      // Level 10 has no ceiling, so a bar would be permanently full — it would
-      // encode nothing for exactly the players most likely to look. State the
-      // floor once and how far past it they are.
-      // One left-aligned line: right-aligning the gain parks it directly under
-      // the "Today" delta, where it reads as today's number.
-      const meta = el("div", "sr-elo-bar-meta sr-elo-bar-meta--max");
-      const line = el("span", "sr-elo-bar-floor");
-      line.append(
-        document.createTextNode("Level 10 floor " + floor.toLocaleString("en-US") + " · "),
-        el("b", "sr-elo-max-gain", "+" + (elo - floor).toLocaleString("en-US")),
-        document.createTextNode(" above"),
-      );
-      meta.append(line);
-      card.append(meta);
-    }
 
     // Three views rather than one long scroll: the numbers you glance at, the
     // maps you act on, and the match list. Only the first is drawn up front.
@@ -815,6 +835,15 @@
 
       // The headline numbers. Sourced from the same aggregate the match room
       // uses, so a player reads the same figures in both places.
+      // Seeded with the elo they are carrying RIGHT NOW: history rows record
+      // elo after each match and FACEIT lags the newest ones, so a fresh climb
+      // could otherwise print a "peak" below the number at the top of the card.
+      let peakElo = elo;
+      for (const r of rows || []) {
+        if (r && typeof r.elo === "number" && isFinite(r.elo) && r.elo > peakElo) {
+          peakElo = r.elo;
+        }
+      }
       const grid = el("div", "sr-p-grid");
       grid.append(
         statCell("rating", st.rating != null ? st.rating.toFixed(2) : null, {
@@ -835,8 +864,11 @@
           hex: gradeHex(st.winRatePct, 55, 45),
           title: "Win rate, all time",
         }),
-        statCell("matches", st.matches != null ? st.matches.toLocaleString("en-US") : null, {
-          title: "FACEIT matches played",
+        // FACEIT prints match counts all over its own pages; it shows peak elo
+        // nowhere, which is exactly why people screenshot it.
+        statCell("peak elo", peakElo != null ? peakElo.toLocaleString("en-US") : null, {
+          hex: "var(--sr-orange)",
+          title: "Highest elo they have held across their last " + ((rows && rows.length) || 0) + " rated matches, including today",
         }),
         statCell("swing", st.swing != null ? (st.swing >= 0 ? "+" : "") + st.swing.toFixed(2) + "%" : null, {
           hex: st.swing == null ? null : st.swing >= 0 ? "var(--sr-good)" : "var(--sr-bad)",
