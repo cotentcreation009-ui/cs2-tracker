@@ -25,6 +25,69 @@ const SITE = (process.env.SITE_URL || "http://localhost:3000").replace(/\/$/, ""
 
 // Mean Leetify rating over the recent window. Leetify reports it per match and
 // never in aggregate, so the average is the only honest summary of it.
+// A player's FACEIT rank across the years they have played.
+//
+// FACEIT elo has no "seasons" — there is no reset and no numbered period, so
+// inventing "Season 4" would be a label with nothing behind it. What actually
+// exists is a continuous history, and the honest way to show how someone's rank
+// has moved is to bucket it by calendar year and say so.
+//
+// Derived from Leetify's full FACEIT match list, which we already fetch, so
+// this costs no additional request. Years with too few matches to characterise
+// are dropped rather than shown as a one-game "peak".
+function rankHistory(p: LeetifyProfile | null) {
+  const rows = p?.faceit_matches;
+  if (!Array.isArray(rows) || !rows.length) return null;
+
+  type Year = {
+    year: number;
+    matches: number;
+    wins: number;
+    peakElo: number;
+    endElo: number;
+    endAt: number;
+    peakLevel: number;
+  };
+  const byYear = new Map<number, Year>();
+
+  for (const m of rows) {
+    const t = Date.parse(m?.finished_at ?? "");
+    if (!Number.isFinite(t)) continue;
+    const year = new Date(t).getUTCFullYear();
+    let e = byYear.get(year);
+    if (!e) {
+      e = { year, matches: 0, wins: 0, peakElo: 0, endElo: 0, endAt: 0, peakLevel: 0 };
+      byYear.set(year, e);
+    }
+    e.matches += 1;
+    if (m.outcome === "win") e.wins += 1;
+    // Elo only rides along on matches from Leetify's legacy endpoint, so plenty
+    // of rows carry none. Level is the FACEIT ladder position, 1-10.
+    const elo = typeof m.elo === "number" && m.elo > 0 ? m.elo : 0;
+    const lvl = typeof m.rank === "number" && m.rank >= 1 && m.rank <= 10 ? m.rank : 0;
+    if (elo > e.peakElo) e.peakElo = elo;
+    if (lvl > e.peakLevel) e.peakLevel = lvl;
+    if (elo && t > e.endAt) {
+      e.endAt = t;
+      e.endElo = elo;
+    }
+  }
+
+  const out = [...byYear.values()]
+    .filter((e) => e.matches >= 3)
+    .sort((a, b) => b.year - a.year)
+    .slice(0, 6)
+    .map((e) => ({
+      year: e.year,
+      matches: e.matches,
+      winRatePct: Math.round((e.wins / e.matches) * 100),
+      peakElo: e.peakElo || null,
+      endElo: e.endElo || null,
+      peakLevel: e.peakLevel || null,
+    }));
+  return out.length ? out : null;
+}
+
 function avgLeetifyRating(p: LeetifyProfile | null): number | null {
   const rows = p?.recent_matches;
   if (!Array.isArray(rows) || !rows.length) return null;
@@ -110,6 +173,9 @@ export async function GET(req: Request): Promise<Response> {
     winStreak: faceit?.currentWinStreak ?? null,
     recentResults: faceit?.recentResults?.slice(0, 5) ?? null,
     leetifyAim: leetify?.rating?.aim ?? null,
+    // FACEIT rank per calendar year — see rankHistory() for why years and
+    // not seasons.
+    rankHistory: rankHistory(leetify),
 
     // The full per-player read the extension's match-room strip renders. Every
     // field below comes out of the two profiles already fetched above, so this
