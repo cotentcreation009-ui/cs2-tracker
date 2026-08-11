@@ -80,7 +80,7 @@
 .sr-steam-meta b{color:var(--sr-orange);font-weight:700}
 
 /* the divided figure strip */
-.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bg) 45%,transparent)}
+.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bg) 45%,transparent)}\n/* the sampled-performance row sits a shade quieter than the headline strip */\n.sr-steam-grid--perf{background:color-mix(in srgb,var(--sr-bg) 25%,transparent)}\n.sr-steam-grid--perf .sr-steam-val{font-size:15px}\n.sr-steam-grid--perf .sr-steam-cell{padding:10px 18px 11px}
 .sr-steam-cell{min-width:0;padding:13px 18px}
 .sr-steam-cell+.sr-steam-cell{border-left:1px solid color-mix(in srgb,var(--sr-line) 65%,transparent)}
 .sr-steam-cell .sr-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;letter-spacing:.11em;order:2;margin-top:5px}
@@ -103,7 +103,7 @@
 .sr-steam-ymeta{font-size:11px;color:var(--sr-faint);white-space:nowrap;text-align:right}
 .sr-steam-ymeta b{color:var(--sr-orange);font-weight:700}
 
-.sr-steam-bandchip{display:inline-flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border-radius:var(--sr-r-chip);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:var(--band);background:color-mix(in srgb,var(--band) 12%,transparent);border:1px solid color-mix(in srgb,var(--band) 40%,transparent)}
+.sr-steam-heroright{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex:none}\n.sr-steam-formbox{display:inline-flex;align-items:center;gap:7px}\n.sr-steam-form{display:inline-flex;align-items:center;gap:4px}\n.sr-steam-fdot{width:8px;height:8px}\n.sr-steam-fdot--w{border-radius:50%;background:var(--sr-good)}\n.sr-steam-fdot--l{border-radius:2px;background:var(--sr-bad)}\n.sr-steam-streak{font-size:10px;font-weight:700;color:var(--sr-good);letter-spacing:.04em}\n.sr-steam-bandchip{display:inline-flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border-radius:var(--sr-r-chip);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:var(--band);background:color-mix(in srgb,var(--band) 12%,transparent);border:1px solid color-mix(in srgb,var(--band) 40%,transparent)}
 .sr-steam-bandchip--severe{box-shadow:0 0 8px color-mix(in srgb,var(--band) 25%,transparent)}
 .sr-steam-dot{width:6px;height:6px;border-radius:50%;background:var(--band)}
 .sr-steam-ban{padding:8px 14px;border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bad) 12%,transparent);color:var(--sr-bad);font-size:11px;font-weight:700}
@@ -211,6 +211,100 @@
 
   function naRow() {
     return el("div", "sr-steam-val sr-steam-val--na", "—");
+  }
+
+
+  // Colour as a second channel: thresholds shared with the match-room strip so
+  // the same number never reads good on one surface and neutral on another.
+  function gradeHex(v, good, bad) {
+    if (v == null) return null;
+    if (v >= good) return "var(--sr-good)";
+    if (v < bad) return "var(--sr-bad)";
+    return null;
+  }
+
+  function perfCell(label, value, hex, title) {
+    const c = statCell(label, title);
+    if (value == null) {
+      c.appendChild(naRow());
+      return c;
+    }
+    const v = el("div", "sr-steam-val", value);
+    if (hex) v.style.color = hex;
+    c.appendChild(v);
+    return c;
+  }
+
+  // The sampled performance figures — the same numbers the match-room strip
+  // shows, so a player reads one story on both surfaces. Rendered only when
+  // the stats block arrived at all; a payload from before it existed gets the
+  // old card, not a row of dashes.
+  function perfRow(st) {
+    if (!st || typeof st !== "object") return null;
+    const have = ["rating", "adr", "kr", "hsPct", "winRatePct"].filter(
+      (k) => typeof st[k] === "number" && isFinite(st[k]) && st[k] > 0,
+    );
+    if (have.length < 2) return null;
+
+    const n = posNum(st.recentMatches) || 0;
+    const sampled = n ? " over their last " + n + " matches" : "";
+    const grid = el("div", "sr-steam-grid sr-steam-grid--perf");
+    grid.appendChild(perfCell(
+      "Rating",
+      posNum(st.rating) ? st.rating.toFixed(2) : null,
+      gradeHex(st.rating, 1.1, 0.95),
+      "HLTV Rating 1.0" + sampled,
+    ));
+    grid.appendChild(perfCell(
+      "ADR",
+      posNum(st.adr) ? String(Math.round(st.adr)) : null,
+      gradeHex(st.adr, 85, 65),
+      "Average damage per round" + sampled,
+    ));
+    grid.appendChild(perfCell(
+      "K/R",
+      posNum(st.kr) ? st.kr.toFixed(2) : null,
+      null,
+      "Kills per round" + sampled,
+    ));
+    grid.appendChild(perfCell(
+      "HS",
+      posNum(st.hsPct) ? Math.round(st.hsPct) + "%" : null,
+      null,
+      "Headshot percentage, all time on FACEIT",
+    ));
+    grid.appendChild(perfCell(
+      "Win",
+      posNum(st.winRatePct) ? Math.round(st.winRatePct) + "%" : null,
+      gradeHex(st.winRatePct, 55, 45),
+      "Win rate, all time on FACEIT",
+    ));
+    return grid;
+  }
+
+  // Their last five FACEIT results, newest first, as marks a colour-blind
+  // reader can still split: a round dot for a win, a square for a loss — the
+  // same convention the profile card's match list uses.
+  function formCluster(d) {
+    const rows = Array.isArray(d.recentResults) ? d.recentResults.slice(0, 5) : [];
+    if (!rows.length) return null;
+    const box = el("div", "sr-steam-formbox");
+    const dots = el("span", "sr-steam-form");
+    let wins = 0;
+    for (const r of rows) {
+      const won = r === "1" || r === 1;
+      if (won) wins += 1;
+      dots.appendChild(el("span", "sr-steam-fdot" + (won ? " sr-steam-fdot--w" : " sr-steam-fdot--l")));
+    }
+    box.appendChild(dots);
+    const streak = posNum(d.winStreak) || 0;
+    if (streak >= 2) {
+      box.appendChild(el("span", "sr-steam-streak", "W" + streak));
+    }
+    box.title =
+      "Last " + rows.length + " FACEIT matches, newest first: " + wins + " won" +
+      (streak >= 2 ? " \u00b7 on a " + streak + "-win streak" : "");
+    return box;
   }
 
   function cellCheat(cheat, band) {
@@ -345,13 +439,17 @@
     id.appendChild(meta);
     wrap.appendChild(id);
 
+    const right = el("div", "sr-steam-heroright");
     if (cheat && band) {
       const chip = el("span", "sr-steam-bandchip" + (cheat.band === "severe" ? " sr-steam-bandchip--severe" : ""));
       chip.title = DISCLAIMER;
       chip.appendChild(el("span", "sr-steam-dot"));
       chip.appendChild(document.createTextNode(band.word));
-      wrap.appendChild(chip);
+      right.appendChild(chip);
     }
+    const form = formCluster(d);
+    if (form) right.appendChild(form);
+    if (right.childNodes.length) wrap.appendChild(right);
     return wrap;
   }
 
@@ -463,6 +561,8 @@
       grid.appendChild(cellCheat(cheat, band));
       grid.appendChild(cellGap(d.gap));
       root.appendChild(grid);
+      const perf = perfRow(d.stats);
+      if (perf) root.appendChild(perf);
     } else {
       root.appendChild(el("div", "sr-steam-empty", "No data yet"));
     }
