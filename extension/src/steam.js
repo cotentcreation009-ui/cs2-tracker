@@ -57,33 +57,66 @@
   }
 
   const CSS = `
-.sr-steam-panel{width:100%;margin:12px 0;background:var(--sr-panel);border:1px solid var(--sr-line);border-radius:var(--sr-r-panel);box-shadow:var(--sr-shadow);color:var(--sr-ink);font-family:var(--sr-font);font-size:12px;line-height:1.35;font-variant-numeric:tabular-nums;text-align:left;overflow:hidden}
-.sr-steam-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--sr-line)}
-.sr-steam-brand{font-size:12px;font-weight: 700;color:var(--sr-ink);white-space:nowrap}
-.sr-steam-brand b{font-weight: 700;color:var(--sr-brand)}
-.sr-steam-sub{font-size:11px;color:var(--sr-muted);white-space:nowrap}
-.sr-steam-spacer{flex:1 1 auto}
-.sr-steam-bandchip{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:var(--sr-r-chip);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:var(--band);background:color-mix(in srgb,var(--band) 12%,transparent);border:1px solid color-mix(in srgb,var(--band) 40%,transparent)}
+.sr-steam-panel{width:100%;margin:12px 0;background:linear-gradient(180deg,color-mix(in srgb,var(--sr-panel2) 70%,var(--sr-panel)) 0%,var(--sr-panel) 42%);border:1px solid var(--sr-line);border-radius:var(--sr-r-panel);box-shadow:var(--sr-shadow);color:var(--sr-ink);font-family:var(--sr-font);font-size:12px;line-height:1.35;font-variant-numeric:tabular-nums;text-align:left;overflow:hidden}
+
+/* hero: the rank badge, who they are, and the one verdict — the shape the
+   reference card gets right. The badge is the anchor and everything else
+   hangs off it, rather than a row of equal-weight cells with no focal point. */
+.sr-steam-hero{display:flex;align-items:center;gap:14px;padding:14px 16px 12px}
+/* Drawn with a conic gradient rather than SVG on purpose: tokens.css resets
+   every descendant with all:revert, and in Chrome an SVG circle's r/cx/cy
+   ARE css properties — so the reset collapsed the ring to r=0 and it silently
+   never appeared. A gradient background survives the same reset. The inner
+   disc is a pseudo-element, which the universal selector does not match. */
+.sr-steam-ring{position:relative;flex:none;width:54px;height:54px;border-radius:50%;background:conic-gradient(var(--lvl,var(--sr-brand)) calc(var(--pct,0) * 1%), var(--sr-line2) 0)}
+.sr-steam-ring::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--sr-panel)}
+.sr-steam-ring--na{background:var(--sr-line)}
+.sr-steam-ringnum{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;line-height:1;color:var(--lvl,var(--sr-ink))}
+.sr-steam-ringnum--na{font-size:15px;font-weight:700;color:var(--sr-faint)}
+.sr-steam-id{min-width:0;flex:1 1 auto}
+.sr-steam-name{display:flex;align-items:center;gap:6px;font-size:16px;font-weight:700;color:var(--sr-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-steam-flag{flex:none;padding:1px 5px;border-radius:3px;background:var(--sr-panel2);border:1px solid var(--sr-line2);font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--sr-muted)}
+.sr-steam-meta{margin-top:3px;font-size:11px;color:var(--sr-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-steam-meta b{color:var(--sr-orange);font-weight:700}
+
+/* the divided figure strip */
+.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bg) 35%,transparent)}
+.sr-steam-cell{min-width:0;padding:11px 14px}
+.sr-steam-cell+.sr-steam-cell{border-left:1px solid var(--sr-line)}
+.sr-steam-cell .sr-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;letter-spacing:.09em;order:2;margin-top:4px}
+.sr-steam-cell{display:flex;flex-direction:column}
+.sr-steam-val{display:flex;align-items:center;gap:5px;order:1;font-size:17px;font-weight:700;color:var(--sr-ink);white-space:nowrap;line-height:1.1}
+.sr-steam-val--na{color:var(--sr-faint);font-weight:400;font-size:15px}
+.sr-steam-score{font-size:17px;font-weight:700;color:var(--band)}
+.sr-steam-plate{display:inline-flex;align-items:center;padding:1px 7px;border-radius:var(--sr-r-chip);font-size:15px;font-weight:700;color:color-mix(in srgb, var(--tier) 62%, white);background:color-mix(in srgb,var(--tier) 12%,transparent);border:1px solid color-mix(in srgb,var(--tier) 45%,transparent)}
+.sr-steam-lvl{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:var(--sr-r-chip);font-size:11px;font-weight:700;line-height:1}
+.sr-steam-elo{color:var(--sr-orange)}
+
+/* rank by year */
+.sr-steam-years{border-top:1px solid var(--sr-line);padding:11px 14px 12px}
+.sr-steam-yearrow{display:grid;grid-template-columns:46px 26px 1fr auto;align-items:center;gap:10px;padding:4px 0}
+.sr-steam-yearrow+.sr-steam-yearrow{border-top:1px solid color-mix(in srgb,var(--sr-line) 60%,transparent)}
+.sr-steam-year{font-size:12px;font-weight:700;color:var(--sr-muted)}
+.sr-steam-ylvl{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:var(--sr-r-chip);font-size:11px;font-weight:700;line-height:1}
+.sr-steam-ybar{height:5px;border-radius:3px;background:var(--sr-line);overflow:hidden}
+.sr-steam-ybarfill{display:block;height:100%;border-radius:3px;background:var(--lvl,var(--sr-brand))}
+.sr-steam-ymeta{font-size:11px;color:var(--sr-faint);white-space:nowrap}
+.sr-steam-ymeta b{color:var(--sr-orange);font-weight:700}
+
+.sr-steam-bandchip{display:inline-flex;align-items:center;gap:5px;flex:none;padding:3px 8px;border-radius:var(--sr-r-chip);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:var(--band);background:color-mix(in srgb,var(--band) 12%,transparent);border:1px solid color-mix(in srgb,var(--band) 40%,transparent)}
 .sr-steam-bandchip--severe{box-shadow:0 0 8px color-mix(in srgb,var(--band) 25%,transparent)}
 .sr-steam-dot{width:6px;height:6px;border-radius:50%;background:var(--band)}
-.sr-steam-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
-.sr-steam-cell{min-width:0;padding:10px 12px}
-.sr-steam-cell+.sr-steam-cell{border-left:1px solid var(--sr-line)}
-.sr-steam-cell .sr-label{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-steam-val{display:flex;align-items:center;gap:4px;height:20px;margin-top:4px;font-size:13px;font-weight:700;color:var(--sr-ink);white-space:nowrap}
-.sr-steam-val--na{color:var(--sr-faint);font-weight:400}
-.sr-steam-score{font-size:13px;font-weight: 700;color:var(--band)}
-.sr-steam-plate{display:inline-flex;align-items:center;padding:1px 6px;border-radius:var(--sr-r-chip);font-size:13px;font-weight: 700;color:color-mix(in srgb, var(--tier) 62%, white);background:color-mix(in srgb,var(--tier) 12%,transparent);border:1px solid color-mix(in srgb,var(--tier) 45%,transparent)}
-.sr-steam-lvl{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:var(--sr-r-chip);font-size:10px;font-weight: 700;line-height:1}
-.sr-steam-elo{color:var(--sr-orange)}
-.sr-steam-ban{padding:8px 12px;border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bad) 12%,transparent);color:var(--sr-bad);font-size:11px;font-weight:700}
+.sr-steam-ban{padding:8px 14px;border-top:1px solid var(--sr-line);background:color-mix(in srgb,var(--sr-bad) 12%,transparent);color:var(--sr-bad);font-size:11px;font-weight:700}
 .sr-steam-empty{padding:16px 12px;font-size:11px;color:var(--sr-faint);text-align:center}
-.sr-steam-foot{border-top:1px solid var(--sr-line)}
-.sr-steam-foot a{display:block;padding:8px 12px;font-size:11px;font-weight:700;text-align:center;color:var(--sr-brand) !important;text-decoration:none !important;transition:background 120ms ease-out}
-.sr-steam-foot a:hover{background:color-mix(in srgb,var(--sr-brand) 8%,transparent)}
+.sr-steam-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--sr-line);padding:0 14px}
+.sr-steam-brand{font-size:11px;font-weight:700;color:var(--sr-ink);white-space:nowrap}
+.sr-steam-brand b{font-weight:700;color:var(--sr-brand)}
+.sr-steam-foot a{display:block;padding:9px 0;font-size:11px;font-weight:700;color:var(--sr-brand) !important;text-decoration:none !important}
+.sr-steam-foot a:hover{text-decoration:underline !important}
 .sr-steam-foot a:focus-visible{outline:2px solid var(--sr-brand);outline-offset:-2px}
 .sr-steam-skel-label{width:56px;height:12px}
 .sr-steam-skel-value{width:72px;height:16px;margin-top:8px}
+@media (max-width:620px){.sr-steam-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.sr-steam-cell:nth-child(n+4){border-top:1px solid var(--sr-line)}.sr-steam-cell:nth-child(4){border-left:0}}
 @media (prefers-reduced-motion:reduce){.sr-steam-foot a{transition:none}}
 `;
 
@@ -225,28 +258,128 @@
     return c;
   }
 
-  function header(cheat, band) {
-    const head = el("div", "sr-steam-head");
-    const brand = el("span", "sr-steam-brand", "CS");
-    brand.appendChild(el("b", null, "Run"));
-    head.appendChild(brand);
-    head.appendChild(el("span", "sr-steam-sub", "· CS2 report"));
-    head.appendChild(el("span", "sr-steam-spacer"));
-    if (cheat) {
-      const chip = el(
-        "span",
-        "sr-steam-bandchip" + (cheat.band === "severe" ? " sr-steam-bandchip--severe" : ""),
-      );
+
+  // The rank badge: a ring filled to their progress through the current level,
+  // with the level in the level's own colour. At level 10 the ring is full,
+  // because there is nothing above it to be part-way towards.
+  // The official ladder colours. Borrowed as a VALUE rather than by adding
+  // .sr-lvl to the ring — that class also carries a border and a tinted fill,
+  // which turned the ring into a square chip with the arc invisible inside it.
+  const LEVEL_HEX = [
+    "#eeeeee", "#47e36c", "#47e36c", "#ffc659", "#ffc659",
+    "#ffc659", "#ffc659", "#ff8a50", "#ff8a50", "#fe1f00",
+  ];
+
+  function levelRing(level, elo) {
+    const box = el("div", "sr-steam-ring");
+    const lvl = level > 0 ? level : 0;
+    if (lvl) box.style.setProperty("--lvl", LEVEL_HEX[lvl - 1]);
+
+    // Progress through the current level. Level 10 has nothing above it, so the
+    // ring reads full rather than pretending at a fraction.
+    let pct = 100;
+    if (lvl >= 1 && lvl < 10 && elo > 0) {
+      const floor = LEVEL_FLOORS[lvl - 1];
+      const next = LEVEL_FLOORS[lvl];
+      pct = Math.max(4, Math.min(100, Math.round(((elo - floor) / (next - floor)) * 100)));
+    }
+    box.style.setProperty("--pct", String(lvl ? pct : 0));
+    if (!lvl) box.classList.add("sr-steam-ring--na");
+
+    const num = el("div", "sr-steam-ringnum" + (lvl ? "" : " sr-steam-ringnum--na"), lvl ? String(lvl) : "—");
+    box.appendChild(num);
+    box.title = lvl
+      ? "FACEIT level " + lvl + (elo > 0 ? " · " + Number(elo).toLocaleString("en-US") + " elo" +
+          (lvl < 10 ? " · " + pct + "% of the way to level " + (lvl + 1) : "") : "")
+      : "No FACEIT level on record";
+    return box;
+  }
+
+  function hero(d, cheat, band) {
+    const lvl = posNum(d.faceitLevel) || (posNum(d.faceitElo) ? levelFromElo(d.faceitElo) : 0);
+    const elo = posNum(d.faceitElo) || 0;
+
+    const wrap = el("div", "sr-steam-hero");
+    wrap.appendChild(levelRing(lvl, elo));
+
+    const id = el("div", "sr-steam-id");
+    const name = el("div", "sr-steam-name");
+    name.appendChild(document.createTextNode(String(d.name || "This player")));
+    if (typeof d.country === "string" && /^[a-z]{2}$/i.test(d.country)) {
+      // Windows ships no flag glyphs, so an emoji flag degrades to two bare
+      // capitals floating beside the name. The country code as a small tag is
+      // what that actually is, and it reads the same on every platform.
+      const f = el("span", "sr-steam-flag", d.country.toUpperCase());
+      f.title = "Country: " + d.country.toUpperCase();
+      name.appendChild(f);
+    }
+    id.appendChild(name);
+
+    const meta = el("div", "sr-steam-meta");
+    if (lvl && elo) {
+      meta.appendChild(document.createTextNode("FACEIT level " + lvl + " · "));
+      meta.appendChild(el("b", null, Number(elo).toLocaleString("en-US")));
+      meta.appendChild(document.createTextNode(" elo"));
+    } else {
+      meta.appendChild(document.createTextNode("No FACEIT rank on record"));
+    }
+    id.appendChild(meta);
+    wrap.appendChild(id);
+
+    if (cheat && band) {
+      const chip = el("span", "sr-steam-bandchip" + (cheat.band === "severe" ? " sr-steam-bandchip--severe" : ""));
       chip.title = DISCLAIMER;
       chip.appendChild(el("span", "sr-steam-dot"));
       chip.appendChild(document.createTextNode(band.word));
-      head.appendChild(chip);
+      wrap.appendChild(chip);
     }
-    return head;
+    return wrap;
+  }
+
+  // Rank across the years they have played. FACEIT elo has no seasons — no
+  // reset, no numbered period — so this says "by year" rather than inventing
+  // one. Years with too little play to characterise are dropped upstream.
+  function yearsBlock(rows) {
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const wrap = el("div", "sr-steam-years");
+    wrap.appendChild(el("span", "sr-label", "FACEIT rank by year"));
+    const peak = Math.max(1, ...rows.map((r) => posNum(r.peakElo) || 0));
+    for (const r of rows) {
+      const row = el("div", "sr-steam-yearrow");
+      row.appendChild(el("span", "sr-steam-year", String(r.year)));
+
+      const lvl = posNum(r.peakLevel) || (posNum(r.peakElo) ? levelFromElo(r.peakElo) : 0);
+      const badge = el("span", "sr-steam-ylvl" + (lvl ? " sr-lvl sr-lvl-" + lvl : ""), lvl ? String(lvl) : "—");
+      badge.title = lvl ? "Highest level reached in " + r.year : "No level recorded";
+      row.appendChild(badge);
+
+      const track = el("span", "sr-steam-ybar");
+      const fill = el("span", "sr-steam-ybarfill");
+      fill.style.width = Math.max(3, Math.round(((posNum(r.peakElo) || 0) / peak) * 100)) + "%";
+      if (lvl) track.style.setProperty("--lvl", LEVEL_HEX[lvl - 1]);
+      track.appendChild(fill);
+      row.appendChild(track);
+
+      const meta = el("span", "sr-steam-ymeta");
+      if (posNum(r.peakElo)) {
+        meta.appendChild(el("b", null, Number(r.peakElo).toLocaleString("en-US")));
+        meta.appendChild(document.createTextNode(" peak · "));
+      }
+      meta.appendChild(document.createTextNode(r.matches + " games · " + r.winRatePct + "%"));
+      row.title =
+        r.year + ": " + r.matches + " FACEIT matches, " + r.winRatePct + "% won" +
+        (posNum(r.peakElo) ? ", peak " + Number(r.peakElo).toLocaleString("en-US") + " elo" : "");
+      row.appendChild(meta);
+      wrap.appendChild(row);
+    }
+    return wrap;
   }
 
   function footer(profileUrl) {
     const foot = el("div", "sr-steam-foot");
+    const brand = el("span", "sr-steam-brand", "CS");
+    brand.appendChild(el("b", null, "Run"));
+    foot.appendChild(brand);
     const a = el("a", null, "Full report on csrun.win ↗");
     a.href = safeUrl(profileUrl);
     a.target = "_blank";
@@ -264,7 +397,7 @@
 
     const root = el("div", "sr-reset sr-steam-panel");
     if (band) root.style.setProperty("--band", band.css);
-    root.appendChild(header(cheat, band));
+    root.appendChild(hero(d, cheat, band));
 
     const hasAny = !!(
       cheat ||
@@ -276,15 +409,20 @@
     );
     if (hasAny) {
       const grid = el("div", "sr-steam-grid");
-      grid.appendChild(cellCheat(cheat, band));
-      grid.appendChild(cellPremier(d.premier));
+      // The level and elo now lead the hero, so the strip carries the figures
+      // that were competing with them for attention rather than repeating one.
       grid.appendChild(cellFaceit(d));
+      grid.appendChild(cellPremier(d.premier));
       grid.appendChild(cellKd(d.kd));
+      grid.appendChild(cellCheat(cheat, band));
       grid.appendChild(cellGap(d.gap));
       root.appendChild(grid);
     } else {
       root.appendChild(el("div", "sr-steam-empty", "No data yet"));
     }
+
+    const years = yearsBlock(d.rankHistory);
+    if (years) root.appendChild(years);
 
     if (d.banned) root.appendChild(el("div", "sr-steam-ban", "VAC or game ban on record"));
     root.appendChild(footer(d.profileUrl));
@@ -295,7 +433,7 @@
   function skeleton() {
     ensureStyle();
     const root = el("div", "sr-reset sr-steam-panel");
-    root.appendChild(header(null, null));
+    root.appendChild(hero({}, null, null));
     const grid = el("div", "sr-steam-grid");
     for (let i = 0; i < 5; i++) {
       const c = el("div", "sr-steam-cell");
