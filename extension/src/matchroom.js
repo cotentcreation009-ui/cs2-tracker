@@ -48,7 +48,7 @@
 
   // id: room currently owned; gen: cancels stale async work; dead: room render
   // failed or was gated off — don't retry until the route actually changes.
-  const state = { id: null, gen: 0, dead: false };
+  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0 };
 
   // ---- tiny DOM/format helpers (nicknames & team names are untrusted) -----
 
@@ -689,6 +689,15 @@
       return panel;
     }
 
+    // Live handles into the rendered chart and table. Highlighting used to
+    // re-render both, which detached the very row the pointer was on: the
+    // mouseup landed on a replacement node so clicks never completed, and a
+    // focused row was destroyed by its own focus handler. Hot state is now a
+    // class toggle over these handles; only a metric change rebuilds.
+    // Declared before the few-maps early return: drawTable reads refs too,
+    // and on a roster with under three known maps it runs first.
+    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null };
+
     if (maps.length < 3) {
       holder.remove();
       side.classList.add("sr-mr-side--wide");
@@ -716,13 +725,6 @@
       const hi = Math.max(...real);
       return { lo: 0, hi: hi * 1.15 || 1 };
     }
-
-    // Live handles into the rendered chart and table. Highlighting used to
-    // re-render both, which detached the very row the pointer was on: the
-    // mouseup landed on a replacement node so clicks never completed, and a
-    // focused row was destroyed by its own focus handler. Hot state is now a
-    // class toggle over these handles; only a metric change rebuilds.
-    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null };
 
     function draw() {
       holder.textContent = "";
@@ -1024,10 +1026,23 @@
     if (g !== state.gen) return;
     if (!room || !Array.isArray(room.teams) || room.teams.length < 2) {
       mount.remove(); // silent no-op — never leave the page looking broken
-      state.dead = true;
+      // A room fetch that dies during a cold page load is the boot race, not
+      // a verdict on the room. Dead used to be terminal until the route
+      // changed, which is why the panel sometimes needed a refresh to appear.
+      // Three spaced retries first; only then go quiet for the room.
+      state.tries += 1;
+      if (state.tries <= 3) {
+        state.dead = true;
+        state.deadUntil = Date.now() + 8000 * state.tries;
+        setTimeout(schedule, 8000 * state.tries + 200);
+      } else {
+        state.dead = true;
+        state.deadUntil = 0;
+      }
       return;
     }
 
+    state.tries = 0;
     const [ta, tb] = room.teams;
     let avgA = avgElo(ta.roster);
     let avgB = avgElo(tb.roster);
@@ -1149,13 +1164,27 @@
   function route() {
     const id = currentRoomId();
     if (id === state.id) {
+      // A paused retry whose time has come re-enters the same room.
+      if (id && state.dead && state.deadUntil && Date.now() >= state.deadUntil) {
+        state.dead = false;
+        state.deadUntil = 0;
+        void enter(id);
+        return;
+      }
       // SPA re-render may have wiped our mount — re-establish it.
       if (id && !state.dead && !document.getElementById(MOUNT_ID)) void enter(id);
       return;
     }
+    state.tries = 0;
+    state.deadUntil = 0;
     leave();
     if (id) void enter(id);
   }
+
+  // A back/forward navigation can restore the page from the bfcache: the DOM
+  // reappears fully formed, no mutations fire, and nothing wakes us. pageshow
+  // is the one signal that covers it.
+  window.addEventListener("pageshow", () => schedule());
 
   let timer = null;
   function schedule() {
