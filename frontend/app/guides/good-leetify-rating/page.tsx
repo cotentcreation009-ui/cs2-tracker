@@ -67,7 +67,7 @@ export default function Page() {
 
       <h2>Read your own numbers</h2>
       <p>
-        Paste any SteamID, vanity name or profile URL into{" "}
+        Open any account on{" "}
         <Link href="/">{SITE_NAME}</Link> to see a player&apos;s Leetify rating and
         every sub-skill in one place — next to their FACEIT level, Premier rating
         and Steam identity. To study a single match in depth, the{" "}
