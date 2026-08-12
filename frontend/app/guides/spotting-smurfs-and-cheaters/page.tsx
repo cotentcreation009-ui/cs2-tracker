@@ -80,8 +80,8 @@ export default function Page() {
         what you find in context.
       </p>
       <p>
-        Paste any SteamID or profile URL into <Link href="/">{SITE_NAME}</Link> to
-        see all of it for a given account.
+        Every signal in this guide sits on one page when you look an account up
+        on <Link href="/">{SITE_NAME}</Link>.
       </p>
     </GuideArticle>
   );

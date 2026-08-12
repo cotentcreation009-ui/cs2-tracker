@@ -133,6 +133,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/guides" className="hover:text-muted">
                 Guides
               </Link>
+              <Link href="/contact" className="hover:text-muted">
+                Contact
+              </Link>
               <Link href="/privacy" className="hover:text-muted">
                 Privacy
               </Link>

@@ -58,6 +58,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     })),
     { url: `${siteUrl}/pro-matches`, changeFrequency: "hourly" as const, priority: 0.8 },
     { url: `${siteUrl}/compare`, changeFrequency: "weekly" as const, priority: 0.5 },
+    { url: `${siteUrl}/contact`, changeFrequency: "yearly" as const, priority: 0.3 },
     { url: `${siteUrl}/privacy`, changeFrequency: "yearly" as const, priority: 0.2 },
     { url: `${siteUrl}/terms`, changeFrequency: "yearly" as const, priority: 0.2 },
     ...players,
