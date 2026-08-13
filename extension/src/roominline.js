@@ -47,7 +47,7 @@
   // identity hues (cool + violet), which the band scale never uses.
   const PARTY_HEX = ["var(--sr-party-1)", "var(--sr-party-2)", "var(--sr-party-3)", "var(--sr-party-4)"];
 
-  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, selMap: null, cardW: null, expect: 0, beats: 0, partyGen: -1, partyN: -1 };
+  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, selMap: null, cardW: null, expect: 0, beats: 0, filledSeen: 0, partyGen: -1, partyN: -1 };
   // strip -> redraw it with whatever is currently known. Party tags are worked
   // out after the strips are already on the page, so they need a way back in.
   const redraws = new WeakMap();
@@ -171,6 +171,23 @@
   const resettle = new WeakMap();
   // Which card each strip annotates — the ground truth for anchored().
   const stripCard = new WeakMap();
+  // strip -> the undo that restores FACEIT's card exactly as we found it.
+  const stripUndo = new WeakMap();
+
+  // Remove a strip the way it was added: styles first, then the node.
+  function dropStrip(strip) {
+    const undo = stripUndo.get(strip);
+    if (undo) {
+      undo();
+      stripUndo.delete(strip);
+      const i = state.undos.indexOf(undo);
+      if (i >= 0) state.undos.splice(i, 1);
+    } else {
+      strip.remove();
+    }
+    resettle.delete(strip);
+    settle.delete(strip);
+  }
   // strip -> re-establish the layout guarantees after its content changed
   const settle = new WeakMap();
 
@@ -236,6 +253,11 @@
     // the first. Ask the real question instead.
     if (overlapsContent(card, strip)) {
       undo();
+      // The reserve() closure above belongs to THIS placement. Left in the
+      // map after a rejected attempt, the strip's next settle ran an
+      // absolute-positioned card's padding maths against a sibling-placed
+      // strip and wrote inflated padding onto FACEIT's own card.
+      resettle.delete(strip);
       return null;
     }
     return undo;
@@ -275,6 +297,7 @@
       if (same(before, widths(card)) && strip.getBoundingClientRect().height > 0) {
         state.undos.push(undo);
         stripCard.set(strip, card);
+        stripUndo.set(strip, undo);
         // Everything above was measured against the placeholder. Once the real
         // numbers arrive the strip changes size, so both guarantees have to be
         // re-established — and if they cannot be, the strip goes rather than
@@ -807,7 +830,11 @@
         // "the stats never show up". Keep the node, redo the data.
         reuse = existing;
       } else {
-        existing.remove();
+        // Run the placement's own undo rather than yanking the node:
+        // placeInside writes position/padding onto FACEIT's card, and a bare
+        // remove() stranded that styling with no strip to justify it — the
+        // card kept growing by one strip-height every time this recurred.
+        dropStrip(existing);
       }
     }
 
@@ -852,7 +879,15 @@
         // placeholders after a failed sweep used to satisfy the heartbeat's
         // "is the roster dressed" test, so a room that came up blank under a
         // throttle stayed blank until the user reloaded.
-        if (form || cm) strip.setAttribute("data-sr-filled", "1");
+        // BOTH sources, not either. History and the CheatMeter travel
+        // different paths and fail independently; marking the strip done when
+        // only one landed retired it from the retry loop with the other half
+        // still showing em-dashes — K/D, win rate, rating and the whole map
+        // line, for the life of the page. That is the "some stats never load"
+        // report, and it is the same attached-is-not-answered mistake one
+        // level down.
+        if (form && cm) strip.setAttribute("data-sr-filled", "1");
+        else strip.removeAttribute("data-sr-filled");
         // The strip just changed size. Re-reserve the room it needs and
         // re-check that it still disturbs nothing.
         const s = settle.get(strip);
@@ -1003,9 +1038,16 @@
     // FACEIT made it the single largest source of requests in the package.
     // A growing roster (players joining a lobby) still earns a re-run.
     if (state.partyGen !== gen || state.partyN !== roster.length) {
-      state.partyGen = gen;
-      state.partyN = roster.length;
-      void detectParties(roster, gen);
+      // Latched on the RESULT. Setting it before the call meant one failed
+      // sweep retired party detection for the whole room: the stack tags —
+      // drawn first on the strip precisely because they change how every
+      // number after them reads — simply never appeared.
+      void detectParties(roster, gen).then((ok) => {
+        if (ok && gen === state.gen) {
+          state.partyGen = gen;
+          state.partyN = roster.length;
+        }
+      });
     }
   }
 
@@ -1016,7 +1058,7 @@
   // same cache, so this costs nothing extra.
   async function detectParties(roster, gen) {
     const A = api();
-    if (!A || roster.length < 2) return;
+    if (!A || roster.length < 2) return false;
 
     const people = (
       await Promise.all(
@@ -1036,7 +1078,7 @@
       )
     ).filter(Boolean);
 
-    if (gen !== state.gen || people.length < 2) return;
+    if (gen !== state.gen || people.length < 2) return false;
 
     const parent = people.map((_, i) => i);
     const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -1077,7 +1119,7 @@
       }
     }
 
-    if (gen !== state.gen) return;
+    if (gen !== state.gen) return false;
     // Repaint only when the read actually CHANGED. detectParties runs on
     // every scan pass (including the 5s heartbeat), and repainting identical
     // strips rebuilt every row twice a heartbeat for nothing.
@@ -1089,11 +1131,12 @@
       ? [...state.party.entries()].map(([nick, g]) => nick + ":" + g.size + ":" + g.hex).sort().join("|")
       : null;
     state.party = party;
-    if (sig === prev) return;
+    if (sig === prev) return true;
     for (const strip of document.querySelectorAll("[" + OWNER + "]")) {
       const repaint = redraws.get(strip);
       if (repaint) repaint();
     }
+    return true;
   }
 
   // Players named by the page, in DOM order, each paired with the node it was
@@ -1138,7 +1181,14 @@
       state.id = id;
       state.gen += 1;
       state.selMap = null; // a selection belongs to the room it was made in
+      // So do the stack tags. Every room contains the user themself, so a
+      // party read in the LAST room kept colouring names in this one — and a
+      // wrong "these three queue together" is worse than none at all.
+      state.party = new Map();
+      state.partyGen = -1;
+      state.partyN = -1;
       state.expect = 0;
+      state.filledSeen = 0;
       state.beats = 0; // a new room earns a fresh minute of self-healing
       clearAll();
     }
@@ -1195,7 +1245,15 @@
       if (A && typeof A.paused === "function" && A.paused()) return;
       const filled = document.querySelectorAll("[data-sr-filled]").length;
       if (state.expect > 0 && filled >= state.expect) return; // nothing owed
-      if (state.beats >= 12) return; // ~1 minute, then trust the observer
+      // Progress buys more time. A minute is plenty for a healthy load and
+      // far too little for a FACEIT that is slow for two — and the budget
+      // was spent either way, leaving a half-dressed roster bare until the
+      // user navigated.
+      if (filled > state.filledSeen) {
+        state.filledSeen = filled;
+        state.beats = 0;
+      }
+      if (state.beats >= 12) return; // ~1 minute without progress, then stop
       state.beats += 1;
       schedule();
     }, 5000);
