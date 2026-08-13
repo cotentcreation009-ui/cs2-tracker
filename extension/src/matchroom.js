@@ -1439,15 +1439,27 @@
           const real = elos.filter((e) => typeof e === "number" && e > 0);
           return real.length ? Math.round(real.reduce((x, y) => x + y, 0) / real.length) : null;
         });
-      Promise.all([avgA == null ? resolve(ta) : avgA, avgB == null ? resolve(tb) : avgB])
-        .then(([a2, b2]) => {
-          if (g !== state.gen || !A.card.isConnected) return;
-          avgA = a2;
-          avgB = b2;
-          A.renderRight(avgA, avgB);
-          B.renderRight(avgB, avgA);
-        })
-        .catch(() => {});
+      // Retried, for the same reason the radar below is: these lookups race
+      // FACEIT's own boot traffic, and when they lost, the header kept "avg —"
+      // and no win-prediction chip for the life of the room while every
+      // player strip beneath it happily showed that player's elo.
+      const fillAvg = (attempt) => {
+        Promise.all([avgA == null ? resolve(ta) : avgA, avgB == null ? resolve(tb) : avgB])
+          .then(([a2, b2]) => {
+            if (g !== state.gen || !A.card.isConnected) return;
+            avgA = a2;
+            avgB = b2;
+            A.renderRight(avgA, avgB);
+            B.renderRight(avgB, avgA);
+            if ((a2 == null || b2 == null) && attempt < 2) {
+              setTimeout(() => {
+                if (g === state.gen && A.card.isConnected) fillAvg(attempt + 1);
+              }, 12000);
+            }
+          })
+          .catch(() => {});
+      };
+      fillAvg(0);
     }
 
     // The radar needs every player's last-30 maps. Per-player DISPLAY now
@@ -1598,6 +1610,24 @@
     obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
     window.addEventListener("hashchange", schedule);
+    // Turning the panel back on while parked in a room used to do nothing:
+    // the settings gate had latched `dead`, the heartbeat had spent its
+    // budget, and only a route change or a reload cleared it — so the inline
+    // strips returned and the panel did not. profile.js already lives by
+    // this contract.
+    try {
+      if (typeof SRSettings !== "undefined" && SRSettings && typeof SRSettings.onChange === "function") {
+        SRSettings.onChange(() => {
+          state.dead = false;
+          state.deadUntil = 0;
+          state.tries = 0;
+          beats = 0;
+          schedule();
+        });
+      }
+    } catch {
+      /* settings layer unavailable — the panel keeps its own lifecycle */
+    }
     // Same self-heal net as roominline: whatever wake-up goes missing in
     // live use, a room URL gets a route() pass every five seconds. route()
     // is a no-op when the panel is mounted (or the room is marked dead), so
