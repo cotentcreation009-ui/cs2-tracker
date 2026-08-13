@@ -48,7 +48,7 @@
 
   // id: room currently owned; gen: cancels stale async work; dead: room render
   // failed or was gated off — don't retry until the route actually changes.
-  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0 };
+  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0, needsHost: false, hostTries: 0 };
 
   // ---- tiny DOM/format helpers (nicknames & team names are untrusted) -----
 
@@ -1199,9 +1199,13 @@
       // retryable, not terminal: leaving state.dead false lets the observer
       // call us again once the SPA has built the page. (Marking it dead here
       // is what silently disabled the panel on every match room.)
-      state.id = null;
+      // state.id is KEPT: nulling it sent the next route() down the
+      // "room changed" path, which reset the attempt counter — so a layout
+      // where a host never appears retried forever at the debounce rate.
+      state.needsHost = true;
       return;
     }
+    state.needsHost = false;
     renderSkeleton(mount);
 
     let room = null;
@@ -1386,6 +1390,13 @@
   function route() {
     const id = currentRoomId();
     if (id === state.id) {
+      // Waiting on a host container the SPA has not built yet. Bounded,
+      // because on some layouts it never arrives.
+      if (id && state.needsHost) {
+        state.hostTries += 1;
+        if (state.hostTries <= 20) void enter(id);
+        return;
+      }
       // A paused retry whose time has come re-enters the same room.
       if (id && state.dead && state.deadUntil && Date.now() >= state.deadUntil) {
         state.dead = false;
@@ -1399,6 +1410,9 @@
     }
     state.tries = 0;
     state.deadUntil = 0;
+    state.needsHost = false;
+    state.hostTries = 0;
+    beats = 0; // a new room earns a fresh minute of self-healing
     leave();
     if (id) void enter(id);
   }
@@ -1408,6 +1422,7 @@
   // is the one signal that covers it.
   window.addEventListener("pageshow", () => schedule());
 
+  let beats = 0;
   let timer = null;
   function schedule() {
     if (timer) return;
@@ -1428,8 +1443,24 @@
     // live use, a room URL gets a route() pass every five seconds. route()
     // is a no-op when the panel is mounted (or the room is marked dead), so
     // the steady-state cost is one getElementById.
+    // Bounded for the same reason as roominline's: only while the panel is
+    // actually missing, and only for the first minute in a room.
     setInterval(() => {
-      if (currentRoomId()) schedule();
+      if (!currentRoomId()) return;
+      if (document.getElementById(MOUNT_ID)) return; // it is up; the observer has it
+      const A = typeof SRApi !== "undefined" && SRApi ? SRApi : window.SRApi;
+      if (A && typeof A.paused === "function" && A.paused()) return; // spend nothing while silent
+      if (beats >= 12) return;
+      beats += 1;
+      // The heartbeat is the retry of last resort: a room marked permanently
+      // dead by a burst of failures (a throttle, a cold load) would otherwise
+      // stay dead until the route changed, which is precisely the "I have to
+      // refresh" report. Bounded by `beats`, so this ends.
+      if (state.dead && !state.deadUntil) {
+        state.dead = false;
+        state.tries = 0;
+      }
+      schedule();
     }, 5000);
   }
 
