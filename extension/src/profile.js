@@ -1184,6 +1184,7 @@
   }
 
   async function init() {
+    console.info("[CSRun] profile active");
     setActive(featureOn(await readSettings()));
     try {
       chrome.storage.onChanged.addListener(async (changes, area) => {

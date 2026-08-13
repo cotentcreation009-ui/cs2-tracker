@@ -1157,6 +1157,7 @@
     }
     if (g !== state.gen) return;
     if (!room || !Array.isArray(room.teams) || room.teams.length < 2) {
+      console.info("[CSRun] panel " + id + ": room api returned nothing (try " + (state.tries + 1) + ")");
       mount.remove(); // silent no-op — never leave the page looking broken
       // A room fetch that dies during a cold page load is the boot race, not
       // a verdict on the room. Dead used to be terminal until the route
@@ -1362,11 +1363,19 @@
   }
 
   function init() {
+    console.info("[CSRun] matchroom active");
     route();
     const obs = new MutationObserver(schedule);
     obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
     window.addEventListener("hashchange", schedule);
+    // Same self-heal net as roominline: whatever wake-up goes missing in
+    // live use, a room URL gets a route() pass every five seconds. route()
+    // is a no-op when the panel is mounted (or the room is marked dead), so
+    // the steady-state cost is one getElementById.
+    setInterval(() => {
+      if (currentRoomId()) schedule();
+    }, 5000);
   }
 
   init();

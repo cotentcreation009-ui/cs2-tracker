@@ -169,6 +169,8 @@
   // UPWARD (the strip is anchored to the card's bottom edge) straight over the
   // player's avatar and name.
   const resettle = new WeakMap();
+  // Which card each strip annotates — the ground truth for anchored().
+  const stripCard = new WeakMap();
   // strip -> re-establish the layout guarantees after its content changed
   const settle = new WeakMap();
 
@@ -272,6 +274,7 @@
       if (!undo) continue;
       if (same(before, widths(card)) && strip.getBoundingClientRect().height > 0) {
         state.undos.push(undo);
+        stripCard.set(strip, card);
         // Everything above was measured against the placeholder. Once the real
         // numbers arrive the strip changes size, so both guarantees have to be
         // re-established — and if they cannot be, the strip goes rather than
@@ -757,6 +760,19 @@
 
   // Is this strip still attached to something that looks like a player card?
   function anchored(strip) {
+    // The strip knows which card it annotates — still being right next to
+    // THAT card is the anchor test. The old heuristic hunted for an <img>
+    // nearby, and a Premier-style card whose avatar is a CSS-background
+    // frame has none: every scan pass rejected its own healthy strip, tore
+    // it down and rebuilt it, and the teardown's mutations scheduled the
+    // next scan — a permanent rebuild loop, throttled only by the debounce.
+    const card = stripCard.get(strip);
+    if (card) {
+      // A replaced or moved card means the strip must be rebuilt against
+      // whatever stands there now — never inherited by a stranger's card.
+      return card.isConnected && (strip.previousElementSibling === card || strip.parentElement === card);
+    }
+    // No record (a strip from before this code): the old avatar hint.
     const host = strip.parentElement;
     if (!host) return false;
     const near = strip.previousElementSibling;
@@ -907,6 +923,18 @@
     // nickname lookup fills in everything the match payload would have.
     if (!roster.length) roster = domRoster();
 
+    // One line whenever the picture changes — the breadcrumb trail for "the
+    // strips didn't show up": which source produced the roster, and whether
+    // the page has painted it yet.
+    const diag =
+      "[CSRun] room " + id + ": api=" + (room ? "ok" : "null") +
+      " roster=" + roster.length +
+      " strips=" + document.querySelectorAll("[" + OWNER + "]").length;
+    if (diag !== state.lastDiag) {
+      state.lastDiag = diag;
+      console.info(diag);
+    }
+
     // Resolve every roster name on the page FIRST. Knowing where all ten sit
     // is what lets cardFor tell a card from the roster around it without
     // depending on an avatar image or a profile link, neither of which a
@@ -1004,9 +1032,18 @@
     }
 
     if (gen !== state.gen) return;
+    // Repaint only when the read actually CHANGED. detectParties runs on
+    // every scan pass (including the 5s heartbeat), and repainting identical
+    // strips rebuilt every row twice a heartbeat for nothing.
+    const sig = [...party.entries()]
+      .map(([nick, g]) => nick + ":" + g.size + ":" + g.hex)
+      .sort()
+      .join("|");
+    const prev = state.party instanceof Map
+      ? [...state.party.entries()].map(([nick, g]) => nick + ":" + g.size + ":" + g.hex).sort().join("|")
+      : null;
     state.party = party;
-    // Repaint whatever is already on the page — the tag arrives after the
-    // strips do, and a strip is cheap to redraw.
+    if (sig === prev) return;
     for (const strip of document.querySelectorAll("[" + OWNER + "]")) {
       const repaint = redraws.get(strip);
       if (repaint) repaint();
@@ -1076,13 +1113,27 @@
       for (const n of r.addedNodes) {
         if (n.nodeType === 1 && !isOurs(n)) return true;
       }
-      if (r.removedNodes.length) return true;
+      for (const n of r.removedNodes) {
+        // Removing our own strip fired the observer that scheduled the scan
+        // that rebuilt the strip — the other half of the rebuild loop.
+        if (n.nodeType !== 1 || !isOurs(n)) return true;
+      }
     }
     return false;
   }
 
   function init() {
+    console.info("[CSRun] roominline active");
     tick();
+    // Belt to the observer's braces. In live use rooms have shown up bare
+    // until a manual refresh even though every fixture of the SPA path
+    // passes — so whatever wake-up signal goes missing out there, a slow
+    // heartbeat bounds the damage: on a room URL the page re-scans within
+    // five seconds no matter what. decorate() is idempotent, so a scan of an
+    // already-dressed room costs one querySelector pass and changes nothing.
+    setInterval(() => {
+      if (roomId()) schedule();
+    }, 5000);
     state.obs = new MutationObserver((records) => {
       if (foreign(records)) schedule();
     });
