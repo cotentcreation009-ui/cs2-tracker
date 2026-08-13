@@ -268,12 +268,15 @@ export function SpotlightRail({
   loading = false,
   emptyNote,
   speedSec = 40,
+  action,
 }: {
   title: string;
   subtitle?: string;
   cards: RailCard[];
   loading?: boolean;
   emptyNote?: string;
+  /** Controls for this rail (e.g. a region switcher), shown beside the title. */
+  action?: ReactNode;
   /** Seconds for one full pass at ~8 cards; scaled up as cards are added. */
   speedSec?: number;
 }): JSX.Element {
@@ -312,10 +315,13 @@ export function SpotlightRail({
         {RAIL_CSS}
       </style>
 
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-          {title}
-        </h2>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <h2 className="shrink-0 text-sm font-semibold uppercase tracking-wider text-muted">
+            {title}
+          </h2>
+          {action}
+        </div>
         {subtitle && <p className="truncate text-xs text-faint">{subtitle}</p>}
       </div>
 
