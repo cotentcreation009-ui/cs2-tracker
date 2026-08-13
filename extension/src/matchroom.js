@@ -48,7 +48,7 @@
 
   // id: room currently owned; gen: cancels stale async work; dead: room render
   // failed or was gated off — don't retry until the route actually changes.
-  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0, needsHost: false, hostTries: 0, mount: null, nicks: null };
+  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0, needsHost: false, hostTries: 0, mount: null, nicks: null, lastPlaced: null };
 
   // ---- tiny DOM/format helpers (nicknames & team names are untrusted) -----
 
@@ -1374,6 +1374,28 @@
     if (state.needsHost) console.info("[CSRun] panel " + id + ": host found, mounting");
     state.needsHost = false;
     state.mount = mount;
+    // WHERE it landed and whether the reader can actually see it. Every guard
+    // in this function now reports failure, and the panel still went missing
+    // with a clean log — so the remaining possibility is that it mounts
+    // successfully somewhere the user never looks. Only the page can answer
+    // that, so it now says so out loud.
+    try {
+      const d = (n) =>
+        !n ? "none" : n.tagName.toLowerCase() +
+          (n.id ? "#" + n.id : "") +
+          (typeof n.className === "string" && n.className ? "." + n.className.trim().split(/\s+/).slice(0, 2).join(".") : "");
+      const r = mount.getBoundingClientRect();
+      console.info(
+        "[CSRun] panel " + id + ": mounted in " + d(mount.parentElement) +
+        " | top=" + Math.round(r.top + (window.scrollY || 0)) +
+        " h=" + Math.round(r.height) +
+        " w=" + Math.round(r.width) +
+        " | vis=" + (getComputedStyle(mount).visibility || "?") +
+        " disp=" + (getComputedStyle(mount).display || "?"),
+      );
+    } catch {
+      /* diagnostics must never break the panel */
+    }
     renderSkeleton(mount);
 
     let room = null;
@@ -1599,7 +1621,17 @@
       // the app, off screen, permanently, because route() only ever checked
       // whether the mount EXISTED. placeByRoster is a no-op once correct.
       if (id && state.mount && state.mount.isConnected && state.nicks && state.nicks.length) {
-        placeByRoster(state.mount, state.nicks);
+        const moved = placeByRoster(state.mount, state.nicks);
+        // Report the walk once per outcome change, so the log shows whether
+        // the panel ever reaches the roster it belongs above.
+        if (moved !== state.lastPlaced) {
+          state.lastPlaced = moved;
+          const r = state.mount.getBoundingClientRect();
+          console.info(
+            "[CSRun] panel " + id + ": walk to roster " + (moved ? "OK" : "FAILED") +
+            " | top=" + Math.round(r.top + (window.scrollY || 0)) + " h=" + Math.round(r.height),
+          );
+        }
       }
       return;
     }
