@@ -579,6 +579,12 @@
   function metricDef(k) {
     return METRICS.find((m) => m.key === k) || METRICS[0];
   }
+  const METRIC_HELP = {
+    winrate: "Share of matches won on this map",
+    pick: "How often each team actually queues this map — a low share is their de-facto ban",
+    kd: "Team's combined kills / deaths on this map",
+    kills: "Average kills per player per match on this map",
+  };
   function fmtMetric(v, metric) {
     if (v == null) return "—";
     const d = metricDef(metric);
@@ -606,6 +612,7 @@
 
     const panel = el("section", "sr-veto-panel");
     let metric = "winrate";
+    let preview = null; // a column header under the pointer, drawn but not kept
     let hot = null; // hovered/pinned map key — drives the cross-highlight
     let pinned = null;
 
@@ -634,27 +641,14 @@
       return null;
     }).filter(Boolean);
 
-    // ---- header: metric switcher ----
+    // ---- header ----
+    // The metric switcher used to live here as four buttons, and every
+    // reading but one was a click away. The table below now shows ALL four
+    // at once and its column headers double as the switcher, so this is a
+    // title and a scope note.
     const head = el("div", "sr-mr-rhead");
     head.append(el("span", "sr-label", "Map form"));
-    const toggle = el("div", "sr-mr-toggle");
     const btns = {};
-    for (const m of METRICS) {
-      const b = el("button", "sr-mr-tbtn" + (m.key === metric ? " sr-mr-tbtn--on" : ""), m.label);
-      b.type = "button";
-      b.title =
-        m.key === "pick"
-          ? "How often each team actually queues this map — a low share is their de-facto ban"
-          : m.key === "kd"
-            ? "Team's combined kills / deaths on this map"
-            : m.key === "kills"
-              ? "Average kills per player per match on this map"
-              : "Share of matches won on this map";
-      b.addEventListener("click", () => setMetric(m.key));
-      btns[m.key] = b;
-      toggle.append(b);
-    }
-    head.append(toggle);
     const scope = el("span", "sr-label sr-mr-rscope", "Last 30 each");
     head.append(scope);
 
@@ -700,7 +694,7 @@
     // class toggle over these handles; only a metric change rebuilds.
     // Declared before the few-maps early return: drawTable reads refs too,
     // and on a roster with under three known maps it runs first.
-    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null, center: null };
+    const refs = { dots: [], vx: new Map(), rows: new Map(), areas: [], spoke: null, center: null, heads: new Map() };
     // The shape currently on screen, as per-axis fractions — the "from" pose
     // when a metric change tweens the polygons to their new values.
     let lastShown = null;
@@ -724,14 +718,21 @@
       y: R_C + Math.sin(ang(i)) * R_MAX * f,
     });
 
+    // What the CHART is drawing: the previewed column if the pointer is on
+    // one, otherwise the kept metric. The table always shows all four.
+    function shown() {
+      return preview || metric;
+    }
+
     function scale() {
+      const m2 = shown();
       const vals = [];
       for (const m of maps) {
-        vals.push(metricOf(m.a, metric, totalA), metricOf(m.b, metric, totalB));
+        vals.push(metricOf(m.a, m2, totalA), metricOf(m.b, m2, totalB));
       }
       const real = vals.filter((v) => v != null);
       if (!real.length) return { lo: 0, hi: 1 };
-      if (metric === "winrate") return { lo: 0, hi: 100 };
+      if (m2 === "winrate") return { lo: 0, hi: 100 };
       // pick / kd / kills: scale to the data so differences are visible
       const hi = Math.max(...real);
       return { lo: 0, hi: hi * 1.15 || 1 };
@@ -747,7 +748,7 @@
       const { lo, hi } = scale();
       const frac = (v) => (v == null ? 0.04 : clampNum((v - lo) / (hi - lo || 1), 0.04, 1));
 
-      const d = metricDef(metric);
+      const d = metricDef(shown());
       const svg = svgEl("svg", {
         viewBox: "0 0 " + R_SIZE + " " + R_SIZE,
         class: "sr-mr-rsvg",
@@ -791,7 +792,7 @@
       svg.append(refs.spoke);
 
       const fracsOf = (which) =>
-        maps.map((m) => frac(metricOf(which === "a" ? m.a : m.b, metric, which === "a" ? totalA : totalB)));
+        maps.map((m) => frac(metricOf(which === "a" ? m.a : m.b, shown(), which === "a" ? totalA : totalB)));
       const target = { a: fracsOf("a"), b: fracsOf("b") };
       const from = lastShown;
 
@@ -886,9 +887,9 @@
         tag.append(el("span", "sr-mr-vxname", mapLabel(m.key)));
         const row = el("span", "sr-mr-vxrow");
         row.append(
-          el("span", "sr-mr-vxv--a", fmtMetric(metricOf(m.a, metric, totalA), metric)),
+          el("span", "sr-mr-vxv--a", fmtMetric(metricOf(m.a, shown(), totalA), shown())),
           el("span", "sr-mr-vxsep", "·"),
-          el("span", "sr-mr-vxv--b", fmtMetric(metricOf(m.b, metric, totalB), metric)),
+          el("span", "sr-mr-vxv--b", fmtMetric(metricOf(m.b, shown(), totalB), shown())),
         );
         tag.append(row);
         tag.append(el("span", "sr-mr-vxcount", m.a.n + " v " + m.b.n));
@@ -908,31 +909,53 @@
       });
     }
 
-    // ---- the table: every pool map, all four numbers, cross-highlighting ----
+    // ---- the table: every pool map, EVERY metric, cross-highlighting -------
+    // Four metrics used to be four button clicks. They are all here now, one
+    // column group each, both teams inside every cell — and a column header
+    // doubles as the radar's switcher: hover to preview that metric on the
+    // chart, click to keep it.
     function drawTable(box) {
       box.textContent = "";
       refs.rows = new Map();
-      const d = metricDef(metric);
+      refs.heads = new Map();
+
       const head2 = el("div", "sr-mr-trow sr-mr-trow--head");
-      const colHead = (which, team) => {
-        const s2 = el("span", "sr-label sr-mr-tnum sr-mr-vxv--" + which, d.head);
-        s2.title = team + " — " + d.label;
-        return s2;
-      };
-      head2.append(
-        el("span", "sr-label", "Map"),
-        colHead("a", teamA),
-        colHead("b", teamB),
-        el("span", "sr-label sr-mr-tgap", "Edge"),
-      );
+      head2.append(el("span", "sr-label", "Map"));
+      for (const m of METRICS) {
+        const h = el("button", "sr-mr-thead" + (m.key === metric ? " sr-mr-thead--on" : ""));
+        h.type = "button";
+        h.append(el("span", "sr-mr-theadl", m.head));
+        h.title = METRIC_HELP[m.key] + " — click to draw this on the chart";
+        h.addEventListener("mouseenter", () => previewMetric(m.key));
+        h.addEventListener("mouseleave", () => previewMetric(null));
+        h.addEventListener("focus", () => previewMetric(m.key));
+        h.addEventListener("blur", () => previewMetric(null));
+        h.addEventListener("click", () => {
+          preview = null;
+          setMetric(m.key);
+        });
+        refs.heads.set(m.key, h);
+        btns[m.key] = h;
+        head2.append(h);
+      }
+      head2.append(el("span", "sr-label sr-mr-tgap", "Edge"));
       box.append(head2);
 
+      // Rows are ordered by the edge on the CHART's metric, so the table and
+      // the chart always agree about what matters most.
       const rows = POOL.map((key) => {
         const a = aggA.get(key) || null;
         const b = aggB.get(key) || null;
-        const va = metricOf(a, metric, totalA);
-        const vb = metricOf(b, metric, totalB);
-        return { key, a, b, va, vb, gap: va != null && vb != null ? va - vb : null };
+        const vals = {};
+        for (const m of METRICS) {
+          vals[m.key] = {
+            a: metricOf(a, m.key, totalA),
+            b: metricOf(b, m.key, totalB),
+          };
+        }
+        const va = vals[metric].a;
+        const vb = vals[metric].b;
+        return { key, a, b, vals, va, vb, gap: va != null && vb != null ? va - vb : null };
       }).filter((r) => (r.a && r.a.n) || (r.b && r.b.n));
 
       rows.sort((x, y) => Math.abs(y.gap ?? -1) - Math.abs(x.gap ?? -1));
@@ -946,13 +969,30 @@
         if (!r.a || !r.a.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--b", "new to " + shortName(teamA)));
         else if (!r.b || !r.b.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--a", "new to " + shortName(teamB)));
         row.append(name);
-        const cell = (v, e, which) => {
-          const s = el("span", "sr-mr-tnum sr-mr-vxv--" + which, fmtMetric(v, metric));
-          s.title = e && e.n ? e.n + " of " + (which === "a" ? totalA : totalB) + " recent matches" : "Not played recently";
-          if (!e || !e.n) s.classList.add("sr-mr-dash");
-          return s;
-        };
-        row.append(cell(r.va, r.a, "a"), cell(r.vb, r.b, "b"));
+
+        // One cell per metric, both teams stacked inside it. The leader's
+        // number carries the weight; the trailer stays quiet.
+        for (const m of METRICS) {
+          const v = r.vals[m.key];
+          const cell = el("span", "sr-mr-tcell" + (m.key === metric ? " sr-mr-tcell--on" : ""));
+          cell.dataset.srMetric = m.key;
+          const mk = (val, e, which) => {
+            const n = el("span", "sr-mr-tnum sr-mr-vxv--" + which, fmtMetric(val, m.key));
+            if (!e || !e.n) n.classList.add("sr-mr-dash");
+            else if (
+              v.a != null && v.b != null &&
+              (which === "a" ? v.a > v.b : v.b > v.a)
+            ) n.classList.add("sr-mr-tnum--lead");
+            return n;
+          };
+          cell.append(mk(v.a, r.a, "a"), mk(v.b, r.b, "b"));
+          cell.title =
+            m.label + " on " + mapLabel(r.key) + " — " +
+            shortName(teamA) + " " + fmtMetric(v.a, m.key) + " (" + ((r.a && r.a.n) || 0) + " matches), " +
+            shortName(teamB) + " " + fmtMetric(v.b, m.key) + " (" + ((r.b && r.b.n) || 0) + " matches)";
+          row.append(cell);
+        }
+
         const gapBox = el("span", "sr-mr-tgap");
         if (r.gap != null) {
           const bar = el("span", "sr-mr-etrack");
@@ -965,7 +1005,8 @@
           bar.append(fill);
           gapBox.append(bar);
           gapBox.title =
-            (r.gap >= 0 ? teamA : teamB) + " ahead by " + fmtMetric(Math.abs(r.gap), metric) + " on " + mapLabel(r.key);
+            (r.gap >= 0 ? teamA : teamB) + " ahead by " + fmtMetric(Math.abs(r.gap), metric) +
+            " on " + mapLabel(r.key) + " (" + metricDef(metric).label + ")";
         } else {
           gapBox.append(el("span", "sr-mr-dash", "—"));
         }
@@ -1036,26 +1077,27 @@
       if (refs.center) {
         const m = hot ? maps.find((x) => x.key === hot) : null;
         if (m) {
-          const va = metricOf(m.a, metric, totalA);
-          const vb = metricOf(m.b, metric, totalB);
+          const shownM = shown();
+          const va = metricOf(m.a, shownM, totalA);
+          const vb = metricOf(m.b, shownM, totalB);
           refs.center.textContent = "";
           refs.center.append(el("span", "sr-mr-cmap", mapLabel(m.key)));
           const vals = el("span", "sr-mr-cvals");
           vals.append(
-            el("span", "sr-mr-vxv--a", fmtMetric(va, metric)),
+            el("span", "sr-mr-vxv--a", fmtMetric(va, shownM)),
             el("span", "sr-mr-vxsep", "·"),
-            el("span", "sr-mr-vxv--b", fmtMetric(vb, metric)),
+            el("span", "sr-mr-vxv--b", fmtMetric(vb, shownM)),
           );
           refs.center.append(vals);
           const gap = va != null && vb != null ? va - vb : null;
           if (gap == null) {
             refs.center.append(el("span", "sr-mr-cedge", m.a.n + " v " + m.b.n + " matches"));
-          } else if (Math.abs(gap) < (metric === "kd" ? 0.02 : 1)) {
+          } else if (Math.abs(gap) < (shownM === "kd" ? 0.02 : 1)) {
             refs.center.append(el("span", "sr-mr-cedge", "dead even"));
           } else {
             const lead = gap > 0 ? "a" : "b";
             refs.center.append(el("span", "sr-mr-cedge sr-mr-cedge--" + lead,
-              shortName(lead === "a" ? teamA : teamB) + " +" + fmtMetric(Math.abs(gap), metric)));
+              shortName(lead === "a" ? teamA : teamB) + " +" + fmtMetric(Math.abs(gap), shownM)));
           }
           refs.center.classList.add("sr-mr-center--on");
         } else {
@@ -1070,12 +1112,25 @@
       applyHot();
     }
 
+    // Hovering a column header draws that metric on the chart without
+    // committing to it — the table already shows every number, so the chart
+    // is free to follow the pointer. Leaving returns to the kept metric.
+    function previewMetric(key) {
+      const want = key || null;
+      if (preview === want) return;
+      preview = want;
+      draw();
+      applyHot();
+      for (const [k, h] of refs.heads) {
+        h.classList.toggle("sr-mr-thead--peek", !!preview && k === preview);
+      }
+    }
+
     function setMetric(next) {
       if (metric === next) return;
-      for (const k in btns) btns[k].classList.toggle("sr-mr-tbtn--on", k === next);
       metric = next;
       draw();
-      drawTable(side);
+      drawTable(side); // the ordering and the emphasised column follow
       applyHot();
     }
 

@@ -223,6 +223,17 @@
   padding-top: 4px;
   border-top: 1px solid var(--sr-line);
 }
+/* The map line is the strip's most-read row — it is the only part scoped to
+   the map actually being played — and it was set smaller than the season
+   numbers above it. Bigger values, legible labels, more air between cells. */
+.sr-in-mapwrap { gap: 5px 14px; }
+.sr-in-mapwrap .sr-in-cv { font-size: 13px; line-height: 1.15; }
+.sr-in-mapwrap .sr-in-cl {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--sr-muted);
+}
+
 /* map numbers off a thin sample: kept, but not dressed as a finding */
 .sr-in-mapwrap--thin .sr-in-cv { color: var(--sr-muted); }
 /* a map chosen from the chart, as opposed to the room's own — underlined so
@@ -232,7 +243,7 @@
   text-underline-offset: 2px;
 }
 .sr-in-mapname {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -241,6 +252,7 @@
 .sr-in-mapn {
   font-size: 10px;
   color: var(--sr-faint);
+  margin-left: auto; /* the sample size closes the line, away from the numbers */
 }
 .sr-in-mapnew {
   font-size: 10px;
@@ -248,8 +260,18 @@
   color: var(--sr-faint);
 }
 .sr-in-delta {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
   font-weight: 700;
+}
+.sr-in-deltak {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sr-faint);
 }
 .sr-in-delta--up { color: var(--sr-good); }
 .sr-in-delta--down { color: var(--sr-bad); }
@@ -257,6 +279,11 @@
 /* Narrow cards wrap the map split onto its own line rather than shrinking it */
 .sr-in--tight .sr-in-grid { gap: 2px 9px; }
 .sr-in--tight .sr-in-cv { font-size: 11px; }
+/* the bigger map line is a wide-card luxury; tight cards keep their economy */
+.sr-in--tight .sr-in-mapwrap { gap: 4px 10px; }
+.sr-in--tight .sr-in-mapwrap .sr-in-cv { font-size: 11px; }
+.sr-in--tight .sr-in-mapwrap .sr-in-cl { font-size: 8px; }
+.sr-in--tight .sr-in-mapname { font-size: 9px; }
 
 
 /* ---- status chips ------------------------------------------------------- */
