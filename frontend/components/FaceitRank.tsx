@@ -63,7 +63,9 @@ export function FaceitDetail({ faceit, color, elo, level }: { faceit: FaceitProf
   const results = faceit.recentResults ?? [];
   const stat = (label: string, value: string) => (
     <div className="rounded-lg bg-panel/60 px-2.5 py-2">
-      <div className="stat-label">{label}</div>
+      {/* nowrap: "Win rate" broke across two lines and shoved the number out
+          of the tile, which read as a layout glitch rather than a stat */}
+      <div className="stat-label whitespace-nowrap">{label}</div>
       <div className="mt-0.5 text-base font-bold tabular-nums text-ink">{value}</div>
     </div>
   );
@@ -82,7 +84,13 @@ export function FaceitDetail({ faceit, color, elo, level }: { faceit: FaceitProf
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      {/* Column count follows the PANEL's width, not the viewport's. The old
+          sm:/lg: breakpoints counted browser width while this panel sits in a
+          ~330px column, so a wide screen still gave six ~55px tiles: "Matches"
+          clipped to "Matche", "Win rate" wrapped onto its own number, and a
+          five-figure ELO had nowhere to go. auto-fit keeps every tile wide
+          enough for its label and drops to fewer columns instead. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-2">
         {elo > 0 && stat("ELO", elo.toLocaleString("en-US"))}
         {faceit.matches > 0 && stat("Matches", faceit.matches.toLocaleString("en-US"))}
         {faceit.winRatePct > 0 && stat("Win rate", `${faceit.winRatePct.toFixed(0)}%`)}
