@@ -1235,39 +1235,73 @@
     // happens inline under FACEIT's own cards (roominline.js), so this only
     // aggregates — and the two modules share api.js's cache, so asking for
     // the same history twice costs one request, not two.
-    const aggA = new Map();
-    const aggB = new Map();
-    const histJobs = [];
     // A Premier room's roster names its players but does not always carry
     // their FACEIT ids, and history is keyed by id — so skipping the ones
     // without a uuid meant fetching nothing at all and rendering an empty
     // chart. Resolve the id from the nickname first; it is the same lookup the
     // strips do, through the same cache, so it costs one request per player at
     // most and usually none.
-    const spawn = (team, agg) => {
-      for (const p of (team.roster || []).slice(0, MAX_PER_TEAM)) {
-        if (!p.uuid && !p.nick) continue;
-        histJobs.push(
-          Promise.resolve()
-            .then(() => (p.uuid ? p.uuid : SRApi.user(p.nick).then((u) => (u ? u.uuid : null))))
-            .then((uuid) => (uuid ? SRApi.eloHistory(uuid, HIST_N) : null))
-            .then((rows) => {
-              if (g !== state.gen) return;
-              if (Array.isArray(rows)) addMaps(agg, rows);
-            })
-            .catch(() => {}),
-        );
-      }
-    };
-    spawn(ta, aggA);
-    spawn(tb, aggB);
+    //
+    // The whole aggregation RETRIES. It used to run exactly once, at the
+    // moment the room was entered — on a cold load the worst moment there is:
+    // twenty lookups racing FACEIT's own boot traffic. When they failed, the
+    // radar built from empty aggregates and never looked again; the strips
+    // healed (roominline retries forever) while the chart stayed gone until a
+    // refresh. Now a build that came up empty because lookups FAILED — not
+    // because the players genuinely lack history — reruns after the api
+    // layer's negative cache has expired, twice at most.
+    const runAgg = (attempt) => {
+      const aggA = new Map();
+      const aggB = new Map();
+      const jobs = [];
+      let ok = 0;
+      let fail = 0;
+      const spawn = (team, agg) => {
+        for (const p of (team.roster || []).slice(0, MAX_PER_TEAM)) {
+          if (!p.uuid && !p.nick) continue;
+          jobs.push(
+            Promise.resolve()
+              .then(() => (p.uuid ? p.uuid : SRApi.user(p.nick).then((u) => (u ? u.uuid : null))))
+              .then((uuid) => (uuid ? SRApi.eloHistory(uuid, HIST_N) : null))
+              .then((rows) => {
+                if (g !== state.gen) return;
+                if (Array.isArray(rows)) {
+                  addMaps(agg, rows);
+                  ok += 1;
+                } else {
+                  fail += 1;
+                }
+              })
+              .catch(() => {
+                fail += 1;
+              }),
+          );
+        }
+      };
+      spawn(ta, aggA);
+      spawn(tb, aggB);
 
-    Promise.allSettled(histJobs).then(() => {
-      if (g !== state.gen || !veto.isConnected) return;
-      const built = radarPanel(aggA, aggB, ta.name, tb.name);
-      veto.replaceWith(built);
-      veto = built;
-    });
+      Promise.allSettled(jobs).then(() => {
+        if (g !== state.gen || !veto.isConnected) return;
+        const built = radarPanel(aggA, aggB, ta.name, tb.name);
+        veto.replaceWith(built);
+        veto = built;
+        // Rebuild only when failures plausibly cost us the chart: nothing
+        // loaded at all, or so little that the radar degraded below three
+        // shared maps. Honest scarcity (no failures) is left alone.
+        const shared = POOL.filter((k) => {
+          const a = aggA.get(k);
+          const b = aggB.get(k);
+          return a && a.n > 0 && b && b.n > 0;
+        }).length;
+        if (attempt < 2 && fail > 0 && (ok === 0 || shared < 3)) {
+          setTimeout(() => {
+            if (g === state.gen && veto.isConnected) runAgg(attempt + 1);
+          }, 12000);
+        }
+      });
+    };
+    runAgg(0);
   }
 
   function leave() {
