@@ -1343,10 +1343,12 @@
     const g = ++state.gen;
 
     if (typeof SRApi === "undefined" || !SRApi) {
+      console.info("[CSRun] panel " + id + ": data layer missing");
       state.dead = true;
       return;
     }
     if (!(await allowed())) {
+      console.info("[CSRun] panel " + id + ": disabled in settings");
       state.dead = true;
       return;
     }
@@ -1361,9 +1363,15 @@
       // state.id is KEPT: nulling it sent the next route() down the
       // "room changed" path, which reset the attempt counter — so a layout
       // where a host never appears retried forever at the debounce rate.
+      // Said out loud now. This was the one exit that left no trace at all,
+      // so a room with no panel and no error line was indistinguishable from
+      // a room where nothing had run — which is exactly where debugging
+      // David's reports kept stalling.
+      if (!state.needsHost) console.info("[CSRun] panel " + id + ": no host container yet");
       state.needsHost = true;
       return;
     }
+    if (state.needsHost) console.info("[CSRun] panel " + id + ": host found, mounting");
     state.needsHost = false;
     state.mount = mount;
     renderSkeleton(mount);
@@ -1580,7 +1588,19 @@
         return;
       }
       // SPA re-render may have wiped our mount — re-establish it.
-      if (id && !state.dead && !document.getElementById(MOUNT_ID)) void enter(id);
+      if (id && !state.dead && !document.getElementById(MOUNT_ID)) {
+        void enter(id);
+        return;
+      }
+      // The panel is up. Is it in the right PLACE? A re-home during FACEIT's
+      // churn happens the instant the old roster is removed and the new one
+      // has not painted, so the walk to the roster finds nothing and the
+      // panel is left wherever the fallback host put it — at the very top of
+      // the app, off screen, permanently, because route() only ever checked
+      // whether the mount EXISTED. placeByRoster is a no-op once correct.
+      if (id && state.mount && state.mount.isConnected && state.nicks && state.nicks.length) {
+        placeByRoster(state.mount, state.nicks);
+      }
       return;
     }
     state.tries = 0;
