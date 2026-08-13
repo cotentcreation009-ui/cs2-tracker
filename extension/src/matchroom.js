@@ -201,34 +201,78 @@
   // The roster block, if the page has painted one: the smallest element that
   // contains every player's name. The panel is about those two teams, so
   // directly above them is where it belongs.
+  // The smallest box holding the roster — ignoring up to two members that
+  // make the group span the page.
+  //
+  // A captain's nickname legitimately appears twice on a FACEIT room: on the
+  // roster, and in the hero, where the team is named after them and links to
+  // the same profile. Nothing in the text can separate those two, so one
+  // outlier can drag the common ancestor all the way up to the page wrapper
+  // — which is precisely how the panel ended up above the whole room. Dropping
+  // a member is only allowed when it shrinks the box by at least a fifth, so
+  // a genuine roster (whose members all sit in the same block) is untouched.
+  function tightestBox(dom, members) {
+    let group = members.slice();
+    let box = dom.commonAncestor(group);
+    if (!box) return null;
+    for (let pass = 0; pass < 2 && group.length > 3; pass++) {
+      const currentH = box.getBoundingClientRect().height;
+      let bestH = currentH * 0.8;
+      let bestBox = null;
+      let bestIdx = -1;
+      for (let i = 0; i < group.length; i++) {
+        const rest = group.filter((_, j) => j !== i);
+        const b = dom.commonAncestor(rest);
+        if (!b) continue;
+        const h = b.getBoundingClientRect().height;
+        if (h < bestH) {
+          bestH = h;
+          bestBox = b;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx < 0) break;
+      group = group.filter((_, j) => j !== bestIdx);
+      box = bestBox;
+    }
+    return box;
+  }
+
   function rosterEl(nicks) {
     const dom = window.SRDom;
     if (!dom) return null;
 
-    // FIRST CHOICE: the cards roominline has already proven are player cards
-    // by attaching a strip to each. Matching on names alone is what put the
-    // panel at the top of the document behind FACEIT's room card — a team is
-    // named after its captain, so FACEIT's hero renders "team_Bron-Bron" and
-    // "team_KEIWANYU", those nodes matched the captains' nicknames, and the
-    // smallest box containing "every name" became the whole Matchroom.
-    // A strip is only ever attached to a real card, so this cannot happen.
-    const owned = [...document.querySelectorAll("[" + "data-sr-owner" + "]")]
-      .map((strip) => strip.parentElement)
-      .filter((n) => n && n.isConnected);
-    if (owned.length >= 2) {
-      const box = dom.commonAncestor(owned);
-      if (box && box.id !== "canvas-body" && !box.contains(document.getElementById(MOUNT_ID) || document.head)) {
-        return box;
-      }
+    // ONLY the cards roominline has already attached a strip to.
+    //
+    // Every text-based rule tried here has been fooled. David's log caught
+    // the last one red-handed: names=10, and the smallest box holding them
+    // all was #canvas-wrapper — the whole page, 893px tall, beginning 420px
+    // above the first player — so the panel was inserted above the entire
+    // room and rendered behind it. FACEIT names each team after its captain,
+    // and its hero links those names to the same profiles the roster does,
+    // so a captain's nickname legitimately appears twice on the page and no
+    // amount of text matching can tell the two apart.
+    //
+    // A strip, by contrast, is only ever attached through cardFor's
+    // one-name-box rule against the live roster. If a strip is on it, it IS
+    // a player card. When none exist yet we return null and simply do not
+    // move: the panel keeps its mount position for the second it takes
+    // roominline to dress the roster, then this places it correctly. Both
+    // surfaces share one feature flag, so a panel without strips is not a
+    // state a user can be in.
+    const owned = [];
+    for (const strip of document.querySelectorAll("[data-sr-owner]")) {
+      const host = strip.parentElement;
+      if (host && host.isConnected) owned.push(host);
     }
-
-    if (!nicks || !nicks.length) return null;
-    const nodes = [...dom.nameNodes(nicks).values()];
-    if (nodes.length < 2) return null;
-    const box = dom.commonAncestor(nodes);
+    if (owned.length < 2) return null;
+    const box = tightestBox(dom, owned);
     if (!box || box.id === "canvas-body") return null;
+    const mount = document.getElementById(MOUNT_ID);
+    if (mount && box.contains(mount)) return null; // never reparent into ourselves
     return box;
   }
+
 
   // Falls back through the room's own containers, and #__next only as a last
   // resort — prepending to that puts the panel above FACEIT's entire app,
@@ -1453,6 +1497,10 @@
     if (!room || !Array.isArray(room.teams) || room.teams.length < 2) {
       console.info("[CSRun] panel " + id + ": room api returned nothing (try " + (state.tries + 1) + ")");
       mount.remove(); // silent no-op — never leave the page looking broken
+      // Forget the node as well. rehomePanel() exists to undo FACEIT's
+      // removals, and it cannot tell theirs from ours — so without this it
+      // dutifully put this empty skeleton back on the page.
+      state.mount = null;
       // A room fetch that dies during a cold page load is the boot race, not
       // a verdict on the room. Dead used to be terminal until the route
       // changed, which is why the panel sometimes needed a refresh to appear.
