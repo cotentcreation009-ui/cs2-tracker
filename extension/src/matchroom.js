@@ -203,7 +203,26 @@
   // directly above them is where it belongs.
   function rosterEl(nicks) {
     const dom = window.SRDom;
-    if (!dom || !nicks || !nicks.length) return null;
+    if (!dom) return null;
+
+    // FIRST CHOICE: the cards roominline has already proven are player cards
+    // by attaching a strip to each. Matching on names alone is what put the
+    // panel at the top of the document behind FACEIT's room card — a team is
+    // named after its captain, so FACEIT's hero renders "team_Bron-Bron" and
+    // "team_KEIWANYU", those nodes matched the captains' nicknames, and the
+    // smallest box containing "every name" became the whole Matchroom.
+    // A strip is only ever attached to a real card, so this cannot happen.
+    const owned = [...document.querySelectorAll("[" + "data-sr-owner" + "]")]
+      .map((strip) => strip.parentElement)
+      .filter((n) => n && n.isConnected);
+    if (owned.length >= 2) {
+      const box = dom.commonAncestor(owned);
+      if (box && box.id !== "canvas-body" && !box.contains(document.getElementById(MOUNT_ID) || document.head)) {
+        return box;
+      }
+    }
+
+    if (!nicks || !nicks.length) return null;
     const nodes = [...dom.nameNodes(nicks).values()];
     if (nodes.length < 2) return null;
     const box = dom.commonAncestor(nodes);
@@ -222,6 +241,32 @@
   function placeByRoster(mount, nicks) {
     if (!mount || !mount.isConnected) return false;
     const roster = rosterEl(nicks);
+    // Name the element we are about to sit above, and how far it is from the
+    // players it supposedly wraps. A walk that "succeeds" onto a container
+    // spanning the whole page puts the panel at the top of the document,
+    // behind FACEIT's room card — which reads as no panel at all.
+    try {
+      const dom = window.SRDom;
+      const found = dom ? [...dom.nameNodes(nicks).values()] : [];
+      const first = found.length ? found[0].getBoundingClientRect().top + (window.scrollY || 0) : null;
+      const rr = roster ? roster.getBoundingClientRect() : null;
+      const d = (n) =>
+        !n ? "none" : n.tagName.toLowerCase() + (n.id ? "#" + n.id : "") +
+          (typeof n.className === "string" && n.className ? "." + n.className.trim().split(/\s+/)[0] : "");
+      if (roster && placeByRoster.lastSeen !== d(roster)) {
+        placeByRoster.lastSeen = d(roster);
+        console.info(
+          "[CSRun] roster anchor = " + d(roster) +
+          " | anchorTop=" + Math.round(rr.top + (window.scrollY || 0)) +
+          " h=" + Math.round(rr.height) +
+          " | names=" + found.length +
+          " firstNameTop=" + (first == null ? "?" : Math.round(first)) +
+          " | parent=" + d(roster.parentElement),
+        );
+      }
+    } catch {
+      /* diagnostics never break placement */
+    }
     if (!roster || !roster.parentElement) return false;
     if (roster.previousElementSibling === mount) return true; // already there
     if (mount.contains(roster)) return false; // never reparent into ourselves
