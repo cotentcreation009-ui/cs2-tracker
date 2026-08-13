@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { SITE_NAME } from "@/lib/site";
 import { ProBoard } from "@/components/pro/ProBoard";
+import { ProSpotlight } from "@/components/pro/ProSpotlight";
 
 // Server wrapper so the board gets its own title/description/canonical for SEO;
 // the interactive, self-polling board itself lives in the ProBoard client
@@ -21,5 +22,12 @@ export const metadata: Metadata = {
 };
 
 export default function ProMatchesPage() {
-  return <ProBoard />;
+  return (
+    <div className="space-y-10">
+      <ProBoard />
+      {/* Below the board on purpose: live scores are why people open this page,
+          and the rails are for browsing once you have looked at them. */}
+      <ProSpotlight />
+    </div>
+  );
 }

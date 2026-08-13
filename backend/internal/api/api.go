@@ -290,6 +290,9 @@ func (s *Server) Router() http.Handler {
 
 			// GRID live pro-match board (gated on GRID_API_KEY / GRID_MOCK).
 			r.Get("/pro-matches", s.handleProMatches)
+			// One request feeds all three spotlight rails; see prospotlight.go for
+			// what each list can honestly claim to be.
+			r.Get("/pro-matches/spotlight", s.handleProSpotlight)
 			r.Get("/pro-matches/{seriesId}", s.handleProMatch)
 			r.Get("/pro-matches/{seriesId}/history", s.handleProMatchHistory)
 			r.Get("/pro-matches/team/{teamId}", s.handleProTeam)

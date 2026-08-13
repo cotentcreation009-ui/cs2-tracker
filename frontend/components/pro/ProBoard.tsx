@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { MatchState, ProMatchesResponse } from "./types";
 import { usePoll, useNow } from "./usePoll";
 import { agoShort } from "./format";
@@ -10,6 +10,8 @@ import { ResultRow } from "./ResultRow";
 
 const POLL_MS = 10_000;
 
+type EventGroup = { label: string; logo?: string; items: MatchState[] };
+
 export function ProBoard() {
   // include=finished: recently finished series (kept ~48h server-side) power
   // the Recent results section — without it results simply vanish off the site
@@ -18,6 +20,9 @@ export function ProBoard() {
     POLL_MS,
   );
   const now = useNow(1000);
+  // event filter for the upcoming section — the label, not an index, because
+  // the feed re-groups every poll
+  const [pickedEvent, setPickedEvent] = useState<string | null>(null);
 
   const { live, upcomingGroups, finished } = useMemo(() => {
     const matches = data?.matches ?? [];
@@ -39,7 +44,7 @@ export function ProBoard() {
       );
     // group upcoming by EVENT; events ordered by their earliest match,
     // matches inside each event stay in time order
-    const byEvent = new Map<string, { label: string; logo?: string; items: MatchState[] }>();
+    const byEvent = new Map<string, EventGroup>();
     for (const m of upcoming) {
       const label = m.tournamentName || "Other matches";
       const g = byEvent.get(label);
@@ -52,6 +57,16 @@ export function ProBoard() {
     }
     return { live, upcomingGroups: [...byEvent.values()], finished };
   }, [data]);
+
+  // Resolve the pick against the CURRENT groups every render: once an event's
+  // last match starts or finishes it leaves the upcoming feed, and a stale pick
+  // would otherwise filter the section down to nothing. Absent label = show all.
+  const activeEvent =
+    pickedEvent && upcomingGroups.some((g) => g.label === pickedEvent) ? pickedEvent : null;
+  const shownGroups = activeEvent
+    ? upcomingGroups.filter((g) => g.label === activeEvent)
+    : upcomingGroups;
+  const upcomingTotal = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
 
   return (
     <div className="space-y-8">
@@ -85,9 +100,20 @@ export function ProBoard() {
 
           {upcomingGroups.length > 0 && (
             <section className="space-y-3">
-              <SectionHeading label="Upcoming · by event" />
+              <SectionHeading label={activeEvent ?? "Upcoming · by event"} />
+              {/* one event = nothing to choose between, so the row stays hidden */}
+              {upcomingGroups.length > 1 && (
+                <EventFilter
+                  groups={upcomingGroups}
+                  total={upcomingTotal}
+                  active={activeEvent}
+                  onPick={(label) =>
+                    setPickedEvent((cur) => (cur === label ? null : label))
+                  }
+                />
+              )}
               <div className="space-y-6">
-                {upcomingGroups.map((g) => (
+                {shownGroups.map((g) => (
                   <div key={g.label} className="space-y-2">
                     <div className="flex items-center gap-2 border-b border-line/50 pb-1.5">
                       {g.logo ? (
@@ -193,6 +219,69 @@ function SectionHeading({
           {count}
         </span>
       ) : null}
+    </div>
+  );
+}
+
+// Event picker for the upcoming section: one tap narrows the schedule to a
+// single tournament, tapping the live chip again (or "All events") widens back.
+function EventFilter({
+  groups,
+  total,
+  active,
+  onPick,
+}: {
+  groups: EventGroup[];
+  total: number;
+  active: string | null;
+  onPick: (label: string | null) => void;
+}) {
+  const base =
+    "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors";
+  const on = "border-brand bg-brand/15 font-bold text-ink";
+  const off =
+    "border-line bg-panel/70 font-medium text-muted hover:border-line2 hover:text-ink";
+  const badge = "rounded-full px-1.5 text-[10px] font-semibold tabular-nums";
+
+  return (
+    <div
+      role="group"
+      aria-label="Filter upcoming matches by event"
+      className="scroll-slim flex items-center gap-2 overflow-x-auto pb-1"
+    >
+      <button
+        type="button"
+        onClick={() => onPick(null)}
+        aria-pressed={active === null}
+        className={`${base} ${active === null ? on : off}`}
+      >
+        All events
+        <span className={`${badge} ${active === null ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
+          {total}
+        </span>
+      </button>
+      {groups.map((g) => {
+        const picked = active === g.label;
+        return (
+          <button
+            key={g.label}
+            type="button"
+            onClick={() => onPick(g.label)}
+            aria-pressed={picked}
+            title={g.label}
+            className={`${base} ${picked ? on : off}`}
+          >
+            {g.logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={g.logo} alt="" loading="lazy" className="h-4 w-4 shrink-0 rounded object-contain" />
+            ) : null}
+            <span className="max-w-56 truncate">{g.label}</span>
+            <span className={`${badge} ${picked ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
+              {g.items.length}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
