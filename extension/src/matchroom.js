@@ -126,13 +126,23 @@
     for (const r of rows) {
       const key = String(r.map || "").trim().toLowerCase();
       if (!key) continue;
-      const e = agg.get(key) || { n: 0, w: 0, kills: 0, deaths: 0, kn: 0 };
+      const e = agg.get(key) || { n: 0, w: 0, kills: 0, deaths: 0, kn: 0, lastAt: 0, net: 0, netN: 0 };
       e.n += 1;
       if (winOf(r)) e.w += 1;
       if (typeof r.kills === "number") {
         e.kills += r.kills;
         e.deaths += typeof r.deaths === "number" ? r.deaths : 0;
         e.kn += 1;
+      }
+      // How current the read is, and what the map has actually cost them.
+      // Both come free from rows we already hold, and neither is anywhere on
+      // FACEIT's own page: a 60% win rate nobody has touched in two months is
+      // a different fact from a 60% they posted last night.
+      const t = r.date instanceof Date ? r.date.getTime() : NaN;
+      if (isFinite(t) && t > e.lastAt) e.lastAt = t;
+      if (typeof r.delta === "number" && isFinite(r.delta)) {
+        e.net += r.delta;
+        e.netN += 1;
       }
       agg.set(key, e);
     }
@@ -562,6 +572,16 @@
   const LBL_R = 1.24;
 
   // total is the team's whole sample, so "pick" can be a share of it
+  // How long ago, in the shortest honest unit.
+  function agoShort(ts) {
+    if (!ts) return null;
+    const sec = Math.max(0, (Date.now() - ts) / 1000);
+    if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + "m";
+    if (sec < 86400) return Math.round(sec / 3600) + "h";
+    if (sec < 86400 * 30) return Math.round(sec / 86400) + "d";
+    return Math.round(sec / (86400 * 30)) + "mo";
+  }
+
   function metricOf(e, metric, total) {
     if (!e || !e.n) return null;
     if (metric === "kills") return e.kn ? e.kills / e.kn : null;
@@ -665,11 +685,116 @@
     };
     legend.append(lg(teamA, "a"), lg(teamB, "b"));
 
+    // ---- the read ----
+    // Everything below this line is numbers; this is the conclusion. A veto
+    // is a decision, and the panel should make it rather than leaving ten
+    // rows of percentages for the reader to diff in their head.
+    const MIN_READ = 3; // matches per side before a map is worth a verdict
+    const READ_EDGE = 8; // win-rate points below which nobody has an edge
+
+    function buildRead() {
+      const wr = (e) => (e && e.n ? (e.w / e.n) * 100 : null);
+      const scored = maps
+        .filter((m) => m.a.n >= MIN_READ && m.b.n >= MIN_READ)
+        .map((m) => ({ key: m.key, a: m.a, b: m.b, wrA: wr(m.a), wrB: wr(m.b) }))
+        .map((x) => Object.assign(x, { edge: x.wrA - x.wrB }));
+      if (!scored.length) return null;
+      const byEdge = [...scored].sort((x, y) => y.edge - x.edge);
+      const best = byEdge[0];
+      const worst = byEdge[byEdge.length - 1];
+      const level = [...scored].sort((x, y) => Math.abs(x.edge) - Math.abs(y.edge))[0];
+      return {
+        pick: best.edge >= READ_EDGE ? best : null,
+        ban: worst.edge <= -READ_EDGE ? worst : null,
+        level: level,
+        // A pool map absent from a roster's last thirty is their de-facto
+        // permaban, and knowing it before the veto starts is worth more than
+        // any percentage on the chart.
+        never: unplayed.filter((u) => u.side === "b").map((u) => u.key),
+      };
+    }
+
+    function readCard(kind, label, mapKey, lineNodes, title) {
+      const c = el("button", "sr-mr-readcard sr-mr-readcard--" + kind);
+      c.type = "button";
+      c.append(el("span", "sr-mr-readk", label));
+      c.append(el("span", "sr-mr-readmap", mapKey ? mapLabel(mapKey) : "—"));
+      const why = el("span", "sr-mr-readwhy");
+      for (const n of lineNodes) why.append(n);
+      c.append(why);
+      if (title) c.title = title;
+      if (mapKey) {
+        // The verdict is also a control: click it and the whole panel — chart,
+        // table and every player strip below — retunes to that map.
+        c.addEventListener("mouseenter", () => setHot(mapKey));
+        c.addEventListener("mouseleave", () => setHot(pinned));
+        c.addEventListener("click", () => {
+          pinned = pinned === mapKey ? null : mapKey;
+          setHot(pinned);
+          applyHot();
+          announce(pinned);
+        });
+      } else {
+        c.disabled = true;
+      }
+      return c;
+    }
+
+    function drawRead(box) {
+      box.textContent = "";
+      const r = buildRead();
+      if (!r) {
+        box.classList.add("sr-mr-read--empty");
+        box.append(el("span", "sr-label", "Not enough shared history for a call"));
+        return;
+      }
+      box.classList.remove("sr-mr-read--empty");
+      const pct = (v) => Math.round(v) + "%";
+      const num = (cls, txt) => el("span", cls, txt);
+
+      if (r.pick) {
+        box.append(readCard("pick", "Your best map", r.pick.key, [
+          num("sr-mr-vxv--a", pct(r.pick.wrA)),
+          num("sr-mr-readvs", " vs "),
+          num("sr-mr-vxv--b", pct(r.pick.wrB)),
+          num("sr-mr-readgap sr-mr-readgap--up", "+" + Math.round(r.pick.edge)),
+        ], "Over their last matches on " + mapLabel(r.pick.key) + ", " + shortName(teamA) +
+          " won " + pct(r.pick.wrA) + " and " + shortName(teamB) + " won " + pct(r.pick.wrB)));
+      } else {
+        box.append(readCard("pick", "Your best map", null, [num("sr-label", "no clear edge")], null));
+      }
+
+      if (r.ban) {
+        box.append(readCard("ban", "Ban this", r.ban.key, [
+          num("sr-mr-vxv--a", pct(r.ban.wrA)),
+          num("sr-mr-readvs", " vs "),
+          num("sr-mr-vxv--b", pct(r.ban.wrB)),
+          num("sr-mr-readgap sr-mr-readgap--down", Math.round(r.ban.edge)),
+        ], shortName(teamB) + " are the stronger side on " + mapLabel(r.ban.key)));
+      } else {
+        box.append(readCard("ban", "Ban this", null, [num("sr-label", "nothing scary")], null));
+      }
+
+      if (r.never.length) {
+        box.append(readCard("never", "They avoid", r.never[0], [
+          num("sr-label", r.never.length > 1 ? "and " + (r.never.length - 1) + " more" : "not in their last 30"),
+        ], "A pool map absent from " + shortName(teamB) + "'s recent history — their de-facto permaban"));
+      } else {
+        box.append(readCard("level", "Closest map", r.level.key, [
+          num("sr-mr-vxv--a", pct(r.level.wrA)),
+          num("sr-mr-readvs", " vs "),
+          num("sr-mr-vxv--b", pct(r.level.wrB)),
+          num("sr-mr-readgap", "even"),
+        ], "The map neither side owns — decided on the day"));
+      }
+    }
+
+    const read = el("div", "sr-mr-read");
     const holder = el("div", "sr-mr-radar");
     const side = el("div", "sr-mr-side");
     const body = el("div", "sr-mr-rbody");
     body.append(holder, side);
-    panel.append(head, legend, body);
+    panel.append(head, legend, read, body);
 
     // Nothing to say at all. Saying so is the point: an empty panel with a
     // heading and a footer reads as broken, and this panel HAS shipped looking
@@ -706,6 +831,7 @@
     if (maps.length < 3) {
       holder.remove();
       side.classList.add("sr-mr-side--wide");
+      drawRead(read);
       drawTable(side);
       return panel;
     }
@@ -938,6 +1064,9 @@
         btns[m.key] = h;
         head2.append(h);
       }
+      const lastHead = el("span", "sr-label sr-mr-tlast", "Last");
+      lastHead.title = "How long ago each team last played this map";
+      head2.append(lastHead);
       head2.append(el("span", "sr-label sr-mr-tgap", "Edge"));
       box.append(head2);
 
@@ -968,6 +1097,16 @@
         const name = el("span", "sr-mr-tmap", mapLabel(r.key));
         if (!r.a || !r.a.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--b", "new to " + shortName(teamA)));
         else if (!r.b || !r.b.n) name.append(el("span", "sr-mr-tnever sr-mr-vxv--a", "new to " + shortName(teamB)));
+        else {
+          // The sample behind the row, stated where the row is read. A 60%
+          // off four games and a 60% off forty are not the same claim, and
+          // until now that number only existed out on the chart's vertices.
+          const nA = (r.a && r.a.n) || 0;
+          const nB = (r.b && r.b.n) || 0;
+          const cnt = el("span", "sr-mr-tn", nA + " v " + nB);
+          if (Math.min(nA, nB) < MIN_READ) cnt.classList.add("sr-mr-tn--thin");
+          name.append(cnt);
+        }
         row.append(name);
 
         // One cell per metric, both teams stacked inside it. The leader's
@@ -993,13 +1132,27 @@
           row.append(cell);
         }
 
+        // How current each side's read is.
+        const lastBox = el("span", "sr-mr-tlast");
+        const la = agoShort(r.a && r.a.lastAt);
+        const lb = agoShort(r.b && r.b.lastAt);
+        lastBox.append(
+          el("span", "sr-mr-tnum sr-mr-vxv--a" + (la ? "" : " sr-mr-dash"), la || "—"),
+          el("span", "sr-mr-tnum sr-mr-vxv--b" + (lb ? "" : " sr-mr-dash"), lb || "—"),
+        );
+        lastBox.title =
+          "Last played — " + shortName(teamA) + ": " + (la || "not recently") +
+          " ago, " + shortName(teamB) + ": " + (lb || "not recently") + " ago";
+        row.append(lastBox);
+
         const gapBox = el("span", "sr-mr-tgap");
         if (r.gap != null) {
+          // Diverging from a centre line, so which side is ahead is a
+          // direction rather than a colour you have to decode.
           const bar = el("span", "sr-mr-etrack");
+          bar.append(el("span", "sr-mr-emid"));
           const fill = el("span", "sr-mr-efill sr-mr-efill--" + (r.gap >= 0 ? "a" : "b"));
-          const w = Math.max(6, Math.round((Math.abs(r.gap) / worst) * 100));
-          // start at zero and let the bar's own transition carry it in; the
-          // double rAF guarantees a painted zero-width frame first
+          const w = Math.max(4, Math.round((Math.abs(r.gap) / worst) * 50));
           fill.style.width = "0%";
           requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = w + "%"; }));
           bar.append(fill);
@@ -1027,14 +1180,19 @@
         box.append(row);
       }
 
-      if (unplayed.length) {
+      // The "they avoid" verdict card already names the first of these, so
+      // repeating it verbatim below the table read as the panel saying the
+      // same thing twice.
+      const shownOnCard = (buildRead() || {}).never || [];
+      const restUnplayed = unplayed.filter((u) => !(u.side === "b" && u.key === shownOnCard[0]));
+      if (restUnplayed.length) {
         const note = el("div", "sr-mr-tnote");
         note.append(el("span", "sr-label", "Never played"));
         note.append(
           el(
             "span",
             null,
-            unplayed
+            restUnplayed
               .slice(0, 3)
               .map((u) => mapLabel(u.key) + " (" + shortName(u.side === "a" ? teamA : teamB) + ")")
               .join(" · "),
@@ -1135,6 +1293,7 @@
     }
 
     draw();
+    drawRead(read);
     drawTable(side);
     applyHot();
     return panel;

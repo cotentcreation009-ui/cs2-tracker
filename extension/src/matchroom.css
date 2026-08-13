@@ -483,6 +483,9 @@
 .sr-mr-tbtn--on { background: var(--sr-line); color: var(--sr-ink); }
 .sr-mr-tbtn:focus-visible { outline: 2px solid var(--sr-brand); outline-offset: 1px; }
 
+.sr-mr-rhead,
+.sr-mr-legend { max-width: 1180px; margin-left: auto; margin-right: auto; width: 100%; }
+
 .sr-mr-legend {
   display: flex;
   flex-wrap: wrap;
@@ -513,7 +516,14 @@
   /* The chart is bounded — it has an intrinsic best size and gains nothing
      from more room, so the table takes every spare pixel instead of the
      chart column banking it as empty space. */
-  grid-template-columns: minmax(280px, 520px) minmax(300px, 600px);
+  /* The chart is square, so its column width sets the panel's height — 520px
+     of chart made a panel tall enough to push FACEIT's roster off the fold.
+     The table takes the rest rather than being capped, and the whole body is
+     centred: on an ultra-wide room the old fixed columns left the content
+     huddled in the middle of a very empty panel. */
+  grid-template-columns: minmax(260px, 430px) minmax(320px, 1fr);
+  max-width: 1180px;
+  margin: 0 auto;
   gap: 20px;
   align-items: center;
   padding: 4px 14px 14px;
@@ -522,7 +532,7 @@
 .sr-mr-radar {
   position: relative;
   width: 100%;
-  max-width: 520px;
+  max-width: 430px;
   margin: 0 auto;
   aspect-ratio: 1 / 1;
 }
@@ -556,6 +566,19 @@
   border-radius: 2px;
   transition: width 0.35s cubic-bezier(0.22, 0.9, 0.35, 1);
 }
+/* Diverging: both fills start at the centre line and grow outward, so the
+   direction of the bar IS the answer to "who is ahead". */
+.sr-mr-etrack { position: relative; }
+.sr-mr-emid {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--sr-line2);
+}
+.sr-mr-efill--a { position: absolute; left: 50%; top: 0; }
+.sr-mr-efill--b { position: absolute; right: 50%; top: 0; }
 .sr-mr-efill--a { background: linear-gradient(90deg, color-mix(in srgb, var(--sr-teamA) 55%, transparent), var(--sr-teamA)); }
 .sr-mr-efill--b { background: linear-gradient(90deg, color-mix(in srgb, var(--sr-teamB) 55%, transparent), var(--sr-teamB)); }
 .sr-mr-eamt {
@@ -572,7 +595,8 @@
    most redundant of them (its story is in the numbers), so it goes first. */
 @media (max-width: 560px) {
   .sr-mr-trow { grid-template-columns: minmax(0, 1fr) repeat(4, 46px); }
-  .sr-mr-trow .sr-mr-tgap { display: none; }
+  .sr-mr-trow .sr-mr-tgap,
+  .sr-mr-trow .sr-mr-tlast { display: none; }
 }
 .sr-mr-rsvg { display: block; width: 100%; height: 100%; overflow: visible; }
 
@@ -702,7 +726,7 @@
    whole comparison is readable without a single click. */
 .sr-mr-trow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(4, 54px) 60px;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 54px) 46px 84px;
   align-items: center;
   gap: 8px;
   min-height: 34px;
@@ -831,4 +855,117 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .sr-mr { animation: none; }
+}
+
+/* ---- the read ----------------------------------------------------------- */
+/* The conclusion, stated before the evidence. Three verdicts across the full
+   width of the panel — which map to take, which to ban, and the one nobody
+   owns — each of them also a control that retunes the whole panel. */
+.sr-mr-read {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 14px 2px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.sr-mr-read--empty {
+  display: block;
+  padding: 6px 14px 2px;
+}
+.sr-mr-readcard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 12px 10px;
+  border: 1px solid var(--sr-line);
+  border-left-width: 3px;
+  border-radius: var(--sr-r-card, 10px);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--sr-ink) 4%, transparent), transparent 70%),
+    var(--sr-panel2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
+}
+.sr-mr-readcard:hover:not(:disabled),
+.sr-mr-readcard:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 14px rgb(0 0 0 / 0.35);
+}
+.sr-mr-readcard:focus-visible { outline: 2px solid var(--sr-brand); outline-offset: 2px; }
+.sr-mr-readcard:disabled { cursor: default; opacity: 0.55; }
+.sr-mr-readcard--pick { border-left-color: var(--sr-good); }
+.sr-mr-readcard--ban { border-left-color: var(--sr-bad); }
+.sr-mr-readcard--never { border-left-color: var(--sr-brand); }
+.sr-mr-readcard--level { border-left-color: var(--sr-line2); }
+.sr-mr-readk {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--sr-faint);
+}
+.sr-mr-readmap {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--sr-ink);
+  line-height: 1.15;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sr-mr-readwhy {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--sr-muted);
+  white-space: nowrap;
+}
+.sr-mr-readvs { color: var(--sr-faint); }
+.sr-mr-readgap {
+  font-weight: 700;
+  color: var(--sr-faint);
+}
+.sr-mr-readgap--up { color: var(--sr-good); }
+.sr-mr-readgap--down { color: var(--sr-bad); }
+
+/* the sample behind a row, and how current it is */
+.sr-mr-tn {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--sr-faint);
+  font-variant-numeric: tabular-nums;
+}
+.sr-mr-tn--thin { color: var(--sr-bad); opacity: 0.75; }
+.sr-mr-tlast {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+}
+.sr-mr-tlast .sr-mr-tnum { font-size: 10px; line-height: 1.25; opacity: 0.72; }
+
+/* Alternating tint: at ten rows of dense numbers the eye needs a rail to
+   track along, and this is quieter than a rule between every row. */
+.sr-mr-trow:not(.sr-mr-trow--head):nth-child(even) {
+  background: color-mix(in srgb, var(--sr-ink) 2.5%, transparent);
+}
+
+@media (max-width: 900px) {
+  .sr-mr-read { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sr-mr-readcard { transition: none; }
+  .sr-mr-readcard:hover:not(:disabled) { transform: none; }
 }
