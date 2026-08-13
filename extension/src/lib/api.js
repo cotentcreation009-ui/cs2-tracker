@@ -406,12 +406,25 @@
       if (a.offsetParent === null || ourNode(a)) continue;
       if ((a.textContent || "").trim().toLowerCase() === want) out.push(a);
     }
-    if (out.length) return out;
+    if (out.length) return innermost(out);
     for (const n of document.querySelectorAll("span,div,p,h1,h2,h3,h4,strong,b,a")) {
       if (n.children.length > 2 || n.offsetParent === null || ourNode(n)) continue;
       if ((n.textContent || "").trim().toLowerCase() === want) out.push(n);
     }
-    return out;
+    return innermost(out);
+  }
+
+  // A name is wrapped several layers deep, and EVERY layer's text is just the
+  // name, so one nickname matches five nested elements. Measured on a live
+  // room: div.List > div.styles > div.styles > div.Nickname > div.Text, all
+  // reporting the same nickname at the same position. Document order returns
+  // the OUTERMOST of those, which is the least specific node there is — and,
+  // worse, it left every nickname looking ambiguous, so the group resolution
+  // below had no unambiguous names to take its bearings from. Keep only the
+  // candidates that contain no other candidate.
+  function innermost(list) {
+    if (list.length < 2) return list;
+    return list.filter((n) => !list.some((o) => o !== n && n.contains(o)));
   }
 
   function nodeForNick(nick) {
