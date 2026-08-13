@@ -48,7 +48,7 @@
 
   // id: room currently owned; gen: cancels stale async work; dead: room render
   // failed or was gated off — don't retry until the route actually changes.
-  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0, needsHost: false, hostTries: 0 };
+  const state = { id: null, gen: 0, dead: false, deadUntil: 0, tries: 0, needsHost: false, hostTries: 0, mount: null, nicks: null };
 
   // ---- tiny DOM/format helpers (nicknames & team names are untrusted) -----
 
@@ -1365,6 +1365,7 @@
       return;
     }
     state.needsHost = false;
+    state.mount = mount;
     renderSkeleton(mount);
 
     let room = null;
@@ -1406,6 +1407,7 @@
     const nicks = [...(ta.roster || []), ...(tb.roster || [])]
       .map((m) => m && m.nick)
       .filter(Boolean);
+    state.nicks = nicks; // remembered so a re-homed panel can walk back
     if (!placeByRoster(mount, nicks)) {
       for (const wait of [600, 1800, 4000]) {
         setTimeout(() => {
@@ -1536,6 +1538,8 @@
   }
 
   function leave() {
+    state.mount = null;
+    state.nicks = null;
     state.gen += 1; // cancels all in-flight fills
     state.id = null;
     state.dead = false;
@@ -1603,10 +1607,40 @@
     }, 350); // debounce SPA churn (contract: ≥300ms)
   }
 
+  // FACEIT's live rooms tear their own DOM down and rebuild it repeatedly —
+  // David's console shows a dozen "channel N closed by server" in a few
+  // seconds, and every one of them takes our panel with it. Rebuilding from
+  // scratch means re-running the whole render (and blanking the panel for the
+  // gap), so put the SAME node back, synchronously, in the observer callback:
+  // the browser runs these before it paints, so nothing is ever seen missing.
+  function panelRemoved(records) {
+    for (const r of records) {
+      for (const n of r.removedNodes) {
+        if (n.nodeType !== 1) continue;
+        if (n.id === MOUNT_ID || (n.querySelector && n.querySelector("#" + MOUNT_ID))) return true;
+      }
+    }
+    return false;
+  }
+
+  function rehomePanel() {
+    const m = state.mount;
+    if (!m || m.isConnected || !currentRoomId()) return;
+    const host = hostEl();
+    if (!host) return;
+    const anchor = host.firstElementChild;
+    if (anchor) host.insertBefore(m, anchor);
+    else host.appendChild(m);
+    if (state.nicks && state.nicks.length) placeByRoster(m, state.nicks);
+  }
+
   function init() {
     console.info("[CSRun] matchroom active");
     route();
-    const obs = new MutationObserver(schedule);
+    const obs = new MutationObserver((records) => {
+      if (panelRemoved(records)) rehomePanel(); // before the frame paints
+      schedule();
+    });
     obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
     window.addEventListener("hashchange", schedule);

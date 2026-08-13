@@ -173,6 +173,11 @@
   const stripCard = new WeakMap();
   // strip -> the undo that restores FACEIT's card exactly as we found it.
   const stripUndo = new WeakMap();
+  // nick -> strip, INCLUDING strips FACEIT has detached. A re-render wipes the
+  // roster wholesale, so document.querySelector can no longer see the strip we
+  // built a second ago; without this the node is unreachable and the only
+  // option is to build a new one, blank, from scratch.
+  const byNick = new Map();
 
   // Remove a strip the way it was added: styles first, then the node.
   function dropStrip(strip) {
@@ -816,8 +821,12 @@
     // the SPA re-renders, and without this each pass added another copy.
     // A strip whose card React has since replaced is an orphan, though — it
     // would otherwise block its own replacement and sit there stale for ever.
-    const existing = document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]');
+    const existing =
+      document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]') ||
+      byNick.get(nick) ||
+      null;
     let reuse = null;
+    let carry = null; // a finished strip whose host card FACEIT just replaced
     if (existing) {
       if (existing.isConnected && anchored(existing)) {
         // Answered already — nothing to do, and this early return is what
@@ -829,6 +838,26 @@
         // an empty shell for the life of the page and only a reload fixed it —
         // "the stats never show up". Keep the node, redo the data.
         reuse = existing;
+      } else if (existing.hasAttribute("data-sr-filled")) {
+        // Orphaned by one of FACEIT's own re-renders — which its live rooms do
+        // constantly (David's console: "channel 16 closed by server" over and
+        // over, each one replacing the roster). The numbers on this strip are
+        // still true, so carrying the node to the card that replaced its host
+        // is both cheaper and, more to the point, INVISIBLE: rebuilding from
+        // scratch blanked the whole roster for a beat every time, which is
+        // what the flicker was.
+        carry = existing;
+        const undoOld = stripUndo.get(existing);
+        if (undoOld) {
+          undoOld(); // restores the old card and detaches the node, intact
+          stripUndo.delete(existing);
+          const i = state.undos.indexOf(undoOld);
+          if (i >= 0) state.undos.splice(i, 1);
+        } else {
+          existing.remove();
+        }
+        resettle.delete(existing);
+        settle.delete(existing);
       } else {
         // Run the placement's own undo rather than yanking the node:
         // placeInside writes position/padding onto FACEIT's card, and a bare
@@ -846,9 +875,10 @@
     const card = cardFor(nameNode, all);
     if (!card) return;
 
-    const strip = reuse || el("div", "sr-reset sr-in");
+    const strip = reuse || carry || el("div", "sr-reset sr-in");
     strip.setAttribute(MARK, "1");
     strip.setAttribute(OWNER, nick);
+    byNick.set(nick, strip);
 
     // Draw immediately from the roster — level and elo arrive with the match
     // payload, so there is no reason to show a spinner for them. Anything
@@ -857,6 +887,14 @@
     // Filled BEFORE attaching so the layout check below measures real content
     // and the strip's real height, not an empty box.
     const cardW = state.cardW || card.getBoundingClientRect().width;
+    if (carry) {
+      // Same node, new host. It keeps its numbers and its filled mark, so the
+      // roster never shows a gap; if the new card refuses it we fall back to
+      // building fresh below rather than leaving the player bare.
+      if (attach(card, strip)) return;
+      strip.removeAttribute("data-sr-filled");
+      carry = null;
+    }
     if (!reuse) {
       fillStrip(strip, p, null, null, true, cardW);
       strip.removeAttribute("data-sr-filled");
@@ -945,6 +983,7 @@
   }
 
   function clearAll() {
+    byNick.clear();
     // Restore first — each undo removes its own strip AND unwinds the inline
     // styles we put on FACEIT's card.
     const undos = state.undos;
@@ -1195,12 +1234,73 @@
     if (id) void run(id);
   }
 
-  function schedule() {
+  let fastPending = false;
+
+  // Two cadences. The debounce is right for "the page changed somehow" — it
+  // absorbs FACEIT's churn. But when the change is FACEIT deleting our own
+  // strips, the roster is undressed RIGHT NOW and waiting 400ms to notice is
+  // the flicker itself. tick() is idempotent, so a second, faster timer is
+  // safe: re-attaching our own nodes produces only our own mutations, which
+  // foreign() ignores, so this cannot feed itself.
+  function schedule(fast) {
+    if (fast === true) {
+      if (fastPending) return;
+      fastPending = true;
+      setTimeout(() => {
+        fastPending = false;
+        tick();
+      }, 40);
+      return;
+    }
     if (state.timer) return;
     state.timer = setTimeout(() => {
       state.timer = null;
       tick();
     }, DEBOUNCE_MS);
+  }
+
+  // Put detached strips back on the cards that replaced their hosts, NOW —
+  // synchronously, inside the observer callback, which the browser runs before
+  // it paints the next frame. A timer cannot do this: however short, it lets
+  // at least one frame render with the roster undressed, and that frame is the
+  // flicker. No network, no rebuild — the same nodes, still holding the same
+  // numbers, moved to their new homes.
+  function rehomeDetached() {
+    const dom = window.SRDom;
+    if (!dom || !byNick.size) return;
+    const orphans = [];
+    for (const [nick, strip] of byNick) {
+      if (!strip.isConnected) orphans.push([nick, strip]);
+    }
+    if (!orphans.length) return;
+    const nodes = dom.nameNodes([...byNick.keys()]);
+    if (!nodes || !nodes.size) return;
+    const all = [...nodes.values()];
+    for (const [nick, strip] of orphans) {
+      const node = nodes.get(nick);
+      if (!node) continue;
+      const card = dom.cardFor(node, all);
+      if (!card) continue;
+      const undoOld = stripUndo.get(strip);
+      if (undoOld) {
+        stripUndo.delete(strip);
+        const i = state.undos.indexOf(undoOld);
+        if (i >= 0) state.undos.splice(i, 1);
+      }
+      resettle.delete(strip);
+      settle.delete(strip);
+      attach(card, strip); // re-registers undo, settle and the card bond
+    }
+  }
+
+  // Did this batch of mutations take one of OUR strips off the page?
+  function ourStripRemoved(records) {
+    for (const r of records) {
+      for (const n of r.removedNodes) {
+        if (n.nodeType === 1 && (n.hasAttribute?.(MARK) || n.querySelector?.("[" + MARK + "]"))) return true;
+      }
+    }
+    return false;
   }
 
   // Our own strips are DOM mutations. Reacting to them re-scans the page for
@@ -1258,7 +1358,12 @@
       schedule();
     }, 5000);
     state.obs = new MutationObserver((records) => {
-      if (foreign(records)) schedule();
+      if (roomId() && ourStripRemoved(records)) {
+        rehomeDetached(); // before the frame paints
+        schedule(true); // then a normal pass to top up anything still missing
+      } else if (foreign(records)) {
+        schedule();
+      }
     });
     state.obs.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("popstate", schedule);
