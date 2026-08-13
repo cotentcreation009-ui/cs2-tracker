@@ -18,6 +18,7 @@ import { LiveTrendChart } from "@/components/LiveTrendChart";
 import { WeaponStats } from "@/components/WeaponStats";
 import { MapStats } from "@/components/MapStats";
 import { LeetifyPanel } from "@/components/LeetifyPanel";
+import { GuideLinks } from "@/components/GuideLinks";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { FriendsPanel } from "@/components/FriendsPanel";
 import { InventoryPanel } from "@/components/InventoryPanel";
@@ -474,6 +475,10 @@ export function ProfileView({
       )}
         </>
       )}
+
+      {/* Reader-facing glossary, and the shortest path a crawler has from the
+          site's most-visited pages to the writing. */}
+      <GuideLinks name={player.personaName || undefined} />
 
     </div>
   );
