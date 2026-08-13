@@ -47,7 +47,7 @@
   // identity hues (cool + violet), which the band scale never uses.
   const PARTY_HEX = ["var(--sr-party-1)", "var(--sr-party-2)", "var(--sr-party-3)", "var(--sr-party-4)"];
 
-  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, selMap: null, cardW: null };
+  const state = { id: null, gen: 0, timer: null, obs: null, undos: [], party: new Map(), map: null, selMap: null, cardW: null, expect: 0, beats: 0, partyGen: -1, partyN: -1 };
   // strip -> redraw it with whatever is currently known. Party tags are worked
   // out after the strips are already on the page, so they need a way back in.
   const redraws = new WeakMap();
@@ -794,9 +794,21 @@
     // A strip whose card React has since replaced is an orphan, though — it
     // would otherwise block its own replacement and sit there stale for ever.
     const existing = document.querySelector('[' + OWNER + '="' + cssEscape(nick) + '"]');
+    let reuse = null;
     if (existing) {
-      if (existing.isConnected && anchored(existing)) return;
-      existing.remove();
+      if (existing.isConnected && anchored(existing)) {
+        // Answered already — nothing to do, and this early return is what
+        // keeps a settled room free.
+        if (existing.hasAttribute("data-sr-filled")) return;
+        // Attached but still holding placeholders: the data sweep that should
+        // have filled it failed (a throttle, a cold load, a dropped
+        // connection). This case used to return here too, so the strip stayed
+        // an empty shell for the life of the page and only a reload fixed it —
+        // "the stats never show up". Keep the node, redo the data.
+        reuse = existing;
+      } else {
+        existing.remove();
+      }
     }
 
     // A DOM-derived entry already carries the exact node it came from, which
@@ -807,7 +819,7 @@
     const card = cardFor(nameNode, all);
     if (!card) return;
 
-    const strip = el("div", "sr-reset sr-in");
+    const strip = reuse || el("div", "sr-reset sr-in");
     strip.setAttribute(MARK, "1");
     strip.setAttribute(OWNER, nick);
 
@@ -818,8 +830,11 @@
     // Filled BEFORE attaching so the layout check below measures real content
     // and the strip's real height, not an empty box.
     const cardW = state.cardW || card.getBoundingClientRect().width;
-    fillStrip(strip, p, null, null, true, cardW);
-    if (!attach(card, strip)) return;
+    if (!reuse) {
+      fillStrip(strip, p, null, null, true, cardW);
+      strip.removeAttribute("data-sr-filled");
+      if (!attach(card, strip)) return;
+    }
 
     const A = api();
     if (!A) return;
@@ -833,6 +848,11 @@
         // in hand — the strips retune to the selected map for free.
         const mapForm = histRows ? computeMapForm(histRows, state.selMap || state.map) : null;
         fillStrip(strip, p, form, cm, false, state.cardW || card.getBoundingClientRect().width, mapForm);
+        // Attached is not the same as answered. A strip left holding
+        // placeholders after a failed sweep used to satisfy the heartbeat's
+        // "is the roster dressed" test, so a room that came up blank under a
+        // throttle stayed blank until the user reloaded.
+        if (form || cm) strip.setAttribute("data-sr-filled", "1");
         // The strip just changed size. Re-reserve the room it needs and
         // re-check that it still disturbs nothing.
         const s = settle.get(strip);
@@ -928,10 +948,15 @@
     // reliable source: every player on it links to their own profile, and the
     // nickname lookup fills in everything the match payload would have.
     if (!roster.length) roster = domRoster();
+    // MAX_ROSTER guarded only the DOM path; a hub or championship room can
+    // hand us far more players through the API, multiplying every per-player
+    // lookup below by whatever FACEIT decided to send.
+    if (roster.length > MAX_ROSTER) roster = roster.slice(0, MAX_ROSTER);
 
     // One line whenever the picture changes — the breadcrumb trail for "the
     // strips didn't show up": which source produced the roster, and whether
     // the page has painted it yet.
+    state.expect = roster.length; // what "fully dressed" means for this room
     const dressed = new Set(
       [...document.querySelectorAll("[" + OWNER + "]")].map((n) => n.getAttribute(OWNER)),
     );
@@ -971,7 +996,17 @@
     for (const p of roster) {
       void decorate(Object.assign({}, p, { node: p.node || nodes.get(p.nick) || null }), gen, all);
     }
-    void detectParties(roster, gen);
+    // ONCE per room, not once per scan. decorate() returns early for a strip
+    // that is already attached, so in steady state it costs nothing — but
+    // detectParties had no such guard and re-asked for every player's history
+    // on every pass. Cached answers made that free; a throttled or failing
+    // FACEIT made it the single largest source of requests in the package.
+    // A growing roster (players joining a lobby) still earns a re-run.
+    if (state.partyGen !== gen || state.partyN !== roster.length) {
+      state.partyGen = gen;
+      state.partyN = roster.length;
+      void detectParties(roster, gen);
+    }
   }
 
   // ---- who is queuing together --------------------------------------------
@@ -1103,6 +1138,8 @@
       state.id = id;
       state.gen += 1;
       state.selMap = null; // a selection belongs to the room it was made in
+      state.expect = 0;
+      state.beats = 0; // a new room earns a fresh minute of self-healing
       clearAll();
     }
     if (id) void run(id);
@@ -1125,9 +1162,11 @@
         if (n.nodeType === 1 && !isOurs(n)) return true;
       }
       for (const n of r.removedNodes) {
-        // Removing our own strip fired the observer that scheduled the scan
-        // that rebuilt the strip — the other half of the rebuild loop.
-        if (n.nodeType !== 1 || !isOurs(n)) return true;
+        // Mirror of the addedNodes test above. Counting non-elements here
+        // meant every replaced TEXT node — the veto countdown, the ready
+        // timer, chat, connection state — read as a page change, so the scan
+        // ran at the debounce floor instead of when something actually moved.
+        if (n.nodeType === 1 && !isOurs(n)) return true;
       }
     }
     return false;
@@ -1142,8 +1181,23 @@
     // heartbeat bounds the damage: on a room URL the page re-scans within
     // five seconds no matter what. decorate() is idempotent, so a scan of an
     // already-dressed room costs one querySelector pass and changes nothing.
+    // BOUNDED. An unconditional five-second tick is a polling loop wearing a
+    // safety-net costume: it kept working the page (and, through the api
+    // layer's short failure window, the network) for as long as the tab
+    // lived. It now only fires while the roster is still undressed, and only
+    // for the first minute in a room — long enough to cover a missed wake-up,
+    // short enough that a settled or genuinely empty room goes quiet.
     setInterval(() => {
-      if (roomId()) schedule();
+      if (!roomId()) return;
+      // Silent by design (FACEIT asked us to back off): wait without spending
+      // an attempt, so the budget is intact when it starts answering again.
+      const A = api();
+      if (A && typeof A.paused === "function" && A.paused()) return;
+      const filled = document.querySelectorAll("[data-sr-filled]").length;
+      if (state.expect > 0 && filled >= state.expect) return; // nothing owed
+      if (state.beats >= 12) return; // ~1 minute, then trust the observer
+      state.beats += 1;
+      schedule();
     }, 5000);
     state.obs = new MutationObserver((records) => {
       if (foreign(records)) schedule();

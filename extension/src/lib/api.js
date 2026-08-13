@@ -40,6 +40,48 @@
   // first retry (matchroom at 8s, steam at 9s) reaches the network.
   const NEG_TTL_MS = 8 * 1000;
 
+  // "The server answered, and the answer is no." Returned by srFetch for a
+  // definite 4xx — the request was delivered and understood, so asking again
+  // in eight seconds cannot change the answer. Collapsing this into the same
+  // null as a dropped connection is what turned every Matchmaking room (whose
+  // id is not a FACEIT match, so /api/match/v2 404s) into a permanent poll:
+  // failure cached 8s, heartbeat every 5s, a request every ~8s for as long as
+  // the tab stayed open. FACEIT rate-limited the user's own session for it.
+  const ABSENT = { srAbsent: true };
+
+  // When FACEIT says 429 it is asking us to stop, and the only correct answer
+  // is to stop asking — all of it, not just the key that was refused. Without
+  // this, a throttle dropped every cached key into its short retry window at
+  // once and the package kept hammering a server already saying no, which is
+  // how a transient limit becomes an "Action failed" dialog on the user's own
+  // clicks. First refusal costs 15 seconds and each further round doubles it;
+  // any served response clears it.
+  const PAUSE_MIN_MS = 15 * 1000;
+  // A minute, not five. The ceiling is also the worst-case time a user sits
+  // looking at a blank room after FACEIT relents, and minutes of blank is the
+  // very complaint this whole thread is about. One roster-sized burst per
+  // minute is already a negligible load to put on them.
+  const PAUSE_MAX_MS = 60 * 1000;
+  let pausedUntil = 0;
+  let pauseStep = 0;
+
+  function throttled() {
+    return Date.now() < pausedUntil;
+  }
+  function noteRefused() {
+    // A roster asks for ten players at once, so one refusal arrives as ten.
+    // Escalating per RESPONSE took the backoff straight to its five-minute
+    // ceiling on the first burst and left the extension mute long after
+    // FACEIT had relented. One round of refusals is one event.
+    if (throttled()) return;
+    pauseStep = pauseStep ? Math.min(pauseStep * 2, PAUSE_MAX_MS) : PAUSE_MIN_MS;
+    pausedUntil = Date.now() + pauseStep;
+  }
+  function noteServed() {
+    pauseStep = 0;
+    pausedUntil = 0;
+  }
+
   function cached(key, make) {
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < (hit.neg ? NEG_TTL_MS : TTL_MS)) return hit.promise;
@@ -48,6 +90,15 @@
       .then(make)
       .catch(() => null) // the data layer never throws
       .then((v) => {
+        // Stamped on SETTLE, not on send. A request that ran into the 8s
+        // abort resolved at t=8000 against an entry stamped t=0, so its 8s
+        // negative window was already spent and the very next caller went
+        // straight back to the network. Throttled servers answer slowly —
+        // so the brake released exactly when it was needed most.
+        entry.at = Date.now();
+        // A definite absence is cached for the FULL ttl and reported to the
+        // caller as "nothing", which is all they ever needed to know.
+        if (v === ABSENT) return null;
         if (v == null || (typeof v === "object" && v.error)) entry.neg = true;
         return v;
       });
@@ -62,6 +113,9 @@
   // ---- srFetch: same-origin JSON with an 8s budget ----------------------
 
   async function srFetch(url) {
+    // Paused: answer "nothing" without touching the network. Callers already
+    // handle a null, and their own retries are what resume us.
+    if (throttled()) return null;
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -70,7 +124,15 @@
         headers: { accept: "application/json" },
         signal: ctl.signal,
       });
-      if (!res.ok) return null;
+      // 4xx (bar 429) is the server telling us this thing does not exist or
+      // is not ours to read — a permanent answer for this url. 5xx, 429 and
+      // network errors are transient and keep the short retry window.
+      if (res.status === 429) {
+        noteRefused();
+        return null;
+      }
+      if (!res.ok) return res.status >= 400 && res.status < 500 ? ABSENT : null;
+      noteServed(); // the server is talking to us again
       const body = await res.json();
       // FACEIT wraps most responses in { payload }; some (stats rows) are bare.
       return body && typeof body === "object" && "payload" in body
@@ -91,6 +153,7 @@
       const p = await srFetch(
         `/api/users/v1/nicknames/${encodeURIComponent(nick)}`,
       );
+      if (p === ABSENT) return ABSENT; // no such nickname — asking again will not help
       if (!p || !p.id) return null;
       const cs2 = (p.games && p.games.cs2) || {};
       return {
@@ -202,7 +265,11 @@
       const p = await srFetch(
         `/api/match/v2/match/${encodeURIComponent(roomId)}`,
       );
-      if (!p || !p.teams) return null;
+      if (p === ABSENT) return ABSENT; // not a FACEIT match — true for this id forever
+      // A 200 that carries no teams is the same permanent answer by another
+      // route: the endpoint knows this id and still cannot describe a match.
+      if (p && !p.teams) return ABSENT;
+      if (!p) return null;
       return {
         state: p.state || null,
         map: pickedMap(p),
@@ -387,7 +454,10 @@
     return a === document.body || a === document.documentElement ? null : a;
   }
 
-  window.SRApi = { user, eloHistory, room, cheatmeter };
+  // paused(): the display modules ask before spending a self-heal attempt.
+  // Retrying while the data layer is deliberately silent burns the retry
+  // budget on nothing and leaves none for the moment FACEIT starts answering.
+  window.SRApi = { user, eloHistory, room, cheatmeter, paused: throttled };
   window.SRDom = { nodeForNick, nameNodes, cardFor, commonAncestor };
   window.SRSettings = { get: settingsGet, onChange: settingsOnChange };
 })();

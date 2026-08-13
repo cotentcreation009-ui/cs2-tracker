@@ -5,6 +5,9 @@
 
 const DEFAULT_API = "https://csrun.win";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Failures are held briefly — long enough to stop a ten-player stampede
+// against a sick backend, short enough that recovery is measured in seconds.
+const ERR_TTL_MS = 30 * 1000;
 const cache = new Map(); // key -> { at, data }
 
 const NOTIFY_MIN_GAP_MS = 10 * 1000;
@@ -40,9 +43,13 @@ async function lookup({ steamid, faceit }) {
     headers: { accept: "application/json" },
   });
   if (!res.ok) {
-    // Errors are not cached either — a 500 or a rate-limited moment should not
-    // stick to a player for five minutes.
-    return { error: `http ${res.status}` };
+    // An error must not stick to a player for five minutes — but it must
+    // stick for a moment. Caching nothing at all meant every caller re-hit an
+    // unhealthy backend at its own cadence, ten players at a time. Backdating
+    // the stamp expires this entry ERR_TTL_MS from now under the same check.
+    const err = { error: `http ${res.status}` };
+    cache.set(key, { at: Date.now() - (CACHE_TTL_MS - ERR_TTL_MS), data: err });
+    return err;
   }
   const data = await res.json();
   // A partial answer means an upstream lookup failed, not that the player has
