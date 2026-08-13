@@ -27,6 +27,11 @@
   let currentNick = null;
   let root = null;
   let mounting = false;
+  // The last mount spot we computed, held one debounce cycle: the card only
+  // mounts when two consecutive passes agree on WHERE. Mid-hydration the
+  // anchor climb lands on different ancestors as FACEIT's layout widens, and
+  // mounting on the first answer is what made the card leap around the page.
+  let lastSpot = null;
   let observer = null;
   // Nicks with no usable data → stay silent, no refetch loop. Entries expire
   // so a transient failure doesn't hide the card for the whole session.
@@ -192,7 +197,9 @@
     ".sr-p-bar2{height:5px;border-radius:3px;background:var(--sr-panel2);overflow:hidden;}",
     ".sr-p-bar2fill{display:block;height:100%;border-radius:3px;background:var(--sr-line2);}",
     "@media (max-width:520px){.sr-p-maprow{grid-template-columns:1fr 36px 40px 36px 52px;}.sr-p-maprow>span:nth-child(3){display:none;}}",
-    "@media (prefers-reduced-motion:reduce){a.sr-elo-row{transition:none;}}",
+    ".sr-elo-root{animation:sr-p-in .25s ease-out;}",
+    "@keyframes sr-p-in{from{opacity:0;}}",
+    "@media (prefers-reduced-motion:reduce){a.sr-elo-row{transition:none;}.sr-elo-root{animation:none;}}",
   ].join("\n");
 
   function ensureStyles() {
@@ -1061,6 +1068,18 @@
     if (mounting) return;
     const spot = mountPoint();
     if (!spot) return; // SPA still rendering — the observer retries
+    const sig = { parent: spot.parent, before: spot.before || null, after: spot.after || null };
+    if (
+      !lastSpot ||
+      lastSpot.parent !== sig.parent ||
+      lastSpot.before !== sig.before ||
+      lastSpot.after !== sig.after
+    ) {
+      // First sighting of this spot — wait one cycle and require it again.
+      lastSpot = sig;
+      setTimeout(schedule, DEBOUNCE_MS);
+      return;
+    }
     mounting = true;
     try {
       ensureStyles();
@@ -1070,6 +1089,9 @@
       if (spot.before) spot.parent.insertBefore(r, spot.before);
       else if (spot.after) spot.after.insertAdjacentElement("afterend", r);
       else spot.parent.prepend(r);
+      // A before-spot IS the tab-strip anchor — the final home. Mark it so
+      // relocate() knows there is nowhere better to walk to.
+      if (spot.before) r.dataset.srPlaced = "tab";
       root = r;
       const ok = await hydrate(r, nick);
       if (!ok) {
@@ -1092,6 +1114,7 @@
     const stray = document.getElementById("statrun-profile");
     if (stray) stray.remove();
     currentNick = null;
+    lastSpot = null; // a new page means a new anchor hunt
   }
 
   // The widget usually mounts before FACEIT's SPA has rendered the profile
@@ -1100,11 +1123,17 @@
   // keeps its already-fetched contents; nothing refetches).
   function relocate() {
     if (!root || !root.isConnected) return;
+    // Once the card sits at a tab-strip anchor it stays put. Re-running the
+    // anchor hunt on every SPA mutation kept finding marginally different
+    // ancestors as FACEIT re-rendered, and each "improvement" reflowed the
+    // whole page under the reader.
+    if (root.dataset.srPlaced === "tab") return;
     const spot = mountPoint();
     if (!spot || !spot.before || !spot.parent) return;
     if (root.parentElement === spot.parent && root.nextElementSibling === spot.before) return;
     if (root.contains(spot.parent) || root === spot.before) return;
     spot.parent.insertBefore(root, spot.before);
+    root.dataset.srPlaced = "tab";
   }
 
   function checkPage() {

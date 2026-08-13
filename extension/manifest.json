@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "CSRun for FACEIT — CheatMeter, Elo & Cross-Platform Stats",
+  "name": "CSRun for FACEIT \u2014 CheatMeter, Elo & Cross-Platform Stats",
   "version": "2.0.0",
   "description": "Elo change, win prediction, map veto stats, CheatMeter risk and Premier/Leetify ranks in FACEIT match rooms and Steam profiles.",
   "icons": {
@@ -19,10 +19,13 @@
   "options_page": "src/options.html",
   "permissions": [
     "storage",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
-    "https://csrun.win/*"
+    "https://csrun.win/*",
+    "https://www.faceit.com/*",
+    "https://steamcommunity.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"

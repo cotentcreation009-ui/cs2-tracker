@@ -70,3 +70,55 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 });
+
+// ---- recover open tabs after an install/update --------------------------
+// Reloading or auto-updating the extension kills its content scripts in
+// every open tab, and FACEIT is an SPA — users browse for hours without a
+// full page load, so the extension simply stays dead in that tab until a
+// manual refresh. Re-inject into matching tabs instead: remove whatever DOM
+// the previous version left behind (its scripts are already gone), then run
+// the manifest's own file lists.
+async function reinjectContentScripts() {
+  const groups = chrome.runtime.getManifest().content_scripts || [];
+  for (const group of groups) {
+    let tabs = [];
+    try {
+      tabs = await chrome.tabs.query({ url: group.matches });
+    } catch {
+      continue;
+    }
+    for (const tab of tabs) {
+      if (tab.id == null) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const SEL = [
+              "[data-sr-inline]",
+              "#statrun-room",
+              "#statrun-profile",
+              "#statrun-steam-panel",
+              "#statrun-profile-style",
+              ".sr-chip",
+            ];
+            for (const sel of SEL) {
+              for (const n of document.querySelectorAll(sel)) n.remove();
+            }
+          },
+        });
+        if (group.css && group.css.length) {
+          await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: group.css });
+        }
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: group.js });
+      } catch {
+        // tab navigated away, is discarded, or is not injectable — skip it
+      }
+    }
+  }
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install" || details.reason === "update") {
+    void reinjectContentScripts();
+  }
+});
