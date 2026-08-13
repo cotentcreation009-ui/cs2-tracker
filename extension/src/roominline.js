@@ -537,27 +537,30 @@
           ? " — only " + mapForm.matches + " game" + (mapForm.matches === 1 ? "" : "s") + ", read with care"
           : "";
         if (thin) row.classList.add("sr-in-mapwrap--thin");
+        // Labels spell the reading out. "win" and "avg K" and a bare "elo"
+        // each needed a hover to be sure what they meant, on the one line of
+        // the strip that is entirely about a single map.
         row.append(
           cell("K/D", mapForm.kd.toFixed(2), { hex: thin ? null : kdHex(mapForm.kd), title: "K/D on this map" + note }),
-          cell("win", Math.round(mapForm.wr) + "%", { hex: thin ? null : rateHex(mapForm.wr), title: "Win rate on this map" + note }),
+          cell("WIN RATE", Math.round(mapForm.wr) + "%", { hex: thin ? null : rateHex(mapForm.wr), title: "Win rate on this map" + note }),
         );
         // The deeper read, where the card has room for it: how hard they hit,
         // what the map has actually cost or paid them, and whether they are
         // current on it or rusty. All from rows already fetched.
         if (!tight) {
           if (typeof mapForm.avgKills === "number" && isFinite(mapForm.avgKills)) {
-            row.append(cell("avg K", mapForm.avgKills.toFixed(1), { title: "Average kills per match on this map" + note }));
+            row.append(cell("KILLS/GAME", mapForm.avgKills.toFixed(1), { title: "Average kills per match on this map" + note }));
           }
           if (mapForm.netElo != null) {
             row.append(
-              cell("elo", (mapForm.netElo > 0 ? "+" : "") + mapForm.netElo, {
+              cell("NET ELO", (mapForm.netElo > 0 ? "+" : "") + mapForm.netElo, {
                 hex: thin ? null : mapForm.netElo >= 0 ? "var(--sr-good)" : "var(--sr-bad)",
                 title: "Net elo won or lost across their games on this map" + note,
               }),
             );
           }
           if (mapForm.lastAt) {
-            row.append(cell("last", agoShort(mapForm.lastAt), { title: "Most recent match on this map" }));
+            row.append(cell("LAST PLAYED", agoShort(mapForm.lastAt), { title: "Most recent match on this map" }));
           }
         }
         // A 0.01 difference is noise; giving it the same arrow and colour as a
@@ -569,12 +572,15 @@
             "sr-in-delta " + (d >= 0 ? "sr-in-delta--up" : "sr-in-delta--down"),
             (d >= 0 ? "▲" : "▼") + Math.abs(d).toFixed(2),
           );
+          // A bare arrow and a number begged the question "compared to what?"
+          if (!tight) arrow.append(el("span", "sr-in-deltak", "vs their avg"));
           arrow.title =
             "K/D on this map versus their overall — " +
             (d >= 0 ? "this map suits them" : "below their usual");
           row.append(arrow);
         }
-        const g = el("span", "sr-in-mapn", mapForm.matches + "g");
+        const g = el("span", "sr-in-mapn",
+          mapForm.matches + (tight ? " gms" : " game" + (mapForm.matches === 1 ? "" : "s")));
         g.title = mapForm.matches + " games on this map in their last " + HIST_N;
         row.append(g);
       }
@@ -926,10 +932,15 @@
     // One line whenever the picture changes — the breadcrumb trail for "the
     // strips didn't show up": which source produced the roster, and whether
     // the page has painted it yet.
+    const dressed = new Set(
+      [...document.querySelectorAll("[" + OWNER + "]")].map((n) => n.getAttribute(OWNER)),
+    );
+    const missing = roster.map((r) => r.nick).filter((n) => !dressed.has(n));
     const diag =
       "[CSRun] room " + id + ": api=" + (room ? "ok" : "null") +
       " roster=" + roster.length +
-      " strips=" + document.querySelectorAll("[" + OWNER + "]").length;
+      " strips=" + dressed.size +
+      (missing.length ? " missing=" + missing.slice(0, 6).join(",") : "");
     if (diag !== state.lastDiag) {
       state.lastDiag = diag;
       console.info(diag);
