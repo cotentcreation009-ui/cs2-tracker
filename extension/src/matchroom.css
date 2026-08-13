@@ -595,8 +595,7 @@
    most redundant of them (its story is in the numbers), so it goes first. */
 @media (max-width: 560px) {
   .sr-mr-trow { grid-template-columns: minmax(0, 1fr) repeat(4, 46px); }
-  .sr-mr-trow .sr-mr-tgap,
-  .sr-mr-trow .sr-mr-tlast { display: none; }
+  .sr-mr-trow .sr-mr-tgap { display: none; }
 }
 .sr-mr-rsvg { display: block; width: 100%; height: 100%; overflow: visible; }
 
@@ -726,7 +725,7 @@
    whole comparison is readable without a single click. */
 .sr-mr-trow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(4, 54px) 46px 84px;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 54px) 84px;
   align-items: center;
   gap: 8px;
   min-height: 34px;
@@ -947,15 +946,6 @@
   font-variant-numeric: tabular-nums;
 }
 .sr-mr-tn--thin { color: var(--sr-bad); opacity: 0.75; }
-.sr-mr-tlast {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  text-align: right;
-}
-.sr-mr-tlast .sr-mr-tnum { font-size: 10px; line-height: 1.25; opacity: 0.72; }
-
 /* Alternating tint: at ten rows of dense numbers the eye needs a rail to
    track along, and this is quieter than a rule between every row. */
 .sr-mr-trow:not(.sr-mr-trow--head):nth-child(even) {

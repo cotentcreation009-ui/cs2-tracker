@@ -661,16 +661,6 @@
   const LBL_R = 1.24;
 
   // total is the team's whole sample, so "pick" can be a share of it
-  // How long ago, in the shortest honest unit.
-  function agoShort(ts) {
-    if (!ts) return null;
-    const sec = Math.max(0, (Date.now() - ts) / 1000);
-    if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + "m";
-    if (sec < 86400) return Math.round(sec / 3600) + "h";
-    if (sec < 86400 * 30) return Math.round(sec / 86400) + "d";
-    return Math.round(sec / (86400 * 30)) + "mo";
-  }
-
   function metricOf(e, metric, total) {
     if (!e || !e.n) return null;
     if (metric === "kills") return e.kn ? e.kills / e.kn : null;
@@ -1153,9 +1143,6 @@
         btns[m.key] = h;
         head2.append(h);
       }
-      const lastHead = el("span", "sr-label sr-mr-tlast", "Last");
-      lastHead.title = "How long ago each team last played this map";
-      head2.append(lastHead);
       head2.append(el("span", "sr-label sr-mr-tgap", "Edge"));
       box.append(head2);
 
@@ -1220,19 +1207,6 @@
             shortName(teamB) + " " + fmtMetric(v.b, m.key) + " (" + ((r.b && r.b.n) || 0) + " matches)";
           row.append(cell);
         }
-
-        // How current each side's read is.
-        const lastBox = el("span", "sr-mr-tlast");
-        const la = agoShort(r.a && r.a.lastAt);
-        const lb = agoShort(r.b && r.b.lastAt);
-        lastBox.append(
-          el("span", "sr-mr-tnum sr-mr-vxv--a" + (la ? "" : " sr-mr-dash"), la || "—"),
-          el("span", "sr-mr-tnum sr-mr-vxv--b" + (lb ? "" : " sr-mr-dash"), lb || "—"),
-        );
-        lastBox.title =
-          "Last played — " + shortName(teamA) + ": " + (la || "not recently") +
-          " ago, " + shortName(teamB) + ": " + (lb || "not recently") + " ago";
-        row.append(lastBox);
 
         const gapBox = el("span", "sr-mr-tgap");
         if (r.gap != null) {
