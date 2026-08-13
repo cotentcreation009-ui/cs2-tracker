@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { getFaceit, getLeetify, getProfile, resolveSteamId } from "@/lib/api";
 import { ComparisonView, type ComparePlayer } from "@/components/ComparisonView";
 import { CompareForm } from "@/components/CompareForm";
@@ -126,6 +127,65 @@ export default async function ComparePage({
       {players.length >= 2 && <ComparisonView players={players} />}
 
       <CompareForm selected={selected} max={MAX} />
+
+      {/* Crawlable primer under the tool — the comparison itself is data-driven
+          UI, so this is the page's only prose. */}
+      <section className="max-w-3xl border-t border-line pt-8">
+        <h2 className="text-xl font-bold tracking-tight">
+          How to read a comparison
+        </h2>
+        <div className="mt-3 space-y-4 text-sm leading-relaxed text-muted">
+          <p>
+            The rows come from different measuring systems, and they answer
+            different questions. Leetify rating measures per-round impact in a
+            single match and only means something as an average; FACEIT ELO and
+            Premier CS Rating are ladder positions built from whole win/loss
+            histories. Two players can rank the same on one scale and far apart
+            on another — the guide to{" "}
+            <Link
+              href="/guides/cs2-rating-systems-compared"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              CS2&apos;s rating systems
+            </Link>{" "}
+            explains why the scales never convert.
+          </p>
+          <p>
+            For the performance rows, judge numbers against role, not just each
+            other: an entry fragger&apos;s K/D runs structurally lower than a
+            cleanup player&apos;s at the same skill, while ADR counts the damage
+            K/D throws away. What counts as good for each is covered in{" "}
+            <Link
+              href="/guides/what-is-a-good-adr-cs2"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              the ADR guide
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/guides/what-is-a-good-kd-cs2"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              the K/D guide
+            </Link>
+            .
+          </p>
+          <p>
+            One more habit worth keeping: check the sample behind a number
+            before trusting it. Win rates and ratings over a handful of matches
+            are mostly noise, and a big gap between a player&apos;s ladders —
+            say a high{" "}
+            <Link
+              href="/guides/faceit-levels-and-elo"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              FACEIT level
+            </Link>{" "}
+            next to a modest Premier rating — is a prompt to look closer, not a
+            verdict on its own.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }

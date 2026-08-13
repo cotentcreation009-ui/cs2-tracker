@@ -6,12 +6,28 @@ import { RecentlyViewed } from "@/components/RecentlyViewed";
 import Link from "next/link";
 import { getLeaderboard } from "@/lib/api";
 import { JsonLd } from "@/components/JsonLd";
+import { GUIDES } from "@/lib/guides";
 import {
   graph,
   organizationSchema,
   websiteSchema,
   faqSchema,
 } from "@/lib/schema";
+
+// Four evergreen guides surfaced on the homepage; the full library is one
+// click away. Resolved from the registry so a renamed slug fails the build
+// instead of 404ing quietly.
+const FEATURED_GUIDE_SLUGS = [
+  "premier-cs-rating-explained",
+  "faceit-levels-and-elo",
+  "what-is-a-good-adr-cs2",
+  "spotting-smurfs-and-cheaters",
+];
+const FEATURED_GUIDES = FEATURED_GUIDE_SLUGS.map((slug) => {
+  const g = GUIDES.find((x) => x.slug === slug);
+  if (!g) throw new Error(`featured guide missing from registry: ${slug}`);
+  return g;
+});
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
@@ -226,6 +242,46 @@ export default async function HomePage() {
                 </summary>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{f.a}</p>
               </details>
+            ))}
+          </div>
+
+          <div className="mt-10 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">
+                From the guides
+              </h2>
+              <p className="mt-1.5 text-sm text-muted">
+                Plain-English explainers for the numbers on every profile.
+              </p>
+            </div>
+            <Link
+              href="/guides"
+              className="text-sm font-semibold text-brand hover:underline"
+            >
+              All {GUIDES.length} guides →
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {FEATURED_GUIDES.map((g) => (
+              <Link
+                key={g.slug}
+                href={`/guides/${g.slug}`}
+                className="card lift block px-5 py-5"
+              >
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand">
+                  {g.tag}
+                  <span aria-hidden className="text-faint">
+                    ·
+                  </span>
+                  <span className="font-normal text-faint">{g.read}</span>
+                </div>
+                <h3 className="mt-2 font-bold tracking-tight">
+                  {g.shortTitle ?? g.title}
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                  {g.description}
+                </p>
+              </Link>
             ))}
           </div>
         </div>

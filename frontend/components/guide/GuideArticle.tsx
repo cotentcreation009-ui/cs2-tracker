@@ -79,7 +79,8 @@ export function GuideArticle({
         {guide.title}
       </h1>
       <p className="mt-2 text-xs text-faint">
-        Updated {formatGuideDate(guide.updated)} · {guide.read}
+        By the CSRun team · Updated {formatGuideDate(guide.updated)} ·{" "}
+        {guide.read}
       </p>
 
       <div className={`mt-8 ${PROSE}`}>{children}</div>
