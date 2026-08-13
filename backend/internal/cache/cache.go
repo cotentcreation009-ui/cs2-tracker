@@ -115,6 +115,12 @@ func ProSeriesResultKey(seriesID string) string { return "cs2:pro:seriesresult4:
 // ProTeamRosterKey caches a team's current player nicknames.
 func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID }
 
+// The FACEIT leaderboard for one region — a real ranking, and the only list on
+// the spotlight rails that claims to be one.
+func ProFaceitRankingKey(region string) string {
+	return "cs2:pro:faceitrank1:" + strings.ToLower(region)
+}
+
 // ProSeriesDetailKey caches a full on-demand MatchState for a series that has
 // aged out of the live board (historical results).
 func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail2:" + seriesID }
