@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { MatchState, ProMatchesResponse } from "./types";
 import { usePoll, useNow } from "./usePoll";
 import { agoShort } from "./format";
 import { LiveMatchCard } from "./LiveMatchCard";
 import { UpcomingRow } from "./UpcomingRow";
 import { ResultRow } from "./ResultRow";
+import { ProSpotlight, FaceitLeaderboardRail } from "./ProSpotlight";
 
 const POLL_MS = 10_000;
 
@@ -113,8 +114,9 @@ export function ProBoard() {
                 />
               )}
               <div className="space-y-6">
-                {shownGroups.map((g) => (
-                  <div key={g.label} className="space-y-2">
+                {shownGroups.map((g, gi) => (
+                  <Fragment key={g.label}>
+                  <div className="space-y-2">
                     <div className="flex items-center gap-2 border-b border-line/50 pb-1.5">
                       {g.logo ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -135,6 +137,15 @@ export function ProBoard() {
                       ))}
                     </div>
                   </div>
+                  {/* After the first event, so the rails are met while
+                      scrolling the schedule rather than under it. */}
+                  {gi === 0 && (
+                    <div className="space-y-6 pt-2">
+                      <ProSpotlight />
+                      <FaceitLeaderboardRail />
+                    </div>
+                  )}
+                  </Fragment>
                 ))}
               </div>
             </section>

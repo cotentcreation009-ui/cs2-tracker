@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { usePoll } from "./usePoll";
 import { SpotlightRail, type RailCard } from "./SpotlightRail";
 import { PlayerAvatar } from "./PlayerAvatar";
@@ -15,6 +15,17 @@ import { PlayerAvatar } from "./PlayerAvatar";
 // that is what the first two rails say.
 
 const POLL_MS = 120_000; // rosters and leaderboards move slowly
+
+// FACEIT's own region codes. Kept in step with the allowlist in
+// backend/internal/faceit/rankings.go — an unlisted code is refused there
+// rather than being passed through to their API.
+const REGIONS = [
+  { code: "EU", label: "Europe" },
+  { code: "NA", label: "N. America" },
+  { code: "SA", label: "S. America" },
+  { code: "AS", label: "Asia" },
+  { code: "OCE", label: "Oceania" },
+] as const;
 
 interface SpotlightTeam {
   id: string;
@@ -82,7 +93,7 @@ export function ProSpotlight() {
     POLL_MS,
   );
 
-  const { teams, players, faceit } = useMemo(() => {
+  const { teams, players } = useMemo(() => {
     const teams: RailCard[] = (data?.teams ?? []).map((t) => ({
       id: t.id,
       name: t.name,
@@ -114,31 +125,11 @@ export function ProSpotlight() {
       ),
     }));
 
-    const faceit: RailCard[] = (data?.faceit ?? []).map((f) => ({
-      id: f.playerId || f.nickname,
-      name: f.nickname,
-      href: f.faceitUrl,
-      // FACEIT does not document an avatar on this collection; when it sends
-      // one the card gets a face, and when it does not the rail falls back to
-      // the initial tile rather than showing a broken image.
-      imageUrl: f.avatar || undefined,
-      accent: levelHex(f.skillLevel),
-      rank: f.position,
-      subtitle: f.country ? f.country.toUpperCase() : undefined,
-      stats: [
-        ...(f.elo ? [{ label: "Elo", value: f.elo.toLocaleString("en-US") }] : []),
-        ...(f.skillLevel ? [{ label: "Level", value: String(f.skillLevel) }] : []),
-      ],
-      meter: f.skillLevel ? Math.min(1, f.skillLevel / 10) : undefined,
-    }));
-
-    return { teams, players, faceit };
+    return { teams, players };
   }, [data]);
 
-  // Nothing configured and nothing to show: stay out of the way entirely
-  // rather than stacking three empty headings above the board.
   if (data && data.enabled === false) return null;
-  if (data && !teams.length && !players.length && !faceit.length) return null;
+  if (data && !teams.length && !players.length) return null;
 
   return (
     <div className="space-y-6">
@@ -162,17 +153,75 @@ export function ProSpotlight() {
           speedSec={55}
         />
       )}
-
-      {(loading || faceit.length > 0) && (
-        <SpotlightRail
-          title={`Top FACEIT players${data?.faceitRegion ? ` · ${data.faceitRegion}` : ""}`}
-          subtitle="FACEIT's published leaderboard, by elo"
-          cards={faceit}
-          loading={loading && !data}
-          emptyNote="FACEIT's leaderboard is unavailable right now."
-          speedSec={50}
-        />
-      )}
     </div>
+  );
+}
+
+// The FACEIT leaderboard, with its own region switcher and its own fetch:
+// changing region must not re-run the GRID roster work behind the other two
+// rails, which is why the endpoint takes ?only=faceit.
+export function FaceitLeaderboardRail() {
+  const [region, setRegion] = useState<string>("EU");
+  const { data, loading } = usePoll<SpotlightResponse>(
+    `/api/pro-matches/spotlight?only=faceit&region=${region}`,
+    POLL_MS,
+  );
+
+  const faceit: RailCard[] = useMemo(
+    () =>
+      (data?.faceit ?? []).map((f) => ({
+      id: f.playerId || f.nickname,
+      name: f.nickname,
+      href: f.faceitUrl,
+      // FACEIT does not document an avatar on this collection; when it sends
+      // one the card gets a face, and when it does not the rail falls back to
+      // the initial tile rather than showing a broken image.
+      imageUrl: f.avatar || undefined,
+      accent: levelHex(f.skillLevel),
+      rank: f.position,
+      subtitle: f.country ? f.country.toUpperCase() : undefined,
+      stats: [
+        ...(f.elo ? [{ label: "Elo", value: f.elo.toLocaleString("en-US") }] : []),
+        ...(f.skillLevel ? [{ label: "Level", value: String(f.skillLevel) }] : []),
+      ],
+      meter: f.skillLevel ? Math.min(1, f.skillLevel / 10) : undefined,
+      })),
+    [data],
+  );
+
+  const tabs = (
+    <div className="scroll-slim -mb-1 flex gap-1 overflow-x-auto pb-1">
+      {REGIONS.map((r) => {
+        const on = r.code === region;
+        return (
+          <button
+            key={r.code}
+            type="button"
+            aria-pressed={on}
+            title={r.label}
+            onClick={() => setRegion(r.code)}
+            className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${
+              on
+                ? "border-brand/60 bg-brand/15 text-ink"
+                : "border-line bg-panel text-muted hover:text-ink"
+            }`}
+          >
+            {r.code}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <SpotlightRail
+      title="Top FACEIT players"
+      subtitle="FACEIT's published leaderboard, by elo"
+      cards={faceit}
+      loading={loading && !data}
+      emptyNote="FACEIT has no leaderboard for this region right now."
+      speedSec={50}
+      action={tabs}
+    />
   );
 }

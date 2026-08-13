@@ -89,8 +89,13 @@ func (s *Server) handleProSpotlight(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	gridUp := s.proMatches != nil && s.proMatches.Store().Enabled()
-	out.Enabled = gridUp || (s.faceit != nil && s.faceit.HasKey())
+	// The region switcher refetches only the leaderboard. Doing the GRID work
+	// again for a rail that did not change would spend roster lookups from a
+	// shared 20/min budget on nothing.
+	onlyFaceit := r.URL.Query().Get("only") == "faceit"
+
+	gridUp := !onlyFaceit && s.proMatches != nil && s.proMatches.Store().Enabled()
+	out.Enabled = gridUp || onlyFaceit || (s.faceit != nil && s.faceit.HasKey())
 
 	var wg sync.WaitGroup
 
