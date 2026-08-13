@@ -42,8 +42,9 @@ export default function Page() {
 
       <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Contact</h1>
       <p className="mt-4 text-sm leading-relaxed text-muted sm:text-[15px]">
-        {SITE_NAME} is run by a real person, and every message below lands with
-        one. The fastest way to reach us for anything is email:{" "}
+        {SITE_NAME} is built and run by two Counter-Strike players with over
+        fifteen years in the scene, and every message below lands with one of
+        them. The fastest way to reach us for anything is email:{" "}
         <MailLink />.
       </p>
 

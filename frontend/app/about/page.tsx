@@ -206,8 +206,10 @@ export default function AboutPage() {
       {/* Who's behind it */}
       <H>Independent &amp; accountable</H>
       <P>
-        {SITE_NAME} is an independent, community-built project — not a company
-        product, and not tied to any game publisher or stats provider. We keep it
+        {SITE_NAME} is an independent project built and run by two
+        Counter-Strike players with over fifteen years in the scene — not a
+        company product, and not tied to any game publisher or stats provider.
+        We keep it
         deliberately simple: no account is needed to look up a player, and{" "}
         {SITE_NAME} never asks for your Steam login or password. If something looks
         wrong — or you&apos;re a player who wants your profile corrected or
