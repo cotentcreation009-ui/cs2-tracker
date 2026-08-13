@@ -391,26 +391,56 @@
 
   // The node whose OWN text is exactly this nickname, ignoring nodes that
   // merely contain it — so a chat line mentioning the name never wins.
-  function nodeForNick(nick) {
+  // EVERY node naming this player, in document order — not just the first.
+  // A nickname is not unique on the page: FACEIT names each team after its
+  // captain and links that label to the same profile the roster does, so a
+  // captain matches twice. Taking the first match meant the captains were
+  // resolved to the HERO, their strips were attached there instead of to
+  // their player cards, and the panel — which anchors above the box holding
+  // the roster — was dragged up above the entire room.
+  function nodesForNick(nick) {
     const want = String(nick || "").trim().toLowerCase();
-    if (!want) return null;
+    const out = [];
+    if (!want) return out;
     for (const a of document.querySelectorAll('a[href*="/players/"]')) {
       if (a.offsetParent === null || ourNode(a)) continue;
-      if ((a.textContent || "").trim().toLowerCase() === want) return a;
+      if ((a.textContent || "").trim().toLowerCase() === want) out.push(a);
     }
+    if (out.length) return out;
     for (const n of document.querySelectorAll("span,div,p,h1,h2,h3,h4,strong,b,a")) {
       if (n.children.length > 2 || n.offsetParent === null || ourNode(n)) continue;
-      if ((n.textContent || "").trim().toLowerCase() === want) return n;
+      if ((n.textContent || "").trim().toLowerCase() === want) out.push(n);
     }
-    return null;
+    return out;
+  }
+
+  function nodeForNick(nick) {
+    const all = nodesForNick(nick);
+    return all.length ? all[0] : null;
   }
 
   // Map of nickname -> the node naming that player on this page.
+  // Resolve the whole roster together, so an ambiguous name is settled by the
+  // company it keeps: whichever of its candidates sits inside the block that
+  // already holds the players nobody can confuse.
   function nameNodes(nicks) {
-    const out = new Map();
+    const cands = new Map();
     for (const nick of nicks || []) {
-      const n = nodeForNick(nick);
-      if (n) out.set(nick, n);
+      const list = nodesForNick(nick);
+      if (list.length) cands.set(nick, list);
+    }
+    const settled = [];
+    for (const list of cands.values()) if (list.length === 1) settled.push(list[0]);
+    const home = settled.length >= 2 ? commonAncestor(settled) : null;
+
+    const out = new Map();
+    for (const [nick, list] of cands) {
+      if (list.length === 1) {
+        out.set(nick, list[0]);
+        continue;
+      }
+      const withTheOthers = home ? list.filter((n) => home.contains(n)) : [];
+      out.set(nick, withTheOthers[0] || list[0]);
     }
     return out;
   }
