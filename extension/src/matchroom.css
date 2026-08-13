@@ -758,3 +758,15 @@
   .sr-mr-area,
   .sr-mr-dotpt { transition: none; }
 }
+
+/* Re-parenting replays this animation: placeByRoster walks the panel from its
+   fallback slot up to the roster once the player cards paint, and that walk
+   used to read as a hard jump. Replayed as a fresh fade at the destination,
+   it reads as the panel arriving instead. */
+.sr-mr { animation: sr-mr-arrive 0.25s ease-out; }
+@keyframes sr-mr-arrive {
+  from { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sr-mr { animation: none; }
+}
