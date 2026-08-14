@@ -102,3 +102,60 @@ func TestNormalizeName(t *testing.T) {
 		t.Error("distinct orgs collided")
 	}
 }
+
+func TestNameKeys(t *testing.T) {
+	// The whole point: Valve's spelling and GRID's spelling must share a key.
+	pairs := [][2]string{
+		{"Spirit", "Team Spirit"},
+		{"Vitality", "Team Vitality"},
+		{"Falcons", "Team Falcons"},
+		{"9z", "9z Team"},
+		{"Liquid", "Team Liquid"},
+	}
+	for _, p := range pairs {
+		if !keysOverlap(NameKeys(p[0]), NameKeys(p[1])) {
+			t.Errorf("%q and %q share no key: %v vs %v",
+				p[0], p[1], NameKeys(p[0]), NameKeys(p[1]))
+		}
+	}
+	// The exact spelling still comes first, so an exact hit beats a loose one.
+	if got := NameKeys("Team Spirit"); got[0] != "teamspirit" {
+		t.Errorf("exact key should lead: %v", got)
+	}
+	// The org's own spelling always leads; the "Team X" form is only ever an
+	// extra key so the two sources can meet whichever was indexed first.
+	if got := NameKeys("MOUZ"); got[0] != "mouz" {
+		t.Errorf("MOUZ = %v", got)
+	}
+	// Distinct orgs must still not collide.
+	if keysOverlap(NameKeys("Spirit"), NameKeys("Aurora")) {
+		t.Error("distinct orgs collided")
+	}
+	// Nothing sensible to key on.
+	if got := NameKeys("  "); got != nil {
+		t.Errorf("blank name = %v", got)
+	}
+	// "Team" alone leaves nothing identifying behind — don't strip to "".
+	if got := NameKeys("Team"); got[0] != "team" || len(got) > 2 {
+		t.Errorf("bare Team = %v", got)
+	}
+	// A key must never be the bare word, or every org would collide on it.
+	for _, n := range []string{"Spirit", "Team Spirit", "9z Team", "MOUZ"} {
+		for _, k := range NameKeys(n) {
+			if k == "" {
+				t.Errorf("%q produced an empty key: %v", n, NameKeys(n))
+			}
+		}
+	}
+}
+
+func keysOverlap(a, b []string) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}
