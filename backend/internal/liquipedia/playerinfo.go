@@ -20,6 +20,11 @@ type PlayerInfo struct {
 	Role        string `json:"role,omitempty"`        // "AWPer", "In-game leader", …
 	BirthDate   string `json:"birthDate,omitempty"`   // "2006-01-25" when parseable
 	Team        string `json:"team,omitempty"`        // current team per the wiki
+	// SteamID is the player's SteamID64 when the wiki records one. It is what
+	// lets a pro's card link to their profile page on this site instead of off
+	// to a search on someone else's. Empty when the page has no Steam account
+	// on it — a real and common case, so callers must handle it.
+	SteamID string `json:"steamId,omitempty"`
 }
 
 // maxWikitextBytes caps a fetched page revision (player pages are ~10-60KB).
@@ -117,8 +122,25 @@ func parsePlayerInfobox(wikitext string) *PlayerInfo {
 	if m := birthRe.FindStringSubmatch(firstOf(fields, "birth_date", "birthdate", "birth")); m != nil {
 		info.BirthDate = fmt.Sprintf("%s-%02s-%02s", m[1], m[2], m[3])
 	}
+	info.SteamID = steamID64(firstOf(fields, "steam64id", "steamid64", "steamid", "steam"))
 	return info
 }
+
+// steamID64 extracts a SteamID64 from whatever the wiki put in a Steam field.
+// Most CS pages use |steam64ID=7656119…, but a few carry a profile URL, so a
+// bare 17-digit id anywhere in the value counts. A /id/vanity URL yields
+// nothing: resolving it needs a Steam API call, and a wrong guess would send
+// someone to a stranger's stats, which is worse than not linking at all.
+func steamID64(v string) string {
+	m := steamID64Re.FindString(cleanWiki(v))
+	if m == "" {
+		return ""
+	}
+	return m
+}
+
+// SteamID64s are 17 digits and, for individual accounts, all begin 7656119.
+var steamID64Re = regexp.MustCompile(`\b7656119\d{10}\b`)
 
 var (
 	infoboxStart = regexp.MustCompile(`(?i)\{\{Infobox\s+player`)

@@ -79,13 +79,18 @@ function levelHex(lvl?: number): string {
 }
 
 
-export function ProSpotlight() {
-  const { data, loading } = usePoll<SpotlightResponse>(
-    "/api/pro-matches/spotlight",
-    POLL_MS,
-  );
+// The ranking sits at the top of the page and the players rail lower down, so
+// they are separate components. Both read the same endpoint; it is cached for
+// a minute at the proxy, so the second poll is a conditional round trip rather
+// than duplicated work at the backend.
+function useSpotlight() {
+  return usePoll<SpotlightResponse>("/api/pro-matches/spotlight", POLL_MS);
+}
 
-  const { teams, players } = useMemo(() => {
+export function ProSpotlight() {
+  const { data, loading } = useSpotlight();
+
+  const { teams } = useMemo(() => {
     const teams: RailCard[] = (data?.teams ?? []).map((t) => ({
       id: String(t.standing),
       name: t.name,
@@ -109,30 +114,14 @@ export function ProSpotlight() {
       meter: undefined,
     }));
 
-    const players: RailCard[] = (data?.players ?? []).map((p) => ({
-      id: `${p.teamName ?? ""}-${p.nick}`,
-      name: p.nick,
-      // HLTV has no API and no stable per-player URL we can derive, so a
-      // search link is the honest way to send someone there: it always
-      // resolves, and it never fabricates a profile id.
-      href: `https://www.hltv.org/search?query=${encodeURIComponent(p.nick)}`,
-      accent: p.color || undefined,
-      subtitle: p.teamRank ? `#${p.teamRank} ${p.teamName ?? ""}`.trim() : p.teamName,
-      // The photo comes from Liquipedia, resolved in the visitor's browser
-      // (their servers rate-limit ours), with a silhouette when there is none.
-      media: (
-        <PlayerAvatar nick={p.nick} hex={p.color || "#6ad0ff"} shape="card" />
-      ),
-    }));
-
-    return { teams, players };
+    return { teams };
   }, [data]);
 
   if (data && data.enabled === false) return null;
-  if (data && !teams.length && !players.length) return null;
+  if (data && !teams.length) return null;
 
   return (
-    <div className="space-y-6">
+    <>
       {(loading || teams.length > 0) && (
         <SpotlightRail
           title="Top 20 teams"
@@ -146,18 +135,44 @@ export function ProSpotlight() {
           emptyNote="The standings are unavailable right now."
         />
       )}
+    </>
+  );
+}
 
-      {(loading || players.length > 0) && (
-        <SpotlightRail
-          title="Players in action"
-          subtitle="Players of the top 20 teams · photos from Liquipedia (CC BY-SA)"
-          cards={players}
-          loading={loading && !data}
-          emptyNote="No rosters available right now."
-          speedSec={55}
-        />
-      )}
-    </div>
+// The same top-20 rosters, rendered further down where there is room for a
+// second wall of cards without pushing the live scores off the fold.
+export function PlayersRail() {
+  const { data, loading } = useSpotlight();
+
+  const players: RailCard[] = useMemo(
+    () =>
+      (data?.players ?? []).map((p) => ({
+        id: `${p.teamName ?? ""}-${p.nick}`,
+        name: p.nick,
+        // Their stats page here, not a search on someone else's site. The
+        // nickname is resolved to a SteamID64 on the click — see the bridge
+        // route — because doing it for all ~100 rostered players up front
+        // would be a hundred lookups for links nobody clicks.
+        href: `/pro-matches/player/${encodeURIComponent(p.nick)}`,
+        accent: p.color || undefined,
+        subtitle: p.teamRank ? `#${p.teamRank} ${p.teamName ?? ""}`.trim() : p.teamName,
+        media: (
+          <PlayerAvatar nick={p.nick} hex={p.color || "#6ad0ff"} shape="card" />
+        ),
+      })),
+    [data],
+  );
+
+  if (data && !players.length) return null;
+  return (
+    <SpotlightRail
+      title="Players in action"
+      subtitle="Players of the top 20 teams · photos from Liquipedia (CC BY-SA)"
+      cards={players}
+      loading={loading && !data}
+      emptyNote="No rosters available right now."
+      speedSec={55}
+    />
   );
 }
 

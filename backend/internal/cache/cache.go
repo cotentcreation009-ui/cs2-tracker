@@ -137,8 +137,10 @@ func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail2:
 func ProPlayerImgKey(nick string) string { return "cs2:pro:pimg:" + strings.ToLower(nick) }
 
 // ProPlayerCardKey caches a pro player's Liquipedia identity card (real name,
-// country, role) by nickname.
-func ProPlayerCardKey(nick string) string { return "cs2:pro:pcard:" + strings.ToLower(nick) }
+// country, role, SteamID64) by nickname. Versioned: cards are held for 14 days,
+// so adding a field to the payload needs a new key or the old, thinner cards
+// keep answering for a fortnight.
+func ProPlayerCardKey(nick string) string { return "cs2:pro:pcard2:" + strings.ToLower(nick) }
 
 // ProPlayerStatsKey caches a player's official GRID aggregates per window.
 func ProPlayerStatsKey(playerID, window string) string {

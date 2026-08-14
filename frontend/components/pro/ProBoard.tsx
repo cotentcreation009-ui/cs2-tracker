@@ -7,7 +7,7 @@ import { agoShort } from "./format";
 import { LiveMatchCard } from "./LiveMatchCard";
 import { UpcomingRow } from "./UpcomingRow";
 import { ResultRow } from "./ResultRow";
-import { ProSpotlight, FaceitLeaderboardRail } from "./ProSpotlight";
+import { ProSpotlight, PlayersRail, FaceitLeaderboardRail } from "./ProSpotlight";
 
 const POLL_MS = 10_000;
 
@@ -70,7 +70,7 @@ export function ProBoard() {
   const upcomingTotal = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <Header
         updatedAt={data?.updatedAt}
         now={now}
@@ -88,10 +88,17 @@ export function ProBoard() {
         />
       ) : (
         <>
+          {/* The ranking sits directly under the title — it is the thing that
+              frames everything below it, and it reads as a strip rather than a
+              section, so it costs little height. */}
+          <ProSpotlight />
+
           {live.length > 0 && (
-            <section className="space-y-3">
+            <section className="space-y-2">
               <SectionHeading label="Live now" count={live.length} live />
-              <div className="grid gap-4 lg:grid-cols-2">
+              {/* Three across on a wide screen: the cards are half the height
+                  they were, so two of them left the row looking empty. */}
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {live.map((m) => (
                   <LiveMatchCard key={m.seriesId} match={m} />
                 ))}
@@ -141,7 +148,7 @@ export function ProBoard() {
                       scrolling the schedule rather than under it. */}
                   {gi === 0 && (
                     <div className="space-y-6 pt-2">
-                      <ProSpotlight />
+                      <PlayersRail />
                       <FaceitLeaderboardRail />
                     </div>
                   )}
@@ -182,13 +189,11 @@ function Header({
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">
+        {/* Title only. The strapline explained what a page full of live scores
+            was already saying, and cost a line of height above the fold. */}
+        <h1 className="text-xl font-extrabold tracking-tight text-ink sm:text-2xl">
           <span className="gradient-text">Pro Matches</span>
         </h1>
-        <p className="mt-1 text-sm text-muted">
-          Live &amp; upcoming Counter-Strike 2 pro matches — scores update
-          automatically.
-        </p>
       </div>
       <div className="flex items-center gap-1.5 text-[11px] text-faint">
         <span

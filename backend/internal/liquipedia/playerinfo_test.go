@@ -57,3 +57,31 @@ func TestPrettyRole(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePlayerInfoboxSteamID(t *testing.T) {
+	// The common shape: Liquipedia's CS pages carry the id outright.
+	got := parsePlayerInfobox("{{Infobox player\n|id=donk\n|steam64ID=76561198386265483\n}}")
+	if got.SteamID != "76561198386265483" {
+		t.Errorf("steam64ID field: got %q", got.SteamID)
+	}
+	// A profile URL is just as good — the id is in it.
+	got = parsePlayerInfobox("{{Infobox player\n|id=x\n|steam=https://steamcommunity.com/profiles/76561198034202275/\n}}")
+	if got.SteamID != "76561198034202275" {
+		t.Errorf("profile URL: got %q", got.SteamID)
+	}
+	// A vanity URL carries no id, and guessing one would link to a stranger.
+	got = parsePlayerInfobox("{{Infobox player\n|id=x\n|steam=https://steamcommunity.com/id/somebody/\n}}")
+	if got.SteamID != "" {
+		t.Errorf("vanity URL should not resolve: got %q", got.SteamID)
+	}
+	// Nothing that merely looks numeric should pass as an account.
+	got = parsePlayerInfobox("{{Infobox player\n|id=x\n|steam64ID=12345\n|birth_date={{birth date and age|2006|1|25}}\n}}")
+	if got.SteamID != "" {
+		t.Errorf("short number accepted: got %q", got.SteamID)
+	}
+	// A page with no Steam account at all is normal, not an error.
+	got = parsePlayerInfobox("{{Infobox player\n|id=x\n|country=Denmark\n}}")
+	if got.SteamID != "" || !got.Found {
+		t.Errorf("absent steam field: %+v", got)
+	}
+}
