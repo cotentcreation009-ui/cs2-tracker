@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { usePoll } from "./usePoll";
 import { SpotlightRail, type RailCard } from "./SpotlightRail";
 import { PlayerAvatar } from "./PlayerAvatar";
+import { TeamCrest } from "./TeamCrest";
 
 // Three rails: the world's top 20 teams, their players, and FACEIT's
 // leaderboard. Every one of them is somebody's published ranking — none is a
@@ -94,7 +95,11 @@ export function ProSpotlight() {
       href: t.gridId
         ? `/pro-matches/team/${encodeURIComponent(t.gridId)}`
         : undefined,
-      imageUrl: t.logoUrl,
+      // GRID only has a logo for orgs we have tracked; TeamCrest falls back to
+      // Liquipedia in the browser so the top 20 all carry their crest.
+      media: (
+        <TeamCrest name={t.name} logoUrl={t.logoUrl} hex={t.color || "#6ad0ff"} />
+      ),
       accent: t.color || undefined,
       rank: t.standing,
       subtitle: t.live ? "Live now" : t.roster?.slice(0, 2).join(", "),
