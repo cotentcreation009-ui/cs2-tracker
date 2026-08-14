@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "CSRun for FACEIT — CheatMeter, Elo & Cross-Platform Stats",
+  "name": "CSRun for FACEIT — Map Veto, Elo & Cross-Map Stats",
   "version": "2.1.0",
-  "description": "Elo change, win prediction, map veto stats, CheatMeter risk and Premier/Leetify ranks in FACEIT match rooms and Steam profiles.",
+  "description": "Per-map win rates for both teams, elo change, win prediction, auto queue accept, quick access to players' full stats, and more.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
