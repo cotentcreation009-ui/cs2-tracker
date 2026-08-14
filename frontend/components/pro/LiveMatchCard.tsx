@@ -66,10 +66,10 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
   // card's relative sections) rather than a wrapping <Link> — the Watch pill is
   // an anchor, and nested <a> is invalid HTML that trips hydration.
   return (
-    <div className="group relative block overflow-hidden rounded-2xl border border-line bg-panel2/40 p-5 shadow-lg ring-1 ring-[#ff4655]/10 transition duration-200 hover:-translate-y-0.5 hover:border-line2 hover:ring-[#ff4655]/25">
+    <div className="group relative block overflow-hidden rounded-xl border border-line bg-panel2/40 p-3.5 shadow-lg ring-1 ring-[#ff4655]/10 transition duration-200 hover:-translate-y-0.5 hover:border-line2 hover:ring-[#ff4655]/25">
       {/* team-colour ambient glows */}
-      <span aria-hidden className="pointer-events-none absolute -left-20 -top-24 h-52 w-52 rounded-full opacity-[0.18] blur-3xl" style={{ background: aColor }} />
-      <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-52 w-52 rounded-full opacity-[0.18] blur-3xl" style={{ background: bColor }} />
+      <span aria-hidden className="pointer-events-none absolute -left-20 -top-24 h-36 w-36 rounded-full opacity-[0.18] blur-3xl" style={{ background: aColor }} />
+      <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-36 w-36 rounded-full opacity-[0.18] blur-3xl" style={{ background: bColor }} />
       {/* dual-colour hairline */}
       <span
         aria-hidden
@@ -94,21 +94,21 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
       </div>
 
       {/* teams flanking the hero score */}
-      <div className="relative mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={58} />
+      <div className="relative mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <TeamLogo name={a?.shortName || a?.name} src={a?.logoUrl} color={a?.colorPrimary} size={36} />
           <div className="min-w-0">
-            <div className="truncate text-[15px] font-bold leading-tight text-ink">{a?.shortName || a?.name || "TBD"}</div>
+            <div className="truncate text-[13px] font-bold leading-tight text-ink">{a?.shortName || a?.name || "TBD"}</div>
             {showPips ? <MapPips won={aWon} bestOf={bo} color={aColor} /> : null}
           </div>
         </div>
 
         <div className="flex flex-col items-center px-1">
-          <div className="flex items-baseline gap-2 text-4xl font-extrabold leading-none tabular-nums sm:text-5xl">
+          <div className="flex items-baseline gap-2 text-2xl font-extrabold leading-none tabular-nums sm:text-3xl">
             <span style={heroAColor ? { color: heroAColor } : undefined} className={heroAColor ? "" : "text-ink"}>
               {heroA}
             </span>
-            <span className="text-lg text-faint sm:text-xl">:</span>
+            <span className="text-sm text-faint sm:text-base">:</span>
             <span style={heroBColor ? { color: heroBColor } : undefined} className={heroBColor ? "" : "text-ink"}>
               {heroB}
             </span>
@@ -126,25 +126,25 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
           </div>
         </div>
 
-        <div className="flex min-w-0 items-center justify-end gap-3">
+        <div className="flex min-w-0 items-center justify-end gap-2">
           <div className="min-w-0 text-right">
-            <div className="truncate text-[15px] font-bold leading-tight text-ink">{b?.shortName || b?.name || "TBD"}</div>
+            <div className="truncate text-[13px] font-bold leading-tight text-ink">{b?.shortName || b?.name || "TBD"}</div>
             {showPips ? <MapPips won={bWon} bestOf={bo} color={bColor} align="right" /> : null}
           </div>
-          <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={58} />
+          <TeamLogo name={b?.shortName || b?.name} src={b?.logoUrl} color={b?.colorPrimary} size={36} />
         </div>
       </div>
 
       {/* round-by-round strip */}
       {lm?.rounds && lm.rounds.length ? (
-        <div className="relative mt-4 border-t border-line/50 pt-3">
+        <div className="relative mt-2.5 border-t border-line/50 pt-2">
           <RoundStrip rounds={lm.rounds} teams={match.teams} />
         </div>
       ) : null}
 
       {/* footer: maps line (Bo3+) + stream */}
       {showPips || match.streamUrl ? (
-        <div className="relative mt-3 flex items-center justify-between">
+        <div className="relative mt-2 flex items-center justify-between">
           {showPips ? (
             <span className="text-[11px] tabular-nums text-muted">
               Maps <span className="font-semibold text-ink">{aWon}–{bWon}</span>
@@ -159,7 +159,7 @@ export function LiveMatchCard({ match }: { match: MatchState }) {
       <Link
         href={`/pro-matches/${match.seriesId}`}
         aria-label={`${a?.shortName || a?.name || "TBD"} vs ${b?.shortName || b?.name || "TBD"} — live match page`}
-        className="absolute inset-0 rounded-2xl"
+        className="absolute inset-0 rounded-xl"
       />
     </div>
   );
