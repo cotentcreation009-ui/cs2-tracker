@@ -424,6 +424,153 @@ async function listPageFiles(
 // redirect-target page title (a nick like "MartinezSa" can redirect to a page
 // titled "Martinez" whose photo files are named after the TARGET title).
 // Keyed by lowercase nick.
+// ---- team crests ---------------------------------------------------------
+//
+// Same two-call shape as the player photos above, with a different picker:
+// a team page carries a hundred files (every event icon it has ever attended)
+// but its own logos are titled after the page — "Team Vitality 2026 full
+// darkmode.png", "9z Team 2024 lightmode.png". So candidates are the files
+// whose title starts with the REDIRECT-RESOLVED page title, and the best of
+// those wins. Redirects matter here: Valve's standings say "Vitality" and
+// "Falcons", Liquipedia titles them "Team Vitality" and "Team Falcons".
+
+const TEAM_PREFIX = "lp:team1:";
+
+type TeamPending = { name: string; resolve: (u: string | null) => void };
+let teamPending: TeamPending[] = [];
+let teamTimer: ReturnType<typeof setTimeout> | null = null;
+const teamInflight = new Map<string, Promise<string | null>>();
+
+function readTeamCache(name: string): CacheEntry | null {
+  try {
+    const raw = localStorage.getItem(TEAM_PREFIX + name.toLowerCase());
+    if (!raw) return null;
+    const v = JSON.parse(raw) as CacheEntry;
+    const ttl = v.u ? HIT_TTL_MS : MISS_TTL_MS;
+    if (typeof v.t !== "number" || Date.now() - v.t > ttl) return null;
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+function writeTeamCache(name: string, u: string | null): void {
+  try {
+    localStorage.setItem(TEAM_PREFIX + name.toLowerCase(), JSON.stringify({ u, t: Date.now() }));
+  } catch {
+    /* storage full — resolution still worked */
+  }
+}
+
+/** A team's crest from Liquipedia (CC BY-SA), or null when it has none. */
+export function resolveTeamLogo(name: string): Promise<string | null> {
+  const key = name.trim().toLowerCase();
+  if (!key) return Promise.resolve(null);
+  const cached = readTeamCache(key);
+  if (cached) return Promise.resolve(cached.u);
+  const existing = teamInflight.get(key);
+  if (existing) return existing;
+
+  const p = new Promise<string | null>((resolve) => {
+    teamPending.push({ name: name.trim(), resolve });
+    if (teamTimer == null) teamTimer = setTimeout(flushTeamBatch, BATCH_WAIT_MS);
+  });
+  teamInflight.set(key, p);
+  void p.finally(() => teamInflight.delete(key));
+  return p;
+}
+
+function flushTeamBatch(): void {
+  teamTimer = null;
+  const batch = teamPending.splice(0, MAX_TITLES);
+  if (batch.length === 0) return;
+  batchChain = batchChain.then(() => execTeamBatch(batch)).catch(() => {});
+  if (teamPending.length > 0) teamTimer = setTimeout(flushTeamBatch, 0);
+}
+
+async function execTeamBatch(batch: TeamPending[]): Promise<void> {
+  const byName = new Map<string, TeamPending[]>();
+  for (const b of batch) {
+    const c = readTeamCache(b.name);
+    if (c) {
+      b.resolve(c.u);
+      continue;
+    }
+    const k = b.name.toLowerCase();
+    const arr = byName.get(k) ?? [];
+    arr.push(b);
+    byName.set(k, arr);
+  }
+  if (byName.size === 0) return;
+  const names = [...byName.values()].map((arr) => arr[0].name);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { files, redirects } = await listPageFiles(names);
+      const bestByName = pickTeamCrest(names, files, redirects);
+      const wanted = [...new Set([...bestByName.values()].filter((t): t is string => t !== null))];
+      const urls = wanted.length > 0 ? await fileThumbUrls(wanted) : new Map<string, string>();
+      for (const [k, arr] of byName) {
+        const title = bestByName.get(k) ?? null;
+        const u = (title ? urls.get(title) : null) ?? null;
+        writeTeamCache(k, u);
+        for (const b of arr) b.resolve(u);
+      }
+      return;
+    } catch {
+      if (attempt === 0) await sleep(1500);
+    }
+  }
+  for (const arr of byName.values()) for (const b of arr) b.resolve(null);
+}
+
+// Prefer a dark-background crest (this UI is dark), then the newest year, and
+// prefer the plain mark over the "full" lockup, which carries the wordmark and
+// reads as a smudge at card size.
+function pickTeamCrest(
+  names: string[],
+  files: string[],
+  redirects: Map<string, string>,
+): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const name of names) {
+    const page = (redirects.get(name.toLowerCase()) ?? name).toLowerCase();
+    let best: string | null = null;
+    let bestScore = -1;
+    // A crest is titled after the org and NOTHING else: an optional org word,
+    // an optional year, an optional "full", then the mode. Anything richer is
+    // a different subject that merely starts with the same name — the junior
+    // roster ("Natus Vincere Junior 2021 darkmode.png"), an event the org
+    // hosts ("BetBoom RUSH B! Summit icon allmode.png"), or a photograph
+    // ("Spirit at LanDaLan 3.jpg"). All three were winning before this.
+    const CREST =
+      /^[\s_]*(?:team|esports|e-sports|gaming|clan)?[\s_]*(?:((?:19|20)\d{2}))?[\s_]*(full)?[\s_]*(darkmode|lightmode|allmode)\.[a-z0-9]+$/;
+    // Liquipedia titles some pages with a "Team " prefix the standings omit
+    // (Valve says "Spirit", the page is "Team Spirit"), so try both.
+    const prefixes = [page, `team ${page}`];
+    for (const f of files) {
+      const lower = f.replace(/^File:/i, "").toLowerCase();
+      const prefix = prefixes.find((pre) => lower.startsWith(pre));
+      if (!prefix) continue;
+      const m = CREST.exec(lower.slice(prefix.length));
+      if (!m) continue;
+      const [, year, full, mode] = m;
+
+      let score = mode === "darkmode" ? 60 : mode === "allmode" ? 45 : 20;
+      if (!full) score += 15;
+      // No year usually means the canonical current crest; a dated one is
+      // ranked by how recent it is.
+      score += year ? Math.min(12, Math.max(0, Number(year) - 2015)) : 14;
+      if (score > bestScore) {
+        bestScore = score;
+        best = f;
+      }
+    }
+    out.set(name.toLowerCase(), best);
+  }
+  return out;
+}
+
 function pickBest(
   nicks: string[],
   files: string[],
