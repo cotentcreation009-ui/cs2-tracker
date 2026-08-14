@@ -165,6 +165,20 @@ export interface ProTeamPage {
   players?: ProTeamPlayer[];
   results?: ProTeamResult[];
   nextMatch?: ProNextMatch | null;
+  /** Valve Regional Standings — absent for an org that isn't ranked. */
+  vrs?: ProVrsStanding | null;
+}
+
+/**
+ * A team's place in Counter-Strike's official ranking. `of` is how many teams
+ * the published table covers, so a standing can be shown as "#34 of 214"
+ * rather than a bare number that reads as "out of twenty".
+ */
+export interface ProVrsStanding {
+  standing: number;
+  points: number;
+  asOf?: string;
+  of?: number;
 }
 
 // The team's live or next scheduled series, trimmed from the board state.

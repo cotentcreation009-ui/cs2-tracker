@@ -68,9 +68,22 @@ func NewClient(log *slog.Logger) *Client {
 
 // TopTeams returns the current global standings, best first, capped at limit.
 func (c *Client) TopTeams(ctx context.Context, limit int) ([]Team, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
+	teams, err := c.Standings(ctx)
+	if err != nil {
+		return nil, err
 	}
+	if limit <= 0 || limit > len(teams) {
+		limit = min(20, len(teams))
+	}
+	return teams[:limit], nil
+}
+
+// Standings returns the WHOLE global table, best first.
+//
+// The full table costs exactly what the top twenty cost — it is one file — and
+// a team page for a side ranked #34 can only show its standing if we kept the
+// rows past twenty. Callers cache this; it changes about monthly.
+func (c *Client) Standings(ctx context.Context) ([]Team, error) {
 	name, err := c.latestGlobalFile(ctx)
 	if err != nil {
 		return nil, err
@@ -84,10 +97,58 @@ func (c *Client) TopTeams(ctx context.Context, limit int) ([]Team, error) {
 	if len(teams) == 0 {
 		return nil, ErrNoStandings
 	}
-	if len(teams) > limit {
-		teams = teams[:limit]
-	}
 	return teams, nil
+}
+
+// Find returns a team's row by name, matching the way the rest of the app
+// joins the two providers' spellings — GRID says "Team Alliance" where these
+// standings say "Alliance". Returns false when the org is not ranked at all,
+// which is a normal answer, not an error.
+func Find(teams []Team, name string) (Team, bool) {
+	want := NameKeys(name)
+	if len(want) == 0 {
+		return Team{}, false
+	}
+	for _, t := range teams {
+		for _, tk := range NameKeys(t.Name) {
+			for _, wk := range want {
+				if tk == wk {
+					return t, true
+				}
+			}
+		}
+	}
+	// Second pass, with the decorative half of an org's name removed. Valve's
+	// table says "G2", "FaZe", "Aurora", "paiN"; other providers write "G2
+	// Esports", "FaZe Clan", "Aurora Gaming", "paiN Gaming". Measured against
+	// the live table, this pass is the difference between finding those rows
+	// and showing no ranking for teams that are plainly ranked.
+	//
+	// Only ever a fallback, and only for DISPLAYING a ranking. The team-id
+	// join stays strict — a wrong rank is a wrong number on a page, a wrong id
+	// is a link to somebody else's team.
+	if lw := looseKey(name); lw != "" {
+		for _, t := range teams {
+			if looseKey(t.Name) == lw {
+				return t, true
+			}
+		}
+	}
+	return Team{}, false
+}
+
+// orgNoise is the words providers decorate an org name with. "Academy" is
+// deliberately absent: that is a different side, not a spelling.
+var orgNoise = regexp.MustCompile(`(?i)\b(e-?sports?|gaming|clan|team|club)\b`)
+
+// looseKey reduces a name to the distinctive part of it, or "" if that leaves
+// nothing to match on.
+func looseKey(s string) string {
+	stripped := NormalizeName(orgNoise.ReplaceAllString(s, " "))
+	if len(stripped) < 2 {
+		return ""
+	}
+	return stripped
 }
 
 // latestGlobalFile finds the most recent standings_global_*.md. The repo has

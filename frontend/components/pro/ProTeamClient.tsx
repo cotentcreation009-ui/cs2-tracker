@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ProNextMatch, ProTeamPage, ProTeamPlayer, ProTeamResult } from "./types";
+import type {
+  ProNextMatch,
+  ProTeamPage,
+  ProTeamPlayer,
+  ProTeamResult,
+  ProVrsStanding,
+} from "./types";
 import { TeamLogo } from "./TeamLogo";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { PlayerStatsDrawer } from "./PlayerStatsDrawer";
@@ -96,6 +102,10 @@ export function ProTeamClient({ id }: { id: string }) {
               Counter-Strike 2
               {total > 0 ? <span className="ml-2 normal-case tracking-normal">· last {total} series tracked</span> : null}
             </p>
+            {/* Sits with the team's identity rather than in the stat tiles
+                below: those only render once we have tracked series, and a
+                ranked team between events would otherwise show no ranking. */}
+            <VrsBadge vrs={data.vrs} hex={hex} />
           </div>
         </div>
 
@@ -405,6 +415,41 @@ function ResultRow({ r }: { r: ProTeamResult }) {
         <path d="M9 6l6 6-6 6" />
       </svg>
     </Link>
+  );
+}
+
+/**
+ * The team's place in Valve's Regional Standings.
+ *
+ * Worth naming in full on the page: it is Counter-Strike's OFFICIAL ranking,
+ * the one Major invitations are decided by, and the only ranking here that is
+ * somebody's published number rather than something we computed. Renders
+ * nothing at all for an unranked org — most teams are — rather than implying a
+ * position we do not have.
+ */
+function VrsBadge({ vrs, hex }: { vrs?: ProVrsStanding | null; hex: string }) {
+  if (!vrs || !vrs.standing) return null;
+  return (
+    <div
+      className="mt-2 inline-flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-lg border border-line/60 bg-panel/50 px-2.5 py-1.5"
+      title={`Valve Regional Standings — Counter-Strike's official ranking, used to decide Major invitations${vrs.asOf ? `. Published ${vrs.asOf}` : ""}`}
+    >
+      <span className="text-[9px] font-semibold uppercase tracking-[0.14em]" style={{ color: hex }}>
+        VRS rank
+      </span>
+      <span className="text-lg font-extrabold tabular-nums leading-none text-ink">
+        #{vrs.standing}
+      </span>
+      {vrs.of ? <span className="text-[11px] text-muted">of {vrs.of}</span> : null}
+      <span aria-hidden className="text-faint">·</span>
+      <span className="text-sm font-bold tabular-nums text-ink">
+        {vrs.points.toLocaleString()}
+      </span>
+      <span className="text-[11px] text-muted">pts</span>
+      {vrs.asOf ? (
+        <span className="text-[10px] normal-case text-faint">· as of {vrs.asOf}</span>
+      ) : null}
+    </div>
   );
 }
 

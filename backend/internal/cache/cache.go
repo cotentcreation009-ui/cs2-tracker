@@ -119,7 +119,10 @@ func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID
 // the spotlight rails that claims to be one.
 // Counter-Strike's official Regional Standings — Valve regenerates them about
 // monthly, so this is cached hard.
-func ProStandingsKey() string { return "cs2:pro:standings1" }
+// ProStandingsKey caches Valve's ENTIRE Regional Standings table (not just the
+// top 20 — the team page needs rows further down). Versioned because the
+// cached payload changed shape.
+func ProStandingsKey() string { return "cs2:pro:standings2" }
 
 // Learned org-name -> GRID team id pairings, accumulated from every board poll
 // so a ranked team becomes linkable the first time we see it play.
