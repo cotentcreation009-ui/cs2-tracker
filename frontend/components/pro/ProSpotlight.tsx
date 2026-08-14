@@ -5,14 +5,15 @@ import { usePoll } from "./usePoll";
 import { SpotlightRail, type RailCard } from "./SpotlightRail";
 import { PlayerAvatar } from "./PlayerAvatar";
 
-// Three rails above the board: the teams and players currently on it, and
-// FACEIT's leaderboard.
+// Three rails: the world's top 20 teams, their players, and FACEIT's
+// leaderboard. Every one of them is somebody's published ranking — none is a
+// number we invented.
 //
-// The labels are deliberate. Only the FACEIT rail is a RANKING — that list is
-// published by FACEIT and we show it as-is. HLTV publishes no API and blocks
-// server-side reads, so a "world top 20" here would be a number we invented.
-// What we can say truthfully is who is playing in the matches we track, so
-// that is what the first two rails say.
+// The teams rail is Counter-Strike's OFFICIAL Regional Standings, the ranking
+// Valve uses to decide Major invitations. It replaced an earlier "who is on
+// the board" ordering that surfaced qualifier sides, because how often a team
+// appears in the matches we happen to track says nothing about how good they
+// are. Player rosters come from the same standings.
 
 const POLL_MS = 120_000; // rosters and leaderboards move slowly
 
@@ -28,21 +29,22 @@ const REGIONS = [
 ] as const;
 
 interface SpotlightTeam {
-  id: string;
+  standing: number;
+  points: number;
   name: string;
+  /** Present only for orgs we have seen play — our team page is keyed by it. */
+  gridId?: string;
   logoUrl?: string;
   color?: string;
-  matches: number;
+  roster?: string[];
   live?: boolean;
-  nextAt?: string;
-  tournament?: string;
+  asOf?: string;
 }
 interface SpotlightPlayer {
-  id: string;
   nick: string;
-  teamId?: string;
   teamName?: string;
-  teamLogo?: string;
+  teamRank?: number;
+  teamGridId?: string;
   color?: string;
   live?: boolean;
 }
@@ -75,17 +77,6 @@ function levelHex(lvl?: number): string {
   return "#dfe5ec";
 }
 
-function startsIn(iso?: string): string | undefined {
-  if (!iso) return undefined;
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return undefined;
-  const mins = Math.round((t - Date.now()) / 60000);
-  if (mins < 0) return undefined;
-  if (mins < 60) return `in ${mins}m`;
-  const h = Math.round(mins / 60);
-  if (h < 48) return `in ${h}h`;
-  return `in ${Math.round(h / 24)}d`;
-}
 
 export function ProSpotlight() {
   const { data, loading } = usePoll<SpotlightResponse>(
@@ -95,29 +86,33 @@ export function ProSpotlight() {
 
   const { teams, players } = useMemo(() => {
     const teams: RailCard[] = (data?.teams ?? []).map((t) => ({
-      id: t.id,
+      id: String(t.standing),
       name: t.name,
-      href: `/pro-matches/team/${encodeURIComponent(t.id)}`,
+      // Only orgs we have actually tracked have a stats page to open. The rest
+      // still render — a top-20 side we have never seen play is a real fact,
+      // and a dead link would be worse than a card that waits.
+      href: t.gridId
+        ? `/pro-matches/team/${encodeURIComponent(t.gridId)}`
+        : undefined,
       imageUrl: t.logoUrl,
       accent: t.color || undefined,
-      subtitle: t.live
-        ? "Live now"
-        : t.tournament || startsIn(t.nextAt) || undefined,
-      stats: [
-        { label: "Tracked", value: String(t.matches) },
-        ...(t.live ? [] : startsIn(t.nextAt) ? [{ label: "Next", value: startsIn(t.nextAt)! }] : []),
-      ],
+      rank: t.standing,
+      subtitle: t.live ? "Live now" : t.roster?.slice(0, 2).join(", "),
+      stats: [{ label: "Points", value: t.points.toLocaleString("en-US") }],
+      // Valve's points run to roughly 2000 at the top; the segment meter is a
+      // read of this team against the leader, not an absolute scale.
+      meter: undefined,
     }));
 
     const players: RailCard[] = (data?.players ?? []).map((p) => ({
-      id: p.id || p.nick,
+      id: `${p.teamName ?? ""}-${p.nick}`,
       name: p.nick,
       // HLTV has no API and no stable per-player URL we can derive, so a
       // search link is the honest way to send someone there: it always
       // resolves, and it never fabricates a profile id.
       href: `https://www.hltv.org/search?query=${encodeURIComponent(p.nick)}`,
       accent: p.color || undefined,
-      subtitle: p.teamName,
+      subtitle: p.teamRank ? `#${p.teamRank} ${p.teamName ?? ""}`.trim() : p.teamName,
       // The photo comes from Liquipedia, resolved in the visitor's browser
       // (their servers rate-limit ours), with a silhouette when there is none.
       media: (
@@ -135,18 +130,22 @@ export function ProSpotlight() {
     <div className="space-y-6">
       {(loading || teams.length > 0) && (
         <SpotlightRail
-          title="Teams on the board"
-          subtitle="Ordered by how much of the tracked calendar they occupy — live teams first"
+          title="Top 20 teams"
+          subtitle={
+            data?.teams?.[0]?.asOf
+              ? `Valve Regional Standings · as of ${data.teams[0].asOf}`
+              : "Counter-Strike's official Regional Standings"
+          }
           cards={teams}
           loading={loading && !data}
-          emptyNote="No tracked teams right now."
+          emptyNote="The standings are unavailable right now."
         />
       )}
 
       {(loading || players.length > 0) && (
         <SpotlightRail
           title="Players in action"
-          subtitle="Rostered players from the teams above · photos from Liquipedia (CC BY-SA)"
+          subtitle="Players of the top 20 teams · photos from Liquipedia (CC BY-SA)"
           cards={players}
           loading={loading && !data}
           emptyNote="No rosters available right now."

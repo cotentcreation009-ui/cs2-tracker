@@ -117,6 +117,14 @@ func ProTeamRosterKey(teamID string) string { return "cs2:pro:roster2:" + teamID
 
 // The FACEIT leaderboard for one region — a real ranking, and the only list on
 // the spotlight rails that claims to be one.
+// Counter-Strike's official Regional Standings — Valve regenerates them about
+// monthly, so this is cached hard.
+func ProStandingsKey() string { return "cs2:pro:standings1" }
+
+// Learned org-name -> GRID team id pairings, accumulated from every board poll
+// so a ranked team becomes linkable the first time we see it play.
+func ProTeamIndexKey() string { return "cs2:pro:teamindex1" }
+
 func ProFaceitRankingKey(region string) string {
 	return "cs2:pro:faceitrank1:" + strings.ToLower(region)
 }

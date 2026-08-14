@@ -3,14 +3,13 @@ package api
 import (
 	"context"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/faceit"
-	"github.com/cs2tracker/server/internal/grid"
+	"github.com/cs2tracker/server/internal/valve"
 )
 
 // The pro-matches spotlight: the teams and players worth looking at right now,
@@ -26,42 +25,56 @@ import (
 //   - those teams' rosters, from GRID;
 //   - FACEIT's published leaderboard, which IS a genuine ranking.
 //
-// So the first two rails are "who is on the board", ordered by tracked presence
-// and imminence, and the frontend labels them as exactly that. The FACEIT rail
-// is the only one that claims to be a ranking, because it is one.
+// The teams rail was originally "who is on the board", ordered by how much of
+// the tracked calendar each team occupied. That produced a wall of qualifier
+// sides — the calendar is mostly tier-3 — which is exactly the wrong answer to
+// "show me the top teams". It now uses Counter-Strike's OFFICIAL Regional
+// Standings, published by Valve and used to decide Major invitations, so the
+// list is a real ranking with a real source.
+//
+// Those standings ship each team's roster too, which is where the players rail
+// now comes from: the players of the twenty best teams in the world, and no
+// GRID roster calls at all.
 
 const (
 	// A rail is a glance, not a directory.
-	spotlightTeams   = 12
+	spotlightTeams   = 20
 	spotlightPlayers = 24
 	spotlightFaceit  = 20
 
-	// Rosters move on transfer days, not hourly, and each one costs a GRID
-	// Central call against a 20/min cap shared with the live board.
-	spotlightRosterTTL = 12 * time.Hour
+	// Valve regenerates the standings about monthly; six hours is already far
+	// more often than the data can change.
+	spotlightStandingsTTL = 6 * time.Hour
 	// The leaderboard shifts continuously but nobody needs it to the minute.
 	spotlightFaceitTTL = 30 * time.Minute
-	// How many teams we are willing to spend roster lookups on per refresh.
-	spotlightRosterTeams = 8
+	// How long a team-name -> GRID id pairing is remembered. Long, because it
+	// only grows useful with time: every poll of the board teaches us a few
+	// more, and a top-20 side we have never tracked cannot be linked until we
+	// have seen it play once.
+	teamIndexTTL = 30 * 24 * time.Hour
 )
 
 type spotlightTeam struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	LogoURL    string `json:"logoUrl,omitempty"`
-	Color      string `json:"color,omitempty"`
-	Matches    int    `json:"matches"`              // tracked series featuring them
-	Live       bool   `json:"live,omitempty"`       // in a series right now
-	NextAt     string `json:"nextAt,omitempty"`     // RFC3339 of their next scheduled series
-	Tournament string `json:"tournament,omitempty"` // the event that next match belongs to
+	// Standing and Points come straight from Valve's table.
+	Standing int    `json:"standing"`
+	Points   int    `json:"points"`
+	Name     string `json:"name"`
+	// GridID is set only when we have actually seen this org play in a tracked
+	// series, because our team page is keyed by GRID's id. Absent means the
+	// card still renders — it just cannot link anywhere truthful yet.
+	GridID  string   `json:"gridId,omitempty"`
+	LogoURL string   `json:"logoUrl,omitempty"`
+	Color   string   `json:"color,omitempty"`
+	Roster  []string `json:"roster,omitempty"`
+	Live    bool     `json:"live,omitempty"` // playing in a tracked series right now
+	AsOf    string   `json:"asOf,omitempty"`
 }
 
 type spotlightPlayer struct {
-	ID       string `json:"id"`
 	Nick     string `json:"nick"`
-	TeamID   string `json:"teamId,omitempty"`
 	TeamName string `json:"teamName,omitempty"`
-	TeamLogo string `json:"teamLogo,omitempty"`
+	TeamRank int    `json:"teamRank,omitempty"`
+	GridID   string `json:"teamGridId,omitempty"`
 	Color    string `json:"color,omitempty"`
 	Live     bool   `json:"live,omitempty"`
 }
@@ -94,21 +107,23 @@ func (s *Server) handleProSpotlight(w http.ResponseWriter, r *http.Request) {
 	// shared 20/min budget on nothing.
 	onlyFaceit := r.URL.Query().Get("only") == "faceit"
 
-	gridUp := !onlyFaceit && s.proMatches != nil && s.proMatches.Store().Enabled()
-	out.Enabled = gridUp || onlyFaceit || (s.faceit != nil && s.faceit.HasKey())
+	out.Enabled = true
 
 	var wg sync.WaitGroup
 
-	// ---- teams + players, from the board we already poll ------------------
-	if gridUp {
-		board, _ := s.proMatches.Store().Board()
-		board = append(board, s.proMatches.Store().Finished()...)
-		out.Teams = teamsFromBoard(board)
-
+	// ---- the official ranking, plus its rosters ---------------------------
+	if !onlyFaceit && s.valve != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out.Players = s.playersForTeams(ctx, out.Teams)
+			teams, err := cachedTTL(s, ctx, cache.ProStandingsKey(), spotlightStandingsTTL,
+				func() ([]valve.Team, error) { return s.valve.TopTeams(ctx, spotlightTeams) })
+			if err != nil {
+				// An unreachable ranking is an absent rail, never a wrong one.
+				s.log.Warn("spotlight: valve standings unavailable", "err", err)
+				return
+			}
+			out.Teams, out.Players = s.decorate(ctx, teams)
 		}()
 	}
 
@@ -144,131 +159,114 @@ func (s *Server) handleProSpotlight(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// teamsFromBoard ranks the teams we are actually tracking: how many series each
-// appears in first, then whoever plays soonest. That is a statement about our
-// coverage and the calendar, which is true, rather than about who is best,
-// which we have no source for.
-func teamsFromBoard(board []grid.MatchState) []spotlightTeam {
-	type acc struct {
-		t         spotlightTeam
-		nextAt    time.Time
-		hasNextAt bool
+// decorate turns Valve's ranking into the two rails.
+//
+// The only thing we add is a GRID id where we have one: our team page is keyed
+// by GRID's identifier, so a card can only link somewhere real for an org we
+// have actually seen play. Everything else on the card is Valve's.
+func (s *Server) decorate(ctx context.Context, ranked []valve.Team) ([]spotlightTeam, []spotlightPlayer) {
+	index, live := s.teamIndex(ctx)
+
+	teams := make([]spotlightTeam, 0, len(ranked))
+	for _, t := range ranked {
+		key := valve.NormalizeName(t.Name)
+		known := index[key]
+		teams = append(teams, spotlightTeam{
+			Standing: t.Standing,
+			Points:   t.Points,
+			Name:     t.Name,
+			GridID:   known.id,
+			LogoURL:  known.logo,
+			Color:    known.color,
+			Roster:   t.Roster,
+			Live:     live[key],
+			AsOf:     t.AsOf,
+		})
 	}
-	seen := map[string]*acc{}
-	for _, m := range board {
-		start, _ := time.Parse(time.RFC3339, m.StartScheduled)
-		for _, tm := range m.Teams {
-			id := strings.TrimSpace(tm.GridID)
-			if id == "" || strings.TrimSpace(tm.Name) == "" {
+
+	// Interleave by team so the players rail reads as a cross-section of the
+	// top of the scene rather than five players from the number-one side.
+	players := make([]spotlightPlayer, 0, spotlightPlayers)
+	for depth := 0; depth < 5 && len(players) < spotlightPlayers; depth++ {
+		for _, t := range teams {
+			if depth >= len(t.Roster) || len(players) >= spotlightPlayers {
 				continue
 			}
-			a := seen[id]
-			if a == nil {
-				a = &acc{t: spotlightTeam{
-					ID:      id,
-					Name:    tm.Name,
-					LogoURL: tm.LogoUrl,
-					Color:   tm.ColorPrimary,
-				}}
-				seen[id] = a
-			}
-			a.t.Matches++
-			if m.Status == "live" {
-				a.t.Live = true
-			}
-			// "Next" means the soonest match still ahead of us.
-			if m.Status == "upcoming" && !start.IsZero() && (!a.hasNextAt || start.Before(a.nextAt)) {
-				a.nextAt = start
-				a.hasNextAt = true
-				a.t.NextAt = start.UTC().Format(time.RFC3339)
-				a.t.Tournament = m.TournamentName
-			}
-		}
-	}
-
-	list := make([]spotlightTeam, 0, len(seen))
-	for _, a := range seen {
-		list = append(list, a.t)
-	}
-	sort.SliceStable(list, func(i, j int) bool {
-		if list[i].Live != list[j].Live {
-			return list[i].Live // whoever is playing right now leads the rail
-		}
-		if list[i].Matches != list[j].Matches {
-			return list[i].Matches > list[j].Matches
-		}
-		if list[i].NextAt != list[j].NextAt {
-			// an empty NextAt sorts last, which is what we want
-			if list[i].NextAt == "" {
-				return false
-			}
-			if list[j].NextAt == "" {
-				return true
-			}
-			return list[i].NextAt < list[j].NextAt
-		}
-		return list[i].Name < list[j].Name
-	})
-	if len(list) > spotlightTeams {
-		list = list[:spotlightTeams]
-	}
-	return list
-}
-
-// playersForTeams pulls rosters for the teams at the head of the rail. Bounded
-// on purpose: every roster is a GRID Central call sharing a 20/min budget with
-// the live board, so we spend a handful, cache them hard, and let the rail be
-// shorter rather than starve the thing people actually came for.
-func (s *Server) playersForTeams(ctx context.Context, teams []spotlightTeam) []spotlightPlayer {
-	if s.proMatches == nil || len(teams) == 0 {
-		return []spotlightPlayer{}
-	}
-	cl := s.proMatches.Client()
-	if cl == nil {
-		return []spotlightPlayer{}
-	}
-	if len(teams) > spotlightRosterTeams {
-		teams = teams[:spotlightRosterTeams]
-	}
-
-	rosters := make([][]grid.RosterPlayer, len(teams))
-	var wg sync.WaitGroup
-	for i, t := range teams {
-		wg.Add(1)
-		go func(i int, t spotlightTeam) {
-			defer wg.Done()
-			rows, err := cachedTTL(s, ctx, cache.ProTeamRosterKey(t.ID), spotlightRosterTTL,
-				func() ([]grid.RosterPlayer, error) { return cl.TeamRoster(ctx, t.ID) })
-			if err != nil {
-				return // a roster we cannot read simply contributes nobody
-			}
-			rosters[i] = rows
-		}(i, t)
-	}
-	wg.Wait()
-
-	out := make([]spotlightPlayer, 0, spotlightPlayers)
-	// Interleave by team so the rail reads as a cross-section of the scene
-	// rather than five players from one org followed by five from the next.
-	for depth := 0; depth < 5 && len(out) < spotlightPlayers; depth++ {
-		for i, rows := range rosters {
-			if depth >= len(rows) || len(out) >= spotlightPlayers {
+			nick := strings.TrimSpace(t.Roster[depth])
+			if nick == "" {
 				continue
 			}
-			p := rows[depth]
-			if strings.TrimSpace(p.Nick) == "" {
-				continue
-			}
-			out = append(out, spotlightPlayer{
-				ID:       p.ID,
-				Nick:     p.Nick,
-				TeamID:   teams[i].ID,
-				TeamName: teams[i].Name,
-				TeamLogo: teams[i].LogoURL,
-				Color:    teams[i].Color,
-				Live:     teams[i].Live,
+			players = append(players, spotlightPlayer{
+				Nick:     nick,
+				TeamName: t.Name,
+				TeamRank: t.Standing,
+				GridID:   t.GridID,
+				Color:    t.Color,
+				Live:     t.Live,
 			})
 		}
 	}
-	return out
+	return teams, players
+}
+
+type knownTeam struct {
+	id    string
+	logo  string
+	color string
+}
+
+// teamIndex maps a normalized org name to what GRID knows about it, learned
+// from every series we have polled and remembered for a month. A top-20 side
+// we have never tracked simply has no entry yet; the next time they appear on
+// the board they gain one, and the card becomes clickable from then on.
+func (s *Server) teamIndex(ctx context.Context) (map[string]knownTeam, map[string]bool) {
+	index := map[string]knownTeam{}
+	live := map[string]bool{}
+	if s.cache != nil {
+		var stored map[string]knownTeamJSON
+		if hit, _ := s.cache.GetJSON(ctx, cache.ProTeamIndexKey(), &stored); hit {
+			for k, v := range stored {
+				index[k] = knownTeam{id: v.ID, logo: v.Logo, color: v.Color}
+			}
+		}
+	}
+	if s.proMatches == nil || !s.proMatches.Store().Enabled() {
+		return index, live
+	}
+
+	board, _ := s.proMatches.Store().Board()
+	board = append(board, s.proMatches.Store().Finished()...)
+	changed := false
+	for _, m := range board {
+		for _, tm := range m.Teams {
+			id := strings.TrimSpace(tm.GridID)
+			key := valve.NormalizeName(tm.Name)
+			if id == "" || key == "" {
+				continue
+			}
+			if m.Status == "live" {
+				live[key] = true
+			}
+			cur, ok := index[key]
+			if !ok || cur.id != id || (cur.logo == "" && tm.LogoUrl != "") {
+				index[key] = knownTeam{id: id, logo: tm.LogoUrl, color: tm.ColorPrimary}
+				changed = true
+			}
+		}
+	}
+	if changed && s.cache != nil {
+		out := make(map[string]knownTeamJSON, len(index))
+		for k, v := range index {
+			out[k] = knownTeamJSON{ID: v.id, Logo: v.logo, Color: v.color}
+		}
+		_ = s.cache.SetJSONTTL(ctx, cache.ProTeamIndexKey(), out, teamIndexTTL)
+	}
+	return index, live
+}
+
+// knownTeamJSON is the stored shape (unexported fields do not marshal).
+type knownTeamJSON struct {
+	ID    string `json:"id"`
+	Logo  string `json:"logo,omitempty"`
+	Color string `json:"color,omitempty"`
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
+	"github.com/cs2tracker/server/internal/valve"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -79,6 +80,9 @@ type Server struct {
 	steam   *steam.Client
 	leetify *leetify.Client
 	faceit  *faceit.Client
+	// valve reads Counter-Strike's official Regional Standings — the only
+	// authoritative "top teams" list that is publicly readable.
+	valve   *valve.Client
 	queue   *queue.Queue
 	cache   *cache.Cache
 	blob    blob.Store // nil when direct (object-storage) upload is not configured
@@ -123,7 +127,7 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
+	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), valve: valve.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
 }
 
 // StartProMatches launches the GRID poller's background loops (a no-op when the
