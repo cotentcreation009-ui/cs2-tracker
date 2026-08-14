@@ -149,13 +149,17 @@ export function PlayersRail() {
       (data?.players ?? []).map((p) => ({
         id: `${p.teamName ?? ""}-${p.nick}`,
         name: p.nick,
-        // Their stats page here, not a search on someone else's site. The
-        // nickname is resolved to a SteamID64 on the click — see the bridge
-        // route — because doing it for all ~100 rostered players up front
-        // would be a hundred lookups for links nobody clicks.
-        href: `/pro-matches/player/${encodeURIComponent(p.nick)}`,
+        // These cards exist to put faces to the top 20, so a click goes to the
+        // team they play for rather than to the player. A team we have never
+        // seen in a tracked series has no GRID id and therefore no overview
+        // page — the card stays unclickable rather than leading nowhere.
+        href: p.teamGridId
+          ? `/pro-matches/team/${encodeURIComponent(p.teamGridId)}`
+          : undefined,
         accent: p.color || undefined,
-        subtitle: p.teamRank ? `#${p.teamRank} ${p.teamName ?? ""}`.trim() : p.teamName,
+        // No standing here. The rail above IS the ranking; repeating "#2" on a
+        // player card only invited reading it as the player's own rank.
+        subtitle: p.teamName,
         media: (
           <PlayerAvatar nick={p.nick} hex={p.color || "#6ad0ff"} shape="card" />
         ),
@@ -166,7 +170,7 @@ export function PlayersRail() {
   if (data && !players.length) return null;
   return (
     <SpotlightRail
-      title="Players in action"
+      title="Pro players"
       subtitle="Players of the top 20 teams · photos from Liquipedia (CC BY-SA)"
       cards={players}
       loading={loading && !data}

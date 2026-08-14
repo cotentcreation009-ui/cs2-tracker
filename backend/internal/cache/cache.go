@@ -125,6 +125,10 @@ func ProStandingsKey() string { return "cs2:pro:standings1" }
 // so a ranked team becomes linkable the first time we see it play.
 func ProTeamIndexKey() string { return "cs2:pro:teamindex1" }
 
+// ProTeamLookupKey marks that we have already asked GRID to resolve an org
+// name, so a name GRID does not know is not re-asked on every page view.
+func ProTeamLookupKey(key string) string { return "cs2:pro:tlookup:" + key }
+
 func ProFaceitRankingKey(region string) string {
 	return "cs2:pro:faceitrank1:" + strings.ToLower(region)
 }

@@ -244,6 +244,46 @@ func isDigits(s string) bool {
 	return s != ""
 }
 
+// NameKeys returns every key an org should be indexed and looked up under.
+//
+// Normalizing case and punctuation is not enough on its own, because the two
+// sources disagree about the word "Team". Valve's standings say "Spirit",
+// "Vitality", "Falcons"; GRID calls those same orgs "Team Spirit", "Team
+// Vitality", "Team Falcons"; and some carry it as a suffix instead ("9z
+// Team"). That single word was why half the top twenty had no GRID id and so
+// could not be clicked, despite GRID knowing exactly who they were.
+//
+// Both forms are returned rather than rewriting either source's spelling, so
+// an exact match still wins and the looser one is only a fallback.
+func NameKeys(s string) []string {
+	base := NormalizeName(s)
+	if base == "" {
+		return nil
+	}
+	if alt := withoutTeamWord(base); alt != "" {
+		return []string{base, alt}
+	}
+	// The other direction matters just as much: whichever source we saw first
+	// put its spelling in the index, and the other one has to find it there.
+	return []string{base, "team" + base}
+}
+
+// withoutTeamWord drops a leading or trailing "team", or returns "" if there
+// is no such word — or if dropping it would leave too little behind to
+// identify anyone.
+func withoutTeamWord(n string) string {
+	const w = "team"
+	// Two characters is the shortest real org name in the standings ("B8"),
+	// so anything shorter than that after the cut is not a name.
+	if strings.HasPrefix(n, w) && len(n) >= len(w)+2 {
+		return n[len(w):]
+	}
+	if strings.HasSuffix(n, w) && len(n) >= len(w)+2 {
+		return n[:len(n)-len(w)]
+	}
+	return ""
+}
+
 // NormalizeName reduces an org name to something two sources can agree on:
 // case, punctuation and the decorative suffixes each provider adds differ
 // constantly ("Natus Vincere" vs "natus-vincere", "MOUZ" vs "mousesports").
