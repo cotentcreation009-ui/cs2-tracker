@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { resolvePlayerSteamId } from "@/lib/liquipediaClient";
+import { firstId } from "./firstId";
 
 // SteamID64s for individual accounts: 17 digits opening 7656.
 const ID64 = /^7656\d{13}$/;
@@ -33,12 +34,17 @@ async function browserId(nick: string): Promise<string | null> {
 /**
  * Bridge from a pro player's card to their stats page here.
  *
- * The lookup runs in the VISITOR's browser, not on the server. Liquipedia
- * 429s the VM's datacenter IP — which is why player photos, team crests and
- * identity cards already resolve client-side — so a server-rendered version of
- * this page told every visitor we had no Steam account for anyone. The server
- * is still asked first: it is same-origin, instant, and correct on the day
- * that IP stops being blocked.
+ * The lookup that works runs in the VISITOR's browser, not on the server —
+ * the same reason player photos, team crests and identity cards already
+ * resolve client-side. A server-rendered version of this page told every
+ * visitor we had no Steam account for anyone.
+ *
+ * Both sources are asked AT ONCE. Measured against production, a server-side
+ * card lookup hangs until the backend's own 5s deadline before answering
+ * "not found", so awaiting it first would sit on a spinner for five seconds
+ * before the browser lookup — the one that actually resolves — even started.
+ * The server stays in the race because it is same-origin and instant on the
+ * day it starts working again.
  *
  * Resolution is per-click by design. The rails carry ~100 rostered players and
  * Liquipedia is paced at one request every 2.1s, so resolving them all up
@@ -51,7 +57,7 @@ export function ProPlayerBridge({ nick }: { nick: string }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const id = (await serverId(nick)) ?? (await browserId(nick));
+      const id = await firstId([serverId(nick), browserId(nick)]);
       if (!alive) return;
       // replace, not push: Back should return to the rail, not bounce through
       // this page and resolve all over again.

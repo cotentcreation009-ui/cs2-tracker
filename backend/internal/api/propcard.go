@@ -46,7 +46,15 @@ func (s *Server) handleProPlayerCard(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.log.Warn("liquipedia player card lookup failed", "nick", nick, "err", err)
 			if s.cache != nil {
-				_ = s.cache.SetJSONTTL(ctx, key, liquipedia.PlayerInfo{}, 30*time.Minute)
+				// NOT ctx: the usual failure here is ctx's own 5s deadline
+				// expiring, and writing the negative entry through a dead
+				// context silently drops it — so the next request for the
+				// same nick spent another 5s and a rate-limiter slot
+				// rediscovering the same failure, forever. Measured: the
+				// same uncached nick cost 5165ms then 5075ms back to back.
+				wctx, wcancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+				_ = s.cache.SetJSONTTL(wctx, key, liquipedia.PlayerInfo{}, 30*time.Minute)
+				wcancel()
 			}
 			w.Header().Set("Cache-Control", "public, max-age=600, s-maxage=1800")
 			writeJSON(w, http.StatusOK, liquipedia.PlayerInfo{})
