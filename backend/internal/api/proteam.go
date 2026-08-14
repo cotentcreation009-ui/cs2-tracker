@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/grid"
+	"github.com/cs2tracker/server/internal/valve"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -126,7 +129,38 @@ func (s *Server) handleProTeam(w http.ResponseWriter, r *http.Request) {
 		"players":   players,
 		"results":   results,
 		"nextMatch": s.teamNextMatch(tid),
+		"vrs":       s.vrsStanding(ctx, team.Name),
 	})
+}
+
+// vrsStanding is the team's place in Counter-Strike's official Valve Regional
+// Standings — the ranking that decides Major invitations, and the only ranking
+// on this site that is somebody's published number rather than ours.
+//
+// Reads the same cached table the pro-matches rail is built from, so a team
+// page costs no extra upstream call. nil for an org that is not ranked, which
+// is most of them: the UI shows nothing rather than inventing a position.
+func (s *Server) vrsStanding(ctx context.Context, name string) map[string]any {
+	if s.valve == nil || strings.TrimSpace(name) == "" {
+		return nil
+	}
+	all, err := cachedTTL(s, ctx, cache.ProStandingsKey(), 6*time.Hour,
+		func() ([]valve.Team, error) { return s.valve.Standings(ctx) })
+	if err != nil {
+		return nil
+	}
+	row, ok := valve.Find(all, name)
+	if !ok {
+		return nil
+	}
+	return map[string]any{
+		"standing": row.Standing,
+		"points":   row.Points,
+		"asOf":     row.AsOf,
+		// How many teams the ranking covers, so the UI can say "of 214" rather
+		// than leaving a bare number to be read as "out of twenty".
+		"of": len(all),
+	}
 }
 
 // teamNextMatch finds the team's live series — or failing that its next

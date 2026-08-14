@@ -159,3 +159,68 @@ func keysOverlap(a, b []string) bool {
 	}
 	return false
 }
+
+func TestFind(t *testing.T) {
+	table := []Team{
+		{Standing: 1, Points: 2011, Name: "Spirit", AsOf: "2026-08-03"},
+		{Standing: 5, Points: 1662, Name: "Vitality"},
+		{Standing: 34, Points: 640, Name: "Alliance"},
+	}
+	// GRID's spelling must find Valve's row — the same join that cost us the
+	// top-20 links.
+	for _, q := range []string{"Alliance", "Team Alliance", "alliance"} {
+		got, ok := Find(table, q)
+		if !ok || got.Standing != 34 || got.Points != 640 {
+			t.Errorf("Find(%q) = %+v, ok=%v", q, got, ok)
+		}
+	}
+	if got, ok := Find(table, "Spirit"); !ok || got.AsOf != "2026-08-03" {
+		t.Errorf("asOf lost: %+v ok=%v", got, ok)
+	}
+	// An unranked org is a normal answer, not a wrong one.
+	if _, ok := Find(table, "Some Qualifier Side"); ok {
+		t.Error("unranked org matched")
+	}
+	if _, ok := Find(table, ""); ok {
+		t.Error("blank name matched")
+	}
+	if _, ok := Find(nil, "Spirit"); ok {
+		t.Error("empty table matched")
+	}
+}
+
+func TestFindToleratesOrgDecoration(t *testing.T) {
+	// Measured against the live table: Valve writes the short form, other
+	// providers add a word. Without this, plainly-ranked teams showed nothing.
+	table := []Team{
+		{Standing: 11, Points: 1688, Name: "G2"},
+		{Standing: 13, Points: 1677, Name: "FaZe"},
+		{Standing: 10, Points: 1690, Name: "Aurora"},
+		{Standing: 26, Points: 1446, Name: "paiN"},
+		{Standing: 14, Points: 1663, Name: "FUT"},
+	}
+	for query, wantStanding := range map[string]int{
+		"G2 Esports":    11,
+		"FaZe Clan":     13,
+		"Aurora Gaming": 10,
+		"paiN Gaming":   26,
+		"FUT Esports":   14,
+		"G2":            11,
+	} {
+		got, ok := Find(table, query)
+		if !ok || got.Standing != wantStanding {
+			t.Errorf("Find(%q) = %+v ok=%v, want standing %d", query, got, ok, wantStanding)
+		}
+	}
+	// An academy side is a different team and must not inherit the rank.
+	if got, ok := Find(table, "G2 Academy"); ok {
+		t.Errorf("academy side matched the main roster: %+v", got)
+	}
+	// Stripping decoration must not turn an org into nothing and match anything.
+	if _, ok := Find(table, "Esports"); ok {
+		t.Error("a bare decorative word matched a team")
+	}
+	if _, ok := Find(table, "Gaming Club"); ok {
+		t.Error("decoration-only name matched a team")
+	}
+}

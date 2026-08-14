@@ -122,14 +122,20 @@ func (s *Server) handleProSpotlight(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			teams, err := cachedTTL(s, ctx, cache.ProStandingsKey(), spotlightStandingsTTL,
-				func() ([]valve.Team, error) { return s.valve.TopTeams(ctx, spotlightTeams) })
+			// The whole table is cached, not just the rail's slice: the team
+			// page reads the same entry to show a side's VRS standing, and
+			// plenty of tracked teams sit below twentieth.
+			all, err := cachedTTL(s, ctx, cache.ProStandingsKey(), spotlightStandingsTTL,
+				func() ([]valve.Team, error) { return s.valve.Standings(ctx) })
 			if err != nil {
 				// An unreachable ranking is an absent rail, never a wrong one.
 				s.log.Warn("spotlight: valve standings unavailable", "err", err)
 				return
 			}
-			out.Teams, out.Players = s.decorate(ctx, teams)
+			if len(all) > spotlightTeams {
+				all = all[:spotlightTeams]
+			}
+			out.Teams, out.Players = s.decorate(ctx, all)
 		}()
 	}
 
