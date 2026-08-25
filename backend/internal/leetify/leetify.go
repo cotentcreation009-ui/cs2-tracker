@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -34,7 +33,7 @@ const maxRecentMatches = 200
 type Client struct {
 	baseURL   string
 	legacyURL string // legacy fallback host (api.leetify.com)
-	apiKey    string // optional; reserved for higher rate limits
+	apiKey    string // optional; self-serve keys raise the rate tier
 	http      *http.Client
 }
 
@@ -61,6 +60,22 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		o(c)
 	}
 	return c
+}
+
+// newReq builds an authenticated GET. Leetify runs a self-serve key programme
+// (leetify.com/app/developer); their spec takes the raw key as the value of
+// either the Authorization or _leetify_key header — NOT a Bearer token. Keyless
+// still works, on a stricter per-IP rate tier.
+func (c *Client) newReq(ctx context.Context, u string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("_leetify_key", c.apiKey)
+	}
+	return req, nil
 }
 
 // Rating is Leetify's skill-rating breakdown (their metric, shown as-is).
@@ -142,7 +157,7 @@ type Profile struct {
 	Rating         Rating            `json:"rating"`
 	Stats          Stats             `json:"stats"`
 	Ranks          json.RawMessage   `json:"ranks"`
-	// Derived extras. KD + AvgPartySize come from the legacy endpoint's per-match
+	// KD + AvgPartySize came from the legacy profile endpoint's per-match
 	// data (v3 doesn't expose them, so they're 0/omitted there); PeakPremier is
 	// the highest Premier rating seen across the match list (both sources).
 	KD           float64 `json:"kd,omitempty"`
@@ -216,36 +231,6 @@ func peakPremier(ms []RecentMatch) int {
 		}
 	}
 	return peak
-}
-
-// mergeLegacyGames copies the legacy-only per-game fields (kills/deaths,
-// FACEIT elo, and a rank v3 hid) onto v3 rows, matched by game id.
-func mergeLegacyGames(p *Profile, lp *Profile) {
-	byID := map[string]*RecentMatch{}
-	for _, list := range [][]RecentMatch{lp.RecentMatches, lp.FaceitMatches, lp.PremierMatches} {
-		for i := range list {
-			if list[i].ID != "" {
-				byID[list[i].ID] = &list[i]
-			}
-		}
-	}
-	if len(byID) == 0 {
-		return
-	}
-	for _, list := range [][]RecentMatch{p.RecentMatches, p.FaceitMatches, p.PremierMatches} {
-		for i := range list {
-			lg, ok := byID[list[i].ID]
-			if !ok {
-				continue
-			}
-			list[i].Kills = lg.Kills
-			list[i].Deaths = lg.Deaths
-			list[i].Elo = lg.Elo
-			if list[i].Rank == 0 && lg.Rank > 0 {
-				list[i].Rank = lg.Rank
-			}
-		}
-	}
 }
 
 // rankedQueue returns the ladder a game's rating belongs to and the rating it
@@ -399,14 +384,9 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	q.Set("steam64_id", strconv.FormatUint(steam64, 10))
 	u := c.baseURL + "/v3/profile?" + q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := c.newReq(ctx, u)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	if c.apiKey != "" {
-		// Reserved: the public API is keyless; a key (when issued) raises limits.
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
 	resp, err := c.doWithRetry(req)
@@ -428,220 +408,22 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			p.RecentMatches = p.RecentMatches[:maxRecentMatches]
 		}
 		p.PeakPremier = peakPremier(p.RecentMatches)
-		// The legacy endpoint carries per-game data v3 doesn't (kills/deaths,
-		// FACEIT elo, Premier rating on games where v3 hides it) AND the full
-		// history beyond v3's 100-game window. Fetch it best-effort every time:
-		// merge its per-game fields into the v3 rows by game id, complete the
-		// platform lists, and pick up the legacy-only K/D + party + peak.
-		if lp, lerr := c.getProfileLegacy(ctx, steam64); lerr == nil {
-			mergeLegacyGames(&p, lp)
-			if len(lp.FaceitMatches) > len(p.FaceitMatches) {
-				p.FaceitMatches = lp.FaceitMatches
-			}
-			if len(lp.PremierMatches) > len(p.PremierMatches) {
-				p.PremierMatches = lp.PremierMatches
-			}
-			if lp.KD > 0 {
-				p.KD = lp.KD
-			}
-			if lp.AvgPartySize > 0 {
-				p.AvgPartySize = lp.AvgPartySize
-			}
-			if lp.PeakPremier > p.PeakPremier {
-				p.PeakPremier = lp.PeakPremier
-			}
-		}
 		computeRankDeltas(p.RecentMatches)
 		computeRankDeltas(p.FaceitMatches)
 		computeRankDeltas(p.PremierMatches)
 		return &p, nil
 	case http.StatusNotFound:
-		// The newer /v3 API doesn't index every account Leetify actually has
-		// (e.g. some friends-only profiles 404 here). Fall back to the legacy
-		// profile endpoint, which still serves them, before giving up.
-		if p, err := c.getProfileLegacy(ctx, steam64); err == nil {
-			return p, nil
-		}
+		// Since Leetify's Jan 2026 policy, /v3 is the whole public surface for
+		// profiles: it serves REGISTERED accounts only, and the old
+		// api.leetify.com/api/profile/id/ fallback that quietly served everyone
+		// else was withdrawn upstream around July 2026 (404 for every account,
+		// including registered ones). A 404 here is therefore the final answer,
+		// and retrying the dead endpoint only made every miss pay for a second
+		// round trip.
 		return nil, ErrNotFound
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 	}
-}
-
-// --- legacy fallback (api.leetify.com/api/profile/id/{steam64}) -------------
-// The older public endpoint returns accounts /v3 404s on. Its JSON shape is
-// different, so it is mapped into the same Profile. It has no aggregate stats
-// block, so aim micro-stats are averaged from the per-match games — left at 0
-// ("no data", which the CheatMeter skips) when the games don't carry them.
-
-type legacyProfile struct {
-	Meta struct {
-		Name         string            `json:"name"`
-		PlatformBans []json.RawMessage `json:"platformBans"`
-	} `json:"meta"`
-	RecentGameRatings struct {
-		Aim         float64 `json:"aim"`
-		Positioning float64 `json:"positioning"`
-		Utility     float64 `json:"utility"`
-		Clutch      float64 `json:"clutch"`
-		Opening     float64 `json:"opening"`
-		CTLeetify   float64 `json:"ctLeetify"`
-		TLeetify    float64 `json:"tLeetify"`
-		Leetify     float64 `json:"leetify"` // overall rating (raw decimal)
-	} `json:"recentGameRatings"`
-	Games []legacyGame `json:"games"`
-}
-
-type legacyGame struct {
-	GameID                     string             `json:"gameId"`
-	GameFinishedAt             string             `json:"gameFinishedAt"`
-	DataSource                 string             `json:"dataSource"`
-	MatchResult                string             `json:"matchResult"`
-	MapName                    string             `json:"mapName"`
-	Scores                     []int              `json:"scores"`
-	RankType                   int                `json:"rankType"`
-	SkillLevel                 int                `json:"skillLevel"`
-	Elo                        *float64           `json:"elo"`
-	OwnTeamTotalLeetifyRatings map[string]float64 `json:"ownTeamTotalLeetifyRatings"`
-	Preaim                     float64            `json:"preaim"`
-	ReactionTime               float64            `json:"reactionTime"`
-	AccuracyHead               float64            `json:"accuracyHead"`
-	Kills                      int                `json:"kills"`
-	Deaths                     int                `json:"deaths"`
-	PartySize                  int                `json:"partySize"`
-}
-
-func (lp *legacyProfile) toProfile(steam64 uint64) *Profile {
-	sid := strconv.FormatUint(steam64, 10)
-	p := &Profile{
-		Name:         lp.Meta.Name,
-		Steam64ID:    sid,
-		TotalMatches: len(lp.Games),
-		Bans:         lp.Meta.PlatformBans,
-		Rating: Rating{
-			Aim:         lp.RecentGameRatings.Aim,
-			Positioning: lp.RecentGameRatings.Positioning,
-			Utility:     lp.RecentGameRatings.Utility,
-			Clutch:      lp.RecentGameRatings.Clutch,
-			Opening:     lp.RecentGameRatings.Opening,
-			CTLeetify:   lp.RecentGameRatings.CTLeetify,
-			TLeetify:    lp.RecentGameRatings.TLeetify,
-		},
-	}
-
-	wins := 0
-	var preaimSum, reactSum, hsSum float64
-	var preaimN, reactN, hsN, premierRank int
-	var killSum, deathSum, partySum, partyN, peakPrem int
-	rm := make([]RecentMatch, 0, len(lp.Games))
-	faceitRm := make([]RecentMatch, 0, 16)
-	premierRm := make([]RecentMatch, 0, 16)
-	for _, g := range lp.Games {
-		if g.MatchResult == "win" {
-			wins++
-		}
-		if g.Preaim > 0 {
-			preaimSum += g.Preaim
-			preaimN++
-		}
-		if g.ReactionTime > 0 {
-			reactSum += g.ReactionTime * 1000 // legacy reactionTime is in seconds
-			reactN++
-		}
-		if g.AccuracyHead > 0 {
-			hsSum += g.AccuracyHead * 100 // legacy accuracyHead is a 0-1 fraction
-			hsN++
-		}
-		if g.Kills > 0 || g.Deaths > 0 {
-			killSum += g.Kills
-			deathSum += g.Deaths
-		}
-		if g.PartySize > 0 {
-			partySum += g.PartySize
-			partyN++
-		}
-		rank := g.SkillLevel
-		if rank == 0 && g.Elo != nil {
-			rank = int(*g.Elo)
-		}
-		if premierRank == 0 && g.RankType == 11 && rank > 0 {
-			premierRank = rank // most recent Premier rating
-		}
-		if g.RankType == 11 && rank > peakPrem {
-			peakPrem = rank // highest Premier rating ever
-		}
-		match := RecentMatch{
-			ID:             g.GameID,
-			FinishedAt:     g.GameFinishedAt,
-			DataSource:     g.DataSource,
-			Outcome:        g.MatchResult,
-			MapName:        g.MapName,
-			LeetifyRating:  g.OwnTeamTotalLeetifyRatings[sid],
-			Score:          g.Scores,
-			Rank:           rank,
-			RankType:       g.RankType,
-			Kills:          g.Kills,
-			Deaths:         g.Deaths,
-			Preaim:         g.Preaim,
-			ReactionTimeMs: g.ReactionTime * 1000, // seconds → ms (matches v3)
-			AccuracyHead:   g.AccuracyHead * 100,  // fraction → % (matches v3)
-		}
-		if g.Elo != nil && *g.Elo > 0 {
-			match.Elo = int(*g.Elo)
-		}
-		if len(rm) < maxRecentMatches {
-			rm = append(rm, match)
-		}
-		// Keep EVERY FACEIT + Premier match (across all games), past the recent cap.
-		if g.DataSource == "faceit" && len(faceitRm) < maxFaceitMatches {
-			faceitRm = append(faceitRm, match)
-		}
-		if g.RankType == 11 && len(premierRm) < maxFaceitMatches {
-			premierRm = append(premierRm, match)
-		}
-	}
-	if n := len(lp.Games); n > 0 {
-		p.Winrate = float64(wins) / float64(n)
-	}
-	if preaimN > 0 {
-		p.Stats.Preaim = preaimSum / float64(preaimN)
-	}
-	if reactN > 0 {
-		p.Stats.ReactionTimeMs = reactSum / float64(reactN)
-	}
-	if hsN > 0 {
-		p.Stats.AccuracyHead = hsSum / float64(hsN)
-	}
-	if deathSum > 0 {
-		p.KD = float64(killSum) / float64(deathSum)
-	}
-	if partyN > 0 {
-		p.AvgPartySize = float64(partySum) / float64(partyN)
-	}
-	p.PeakPremier = peakPrem
-	p.RecentMatches = rm
-	p.FaceitMatches = faceitRm
-	p.PremierMatches = premierRm
-	// standalone legacy path (v3 404s) still gets deltas; when GetProfile
-	// merges these lists into v3's it recomputes — idempotent either way
-	computeRankDeltas(p.RecentMatches)
-	computeRankDeltas(p.FaceitMatches)
-	computeRankDeltas(p.PremierMatches)
-	ranks := map[string]any{}
-	if lp.RecentGameRatings.Leetify != 0 {
-		// Leetify's overall rating is a small decimal; v3 exposes it ×100 in
-		// ranks.leetify (e.g. 2.36), so match that scale for a consistent display.
-		ranks["leetify"] = math.Round(lp.RecentGameRatings.Leetify*10000) / 100
-	}
-	if premierRank > 0 {
-		ranks["premier"] = premierRank
-	}
-	if len(ranks) > 0 {
-		if b, err := json.Marshal(ranks); err == nil {
-			p.Ranks = b
-		}
-	}
-	return p
 }
 
 // GameStats is the curated per-player slice of Leetify's per-game payload
@@ -723,11 +505,10 @@ type ScoreRow struct {
 // Found=false (no error) when the game exists but that player isn't on it.
 func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64) (*GameStats, error) {
 	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := c.newReq(ctx, u)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.doWithRetry(req)
 	if err != nil {
@@ -925,11 +706,10 @@ type GameDetails struct {
 // Leetify game id (the id our recent-match rows carry).
 func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetails, error) {
 	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := c.newReq(ctx, u)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.doWithRetry(req)
 	if err != nil {
@@ -948,37 +728,5 @@ func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetail
 		return nil, ErrNotFound
 	default:
 		return nil, fmt.Errorf("leetify games: unexpected status %d", resp.StatusCode)
-	}
-}
-
-func (c *Client) getProfileLegacy(ctx context.Context, steam64 uint64) (*Profile, error) {
-	u := c.legacyURL + "/api/profile/id/" + strconv.FormatUint(steam64, 10)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return nil, fmt.Errorf("leetify legacy: request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var lp legacyProfile
-		if err := json.NewDecoder(resp.Body).Decode(&lp); err != nil {
-			return nil, fmt.Errorf("leetify legacy: decode: %w", err)
-		}
-		// An empty/placeholder body is not a real profile.
-		if len(lp.Games) == 0 && lp.RecentGameRatings.Aim == 0 {
-			return nil, ErrNotFound
-		}
-		return lp.toProfile(steam64), nil
-	case http.StatusNotFound:
-		return nil, ErrNotFound
-	default:
-		return nil, fmt.Errorf("leetify legacy: unexpected status %d", resp.StatusCode)
 	}
 }
