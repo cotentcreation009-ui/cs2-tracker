@@ -302,3 +302,56 @@ func (g GCSource) ShareCodes(ctx context.Context, steamID uint64) ([]string, err
 	}
 	return out, nil
 }
+
+// ProfileScale is an Aggregate expressed in the units Leetify's PROFILE
+// endpoint uses — which is what the CheatMeter was written against.
+//
+// The two Leetify surfaces disagree about units for the same fields, measured
+// against both on 2026-08-27:
+//
+//	                profile          match report
+//	reaction        449.36 (ms)      0.6719 (seconds)
+//	head accuracy   29.05  (percent) 0.2162 (fraction)
+//	spray accuracy  41.49  (percent) 0.3846 (fraction)
+//	rating          4.26   (ranks)   0.0873 (per match)
+//	preaim          7.18   (degrees) 5.4    (degrees)
+//
+// This conversion exists so that disagreement is handled once, here, rather
+// than in whatever renders it. Getting reaction wrong is not a cosmetic bug:
+// the scorer reads it as "lower is more suspicious" against a 560ms→430ms
+// scale, so feeding it seconds would peg EVERY player at maximum on the single
+// most heavily weighted signal.
+type ProfileScale struct {
+	Matches        int     `json:"matches"`
+	ReactionTimeMs float64 `json:"reactionTimeMs,omitempty"`
+	Preaim         float64 `json:"preaim,omitempty"`
+	AccuracyHead   float64 `json:"accuracyHead,omitempty"`
+	SprayAccuracy  float64 `json:"sprayAccuracy,omitempty"`
+	LeetifyRating  float64 `json:"leetifyRating,omitempty"`
+	KDRatio        float64 `json:"kdRatio,omitempty"`
+	DPR            float64 `json:"dpr,omitempty"`
+}
+
+// ProfileScale converts. Zero stays zero: absent is not a measurement, and a
+// converted zero would read as an impossibly fast reaction.
+func (a Aggregate) ProfileScale() ProfileScale {
+	scale := func(v, by float64) float64 {
+		if v <= 0 {
+			return 0
+		}
+		return v * by
+	}
+	return ProfileScale{
+		Matches:        a.Matches,
+		ReactionTimeMs: scale(a.ReactionTime, 1000),
+		Preaim:         a.Preaim, // already degrees on both surfaces
+		AccuracyHead:   scale(a.AccuracyHead, 100),
+		SprayAccuracy:  scale(a.SprayAccuracy, 100),
+		// A per-match rating sits around 0.02; the profile's ranks.leetify for
+		// the same class of player sits around 2. Negative means a genuinely
+		// below-average run, so this one must not use the zero guard.
+		LeetifyRating: a.LeetifyRating * 100,
+		KDRatio:       a.KDRatio,
+		DPR:           a.DPR,
+	}
+}

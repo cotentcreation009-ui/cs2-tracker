@@ -289,3 +289,64 @@ func (f fakeBot) Recent(_ context.Context, id string) ([]gcbot.RecentMatch, erro
 	}
 	return f.matches, f.err
 }
+
+// The unit conversion is the most dangerous line in this package. Leetify's
+// profile and match surfaces disagree, and the scorer was written against the
+// profile's units: it reads reaction as "lower is worse" on a 560ms->430ms
+// scale, so seconds passed through unconverted would peg EVERY player at
+// maximum on the most heavily weighted signal.
+func TestProfileScaleUnits(t *testing.T) {
+	// Malone Lam's real numbers, measured from his match reports.
+	a := Aggregate{
+		Matches:       17,
+		ReactionTime:  0.6719, // seconds
+		Preaim:        5.4,    // degrees
+		AccuracyHead:  0.2162, // fraction
+		SprayAccuracy: 0.3846, // fraction
+		LeetifyRating: 0.023,  // per-match scale
+		KDRatio:       1.358,
+	}
+	p := a.ProfileScale()
+
+	if math.Abs(p.ReactionTimeMs-671.9) > 0.01 {
+		t.Errorf("reaction = %v ms, want 671.9 — seconds must become milliseconds", p.ReactionTimeMs)
+	}
+	// The regression that matters: an ordinary 0.67s reaction must NOT look
+	// like a superhuman sub-millisecond one.
+	if p.ReactionTimeMs < 100 {
+		t.Errorf("reaction %v ms would score as inhumanly fast", p.ReactionTimeMs)
+	}
+	if p.Preaim != 5.4 {
+		t.Errorf("preaim = %v, want 5.4 unchanged (degrees on both surfaces)", p.Preaim)
+	}
+	if math.Abs(p.AccuracyHead-21.62) > 0.01 {
+		t.Errorf("head accuracy = %v, want 21.62 percent", p.AccuracyHead)
+	}
+	if math.Abs(p.SprayAccuracy-38.46) > 0.01 {
+		t.Errorf("spray = %v, want 38.46 percent", p.SprayAccuracy)
+	}
+	// Per-match ~0.023 is the same class of player as a profile rating of ~2.3.
+	if math.Abs(p.LeetifyRating-2.3) > 0.01 {
+		t.Errorf("rating = %v, want 2.3 on the ranks scale", p.LeetifyRating)
+	}
+	if p.KDRatio != 1.358 {
+		t.Errorf("kd = %v, want unchanged", p.KDRatio)
+	}
+	if p.Matches != 17 {
+		t.Errorf("matches = %d", p.Matches)
+	}
+}
+
+func TestProfileScaleKeepsAbsentAbsent(t *testing.T) {
+	// Absent is not a measurement. A converted zero reaction would read as the
+	// fastest possible human, which is the opposite of "we don't know".
+	p := Aggregate{Matches: 3}.ProfileScale()
+	if p.ReactionTimeMs != 0 || p.AccuracyHead != 0 || p.SprayAccuracy != 0 || p.Preaim != 0 {
+		t.Errorf("absent fields became values: %+v", p)
+	}
+	// A negative rating is a real below-average run, so it must survive scaling
+	// rather than being zeroed like the others.
+	if got := (Aggregate{LeetifyRating: -0.04}).ProfileScale().LeetifyRating; math.Abs(got-(-4)) > 1e-9 {
+		t.Errorf("negative rating = %v, want -4", got)
+	}
+}
