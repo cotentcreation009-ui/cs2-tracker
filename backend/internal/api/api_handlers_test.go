@@ -13,6 +13,7 @@ import (
 
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
+	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/steam"
 )
@@ -66,6 +67,22 @@ func (f *fakeStore) SaveInventorySnapshot(_ context.Context, _ uint64, payload [
 }
 func (f *fakeStore) PruneInventorySnapshots(context.Context, time.Duration) (int64, error) {
 	return 0, nil
+}
+
+// Leetify match rows. The handler tests do not exercise the bridge, so these
+// answer "nothing stored" — which is also the state a fresh database is in.
+func (f *fakeStore) SeenShareCodes(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (f *fakeStore) SaveMatch(context.Context, *leetify.Match) error { return nil }
+
+func (f *fakeStore) PlayerMatches(context.Context, uint64, int) ([]db.PlayerMatchRow, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) PlayerMatchCount(context.Context, uint64) (int, time.Time, error) {
+	return 0, time.Time{}, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error {

@@ -23,9 +23,11 @@ import (
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/db"
 	"github.com/cs2tracker/server/internal/faceit"
+	"github.com/cs2tracker/server/internal/gcbot"
 	"github.com/cs2tracker/server/internal/grid"
 	"github.com/cs2tracker/server/internal/leetify"
 	"github.com/cs2tracker/server/internal/liquipedia"
+	"github.com/cs2tracker/server/internal/matchsync"
 	"github.com/cs2tracker/server/internal/models"
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
@@ -70,6 +72,13 @@ type Store interface {
 	GetInventorySnapshot(ctx context.Context, steamID uint64) ([]byte, time.Time, bool, error)
 	SaveInventorySnapshot(ctx context.Context, steamID uint64, payload []byte) error
 	PruneInventorySnapshots(ctx context.Context, older time.Duration) (int64, error)
+
+	// Leetify match rows — how a player Leetify will not describe directly
+	// still gets a profile. See internal/matchsync.
+	SeenShareCodes(ctx context.Context, codes []string) (map[string]bool, error)
+	SaveMatch(ctx context.Context, m *leetify.Match) error
+	PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]db.PlayerMatchRow, error)
+	PlayerMatchCount(ctx context.Context, steamID uint64) (int, time.Time, error)
 	Ping(ctx context.Context) error
 }
 
@@ -101,6 +110,9 @@ type Server struct {
 	// invBackfill repairs inventories that Steam's throttle turned away, so a
 	// failed request still leaves the next one a snapshot to serve.
 	invBackfill *backfill
+	// bridge assembles telemetry for players Leetify will not serve a profile
+	// for, out of the match reports they appear in. nil when disabled.
+	bridge *matchsync.Syncer
 	// invHTTP fetches Steam community inventories + Skinport prices (both
 	// public, no keys; kept separate so their timeouts don't affect API calls).
 	invHTTP *http.Client
@@ -127,7 +139,16 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	return &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), valve: valve.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
+	srv := &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), valve: valve.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
+	// The bridge depends on Leetify continuing to serve match reports for
+	// players it will not serve profiles for — a deliberate carve-out, but one
+	// they could close without notice. Everything behind this flag must be
+	// switchable off from the VM without a deploy.
+	if cfg.BridgeEnabled && leetifyClient != nil {
+		srv.bridge = matchsync.New(store, leetifyClient, log,
+			matchsync.GCSource{Bot: gcbot.New(cfg.GCBotURL)})
+	}
+	return srv
 }
 
 // StartProMatches launches the GRID poller's background loops (a no-op when the
@@ -317,6 +338,9 @@ func (s *Server) Router() http.Handler {
 				r.Get("/steam-stats", s.handleSteamStats)
 				r.Get("/steam-extras", s.handleSteamExtras)
 				r.Get("/inventory", s.handleInventory)
+				// Telemetry assembled from match reports, for players Leetify
+				// will not serve a profile for.
+				r.Get("/bridge", s.handleBridge)
 			})
 
 			r.Get("/matches/{id}", s.handleMatch)

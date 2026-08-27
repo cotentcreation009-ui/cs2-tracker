@@ -33,6 +33,7 @@ func TestRoutesAreMatched(t *testing.T) {
 		{"GET", "/api/players/76561198000000001/maps"},
 		{"GET", "/api/players/76561198000000001/leetify"},
 		{"GET", "/api/players/76561198000000001/steam-stats"},
+		{"GET", "/api/players/76561198000000001/bridge"},
 		{"GET", "/api/matches/5"},
 		{"GET", "/api/matches/5/kills"},
 	}
