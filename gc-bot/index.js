@@ -9,8 +9,11 @@
 //   GET  /health            → { loggedOn, gcConnected, queued, guardPending }
 //   POST /guard-code {code} → submit the one-time Steam Guard email code
 //   POST /resolve {shareCode} → { demoUrl } | { error }
-//   POST /recent {steamId} → { matches: [{matchId,time,demoUrl,scores}] } — the
-//        player's ~8 most recent official matches (needs public Game details)
+//   POST /recent {steamId} → { matches: [{matchId,time,demoUrl,scores,
+//        reservationId,tvPort}] } — the player's ~8 most recent official
+//        matches (needs public Game details). reservationId/tvPort are the
+//        other two fields a share code is made of; with matchId they let the
+//        caller rebuild the code for a match seen only through here.
 //
 // Login flow: first start uses STEAM_BOT_USER/STEAM_BOT_PASS; Steam emails a
 // Guard code — submit it via POST /guard-code. After login the refresh token is
@@ -240,22 +243,38 @@ function enqueueRecent(steamId64) {
   });
 }
 
-// summarize a GC match for the /recent reply: time, demo URL and final score.
+// summarize a GC match for the /recent reply: time, demo URL, final score, and
+// the two extra ids a share code is made of.
+//
+// A share code encodes (matchId, reservationId, tvPort). The GC hands all three
+// over — matchid on the match, reservationid on its round stats, tv_port on
+// watchablematchinfo — so surfacing them lets the caller rebuild the code for a
+// match it only ever saw through this endpoint. Without them a recent match can
+// be watched but not looked up anywhere that keys on share codes.
 function summarizeMatch(m) {
   const stats = m.roundstatsall || (m.roundstats_legacy ? [m.roundstats_legacy] : []);
   let demoUrl = null;
   let scores = null;
+  let reservationId = null;
   for (const rs of stats) {
-    if (rs && typeof rs.map === "string" && rs.map.startsWith("http")) demoUrl = rs.map;
-    if (rs && Array.isArray(rs.team_scores) && rs.team_scores.length === 2) {
+    if (!rs) continue;
+    if (typeof rs.map === "string" && rs.map.startsWith("http")) demoUrl = rs.map;
+    if (Array.isArray(rs.team_scores) && rs.team_scores.length === 2) {
       scores = [Number(rs.team_scores[0]), Number(rs.team_scores[1])];
     }
+    // The LAST round-stats entry carries the reservation the demo belongs to;
+    // earlier entries are per-map legs of the same reservation.
+    if (rs.reservationid != null) reservationId = String(rs.reservationid);
   }
+  const w = m.watchablematchinfo || {};
+  const tvPort = w.tv_port != null ? Number(w.tv_port) : null;
   return {
     matchId: String(m.matchid),
     time: Number(m.matchtime) || 0, // unix seconds
     demoUrl,
     scores,
+    reservationId,
+    tvPort,
   };
 }
 

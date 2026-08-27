@@ -11,6 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+
+	"github.com/cs2tracker/server/internal/sharecode"
 	"strings"
 	"time"
 )
@@ -94,6 +97,37 @@ type RecentMatch struct {
 	Time    int64  `json:"time"` // unix seconds the match finished
 	DemoURL string `json:"demoUrl"`
 	Scores  []int  `json:"scores"` // final [team1, team2]
+
+	// The other two fields a share code is made of. Empty on replies from a
+	// sidecar older than the change that surfaced them, which is why ShareCode
+	// reports whether it could build one rather than returning a broken string.
+	ReservationID string `json:"reservationId"`
+	TVPort        int    `json:"tvPort"`
+}
+
+// ShareCode rebuilds the Valve share code for this match.
+//
+// The GC hands over the three fields a code encodes but not the code itself, so
+// a match seen only through /recent cannot otherwise be looked up anywhere that
+// keys on share codes. ok is false when the sidecar did not supply the extra
+// ids (an older image) or when they are unparseable.
+func (m RecentMatch) ShareCode() (string, bool) {
+	matchID, err := strconv.ParseUint(m.MatchID, 10, 64)
+	if err != nil || matchID == 0 {
+		return "", false
+	}
+	res, err := strconv.ParseUint(m.ReservationID, 10, 64)
+	if err != nil || res == 0 {
+		return "", false
+	}
+	if m.TVPort <= 0 || m.TVPort > 65535 {
+		return "", false
+	}
+	return sharecode.Encode(sharecode.Decoded{
+		MatchID:       matchID,
+		ReservationID: res,
+		TVPort:        uint16(m.TVPort),
+	}), true
 }
 
 // Recent fetches a player's ~8 most recent official matches straight from the

@@ -119,3 +119,34 @@ func TestRecentUnavailable(t *testing.T) {
 		t.Fatalf("want ErrUnavailable, got %v", err)
 	}
 }
+
+func TestRecentMatchShareCode(t *testing.T) {
+	// Decoded from a real share code, so a correct rebuild reproduces it exactly.
+	m := RecentMatch{
+		MatchID:       "3829850547188400403",
+		ReservationID: "3829854876515434633",
+		TVPort:        58343,
+	}
+	got, ok := m.ShareCode()
+	if !ok {
+		t.Fatal("could not rebuild a code from complete fields")
+	}
+	if want := "CSGO-X5EDM-CJCpX-dTvfS-kMP7u-EhMMB"; got != want {
+		t.Errorf("ShareCode() = %s, want %s", got, want)
+	}
+
+	// A sidecar older than the change that surfaced these fields sends neither.
+	// That must report "no code", never a plausible-looking wrong one.
+	for _, bad := range []RecentMatch{
+		{MatchID: "3829850547188400403"},                                                      // no reservation, no port
+		{MatchID: "3829850547188400403", ReservationID: "3829854876515434633"},                // no port
+		{MatchID: "3829850547188400403", ReservationID: "x", TVPort: 58343},                   // unparseable
+		{MatchID: "", ReservationID: "3829854876515434633", TVPort: 58343},                    // no match id
+		{MatchID: "3829850547188400403", ReservationID: "0", TVPort: 58343},                   // zero reservation
+		{MatchID: "3829850547188400403", ReservationID: "3829854876515434633", TVPort: 70000}, // impossible port
+	} {
+		if code, ok := bad.ShareCode(); ok {
+			t.Errorf("%+v produced %s, want no code", bad, code)
+		}
+	}
+}
