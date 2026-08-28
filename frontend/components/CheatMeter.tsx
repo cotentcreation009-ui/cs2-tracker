@@ -12,6 +12,7 @@ import {
   BAND_TEXT,
   RISK_LABEL,
   computeSuspicion,
+  type BridgeAggregate,
   type Band,
   type SusFactor,
   type Suspicion,
@@ -276,6 +277,8 @@ export function CheatMeter({
   career,
   generatedOn,
   panels,
+  bridge = null,
+  bridgeMatchId = null,
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -288,8 +291,12 @@ export function CheatMeter({
   // Pre-rendered section nodes shown in the StatsPeek modal (built in ProfileView
   // so the server components render server-side); a missing slot hides its button.
   panels?: { matches?: ReactNode; split?: ReactNode; leetify?: ReactNode; counter?: ReactNode; matchstats?: ReactNode; friends?: ReactNode; inventory?: ReactNode };
+  // Telemetry assembled from Leetify match reports, for players Leetify will
+  // not serve a profile for. Carries the attribution their terms require.
+  bridge?: BridgeAggregate | null;
+  bridgeMatchId?: string | null;
 }) {
-  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras);
+  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
   if (!sus || !sus.hasEnough) return null;
 
   // identity + ranks for the hero (everything visible in the CheatMeter view)
@@ -802,6 +809,42 @@ export function CheatMeter({
           <span className="shrink-0">Generated {generatedOn}</span>
         )}
       </div>
+      <LeetifyCredit shown={!!bridge?.matches} matchId={bridgeMatchId} />
     </section>
+  );
+}
+
+/**
+ * Attribution for data taken from Leetify's match reports.
+ *
+ * Not decoration — their developer guidelines make it a condition of use:
+ * anything showing Leetify data must carry the credit linking to leetify.com,
+ * and surfaced matches must link back with the words "View on Leetify". Shown
+ * only when a read actually leaned on those reports, so the credit always
+ * refers to something on the page.
+ */
+function LeetifyCredit({ shown, matchId }: { shown: boolean; matchId?: string | null }) {
+  if (!shown) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-faint">
+      <a
+        href="https://leetify.com/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-[#F84982] underline decoration-dotted underline-offset-2"
+      >
+        Data Provided by Leetify
+      </a>
+      {matchId && (
+        <a
+          href={`https://leetify.com/app/match-details/${encodeURIComponent(matchId)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-[#F84982] underline decoration-dotted underline-offset-2"
+        >
+          View on Leetify
+        </a>
+      )}
+    </div>
   );
 }

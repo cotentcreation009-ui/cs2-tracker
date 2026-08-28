@@ -34,6 +34,7 @@ import { CrossSource } from "@/components/CrossSource";
 import { CheatMeter } from "@/components/CheatMeter";
 import { PlatformSplit } from "@/components/PlatformSplit";
 import { computeSuspicion } from "@/lib/suspicion";
+import type { BridgeAggregate } from "@/lib/suspicion";
 import Link from "next/link";
 import {
   flag,
@@ -70,6 +71,7 @@ export function ProfileView({
   faceit = null,
   steamExtras = null,
   steamStats = null,
+  bridge = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -79,6 +81,7 @@ export function ProfileView({
   faceit?: FaceitProfile | null;
   steamExtras?: SteamExtras | null;
   steamStats?: SteamGameStats | null;
+  bridge?: BridgeAggregate | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -93,7 +96,8 @@ export function ProfileView({
 
   // The CheatMeter is the page hero when there's enough data to analyze; it
   // self-hides otherwise, in which case we fall back to the plain hero below.
-  const showMeter = !!computeSuspicion(leetify, faceit, steamStats, steamExtras)?.hasEnough;
+  const showMeter = !!computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge)
+    ?.hasEnough;
 
   // The content behind the three name buttons — rendered here (server-side) and
   // handed to StatsPeek, which shows it in a modal over the CheatMeter. When the
@@ -265,6 +269,7 @@ export function ProfileView({
           full identity + Premier/FACEIT/Wingman ranks folded in. */}
       {showMeter && (
         <CheatMeter
+          bridge={bridge}
           player={player}
           leetify={leetify}
           faceit={faceit}
