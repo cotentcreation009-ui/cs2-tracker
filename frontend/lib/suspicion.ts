@@ -114,19 +114,54 @@ const noteFor = (band: Band): string =>
     veryhigh: "Elite / unusual",
   })[band];
 
+/**
+ * Telemetry assembled from Leetify MATCH reports, for players Leetify will not
+ * serve a PROFILE for — which is most of them since their January 2026 change.
+ *
+ * Already converted to the profile endpoint's units by the backend: the two
+ * Leetify surfaces disagree (seconds vs milliseconds, fractions vs percents),
+ * and reaction is scored as "lower is worse", so an unconverted value would peg
+ * every player at maximum on the heaviest signal. See internal/matchsync.
+ */
+export interface BridgeAggregate {
+  matches: number;
+  reactionTimeMs?: number;
+  preaim?: number;
+  accuracyHead?: number;
+  sprayAccuracy?: number;
+  leetifyRating?: number;
+  kdRatio?: number;
+  dpr?: number;
+}
+
 export function computeSuspicion(
   leetify: LeetifyProfile | null | undefined,
   faceit: FaceitProfile | null | undefined,
   steamStats: SteamGameStats | null | undefined,
   steamExtras?: SteamExtras | null,
+  bridge?: BridgeAggregate | null,
 ): Suspicion | null {
   // Work from whatever sources exist. Leetify gives the strongest mechanical
   // tells (reaction / crosshair / aim); Steam stats (shot accuracy, HS%, K/D)
   // and FACEIT still let us produce a lower-confidence read for the many players
   // who aren't on Leetify — so the meter shows for every looked-up account that
   // has at least a couple of usable signals.
-  if (!leetify && !faceit && !steamStats) return null;
-  const s = leetify?.stats;
+  // A bridge aggregate with no matches behind it is not a source.
+  const bridged = bridge && bridge.matches > 0 ? bridge : null;
+  if (!leetify && !faceit && !steamStats && !bridged) return null;
+  // The bridge NEVER overrides a real profile — it stands in only where one is
+  // absent, so a player who works today scores exactly as they did.
+  type Stats = NonNullable<LeetifyProfile["stats"]>;
+  const s: Stats | undefined =
+    leetify?.stats ??
+    (bridged
+      ? ({
+          reaction_time_ms: bridged.reactionTimeMs ?? 0,
+          preaim: bridged.preaim ?? 0,
+          accuracy_head: bridged.accuracyHead ?? 0,
+          spray_accuracy: bridged.sprayAccuracy ?? 0,
+        } as Stats)
+      : undefined);
   const recent = leetify?.recent_matches ?? [];
   const last = recent.slice(0, 30);
 
@@ -168,7 +203,7 @@ export function computeSuspicion(
   // K/D: prefer FACEIT's; else Leetify's (from real CS2 matches — cleaner than
   // Steam's lifetime all-mode number, and the one mechanical-ish signal a
   // friends-only Leetify profile still exposes when it redacts aim detail).
-  const kd = faceit?.kdRatio ?? leetify?.kd ?? 0;
+  const kd = faceit?.kdRatio ?? leetify?.kd ?? bridged?.kdRatio ?? 0;
 
   // Bans — prefer Steam's typed + dated GetPlayerBans over Leetify's opaque
   // (length-only) array. The floor scales with type + freshness so an old game
@@ -246,7 +281,7 @@ export function computeSuspicion(
   // Overall Leetify rating (composite; ranks.leetify is on the ×100 scale, so a
   // strong player sits ~1.5–3). 3.0+ = top percentile. Lighter, skill-linked
   // support like K/D — NOT a direct aim tell, so it stays out of `core`.
-  const leetifyRating = leetify?.ranks?.leetify ?? 0;
+  const leetifyRating = leetify?.ranks?.leetify ?? bridged?.leetifyRating ?? 0;
   const sLeetifyRating = leetifyRating > 0 ? up(leetifyRating, 1.5, 3) : null;
 
   // Mechanical-anomaly composite — reaction, crosshair placement and aim are the
@@ -409,8 +444,14 @@ export function computeSuspicion(
   // Leetify is the strongest source, so a Steam/FACEIT-only read starts lower
   // and stays honestly less confident.
   let confidence = clamp(
-    (leetify ? 45 : 30) +
-      Math.min(recent.length, 30) +
+    // A bridged read has the same mechanical tells a profile does, but none of
+    // the cross-platform history, so it starts between "has Leetify" and "has
+    // neither".
+    (leetify ? 45 : bridged ? 40 : 30) +
+      // Sample size comes from whichever source is actually being scored. Using
+      // the larger of the two would let bridge rows inflate the confidence of a
+      // player whose read comes entirely from their own profile.
+      Math.min(leetify ? recent.length : (bridged?.matches ?? 0), 30) +
       (faceit ? 8 : 0) +
       (steamStats ? 6 : 0) +
       Math.min(F.length, 9),
@@ -421,6 +462,14 @@ export function computeSuspicion(
   // match count mustn't inflate confidence — keep it honestly low (caps the band
   // at Moderate and shows the "limited data" caveat).
   if (redactedThin) confidence = Math.min(confidence, 39);
+  // A read assembled from match reports is worth exactly as much as the number
+  // of them. Two matches can suggest; they cannot accuse — so a thin sample is
+  // held below the thresholds that let the public band say High or Very High,
+  // no matter how extreme the numbers in it are.
+  if (bridged && !leetify) {
+    if (bridged.matches < 4) confidence = Math.min(confidence, 39);
+    else if (bridged.matches < 8) confidence = Math.min(confidence, 54);
+  }
 
   // Confidence gates the PUBLIC band: thin data (no Leetify / few matches) can't
   // assert a high-risk label. The raw score still drives the gauge needle, but
@@ -467,7 +516,8 @@ export function computeSuspicion(
     trend,
     summary: { wins, losses, draws, total: last.length },
     scope: {
-      matches: leetify?.total_matches || faceit?.matches || recent.length,
+      matches:
+        leetify?.total_matches || faceit?.matches || bridged?.matches || recent.length,
       hours: steamStats?.stats?.["total_time_played"]
         ? steamStats.stats["total_time_played"] / 3600
         : null,

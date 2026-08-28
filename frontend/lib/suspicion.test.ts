@@ -230,3 +230,105 @@ describe("top-percentile anchor calibration", () => {
     expect(sub(at15, "leetify")).toBe(0);
   });
 });
+
+// --- the match-report bridge -------------------------------------------------
+// Telemetry assembled from Leetify MATCH reports, for the ~1 in 3 players
+// Leetify will not serve a profile for. Values are Malone Lam's real aggregate.
+
+function mkBridge(o: { matches?: number; reaction?: number; preaim?: number } = {}) {
+  return {
+    matches: o.matches ?? 17,
+    reactionTimeMs: o.reaction ?? 671.9,
+    preaim: o.preaim ?? 9.35,
+    accuracyHead: 21.62,
+    sprayAccuracy: 38.46,
+    leetifyRating: 2.3,
+    kdRatio: 1.358,
+  };
+}
+
+describe("match-report bridge", () => {
+  it("does not move a score that already works", () => {
+    // The guarantee: a player with a real Leetify profile must be scored
+    // identically whether or not bridge data happens to exist for them. The
+    // bridge fills gaps; it never overrides.
+    const lee = mkLeetify({ reaction: 480, preaim: 4, aim: 90 });
+    const without = computeSuspicion(lee, mkFaceit(), null, null);
+    // Deliberately contradictory bridge values — if any of them leak in, the
+    // score moves and this fails.
+    const withBridge = computeSuspicion(lee, mkFaceit(), null, null, {
+      matches: 40,
+      reactionTimeMs: 900,
+      preaim: 30,
+      accuracyHead: 1,
+      leetifyRating: 0.01,
+      kdRatio: 0.2,
+    });
+    expect(withBridge!.score).toBe(without!.score);
+    expect(withBridge!.band).toBe(without!.band);
+    expect(withBridge!.confidence).toBe(without!.confidence);
+  });
+
+  it("lights the meter for a player with no Leetify profile at all", () => {
+    // Today this player renders a blank page: one scored signal, and the meter
+    // needs two. With match reports the mechanical tells come back.
+    const bare = computeSuspicion(null, null, null, null);
+    expect(bare).toBeNull();
+
+    const via = computeSuspicion(null, null, null, null, mkBridge());
+    expect(via).not.toBeNull();
+    expect(via!.hasEnough).toBe(true);
+    const keys = via!.factors.map((f) => f.key);
+    expect(keys).toContain("reaction");
+    expect(keys).toContain("preaim");
+  });
+
+  it("reaches the full band — not the capped one a scoreboard-only read gets", () => {
+    // The point of the bridge: mechanical tells mean the read is no longer
+    // stuck below High the way a FACEIT-only K/D + HS% read is.
+    const blatant = computeSuspicion(null, null, null, null,
+      mkBridge({ reaction: 300, preaim: 1.5, matches: 20 }));
+    expect(blatant!.score).toBeGreaterThan(39);
+    expect(["high", "veryhigh"]).toContain(blatant!.band);
+  });
+
+  it("a thin sample cannot accuse, however extreme the numbers", () => {
+    // Two matches of blatant-looking data must stay indicative. This is the
+    // difference between a signal and a smear.
+    const thin = computeSuspicion(null, null, null, null,
+      mkBridge({ reaction: 250, preaim: 0.5, matches: 2 }));
+    expect(thin!.confidence).toBeLessThan(40);
+    expect(["verylow", "low", "moderate"]).toContain(thin!.band);
+    expect(thin!.lowConfidence).toBe(true);
+
+    // Mid sample: allowed to reach High, still flagged as limited.
+    const mid = computeSuspicion(null, null, null, null,
+      mkBridge({ reaction: 250, preaim: 0.5, matches: 6 }));
+    expect(mid!.confidence).toBeLessThan(55);
+    expect(mid!.band).not.toBe("veryhigh");
+
+    // Full sample: no artificial ceiling.
+    const full = computeSuspicion(null, null, null, null,
+      mkBridge({ reaction: 250, preaim: 0.5, matches: 20 }));
+    expect(full!.confidence).toBeGreaterThan(55);
+  });
+
+  it("an empty bridge is not a source", () => {
+    // Zero matches means nothing was assembled — it must not by itself keep a
+    // blank profile alive.
+    expect(computeSuspicion(null, null, null, null, { matches: 0 })).toBeNull();
+  });
+
+  it("ordinary reaction times do not read as superhuman", () => {
+    // The unit trap: the backend converts seconds to milliseconds. If that ever
+    // regressed, 0.67 would arrive here and score maximum on the heaviest
+    // signal for every player alive.
+    const normal = computeSuspicion(null, null, null, null, mkBridge({ reaction: 671.9 }));
+    const reaction = normal!.factors.find((f) => f.key === "reaction");
+    expect(reaction!.score).toBeLessThan(50);
+
+    const asSeconds = computeSuspicion(null, null, null, null, mkBridge({ reaction: 0.6719 }));
+    const wrong = asSeconds!.factors.find((f) => f.key === "reaction");
+    expect(wrong!.score).toBe(100); // documents what the bug would look like
+  });
+});
