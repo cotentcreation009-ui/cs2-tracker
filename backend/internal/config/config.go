@@ -138,7 +138,9 @@ func Load() (*Config, error) {
 		JobTimeout:        getDuration("JOB_TIMEOUT", 10*time.Minute),
 		WorkerConcurrency: getInt("WORKER_CONCURRENCY", 1),
 		GCBotURL:          getEnv("GC_BOT_URL", ""),
-		BridgeEnabled:     getEnv("LEETIFY_BRIDGE_ENABLED", "") == "1",
+		// getBool, not == "1": writing true in a .env is the natural thing to do
+		// and an exact-match check would silently leave the feature off.
+		BridgeEnabled: getBool("LEETIFY_BRIDGE_ENABLED", false),
 
 		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),
