@@ -133,6 +133,23 @@ type PlayerMatchRow struct {
 	TotalKills    int       `json:"totalKills,omitempty"`
 	TotalDeaths   int       `json:"totalDeaths,omitempty"`
 	RoundsCount   int       `json:"roundsCount,omitempty"`
+	// RoundsWon is the player's team's rounds, read from the stored payload
+	// rather than a column: it earns its keep for win/loss display, not for
+	// scoring, and a payload read spares a migration on a table already live.
+	RoundsWon int `json:"roundsWon,omitempty"`
+}
+
+// Won reports the match outcome for this row. ok is false for a tie or when
+// the rounds are missing — a caller must not guess a winner from silence.
+func (r PlayerMatchRow) Won() (won, ok bool) {
+	if r.RoundsCount <= 0 || r.RoundsWon <= 0 {
+		return false, false
+	}
+	lost := r.RoundsCount - r.RoundsWon
+	if r.RoundsWon == lost {
+		return false, false
+	}
+	return r.RoundsWon > lost, true
 }
 
 // PlayerMatches returns every stored match for a player, newest first.
@@ -148,7 +165,11 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		        COALESCE(p.spray_accuracy,0), COALESCE(p.leetify_rating,0),
 		        COALESCE(p.kd_ratio,0), COALESCE(p.dpr,0),
 		        COALESCE(p.total_kills,0), COALESCE(p.total_deaths,0),
-		        COALESCE(p.rounds_count,0)
+		        COALESCE(p.rounds_count,0),
+		        COALESCE((SELECT (st->>'rounds_won')::int
+		                    FROM jsonb_array_elements(m.payload->'stats') st
+		                   WHERE st->>'steam64_id' = p.steam_id::text
+		                   LIMIT 1), 0)
 		   FROM leetify_match_players p
 		   JOIN leetify_matches m ON m.match_id = p.match_id
 		  WHERE p.steam_id = $1
@@ -165,7 +186,7 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		if err := rows.Scan(&r.MatchID, &r.MapName, &r.DataSource, &r.FinishedAt,
 			&r.Preaim, &r.ReactionTime, &r.AccuracyHead, &r.Accuracy,
 			&r.SprayAccuracy, &r.LeetifyRating, &r.KDRatio, &r.DPR,
-			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount); err != nil {
+			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount, &r.RoundsWon); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

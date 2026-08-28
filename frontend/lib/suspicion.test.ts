@@ -332,3 +332,25 @@ describe("match-report bridge", () => {
     expect(wrong!.score).toBe(100); // documents what the bug would look like
   });
 });
+
+describe("bridged rating small-sample gate", () => {
+  it("does not crown one hot game as the top factor", () => {
+    // Measured live: 7 matches containing one 0.0873 game averaged 3.88 on the
+    // ranks scale — past the top of a band calibrated for 1.5-3.0 — and the
+    // page rendered "Leetify rating 3.88 VERY HIGH" as the biggest driver of a
+    // real person's score. Under 8 matches the rating must not be scored.
+    const thin = computeSuspicion(null, null, null, null,
+      mkBridge({ matches: 7 }));
+    expect(thin!.factors.map((f) => f.key)).not.toContain("leetify");
+
+    const full = computeSuspicion(null, null, null, null,
+      mkBridge({ matches: 17 }));
+    expect(full!.factors.map((f) => f.key)).toContain("leetify");
+  });
+
+  it("a real profile's rating is untouched by the gate", () => {
+    const lee = mkLeetify({});
+    const withThin = computeSuspicion(lee, null, null, null, mkBridge({ matches: 2 }));
+    expect(withThin!.factors.map((f) => f.key)).toContain("leetify");
+  });
+});

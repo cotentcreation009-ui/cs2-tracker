@@ -137,15 +137,36 @@ import type { BridgeAggregate } from "@/lib/suspicion";
 // players Leetify will not serve a PROFILE for. Supplementary like the rest:
 // the feature can be switched off at the backend, and an absent bridge reads
 // the same as a player with nothing stored, so any failure returns null.
-export async function getBridge(
-  steamId: string,
-): Promise<BridgeAggregate | null> {
+export interface BridgeMatchRow {
+  matchId: string;
+  mapName?: string;
+  dataSource?: string;
+  finishedAt?: string;
+  preaim?: number;
+  reactionTime?: number; // seconds — match-report units, unlike the aggregate
+  accuracyHead?: number; // fraction
+  leetifyRating?: number; // per-match scale
+  kdRatio?: number;
+  totalKills?: number;
+  totalDeaths?: number;
+  roundsCount?: number;
+  roundsWon?: number;
+}
+
+export interface BridgeData {
+  aggregate: BridgeAggregate;
+  matches: BridgeMatchRow[];
+}
+
+export async function getBridge(steamId: string): Promise<BridgeData | null> {
   try {
-    const r = await getJSON<{ enabled?: boolean; aggregate?: BridgeAggregate }>(
-      `/api/players/${steamId}/bridge`,
-    );
+    const r = await getJSON<{
+      enabled?: boolean;
+      aggregate?: BridgeAggregate;
+      matches?: BridgeMatchRow[];
+    }>(`/api/players/${steamId}/bridge`);
     if (!r?.enabled || !r.aggregate?.matches) return null;
-    return r.aggregate;
+    return { aggregate: r.aggregate, matches: r.matches ?? [] };
   } catch {
     return null;
   }
