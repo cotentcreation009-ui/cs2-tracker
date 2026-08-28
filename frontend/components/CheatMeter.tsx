@@ -29,6 +29,7 @@ import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 import { MapWinChart } from "@/components/MapStrength";
 import type { ReactNode } from "react";
 import type { BridgeMatchRow } from "@/lib/api";
+import { recentFromBridge } from "@/lib/bridge";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
 
@@ -328,30 +329,10 @@ export function CheatMeter({
 
   // Career stats + map win rates now fill the row where the scale cards used to
   // sit — those duplicated the factors column, whereas these are new signal.
-  // The map chart reads Leetify's recent-match shape. A bridged player has no
-  // profile feed, but the stored match rows carry the same facts — map, rounds
-  // won and lost — so they are dressed in that shape here. Display only: the
-  // score and confidence never touch these.
-  const bridgedRecent: LeetifyRecentMatch[] = (bridgeMatches ?? [])
-    .filter((m) => m.mapName && (m.roundsCount ?? 0) > 0 && (m.roundsWon ?? 0) > 0)
-    .map((m) => {
-      const won = m.roundsWon!;
-      const lost = m.roundsCount! - won;
-      return {
-        id: m.matchId,
-        finished_at: m.finishedAt ?? "",
-        data_source: m.dataSource ?? "matchmaking",
-        outcome: won > lost ? "win" : won < lost ? "loss" : "tie",
-        map_name: m.mapName!,
-        leetify_rating: m.leetifyRating ?? 0,
-        score: [won, lost],
-        preaim: m.preaim ?? 0,
-        reaction_time_ms: (m.reactionTime ?? 0) * 1000,
-        accuracy_head: (m.accuracyHead ?? 0) * 100,
-        accuracy_enemy_spotted: 0,
-        spray_accuracy: 0,
-      };
-    });
+  // The map chart reads Leetify's recent-match shape; a bridged player's rows
+  // are dressed in it by the shared adapter. Display only — scoring never
+  // touches these.
+  const bridgedRecent = recentFromBridge(bridgeMatches ?? []);
   const recentMatches = leetify?.recent_matches ?? bridgedRecent;
   const distinctMaps = new Set(
     recentMatches.filter((m) => m.map_name).map((m) => m.map_name),

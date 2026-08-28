@@ -79,6 +79,7 @@ type Store interface {
 	SaveMatch(ctx context.Context, m *leetify.Match) error
 	PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]db.PlayerMatchRow, error)
 	PlayerMatchCount(ctx context.Context, steamID uint64) (int, time.Time, error)
+	CorpusTeammates(ctx context.Context, steamID uint64, limit int) ([]db.CorpusTeammate, error)
 	Ping(ctx context.Context) error
 }
 
@@ -743,6 +744,40 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 		if err != nil && !notFound {
 			s.serverError(w, "leetify profile", err)
 			return
+		}
+		// No Leetify profile. If the bridge holds matches for them, the rows
+		// themselves say who they queue with: the same ten-player reports that
+		// rebuilt their stats also name whoever recurs on their team. Same
+		// response shape as the Leetify path so the panel cannot tell.
+		if s.bridge != nil {
+			if mates, cerr := s.db.CorpusTeammates(r.Context(), id, 6); cerr == nil && len(mates) > 0 {
+				out := make([]map[string]any, 0, len(mates))
+				for _, m := range mates {
+					row := map[string]any{
+						"steam64_id":       strconv.FormatUint(m.SteamID, 10),
+						"name":             m.Name,
+						"matches_together": m.Together,
+						"winrate":          ratio(m.TogetherWins, m.Together),
+						"total_matches":    m.TotalMatches,
+						"together_wins":    m.TogetherWins,
+						"together_total":   m.Together,
+					}
+					// Per-match ratings average onto the ranks scale x100 —
+					// the same conversion the bridge uses everywhere else.
+					if m.Together >= 2 {
+						row["rating"] = m.RatingAvg * 100
+					}
+					if m.KDAvg > 0 {
+						row["kd"] = m.KDAvg
+					}
+					out = append(out, row)
+				}
+				setEdgeCache(w, s.cfg.ExternalCacheTTL)
+				writeJSON(w, http.StatusOK, map[string]any{"teammates": out})
+				return
+			} else if cerr != nil {
+				s.log.Warn("corpus teammates", "steam", id, "err", cerr)
+			}
 		}
 		setEdgeCache(w, s.cfg.ExternalCacheTTL)
 		writeJSON(w, http.StatusOK, map[string]any{"teammates": []any{}})

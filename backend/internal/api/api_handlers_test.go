@@ -22,16 +22,17 @@ import (
 // optional func field, defaulting to "not found" / empty so a test only sets
 // what it needs.
 type fakeStore struct {
-	profile  func(uint64) (models.PlayerProfile, error)
-	matches  func(uint64, int, int) ([]models.PlayerMatchSummary, error)
-	matchDet func(int64) (models.MatchDetail, error)
-	weapons  func(uint64, int) ([]models.WeaponStat, error)
-	maps     func(uint64) ([]models.MapStat, error)
-	top      func(int) ([]models.LeaderboardEntry, error)
-	kills    func(int64) ([]models.Kill, error)
-	job      func(string) (models.IngestJob, error)
-	ping     func() error
-	count    func(uint64) (int, error)
+	corpusMates []db.CorpusTeammate
+	profile     func(uint64) (models.PlayerProfile, error)
+	matches     func(uint64, int, int) ([]models.PlayerMatchSummary, error)
+	matchDet    func(int64) (models.MatchDetail, error)
+	weapons     func(uint64, int) ([]models.WeaponStat, error)
+	maps        func(uint64) ([]models.MapStat, error)
+	top         func(int) ([]models.LeaderboardEntry, error)
+	kills       func(int64) ([]models.Kill, error)
+	job         func(string) (models.IngestJob, error)
+	ping        func() error
+	count       func(uint64) (int, error)
 
 	invSnapshot  []byte
 	invFetchedAt time.Time
@@ -83,6 +84,10 @@ func (f *fakeStore) PlayerMatches(context.Context, uint64, int) ([]db.PlayerMatc
 
 func (f *fakeStore) PlayerMatchCount(context.Context, uint64) (int, time.Time, error) {
 	return 0, time.Time{}, nil
+}
+
+func (f *fakeStore) CorpusTeammates(context.Context, uint64, int) ([]db.CorpusTeammate, error) {
+	return f.corpusMates, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error {

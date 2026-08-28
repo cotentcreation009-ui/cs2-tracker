@@ -36,6 +36,8 @@ import { PlatformSplit } from "@/components/PlatformSplit";
 import { computeSuspicion } from "@/lib/suspicion";
 import type { BridgeAggregate } from "@/lib/suspicion";
 import type { BridgeMatchRow } from "@/lib/api";
+import { pseudoProfileFromBridge, recentFromBridge } from "@/lib/bridge";
+import { BridgeStatsPanel } from "@/components/BridgeStatsPanel";
 import Link from "next/link";
 import {
   flag,
@@ -112,6 +114,11 @@ export function ProfileView({
   //   • Match stats → parsed career/weapons/maps/recent matches + Steam + cross-source
   // A slot is null when its data is absent, which also hides that button.
   const splitMatches = leetify?.recent_matches ?? [];
+  // A bridged player's stored rows, dressed in Leetify's shapes so the SAME
+  // panels render for them. Display only; scoring reads the aggregate through
+  // its own gated path.
+  const bridgedRecent = leetify ? [] : recentFromBridge(bridgeMatches);
+  const pseudoLeetify = leetify ? null : pseudoProfileFromBridge(bridge, bridgeMatches);
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career.clutchesWon + career.clutchesLost;
@@ -214,9 +221,9 @@ export function ProfileView({
     // Recent matches with one-click demo analysis — previously buried at the
     // bottom of the Leetify panel; now a first-class button of its own.
     matches:
-      splitMatches.length > 0 ? (
+      splitMatches.length > 0 || bridgedRecent.length > 0 ? (
         <LeetifyRecentMatches
-          matches={splitMatches}
+          matches={splitMatches.length > 0 ? splitMatches : bridgedRecent}
           steamId={player.steamId64}
         />
       ) : null,
@@ -239,10 +246,12 @@ export function ProfileView({
         <LeetifyPanel profile={leetify} />
         {!richMatchStats && crossNode}
       </div>
+    ) : bridge && bridge.matches > 0 ? (
+      <BridgeStatsPanel aggregate={bridge} rows={bridgeMatches} />
     ) : null,
-    counter: leetify ? (
+    counter: (leetify ?? pseudoLeetify) ? (
       <CounterReport
-        leetify={leetify}
+        leetify={(leetify ?? pseudoLeetify)!}
         faceit={faceit}
         steamStats={steamStats}
         name={player.personaName || "this player"}
@@ -250,7 +259,10 @@ export function ProfileView({
     ) : null,
     matchstats: richMatchStats ? matchStatsPanel : null,
     // Friends — Leetify's frequent teammates, resolved+ranked lazily on open
-    friends: leetify ? <FriendsPanel steamId={player.steamId64} /> : null,
+    friends:
+      leetify || bridgeMatches.length > 0 ? (
+        <FriendsPanel steamId={player.steamId64} />
+      ) : null,
     // Inventory — CS2 skins + estimated value, fetched lazily on open. Always
     // offered: a private inventory says so, which is itself an answer.
     inventory: <InventoryPanel steamId={player.steamId64} />,
