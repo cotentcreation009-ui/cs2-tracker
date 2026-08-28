@@ -281,7 +281,15 @@ export function computeSuspicion(
   // Overall Leetify rating (composite; ranks.leetify is on the ×100 scale, so a
   // strong player sits ~1.5–3). 3.0+ = top percentile. Lighter, skill-linked
   // support like K/D — NOT a direct aim tell, so it stays out of `core`.
-  const leetifyRating = leetify?.ranks?.leetify ?? bridged?.leetifyRating ?? 0;
+  // A bridged overall rating is only trusted at a real sample. The x100 unit
+  // conversion is calibrated for AVERAGES: one hot game (a per-match 0.09 -> 9
+  // on the ranks scale) blows past a band built for 1.5-3.0 and crowns itself
+  // the top factor as "VERY HIGH" — which is exactly the kind of number this
+  // meter must never invent. Measured on the motivating account: 7 matches
+  // averaged 3.88; the full 17 settle at 2.3.
+  const bridgedRating =
+    bridged && bridged.matches >= 8 ? bridged.leetifyRating ?? 0 : 0;
+  const leetifyRating = leetify?.ranks?.leetify ?? (bridgedRating || 0);
   const sLeetifyRating = leetifyRating > 0 ? up(leetifyRating, 1.5, 3) : null;
 
   // Mechanical-anomaly composite — reaction, crosshair placement and aim are the

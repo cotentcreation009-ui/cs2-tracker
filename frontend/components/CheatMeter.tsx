@@ -1,6 +1,7 @@
 import type {
   FaceitProfile,
   LeetifyProfile,
+  LeetifyRecentMatch,
   Player,
   PlayerCareer,
   SteamExtras,
@@ -27,6 +28,7 @@ import { StatsPeek } from "@/components/StatsPeek";
 import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 import { MapWinChart } from "@/components/MapStrength";
 import type { ReactNode } from "react";
+import type { BridgeMatchRow } from "@/lib/api";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
 
@@ -278,7 +280,7 @@ export function CheatMeter({
   generatedOn,
   panels,
   bridge = null,
-  bridgeMatchId = null,
+  bridgeMatches = [],
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -294,7 +296,7 @@ export function CheatMeter({
   // Telemetry assembled from Leetify match reports, for players Leetify will
   // not serve a profile for. Carries the attribution their terms require.
   bridge?: BridgeAggregate | null;
-  bridgeMatchId?: string | null;
+  bridgeMatches?: BridgeMatchRow[];
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
   if (!sus || !sus.hasEnough) return null;
@@ -326,7 +328,31 @@ export function CheatMeter({
 
   // Career stats + map win rates now fill the row where the scale cards used to
   // sit — those duplicated the factors column, whereas these are new signal.
-  const recentMatches = leetify?.recent_matches ?? [];
+  // The map chart reads Leetify's recent-match shape. A bridged player has no
+  // profile feed, but the stored match rows carry the same facts — map, rounds
+  // won and lost — so they are dressed in that shape here. Display only: the
+  // score and confidence never touch these.
+  const bridgedRecent: LeetifyRecentMatch[] = (bridgeMatches ?? [])
+    .filter((m) => m.mapName && (m.roundsCount ?? 0) > 0 && (m.roundsWon ?? 0) > 0)
+    .map((m) => {
+      const won = m.roundsWon!;
+      const lost = m.roundsCount! - won;
+      return {
+        id: m.matchId,
+        finished_at: m.finishedAt ?? "",
+        data_source: m.dataSource ?? "matchmaking",
+        outcome: won > lost ? "win" : won < lost ? "loss" : "tie",
+        map_name: m.mapName!,
+        leetify_rating: m.leetifyRating ?? 0,
+        score: [won, lost],
+        preaim: m.preaim ?? 0,
+        reaction_time_ms: (m.reactionTime ?? 0) * 1000,
+        accuracy_head: (m.accuracyHead ?? 0) * 100,
+        accuracy_enemy_spotted: 0,
+        spray_accuracy: 0,
+      };
+    });
+  const recentMatches = leetify?.recent_matches ?? bridgedRecent;
   const distinctMaps = new Set(
     recentMatches.filter((m) => m.map_name).map((m) => m.map_name),
   ).size;
@@ -382,16 +408,26 @@ export function CheatMeter({
       leetify?.total_matches || faceit?.matches || st?.["total_matches_played"] || 0;
     if (cMatches > 0)
       fallbackCells.push({ label: "Matches", value: fmt(cMatches) });
+    const decidedBridge = bridgedRecent.filter((m) => m.outcome !== "tie");
+    const bridgeWinPct = decidedBridge.length
+      ? (decidedBridge.filter((m) => m.outcome === "win").length / decidedBridge.length) * 100
+      : 0;
     const cWin =
       leetify && leetify.winrate > 0
         ? leetify.winrate * 100
         : faceit && faceit.winRatePct > 0
           ? faceit.winRatePct
-          : st?.["total_wins"] && st?.["total_matches_played"]
-            ? (st["total_wins"] / st["total_matches_played"]) * 100
-            : 0;
-    if (cWin > 0)
+          : bridgeWinPct;
+    if (cWin > 0) {
       fallbackCells.push({ label: "Win rate", value: `${cWin.toFixed(0)}%`, color: tierColor(cWin, 55, 45) });
+    } else if (st?.["total_wins"] && st?.["total_rounds_played"]) {
+      // Steam's total_wins counts ROUNDS. Divided by matches it once rendered
+      // an 877% "win rate" on a live page — so it is only ever shown against
+      // rounds, and says so.
+      const roundWin = (st["total_wins"] / st["total_rounds_played"]) * 100;
+      if (roundWin > 0 && roundWin <= 100)
+        fallbackCells.push({ label: "Round win %", value: `${roundWin.toFixed(0)}%`, color: tierColor(roundWin, 52, 48) });
+    }
     const cKd =
       leetify?.kd ||
       faceit?.kdRatio ||
@@ -809,7 +845,7 @@ export function CheatMeter({
           <span className="shrink-0">Generated {generatedOn}</span>
         )}
       </div>
-      <LeetifyCredit shown={!!bridge?.matches} matchId={bridgeMatchId} />
+      <LeetifyCredit shown={!!bridge?.matches} matchId={bridgeMatches?.[0]?.matchId ?? null} />
     </section>
   );
 }

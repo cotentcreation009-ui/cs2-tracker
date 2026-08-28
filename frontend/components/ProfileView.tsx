@@ -35,6 +35,7 @@ import { CheatMeter } from "@/components/CheatMeter";
 import { PlatformSplit } from "@/components/PlatformSplit";
 import { computeSuspicion } from "@/lib/suspicion";
 import type { BridgeAggregate } from "@/lib/suspicion";
+import type { BridgeMatchRow } from "@/lib/api";
 import Link from "next/link";
 import {
   flag,
@@ -72,6 +73,7 @@ export function ProfileView({
   steamExtras = null,
   steamStats = null,
   bridge = null,
+  bridgeMatches = [],
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -82,6 +84,7 @@ export function ProfileView({
   steamExtras?: SteamExtras | null;
   steamStats?: SteamGameStats | null;
   bridge?: BridgeAggregate | null;
+  bridgeMatches?: BridgeMatchRow[];
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -270,6 +273,7 @@ export function ProfileView({
       {showMeter && (
         <CheatMeter
           bridge={bridge}
+          bridgeMatches={bridgeMatches}
           player={player}
           leetify={leetify}
           faceit={faceit}
