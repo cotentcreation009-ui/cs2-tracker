@@ -135,3 +135,12 @@ func nullableTime(t time.Time) any {
 	}
 	return t.UTC().Format(time.RFC3339)
 }
+
+// ratio is wins over total as a 0..1 fraction, 0 when the total is nothing —
+// the shape the Friends panel already reads from the Leetify path.
+func ratio(wins, total int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(wins) / float64(total)
+}

@@ -234,3 +234,78 @@ func parseSteamID(s string) (uint64, error) {
 	}
 	return v, nil
 }
+
+// CorpusTeammate is a player who keeps appearing on the subject's team in the
+// matches we hold — the bridge's answer to "who do they queue with", built
+// from our own rows rather than a profile Leetify will not serve.
+type CorpusTeammate struct {
+	SteamID      uint64
+	Name         string
+	Together     int     // shared matches on the same team
+	TogetherWins int     // of those, ones their team won
+	RatingAvg    float64 // avg per-match leetify_rating across shared games
+	KDAvg        float64 // avg kd across shared games; 0 = unknown
+	TotalMatches int     // matches we hold for the teammate themself
+}
+
+// CorpusTeammates lists the subject's recurring same-team lobby-mates.
+//
+// Team membership and rounds live in the stored payload rather than columns —
+// the columns carry only what the scorer reads, and this query is rare enough
+// (one per Friends-panel open, cached upstream) that JSONB reads are the right
+// price for not widening a live table.
+func (d *DB) CorpusTeammates(ctx context.Context, steamID uint64, limit int) ([]CorpusTeammate, error) {
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	rows, err := d.Pool.Query(ctx, `
+		WITH mine AS (
+		  SELECT m.match_id, m.payload,
+		         (SELECT st FROM jsonb_array_elements(m.payload->'stats') st
+		           WHERE st->>'steam64_id' = $1::text LIMIT 1) AS me
+		    FROM leetify_match_players p
+		    JOIN leetify_matches m ON m.match_id = p.match_id
+		   WHERE p.steam_id = $1
+		)
+		SELECT t.mate, t.name, t.together, t.wins, t.rating, t.kd,
+		       (SELECT count(*) FROM leetify_match_players q
+		         WHERE q.steam_id = t.mate)::int AS total
+		  FROM (
+		    SELECT (st2->>'steam64_id')::bigint            AS mate,
+		           max(COALESCE(st2->>'name',''))          AS name,
+		           count(*)::int                           AS together,
+		           count(*) FILTER (
+		             WHERE COALESCE((mine.me->>'rounds_won')::float, 0) >
+		                   COALESCE((mine.me->>'rounds_count')::float, 0) / 2
+		           )::int                                  AS wins,
+		           avg(COALESCE((st2->>'leetify_rating')::float, 0)) AS rating,
+		           COALESCE(avg(NULLIF((st2->>'kd_ratio')::float, 0)), 0) AS kd
+		      FROM mine,
+		           jsonb_array_elements(mine.payload->'stats') st2
+		     WHERE st2->>'steam64_id' <> $1::text
+		       AND st2->>'steam64_id' ~ '^[0-9]+$'
+		       AND mine.me IS NOT NULL
+		       AND st2->>'initial_team_number' = mine.me->>'initial_team_number'
+		     GROUP BY 1
+		    HAVING count(*) >= 2
+		  ) t
+		 ORDER BY t.together DESC, t.mate
+		 LIMIT $2`, int64(steamID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CorpusTeammate
+	for rows.Next() {
+		var t CorpusTeammate
+		var mate int64
+		if err := rows.Scan(&mate, &t.Name, &t.Together, &t.TogetherWins,
+			&t.RatingAvg, &t.KDAvg, &t.TotalMatches); err != nil {
+			return nil, err
+		}
+		t.SteamID = uint64(mate)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
