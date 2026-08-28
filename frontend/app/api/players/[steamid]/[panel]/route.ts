@@ -6,7 +6,11 @@ import { API_BASE, internalHeaders } from "@/lib/api";
 // routes which inject the token server-side — same pattern as /api/ai/analyze.
 export const dynamic = "force-dynamic";
 
-const PANELS = new Set(["faceit", "leetify", "steam-stats", "steam-extras"]);
+// bridge = telemetry assembled from Leetify match reports, for players Leetify
+// will not serve a profile for. Server-rendered pages reach the backend
+// directly, but this proxy is what the client-side lookups use — a panel
+// missing from this set is a 404 no matter what the backend serves.
+const PANELS = new Set(["faceit", "leetify", "steam-stats", "steam-extras", "bridge"]);
 
 export async function GET(
   _req: Request,
