@@ -145,8 +145,14 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 	// they could close without notice. Everything behind this flag must be
 	// switchable off from the VM without a deploy.
 	if cfg.BridgeEnabled && leetifyClient != nil {
+		// Two sources, deliberately. The game coordinator is the fresh one but
+		// answers only for accounts whose Steam game details are public, and
+		// stays silent — not erroring — for everyone else. Without a second
+		// source those players have no route in at all, which is exactly the
+		// case this whole feature exists for.
 		srv.bridge = matchsync.New(store, leetifyClient, log,
-			matchsync.GCSource{Bot: gcbot.New(cfg.GCBotURL)})
+			matchsync.GCSource{Bot: gcbot.New(cfg.GCBotURL)},
+			matchsync.TrackerSource{})
 	}
 	// Say so at startup, both ways. A disabled bridge is deliberately
 	// indistinguishable from a player with nothing stored — which makes a
