@@ -131,6 +131,26 @@ export async function getLeetify(
   }
 }
 
+import type { BridgeAggregate } from "@/lib/suspicion";
+
+// getBridge fetches telemetry assembled from Leetify MATCH reports, for the
+// players Leetify will not serve a PROFILE for. Supplementary like the rest:
+// the feature can be switched off at the backend, and an absent bridge reads
+// the same as a player with nothing stored, so any failure returns null.
+export async function getBridge(
+  steamId: string,
+): Promise<BridgeAggregate | null> {
+  try {
+    const r = await getJSON<{ enabled?: boolean; aggregate?: BridgeAggregate }>(
+      `/api/players/${steamId}/bridge`,
+    );
+    if (!r?.enabled || !r.aggregate?.matches) return null;
+    return r.aggregate;
+  } catch {
+    return null;
+  }
+}
+
 // getFaceit fetches a player's live FACEIT profile. Supplementary, so any
 // failure (no key configured, no FACEIT account, unreachable) returns null and
 // the panel is hidden.
