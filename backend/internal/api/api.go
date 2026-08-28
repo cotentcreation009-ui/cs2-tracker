@@ -148,6 +148,14 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		srv.bridge = matchsync.New(store, leetifyClient, log,
 			matchsync.GCSource{Bot: gcbot.New(cfg.GCBotURL)})
 	}
+	// Say so at startup, both ways. A disabled bridge is deliberately
+	// indistinguishable from a player with nothing stored — which makes a
+	// misconfigured flag invisible from outside, so it has to be visible here.
+	log.Info("leetify match bridge",
+		"enabled", srv.bridge != nil,
+		"flag", cfg.BridgeEnabled,
+		"leetify_client", leetifyClient != nil,
+		"gc_bot_url_set", cfg.GCBotURL != "")
 	return srv
 }
 
