@@ -50,6 +50,11 @@ services:
       FACEIT_API_KEY: ${FACEIT_API_KEY:-}
       FACEIT_BASE_URL: ${FACEIT_BASE_URL:-https://open.faceit.com/data/v4}
       LEETIFY_API_KEY: ${LEETIFY_API_KEY:-}
+      # Assemble profiles for players Leetify will not serve one for, out of the
+      # match reports they appear in. Off unless set to 1: it depends on a
+      # carve-out Leetify could close without notice, so it must be switchable
+      # from the VM's .env without a deploy.
+      LEETIFY_BRIDGE_ENABLED: ${LEETIFY_BRIDGE_ENABLED:-}
       # Inventory fallback: reads Steam refuses go via steamapis.com (key-metered,
       # not IP-throttled), so a Steam penalty doesn't blank the Inventory panel.
       STEAMAPIS_KEY: ${STEAMAPIS_KEY:-}
