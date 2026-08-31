@@ -76,6 +76,7 @@ export function ProfileView({
   steamStats = null,
   bridge = null,
   bridgeMatches = [],
+  bridgeNewest = null,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -87,6 +88,7 @@ export function ProfileView({
   steamStats?: SteamGameStats | null;
   bridge?: BridgeAggregate | null;
   bridgeMatches?: BridgeMatchRow[];
+  bridgeNewest?: string | null;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -286,6 +288,7 @@ export function ProfileView({
         <CheatMeter
           bridge={bridge}
           bridgeMatches={bridgeMatches}
+          bridgeNewest={bridgeNewest}
           player={player}
           leetify={leetify}
           faceit={faceit}

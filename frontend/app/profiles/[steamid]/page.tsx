@@ -67,6 +67,7 @@ export default async function ProfileBySteamID({
         steamStats={steamStats}
         bridge={bridge?.aggregate ?? null}
         bridgeMatches={bridge?.matches ?? []}
+        bridgeNewest={bridge?.newest ?? null}
       />
     );
   } catch (e) {

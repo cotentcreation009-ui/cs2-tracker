@@ -273,6 +273,9 @@ export interface SteamExtras {
   numberOfVacBans?: number;
   numberOfGameBans?: number;
   daysSinceLastBan?: number; // days since most recent VAC/game ban (0 if none)
+  // Minutes of CS2 in the last two weeks. An activity HINT: zero also means
+  // "hidden", so never present it as proof of inactivity.
+  cs2MinutesTwoWeeks?: number;
   economyBan?: string; // "none" | "probation" | "banned"
 }
 
