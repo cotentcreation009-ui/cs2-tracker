@@ -611,7 +611,14 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 				var friends, level int
 				var personaState, visibility = -1, 0
 				var bans steam.PlayerBans
-				wg.Add(4)
+				var recent2w int
+				wg.Add(5)
+				go func() {
+					defer wg.Done()
+					if m, e := s.steam.GetRecentCS2Playtime(r.Context(), id); e == nil {
+						recent2w = m
+					}
+				}()
 				go func() {
 					defer wg.Done()
 					if n, e := s.steam.GetFriendCount(r.Context(), id); e == nil {
@@ -647,6 +654,10 @@ func (s *Server) handleSteamExtras(w http.ResponseWriter, r *http.Request) {
 				o["numberOfGameBans"] = bans.NumberOfGameBans
 				o["daysSinceLastBan"] = bans.DaysSinceLastBan
 				o["economyBan"] = bans.EconomyBan
+				// Minutes of CS2 in the last two weeks. An activity hint only:
+				// zero also means "hidden", so it must never be shown as proof
+				// of inactivity.
+				o["cs2MinutesTwoWeeks"] = recent2w
 			}
 			return o, nil
 		})

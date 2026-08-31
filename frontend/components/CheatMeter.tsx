@@ -282,6 +282,7 @@ export function CheatMeter({
   panels,
   bridge = null,
   bridgeMatches = [],
+  bridgeNewest = null,
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -298,6 +299,7 @@ export function CheatMeter({
   // not serve a profile for. Carries the attribution their terms require.
   bridge?: BridgeAggregate | null;
   bridgeMatches?: BridgeMatchRow[];
+  bridgeNewest?: string | null;
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
   if (!sus || !sus.hasEnough) return null;
@@ -576,6 +578,36 @@ export function CheatMeter({
                 <span className="font-semibold tabular-nums">{fmt(scope.matches)}</span>
                 <span className="text-faint"> matches</span>
               </div>
+              {(() => {
+                // Honesty about time. A bridged read can lag weeks behind the
+                // player's last game; presenting July as today is how a stats
+                // page misleads mid-game. Say when the telemetry ends — and,
+                // when Steam offers it, whether the player is active NOW.
+                const lines: string[] = [];
+                if (!leetify && bridgeNewest) {
+                  const d = new Date(bridgeNewest);
+                  if (!Number.isNaN(d.getTime())) {
+                    const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+                    lines.push(
+                      days <= 1
+                        ? "telemetry current to yesterday"
+                        : `telemetry as of ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}${days > 21 ? ` · ${Math.round(days / 7)} wks ago` : ""}`,
+                    );
+                  }
+                }
+                const mins = steamExtras?.cs2MinutesTwoWeeks ?? 0;
+                if (mins > 0) {
+                  lines.push(`${Math.round(mins / 60)}h CS2 in last 2 wks`);
+                }
+                if (!lines.length) return null;
+                return (
+                  <div className="mt-1.5 border-t border-line/60 pt-1 text-[10px] leading-snug text-faint">
+                    {lines.map((l) => (
+                      <div key={l}>{l}</div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {/* extra account context — compact pills, matching the Steam row above */}

@@ -474,3 +474,35 @@ func containsInt(s []int, v int) bool {
 	}
 	return false
 }
+
+// GetRecentCS2Playtime returns minutes of CS2 played in the last two weeks.
+//
+// This is the one freshness signal Steam serves for ANY public account with no
+// cooperation from the owner — and it is exactly what a mid-game viewer needs
+// next to dated telemetry: "very active, dated read" and "dormant account"
+// call for different caution. Zero is both "did not play" and "hidden", which
+// is why callers must render it as an activity hint, never as proof of
+// inactivity.
+func (c *Client) GetRecentCS2Playtime(ctx context.Context, steamID uint64) (int, error) {
+	var out struct {
+		Response struct {
+			Games []struct {
+				AppID          int `json:"appid"`
+				Playtime2Weeks int `json:"playtime_2weeks"`
+			} `json:"games"`
+		} `json:"response"`
+	}
+	q := url.Values{
+		"steamid": {strconv.FormatUint(steamID, 10)},
+		"count":   {"0"},
+	}
+	if err := c.getJSON(ctx, "/IPlayerService/GetRecentlyPlayedGames/v1/", q, &out); err != nil {
+		return 0, err
+	}
+	for _, g := range out.Response.Games {
+		if g.AppID == 730 {
+			return g.Playtime2Weeks, nil
+		}
+	}
+	return 0, nil
+}
