@@ -23,6 +23,7 @@ import (
 // what it needs.
 type fakeStore struct {
 	corpusMates []db.CorpusTeammate
+	chain       db.AuthChain
 	profile     func(uint64) (models.PlayerProfile, error)
 	matches     func(uint64, int, int) ([]models.PlayerMatchSummary, error)
 	matchDet    func(int64) (models.MatchDetail, error)
@@ -88,6 +89,35 @@ func (f *fakeStore) PlayerMatchCount(context.Context, uint64) (int, time.Time, e
 
 func (f *fakeStore) CorpusTeammates(context.Context, uint64, int) ([]db.CorpusTeammate, error) {
 	return f.corpusMates, nil
+}
+
+func (f *fakeStore) UpsertAuthChain(_ context.Context, id uint64, auth, head string) error {
+	f.chain = db.AuthChain{SteamID: id, AuthCode: auth, HeadCode: head, Status: "active"}
+	return nil
+}
+
+func (f *fakeStore) AuthChainFor(context.Context, uint64) (db.AuthChain, error) {
+	if f.chain.SteamID == 0 {
+		return db.AuthChain{}, db.ErrNoChain
+	}
+	return f.chain, nil
+}
+
+func (f *fakeStore) ActiveAuthChains(context.Context, int) ([]db.AuthChain, error) {
+	if f.chain.SteamID == 0 {
+		return nil, nil
+	}
+	return []db.AuthChain{f.chain}, nil
+}
+
+func (f *fakeStore) AdvanceAuthChain(_ context.Context, _ uint64, head string) error {
+	f.chain.HeadCode = head
+	return nil
+}
+
+func (f *fakeStore) MarkAuthChain(_ context.Context, _ uint64, status string) error {
+	f.chain.Status = status
+	return nil
 }
 
 func (f *fakeStore) Ping(context.Context) error {
