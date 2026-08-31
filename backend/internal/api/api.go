@@ -32,6 +32,7 @@ import (
 	"github.com/cs2tracker/server/internal/queue"
 	"github.com/cs2tracker/server/internal/steam"
 	"github.com/cs2tracker/server/internal/valve"
+	"github.com/cs2tracker/server/internal/valvechain"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -80,6 +81,11 @@ type Store interface {
 	PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]db.PlayerMatchRow, error)
 	PlayerMatchCount(ctx context.Context, steamID uint64) (int, time.Time, error)
 	CorpusTeammates(ctx context.Context, steamID uint64, limit int) ([]db.CorpusTeammate, error)
+	UpsertAuthChain(ctx context.Context, steamID uint64, authCode, headCode string) error
+	AuthChainFor(ctx context.Context, steamID uint64) (db.AuthChain, error)
+	ActiveAuthChains(ctx context.Context, limit int) ([]db.AuthChain, error)
+	AdvanceAuthChain(ctx context.Context, steamID uint64, headCode string) error
+	MarkAuthChain(ctx context.Context, steamID uint64, status string) error
 	Ping(ctx context.Context) error
 }
 
@@ -114,6 +120,9 @@ type Server struct {
 	// bridge assembles telemetry for players Leetify will not serve a profile
 	// for, out of the match reports they appear in. nil when disabled.
 	bridge *matchsync.Syncer
+	// chainValve walks connected accounts' share-code chains through Valve's
+	// sanctioned API. Nil when no Steam key or the bridge is off.
+	chainValve *valvechain.Client
 	// invHTTP fetches Steam community inventories + Skinport prices (both
 	// public, no keys; kept separate so their timeouts don't affect API calls).
 	invHTTP *http.Client
@@ -151,9 +160,23 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		// stays silent — not erroring — for everyone else. Without a second
 		// source those players have no route in at all, which is exactly the
 		// case this whole feature exists for.
-		srv.bridge = matchsync.New(store, leetifyClient, log,
+		sources := []matchsync.CodeSource{
 			matchsync.GCSource{Bot: gcbot.New(cfg.GCBotURL)},
-			matchsync.TrackerSource{})
+			matchsync.TrackerSource{},
+		}
+		if cfg.HasSteamKey() {
+			// The chain walker: accounts whose owners connected their match
+			// history get fresh, complete, sanctioned discovery. The only
+			// source that is all three — the others exist for everyone else.
+			srv.chainValve = &valvechain.Client{Key: cfg.SteamAPIKey}
+			sources = append(sources,
+				matchsync.ChainSource{Store: store, Valve: srv.chainValve, Log: log})
+		}
+		srv.bridge = matchsync.New(store, leetifyClient, log, sources...)
+		if srv.chainValve != nil {
+			// Freshness must not depend on someone happening to view a page.
+			go srv.chainPoller(context.Background())
+		}
 	}
 	// Say so at startup, both ways. A disabled bridge is deliberately
 	// indistinguishable from a player with nothing stored — which makes a
@@ -162,7 +185,8 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		"enabled", srv.bridge != nil,
 		"flag", cfg.BridgeEnabled,
 		"leetify_client", leetifyClient != nil,
-		"gc_bot_url_set", cfg.GCBotURL != "")
+		"gc_bot_url_set", cfg.GCBotURL != "",
+		"chain_walker", srv.chainValve != nil)
 	return srv
 }
 
@@ -356,6 +380,10 @@ func (s *Server) Router() http.Handler {
 				// Telemetry assembled from match reports, for players Leetify
 				// will not serve a profile for.
 				r.Get("/bridge", s.handleBridge)
+				// Connect an account's match history (operator-only for now:
+				// the whole API sits behind the internal token).
+				r.Post("/chain", s.handleChainConnect)
+				r.Get("/chain", s.handleChainStatus)
 			})
 
 			r.Get("/matches/{id}", s.handleMatch)
