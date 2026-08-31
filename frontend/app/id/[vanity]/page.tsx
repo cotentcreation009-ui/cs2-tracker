@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import {
   ApiError,
+  getBridge,
   getFaceit,
   getLeetify,
   getMapStats,
@@ -44,7 +45,7 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps, leetify, faceit, steamExtras, steamStats] =
+    const [profile, matches, weapons, maps, leetify, faceit, steamExtras, steamStats, bridge] =
       await Promise.all([
         getProfile(steamId),
         getPlayerMatches(steamId),
@@ -54,6 +55,7 @@ export default async function ProfileByVanity({
         getFaceit(steamId),
         getSteamExtras(steamId),
         getSteamStats(steamId),
+        getBridge(steamId),
       ]);
     return (
       <ProfileView
@@ -65,6 +67,9 @@ export default async function ProfileByVanity({
         faceit={faceit}
         steamExtras={steamExtras}
         steamStats={steamStats}
+        bridge={bridge?.aggregate ?? null}
+        bridgeMatches={bridge?.matches ?? []}
+        bridgeNewest={bridge?.newest ?? null}
       />
     );
   } catch (e) {
