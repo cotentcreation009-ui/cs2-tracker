@@ -51,8 +51,12 @@ func WithLegacyURL(u string) Option {
 // New builds a Client. baseURL defaults are set by the caller from config.
 func New(baseURL, apiKey string, opts ...Option) *Client {
 	c := &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		legacyURL: "https://api.leetify.com",
+		baseURL: strings.TrimRight(baseURL, "/"),
+		// The site's own internal host. api.leetify.com — the old default —
+		// was an undocumented alias Leetify shut off without notice on
+		// 2026-09-01; this host serves the same legacy routes and is what
+		// their match pages themselves call.
+		legacyURL: "https://api.cs-prod.leetify.com",
 		apiKey:    apiKey,
 		http:      &http.Client{Timeout: 10 * time.Second},
 	}

@@ -189,7 +189,10 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		"flag", cfg.BridgeEnabled,
 		"leetify_client", leetifyClient != nil,
 		"gc_bot_url_set", cfg.GCBotURL != "",
-		"chain_walker", srv.chainValve != nil)
+		"chain_walker", srv.chainValve != nil,
+		// The host actually in use — a silent upstream host shutdown cost a
+		// night of guessing because nothing printed it.
+		"leetify_base", cfg.LeetifyBaseURL)
 	return srv
 }
 
