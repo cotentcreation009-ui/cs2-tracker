@@ -30,9 +30,15 @@ func (d *DB) SeenShareCodes(ctx context.Context, codes []string) (map[string]boo
 	if len(codes) == 0 {
 		return seen, nil
 	}
+	// Match on the code alone. A share code encodes its match id, so it is
+	// globally unique — and the data_source predicate this once carried never
+	// matched anything, because Leetify stores granular values
+	// ('matchmaking_competitive', not 'matchmaking'). That dead predicate made
+	// dedupe a no-op from the day it was written: every sync re-offered and
+	// re-fetched matches the store already held.
 	rows, err := d.Pool.Query(ctx,
 		`SELECT source_id FROM leetify_matches
-		  WHERE data_source='matchmaking' AND source_id = ANY($1)`, codes)
+		  WHERE source_id = ANY($1)`, codes)
 	if err != nil {
 		return nil, err
 	}
