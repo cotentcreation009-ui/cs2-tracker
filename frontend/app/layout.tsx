@@ -81,6 +81,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             >
               <Logo />
             </Link>
+            {/* Connect sits beside the logo, not in the right-hand nav: it is
+                the site's one ask of its visitors, and the flywheel every
+                fresh profile depends on — worth the loudest slot we have. */}
+            <Link
+              href="/connect"
+              className="shrink-0 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-semibold text-brand transition hover:bg-brand/20"
+            >
+              Connect<span className="hidden sm:inline"> your matches</span>
+            </Link>
             {/* search centered between the logo and the nav */}
             <div className="mx-auto w-full max-w-xl">
               <SearchBar />
