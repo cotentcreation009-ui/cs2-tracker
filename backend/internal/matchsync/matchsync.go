@@ -207,6 +207,15 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 			continue
 		}
 		res.Fetched++
+		// One line per stored match, with the one fact every debugging session
+		// has needed and never had: is the player we synced for actually IN it?
+		s.log.Info("matchsync: stored",
+			"steam", steamID,
+			"code", code,
+			"match", m.ID,
+			"map", m.MapName,
+			"finished", m.FinishedTime().Format("2006-01-02"),
+			"subject_present", func() bool { _, ok := m.Player(steamID); return ok }())
 	}
 	return res, nil
 }
