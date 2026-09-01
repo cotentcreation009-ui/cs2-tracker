@@ -140,12 +140,22 @@ func (s *Server) chainPoller(ctx context.Context) {
 			s.log.Warn("chain poller: listing failed", "err", err)
 			continue
 		}
+		// The heartbeat exists because its absence cost a night: with it, "is
+		// the poller alive" is one grep instead of an inference from side
+		// effects.
+		s.log.Info("chain poller round", "accounts", len(chains))
 		for _, c := range chains {
 			// Sync pulls from all sources — the chain walk happens inside it,
 			// and everything downstream (dedupe, caps, rate limits) applies.
-			if _, err := s.bridge.Sync(ctx, c.SteamID); err != nil {
-				s.log.Warn("chain poller: sync failed", "steam", c.SteamID, "err", err)
-			}
+			// Each account gets its own deadline so one wedged upstream can
+			// never stall the whole rotation.
+			func() {
+				cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer cancel()
+				if _, err := s.bridge.Sync(cctx, c.SteamID); err != nil {
+					s.log.Warn("chain poller: sync failed", "steam", c.SteamID, "err", err)
+				}
+			}()
 		}
 	}
 }
