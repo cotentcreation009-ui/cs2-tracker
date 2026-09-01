@@ -605,6 +605,15 @@ export function CheatMeter({
                     {lines.map((l) => (
                       <div key={l}>{l}</div>
                     ))}
+                    {/* A bridged read is as fresh as its discovery. The one
+                        person who can make it real-time is the owner — invite
+                        exactly them, exactly here. */}
+                    <Link
+                      href={`/connect?id=${player.steamId64}`}
+                      className="mt-0.5 inline-block text-brand underline decoration-dotted underline-offset-2"
+                    >
+                      Your account? Connect it for live stats →
+                    </Link>
                   </div>
                 );
               })()}
