@@ -125,6 +125,9 @@ func (d *DB) RememberAbsentCode(ctx context.Context, steamID uint64, code string
 	return err
 }
 
+// The window is three days, not one: an upstream outage (Leetify shut a host
+// alias off for half a day once) must not silently expire every code that had
+// the bad luck to be discovered during it.
 // AbsentCodesToRetry returns a player's codes still worth re-asking about:
 // young enough that the report may simply not exist yet, and not tried in the
 // last couple of minutes (Leetify processing takes tens of minutes — hammering
@@ -133,7 +136,7 @@ func (d *DB) AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, 
 	rows, err := d.Pool.Query(ctx, `
 		SELECT share_code FROM leetify_retry_codes
 		 WHERE steam_id = $1
-		   AND first_seen > now() - interval '24 hours'
+		   AND first_seen > now() - interval '72 hours'
 		   AND last_try   < now() - interval '2 minutes'
 		 ORDER BY first_seen ASC
 		 LIMIT 8`, int64(steamID))
@@ -157,7 +160,7 @@ func (d *DB) AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, 
 func (d *DB) PruneRetryCodes(ctx context.Context) error {
 	_, err := d.Pool.Exec(ctx, `
 		DELETE FROM leetify_retry_codes
-		 WHERE first_seen < now() - interval '24 hours'
+		 WHERE first_seen < now() - interval '72 hours'
 		    OR share_code IN (SELECT source_id FROM leetify_matches
 		                       WHERE source_id IS NOT NULL)`)
 	return err
