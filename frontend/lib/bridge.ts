@@ -80,6 +80,7 @@ export function pseudoProfileFromBridge(
     name: "",
     steam64_id: "",
     total_matches: agg.matches,
+    kd: agg.kdRatio,
     winrate: decided.length ? wins / decided.length : 0,
     privacy_mode: "public",
     bans: [],

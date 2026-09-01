@@ -29,7 +29,7 @@ import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 import { MapWinChart } from "@/components/MapStrength";
 import type { ReactNode } from "react";
 import type { BridgeMatchRow } from "@/lib/api";
-import { recentFromBridge } from "@/lib/bridge";
+import { pseudoProfileFromBridge, recentFromBridge } from "@/lib/bridge";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
 
@@ -373,7 +373,12 @@ export function CheatMeter({
   // once we've ingested their demos. So when they're absent, fill the same card
   // from Leetify / FACEIT / Steam instead, so every profile gets its career
   // panel (clearly labelled by source). Cells self-hide when a value is missing.
-  const ls0 = leetify?.stats;
+  // Display profile for the career card only: the real profile when Leetify
+  // serves one, the bridge's stand-in otherwise — same stand-in the counter
+  // report already renders from. Scoring keeps reading the real `leetify`.
+  const cardLee =
+    leetify ?? pseudoProfileFromBridge(bridge ?? null, bridgeMatches ?? []);
+  const ls0 = cardLee?.stats;
   // A friends-only Leetify profile redacts the aim micro-stats (reaction / preaim
   // / HS accuracy → 0) but keeps the RATINGS and ranks public. When the micro-
   // stats are hidden we fill the Career-stats card from those ratings instead, so
@@ -409,7 +414,7 @@ export function CheatMeter({
     } else {
     const st = steamStats?.stats;
     const cMatches =
-      leetify?.total_matches || faceit?.matches || st?.["total_matches_played"] || 0;
+      cardLee?.total_matches || faceit?.matches || st?.["total_matches_played"] || 0;
     if (cMatches > 0)
       fallbackCells.push({ label: "Matches", value: fmt(cMatches) });
     const decidedBridge = bridgedRecent.filter((m) => m.outcome !== "tie");
@@ -417,8 +422,8 @@ export function CheatMeter({
       ? (decidedBridge.filter((m) => m.outcome === "win").length / decidedBridge.length) * 100
       : 0;
     const cWin =
-      leetify && leetify.winrate > 0
-        ? leetify.winrate * 100
+      cardLee && cardLee.winrate > 0
+        ? cardLee.winrate * 100
         : faceit && faceit.winRatePct > 0
           ? faceit.winRatePct
           : bridgeWinPct;
@@ -433,7 +438,7 @@ export function CheatMeter({
         fallbackCells.push({ label: "Round win %", value: `${roundWin.toFixed(0)}%`, color: tierColor(roundWin, 52, 48) });
     }
     const cKd =
-      leetify?.kd ||
+      cardLee?.kd ||
       faceit?.kdRatio ||
       (st?.["total_kills"] && st?.["total_deaths"] ? st["total_kills"] / st["total_deaths"] : 0);
     if (cKd > 0)
