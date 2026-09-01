@@ -119,7 +119,7 @@ func (s *Server) syncBridgeAsync(steamID uint64) {
 			s.log.Warn("bridge sync failed", "steam", steamID, "err", err)
 			return
 		}
-		if res.Fetched > 0 || res.Failed > 0 {
+		if res.Fetched > 0 || res.Failed > 0 || res.Absent > 0 {
 			s.log.Info("bridge sync", "steam", steamID,
 				"offered", res.Offered, "new", res.New,
 				"fetched", res.Fetched, "absent", res.Absent, "failed", res.Failed)

@@ -86,6 +86,9 @@ type Store interface {
 	ActiveAuthChains(ctx context.Context, limit int) ([]db.AuthChain, error)
 	AdvanceAuthChain(ctx context.Context, steamID uint64, headCode string) error
 	MarkAuthChain(ctx context.Context, steamID uint64, status string) error
+	RememberAbsentCode(ctx context.Context, steamID uint64, code string) error
+	AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error)
+	PruneRetryCodes(ctx context.Context) error
 	Ping(ctx context.Context) error
 }
 

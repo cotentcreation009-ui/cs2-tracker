@@ -111,3 +111,54 @@ func (d *DB) MarkAuthChain(ctx context.Context, steamID uint64, status string) e
 		 WHERE steam_id = $1`, int64(steamID), status)
 	return err
 }
+
+// RememberAbsentCode records a share code whose Leetify report was not there
+// when asked — usually a match they have not processed YET, so it is worth
+// asking again on later syncs rather than abandoning.
+func (d *DB) RememberAbsentCode(ctx context.Context, steamID uint64, code string) error {
+	_, err := d.Pool.Exec(ctx, `
+		INSERT INTO leetify_retry_codes (share_code, steam_id)
+		VALUES ($1, $2)
+		ON CONFLICT (share_code) DO UPDATE
+		   SET last_try = now(), tries = leetify_retry_codes.tries + 1`,
+		code, int64(steamID))
+	return err
+}
+
+// AbsentCodesToRetry returns a player's codes still worth re-asking about:
+// young enough that the report may simply not exist yet, and not tried in the
+// last couple of minutes (Leetify processing takes tens of minutes — hammering
+// per page view would spend the rate budget learning nothing).
+func (d *DB) AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error) {
+	rows, err := d.Pool.Query(ctx, `
+		SELECT share_code FROM leetify_retry_codes
+		 WHERE steam_id = $1
+		   AND first_seen > now() - interval '24 hours'
+		   AND last_try   < now() - interval '2 minutes'
+		 ORDER BY first_seen ASC
+		 LIMIT 8`, int64(steamID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// PruneRetryCodes drops retry rows past hope (a day) or already fetched, so
+// the table stays a handful of rows per active player.
+func (d *DB) PruneRetryCodes(ctx context.Context) error {
+	_, err := d.Pool.Exec(ctx, `
+		DELETE FROM leetify_retry_codes
+		 WHERE first_seen < now() - interval '24 hours'
+		    OR share_code IN (SELECT source_id FROM leetify_matches
+		                       WHERE source_id IS NOT NULL)`)
+	return err
+}
