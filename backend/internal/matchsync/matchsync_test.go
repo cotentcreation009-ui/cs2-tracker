@@ -98,7 +98,9 @@ func (f *fakeFetch) MatchByShareCode(_ context.Context, code string) (*leetify.M
 	if f.fail[code] {
 		return nil, errors.New("boom")
 	}
-	return &leetify.Match{ID: "m-" + code, DataSourceMatchID: code}, nil
+	// Like the real API: the payload does NOT echo the share code back.
+	// The syncer must stamp it itself — that is what the fidelity below tests.
+	return &leetify.Match{ID: "m-" + code}, nil
 }
 
 type fakeSource struct {

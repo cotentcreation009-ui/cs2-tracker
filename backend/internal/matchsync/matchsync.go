@@ -186,6 +186,11 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 			s.log.Warn("matchsync: match fetch failed", "code", code, "err", err)
 			continue
 		}
+		// Stamp the code this match was fetched BY. Leetify's payload does not
+		// reliably carry it, and this string is the store's dedupe key: leave
+		// it empty and every future sync re-fetches this match forever, which
+		// is exactly the failure that burned a night of live debugging.
+		m.DataSourceMatchID = code
 		if err := s.store.SaveMatch(ctx, m); err != nil {
 			res.Failed++
 			s.log.Warn("matchsync: save failed", "code", code, "err", err)

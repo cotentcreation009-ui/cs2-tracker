@@ -83,7 +83,8 @@ func (d *DB) SaveMatch(ctx context.Context, m *leetify.Match) error {
 		   (match_id, data_source, source_id, map_name, finished_at, payload)
 		 VALUES ($1,$2,$3,$4,$5,$6)
 		 ON CONFLICT (match_id) DO UPDATE
-		   SET payload = EXCLUDED.payload, fetched_at = now()`,
+		   SET payload = EXCLUDED.payload, fetched_at = now(),
+		       source_id = COALESCE(EXCLUDED.source_id, leetify_matches.source_id)`,
 		m.ID, m.DataSource, sourceID, m.MapName, finished, payload); err != nil {
 		return err
 	}
