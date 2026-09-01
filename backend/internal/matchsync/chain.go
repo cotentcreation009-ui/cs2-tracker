@@ -58,10 +58,15 @@ func (s ChainSource) ShareCodes(ctx context.Context, steamID uint64) ([]string, 
 		return nil, nil
 	}
 
-	codes, walkErr := s.Valve.Walk(ctx, steamID, chain.AuthCode, chain.HeadCode, chainMaxSteps)
+	walked, walkErr := s.Valve.Walk(ctx, steamID, chain.AuthCode, chain.HeadCode, chainMaxSteps)
+	// The head itself is offered too, not only what lies beyond it: the seed a
+	// player connects with names a real match of theirs, and without this line
+	// that one match was never fetched. Costless — the store's dedupe skips it
+	// once stored, and the retry set covers it while Leetify still processes.
+	codes := append([]string{chain.HeadCode}, walked...)
 
-	if len(codes) > 0 {
-		if err := s.Store.AdvanceAuthChain(ctx, steamID, codes[len(codes)-1]); err != nil {
+	if len(walked) > 0 {
+		if err := s.Store.AdvanceAuthChain(ctx, steamID, walked[len(walked)-1]); err != nil {
 			// The walk succeeded but the head did not persist: return nothing
 			// rather than codes that would be re-walked AND re-fetched next
 			// time — the store dedupe protects fetches, not the walk budget.
