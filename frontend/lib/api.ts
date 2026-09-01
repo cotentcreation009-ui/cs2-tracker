@@ -151,6 +151,7 @@ export interface BridgeMatchRow {
   totalDeaths?: number;
   roundsCount?: number;
   roundsWon?: number;
+  mvps?: number;
 }
 
 export interface BridgeData {

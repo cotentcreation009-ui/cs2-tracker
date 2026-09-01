@@ -239,6 +239,14 @@ type Aggregate struct {
 	DPR           float64   `json:"dpr,omitempty"`
 	Kills         int       `json:"kills,omitempty"`
 	Deaths        int       `json:"deaths,omitempty"`
+	// Career-parity fields: a connected account's card should show what a
+	// Leetify-profile card shows, wherever the match reports carry it.
+	SpottedAcc    float64 `json:"spottedAcc,omitempty"`    // fraction
+	CounterStrafe float64 `json:"counterStrafe,omitempty"` // fraction
+	FlashPerThrow float64 `json:"flashPerThrow,omitempty"` // foes hit per flashbang thrown
+	HEDmgAvg      float64 `json:"heDmgAvg,omitempty"`
+	TradesWonPct  float64 `json:"tradesWonPct,omitempty"` // as Leetify serves it
+	MVPs          int     `json:"mvps,omitempty"`
 }
 
 // Aggregated reads a player's stored rows and averages them.
@@ -267,7 +275,8 @@ func Summarise(rows []db.PlayerMatchRow) Aggregate {
 		sum float64
 		n   int
 	}
-	var preaim, react, head, spray, rating, kd, dpr acc
+	var preaim, react, head, spray, rating, kd, dpr, spotted, cstrafe, hedmg, trades acc
+	var flashHit, flashThrown int
 	add := func(t *acc, v float64) {
 		if v > 0 {
 			t.sum += v
@@ -294,8 +303,15 @@ func Summarise(rows []db.PlayerMatchRow) Aggregate {
 			rating.sum += r.LeetifyRating
 			rating.n++
 		}
+		add(&spotted, r.SpottedAcc)
+		add(&cstrafe, r.CStrafeRatio)
+		add(&hedmg, r.HEDmgAvg)
+		add(&trades, r.TradeWinPct)
+		flashHit += r.FlashHitFoe
+		flashThrown += r.FlashThrown
 		a.Kills += r.TotalKills
 		a.Deaths += r.TotalDeaths
+		a.MVPs += r.MVPs
 	}
 
 	a.Preaim = mean(preaim)
@@ -305,6 +321,15 @@ func Summarise(rows []db.PlayerMatchRow) Aggregate {
 	a.LeetifyRating = mean(rating)
 	a.KDRatio = mean(kd)
 	a.DPR = mean(dpr)
+	a.SpottedAcc = mean(spotted)
+	a.CounterStrafe = mean(cstrafe)
+	a.HEDmgAvg = mean(hedmg)
+	a.TradesWonPct = mean(trades)
+	// Ratio of sums, not mean of ratios: the profile stat is "foes hit per
+	// flashbang", and a game with no flashes must not count as a zero.
+	if flashThrown > 0 {
+		a.FlashPerThrow = float64(flashHit) / float64(flashThrown)
+	}
 
 	dates := make([]time.Time, 0, len(rows))
 	for _, r := range rows {
@@ -376,6 +401,12 @@ type ProfileScale struct {
 	LeetifyRating  float64 `json:"leetifyRating,omitempty"`
 	KDRatio        float64 `json:"kdRatio,omitempty"`
 	DPR            float64 `json:"dpr,omitempty"`
+	SpottedAcc     float64 `json:"spottedAcc,omitempty"`    // percent
+	CounterStrafe  float64 `json:"counterStrafe,omitempty"` // percent
+	FlashPerThrow  float64 `json:"flashPerThrow,omitempty"`
+	HEDmgAvg       float64 `json:"heDmgAvg,omitempty"`
+	TradesWonPct   float64 `json:"tradesWonPct,omitempty"`
+	MVPs           int     `json:"mvps,omitempty"`
 }
 
 // ProfileScale converts. Zero stays zero: absent is not a measurement, and a
@@ -399,5 +430,13 @@ func (a Aggregate) ProfileScale() ProfileScale {
 		LeetifyRating: a.LeetifyRating * 100,
 		KDRatio:       a.KDRatio,
 		DPR:           a.DPR,
+		SpottedAcc:    scale(a.SpottedAcc, 100),
+		CounterStrafe: scale(a.CounterStrafe, 100),
+		FlashPerThrow: a.FlashPerThrow,
+		HEDmgAvg:      a.HEDmgAvg,
+		// Served as-is: Leetify already names it a percentage, and the display
+		// layer normalises either scale rather than double-converting here.
+		TradesWonPct: a.TradesWonPct,
+		MVPs:         a.MVPs,
 	}
 }

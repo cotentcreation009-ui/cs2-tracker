@@ -327,7 +327,7 @@ export function CheatMeter({
     trend,
   } = sus;
   const hex = BAND_HEX[band];
-  const pct = (v: number) => (summary.total ? (v / summary.total) * 100 : 0);
+
 
   // Career stats + map win rates now fill the row where the scale cards used to
   // sit — those duplicated the factors column, whereas these are new signal.
@@ -340,6 +340,27 @@ export function CheatMeter({
     recentMatches.filter((m) => m.map_name).map((m) => m.map_name),
   ).size;
   const showMapChart = distinctMaps >= 3;
+  // Display-only mirrors of the scorer's summary/trend, derived from whichever
+  // recent list this page has (profile feed or bridged rows).
+  const last30 = recentMatches.slice(0, 30);
+  const chrono30 = [...last30].reverse();
+  const viewSummary =
+    summary.total > 0
+      ? summary
+      : {
+          total: last30.length,
+          wins: last30.filter((m) => m.outcome === "win").length,
+          losses: last30.filter((m) => m.outcome === "loss").length,
+          draws: last30.filter((m) => m.outcome === "tie").length,
+        };
+  const pct = (v: number) => (viewSummary.total ? (v / viewSummary.total) * 100 : 0);
+  const viewTrend =
+    summary.total > 0
+      ? trend
+      : {
+          rating: chrono30.map((m) => m.leetify_rating),
+          outcomes: chrono30.map((m) => m.outcome),
+        };
   const showCareer = !!career && career.matches > 0;
   const openTotal = career ? career.openingKills + career.openingDeaths : 0;
   const openPct = openTotal > 0 ? (career!.openingKills / openTotal) * 100 : 0;
@@ -787,41 +808,47 @@ export function CheatMeter({
 
         {showMapChart && <MapWinChart matches={recentMatches} embedded />}
 
+        {/* A bridged page has no Leetify profile feed, but the stored rows
+            carry the same outcomes and ratings — derive the display-only
+            summary/trend from the unified recent list so a connected account's
+            page shows the same consistency chart and W/L donut a profile page
+            does. Scoring never reads these. */}
+        {(() => null)()}
         <div className="flex min-w-0 flex-col gap-2.5">
-          {summary.total > 0 && (
+          {viewSummary.total > 0 && (
             <RatingConsistencyChart
-              ratings={trend.rating}
-              outcomes={trend.outcomes}
-              total={summary.total}
+              ratings={viewTrend.rating}
+              outcomes={viewTrend.outcomes}
+              total={viewSummary.total}
             />
           )}
-          <div className={`grid flex-1 gap-3 ${summary.total > 0 ? "sm:grid-cols-[auto_1fr]" : ""}`}>
-            {summary.total > 0 && (
+          <div className={`grid flex-1 gap-3 ${viewSummary.total > 0 ? "sm:grid-cols-[auto_1fr]" : ""}`}>
+            {viewSummary.total > 0 && (
               <div className="card flex items-center gap-2.5 px-3 py-2.5">
                 <Donut
-                  wins={summary.wins}
-                  losses={summary.losses}
-                  draws={summary.draws}
-                  total={summary.total}
+                  wins={viewSummary.wins}
+                  losses={viewSummary.losses}
+                  draws={viewSummary.draws}
+                  total={viewSummary.total}
                   sizeClass="h-[74px] w-[74px]"
                 />
                 <div className="min-w-0 space-y-0.5 text-xs">
-                  <div className="stat-label">Last {summary.total}</div>
+                  <div className="stat-label">Last {viewSummary.total}</div>
                   <div className="flex items-center gap-1.5 whitespace-nowrap text-good">
                     <span className="h-1.5 w-1.5 rounded-full bg-good" />
-                    {summary.wins}W
-                    <span className="text-faint">({pct(summary.wins).toFixed(0)}%)</span>
+                    {viewSummary.wins}W
+                    <span className="text-faint">({pct(viewSummary.wins).toFixed(0)}%)</span>
                   </div>
                   <div className="flex items-center gap-1.5 whitespace-nowrap text-bad">
                     <span className="h-1.5 w-1.5 rounded-full bg-bad" />
-                    {summary.losses}L
-                    <span className="text-faint">({pct(summary.losses).toFixed(0)}%)</span>
+                    {viewSummary.losses}L
+                    <span className="text-faint">({pct(viewSummary.losses).toFixed(0)}%)</span>
                   </div>
-                  {summary.draws > 0 && (
+                  {viewSummary.draws > 0 && (
                     <div className="flex items-center gap-1.5 whitespace-nowrap text-mid">
                       <span className="h-1.5 w-1.5 rounded-full bg-mid" />
-                      {summary.draws}D
-                      <span className="text-faint">({pct(summary.draws).toFixed(0)}%)</span>
+                      {viewSummary.draws}D
+                      <span className="text-faint">({pct(viewSummary.draws).toFixed(0)}%)</span>
                     </div>
                   )}
                 </div>

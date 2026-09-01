@@ -144,6 +144,16 @@ type PlayerMatchRow struct {
 	// rather than a column: it earns its keep for win/loss display, not for
 	// scoring, and a payload read spares a migration on a table already live.
 	RoundsWon int `json:"roundsWon,omitempty"`
+	// Career-parity fields, read from the stored payload like RoundsWon: a
+	// connected account's page should match a Leetify-profile page wherever
+	// the match reports carry the same fact.
+	SpottedAcc   float64 `json:"spottedAcc,omitempty"`   // accuracy_enemy_spotted, fraction
+	CStrafeRatio float64 `json:"cstrafeRatio,omitempty"` // counter_strafing_shots_good_ratio, fraction
+	FlashHitFoe  int     `json:"flashHitFoe,omitempty"`
+	FlashThrown  int     `json:"flashThrown,omitempty"`
+	HEDmgAvg     float64 `json:"heDmgAvg,omitempty"`
+	TradeWinPct  float64 `json:"tradeWinPct,omitempty"` // trade_kills_success_percentage as served
+	MVPs         int     `json:"mvps,omitempty"`
 }
 
 // Won reports the match outcome for this row. ok is false for a tie or when
@@ -173,12 +183,20 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		        COALESCE(p.kd_ratio,0), COALESCE(p.dpr,0),
 		        COALESCE(p.total_kills,0), COALESCE(p.total_deaths,0),
 		        COALESCE(p.rounds_count,0),
-		        COALESCE((SELECT (st->>'rounds_won')::int
-		                    FROM jsonb_array_elements(m.payload->'stats') st
-		                   WHERE st->>'steam64_id' = p.steam_id::text
-		                   LIMIT 1), 0)
+		        COALESCE((me.st->>'rounds_won')::int, 0),
+		        COALESCE((me.st->>'accuracy_enemy_spotted')::float, 0),
+		        COALESCE((me.st->>'counter_strafing_shots_good_ratio')::float, 0),
+		        COALESCE((me.st->>'flashbang_hit_foe')::int, 0),
+		        COALESCE((me.st->>'flashbang_thrown')::int, 0),
+		        COALESCE((me.st->>'he_foes_damage_avg')::float, 0),
+		        COALESCE((me.st->>'trade_kills_success_percentage')::float, 0),
+		        COALESCE((me.st->>'mvps')::int, 0)
 		   FROM leetify_match_players p
 		   JOIN leetify_matches m ON m.match_id = p.match_id
+		   LEFT JOIN LATERAL (
+		        SELECT st FROM jsonb_array_elements(m.payload->'stats') st
+		         WHERE st->>'steam64_id' = p.steam_id::text LIMIT 1
+		   ) me ON true
 		  WHERE p.steam_id = $1
 		  ORDER BY p.finished_at DESC NULLS LAST
 		  LIMIT $2`, int64(steamID), limit)
@@ -193,7 +211,9 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		if err := rows.Scan(&r.MatchID, &r.MapName, &r.DataSource, &r.FinishedAt,
 			&r.Preaim, &r.ReactionTime, &r.AccuracyHead, &r.Accuracy,
 			&r.SprayAccuracy, &r.LeetifyRating, &r.KDRatio, &r.DPR,
-			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount, &r.RoundsWon); err != nil {
+			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount, &r.RoundsWon,
+			&r.SpottedAcc, &r.CStrafeRatio, &r.FlashHitFoe, &r.FlashThrown,
+			&r.HEDmgAvg, &r.TradeWinPct, &r.MVPs); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
