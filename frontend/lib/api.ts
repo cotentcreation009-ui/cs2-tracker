@@ -157,6 +157,9 @@ export interface BridgeMatchRow {
 export interface BridgeData {
   aggregate: BridgeAggregate;
   matches: BridgeMatchRow[];
+  // True when this account's owner authorised their match history, so the
+  // page can say "connected" instead of inviting them to connect again.
+  connected: boolean;
   // Date of the newest match the bridge holds — the page must SAY how current
   // its telemetry is rather than quietly presenting July as today.
   newest: string | null;
@@ -168,12 +171,14 @@ export async function getBridge(steamId: string): Promise<BridgeData | null> {
       enabled?: boolean;
       aggregate?: BridgeAggregate;
       matches?: BridgeMatchRow[];
+      connected?: boolean;
       span?: { newest?: string | null };
     }>(`/api/players/${steamId}/bridge`);
     if (!r?.enabled || !r.aggregate?.matches) return null;
     return {
       aggregate: r.aggregate,
       matches: r.matches ?? [],
+      connected: !!r.connected,
       newest: r.span?.newest ?? null,
     };
   } catch {

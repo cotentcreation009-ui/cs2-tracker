@@ -70,6 +70,7 @@ export default async function ProfileByVanity({
         bridge={bridge?.aggregate ?? null}
         bridgeMatches={bridge?.matches ?? []}
         bridgeNewest={bridge?.newest ?? null}
+        bridgeConnected={!!bridge?.connected}
       />
     );
   } catch (e) {

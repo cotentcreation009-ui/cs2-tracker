@@ -60,9 +60,19 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 
 	// Cache briefly: a background sync only lands new rows every so often, and
 	// this endpoint is read on every profile view.
+	// Whether this account's owner connected their match history. The page
+	// must say so: an already-connected profile inviting its owner to connect
+	// reads as though the connection failed, and a visitor deserves to know
+	// the difference between assembled-from-lobbies and owner-authorised data.
+	connected := false
+	if chain, cerr := s.db.AuthChainFor(r.Context(), id); cerr == nil {
+		connected = chain.Status == "active"
+	}
+
 	setEdgeCache(w, 60*time.Second)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled": true,
+		"enabled":   true,
+		"connected": connected,
 		// Converted to the units the scorer expects — Leetify's profile and
 		// match surfaces disagree, and the conversion belongs on this side.
 		"aggregate": agg.ProfileScale(),

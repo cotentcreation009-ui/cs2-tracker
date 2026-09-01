@@ -77,6 +77,7 @@ export function ProfileView({
   bridge = null,
   bridgeMatches = [],
   bridgeNewest = null,
+  bridgeConnected = false,
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -89,6 +90,7 @@ export function ProfileView({
   bridge?: BridgeAggregate | null;
   bridgeMatches?: BridgeMatchRow[];
   bridgeNewest?: string | null;
+  bridgeConnected?: boolean;
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -289,6 +291,7 @@ export function ProfileView({
           bridge={bridge}
           bridgeMatches={bridgeMatches}
           bridgeNewest={bridgeNewest}
+          bridgeConnected={bridgeConnected}
           player={player}
           leetify={leetify}
           faceit={faceit}

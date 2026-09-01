@@ -53,6 +53,14 @@ type ReplayPlayer struct {
 	SteamID uint64 `json:"steamId,string"`
 	Name    string `json:"name"`
 	Team    string `json:"team"` // starting side: "CT" | "T"
+	// Premier rating carried into and out of this match, from the demo's own
+	// end-of-match rank message. Nothing else we can reach reports it: Leetify's
+	// match reports omit rank entirely, and Valve exposes it to nobody. Zero
+	// means the demo said nothing — an uncalibrated or unranked player — and
+	// must render as a dash, never as a rating of zero.
+	RankOld    int `json:"rankOld,omitempty"`
+	RankNew    int `json:"rankNew,omitempty"`
+	RankChange int `json:"rankChange,omitempty"`
 }
 
 type ReplayRound struct {
@@ -68,7 +76,7 @@ type ReplayRound struct {
 	Nades     []ReplayNade       `json:"nades"`
 	Bomb      []ReplayBomb       `json:"bomb"`
 	Chat      []ReplayChat       `json:"chat,omitempty"` // in-game chat sent during the round
-	Stats     []ReplayPlayerStat `json:"stats"` // per-player aggregates for this round
+	Stats     []ReplayPlayerStat `json:"stats"`          // per-player aggregates for this round
 	// Player indices whose slot was taken over by a bot at some point this
 	// round (casual/wingman disconnects). Aim tells from these rounds describe
 	// the BOT, not the human — cheat analysis must exclude them.
@@ -290,6 +298,7 @@ func ParseReplayStream(r io.Reader, emit func(ReplayRound)) (meta *ReplayMeta, e
 	p.RegisterEventHandler(rc.onPlayerFlashed)
 	p.RegisterEventHandler(rc.onWeaponFire)
 	p.RegisterEventHandler(rc.onChat)
+	p.RegisterEventHandler(rc.onRankUpdate)
 	p.RegisterEventHandler(rc.onItemDrop)
 	p.RegisterEventHandler(rc.onItemPickup)
 
@@ -1542,6 +1551,40 @@ func buyType(equip, roundNum int) string {
 	default:
 		return "full"
 	}
+}
+
+// onRankUpdate records the Premier rating each player carried into and out of
+// this match. The demo is the ONLY source for it — Leetify's match reports omit
+// rank entirely and Valve publishes it nowhere — so this handler is the whole
+// reason a connected account can show rank movement at all.
+//
+// The event arrives at match end, after some players may have disconnected, so
+// it is keyed by SteamID rather than by the event's player pointer. Ranks land
+// on a player who may not otherwise be indexed yet, which is why this goes
+// through the same indexer as everything else.
+func (rc *replayCollector) onRankUpdate(e events.RankUpdate) {
+	// Guard the RAW id: SteamID32 zero converts to a non-zero SteamID64 (the
+	// conversion adds Valve's base offset), so checking the converted value
+	// would let a phantom player through.
+	if e.SteamID32 == 0 {
+		return
+	}
+	id := e.SteamID64()
+	i, ok := rc.idx[id]
+	if !ok {
+		// Not seen yet (rare: a player who never fired or died). Index them so
+		// the rank is not dropped.
+		i = len(rc.players)
+		rc.idx[id] = i
+		name := ""
+		if e.Player != nil {
+			name = e.Player.Name
+		}
+		rc.players = append(rc.players, ReplayPlayer{SteamID: id, Name: name})
+	}
+	rc.players[i].RankOld = e.RankOld
+	rc.players[i].RankNew = e.RankNew
+	rc.players[i].RankChange = int(e.RankChange)
 }
 
 // onChat records in-game chat messages into the current round's timeline.

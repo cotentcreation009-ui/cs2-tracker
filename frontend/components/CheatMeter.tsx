@@ -283,6 +283,7 @@ export function CheatMeter({
   bridge = null,
   bridgeMatches = [],
   bridgeNewest = null,
+  bridgeConnected = false,
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -300,6 +301,7 @@ export function CheatMeter({
   bridge?: BridgeAggregate | null;
   bridgeMatches?: BridgeMatchRow[];
   bridgeNewest?: string | null;
+  bridgeConnected?: boolean;
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
   if (!sus || !sus.hasEnough) return null;
@@ -631,15 +633,22 @@ export function CheatMeter({
                     {lines.map((l) => (
                       <div key={l}>{l}</div>
                     ))}
-                    {/* A bridged read is as fresh as its discovery. The one
-                        person who can make it real-time is the owner — invite
-                        exactly them, exactly here. */}
-                    <Link
-                      href={`/connect?id=${player.steamId64}`}
-                      className="mt-0.5 inline-block text-brand underline decoration-dotted underline-offset-2"
-                    >
-                      Your account? Connect it for live stats →
-                    </Link>
+                    {/* Connected accounts get told so — inviting an owner to
+                        connect an account they already connected reads as a
+                        failure. Everyone else gets the invitation. */}
+                    {bridgeConnected ? (
+                      <span className="mt-0.5 inline-flex items-center gap-1 font-semibold text-good">
+                        <span className="h-1.5 w-1.5 rounded-full bg-good" />
+                        Account connected · updates automatically
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/connect?id=${player.steamId64}`}
+                        className="mt-0.5 inline-block text-brand underline decoration-dotted underline-offset-2"
+                      >
+                        Your account? Connect it for live stats →
+                      </Link>
+                    )}
                   </div>
                 );
               })()}
