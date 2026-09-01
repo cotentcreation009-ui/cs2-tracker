@@ -120,6 +120,12 @@ func (f *fakeStore) MarkAuthChain(_ context.Context, _ uint64, status string) er
 	return nil
 }
 
+func (f *fakeStore) RememberAbsentCode(context.Context, uint64, string) error { return nil }
+func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeStore) PruneRetryCodes(context.Context) error { return nil }
+
 func (f *fakeStore) Ping(context.Context) error {
 	if f.ping != nil {
 		return f.ping()

@@ -25,6 +25,7 @@ type fakeStore struct {
 	stored map[string]bool // share codes already held
 	saved  []*leetify.Match
 	rows   []db.PlayerMatchRow
+	retry  []string
 	seeErr error
 }
 
@@ -61,6 +62,19 @@ func (f *fakeStore) PlayerMatches(context.Context, uint64, int) ([]db.PlayerMatc
 
 func (f *fakeStore) PlayerMatchCount(context.Context, uint64) (int, time.Time, error) {
 	return len(f.rows), time.Time{}, nil
+}
+
+func (f *fakeStore) RememberAbsentCode(_ context.Context, _ uint64, code string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retry = append(f.retry, code)
+	return nil
+}
+
+func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.retry...), nil
 }
 
 type fakeFetch struct {
@@ -348,5 +362,41 @@ func TestProfileScaleKeepsAbsentAbsent(t *testing.T) {
 	// rather than being zeroed like the others.
 	if got := (Aggregate{LeetifyRating: -0.04}).ProfileScale().LeetifyRating; math.Abs(got-(-4)) > 1e-9 {
 		t.Errorf("negative rating = %v, want -4", got)
+	}
+}
+
+func TestAbsentCodesAreRetriedUntilTheReportExists(t *testing.T) {
+	// The race this exists for: the chain walker finds a code minutes after
+	// the final round, but Leetify takes up to a couple of hours to process
+	// the demo. The first ask 404s — indistinguishable from "never existed".
+	c := codes(1)
+	store := &fakeStore{stored: map[string]bool{}}
+	fetch := &fakeFetch{absent: map[string]bool{c[0]: true}}
+	s := New(store, fetch, quiet(), fakeSource{codes: c})
+
+	res, err := s.Sync(context.Background(), 1)
+	if err != nil || res.Absent != 1 || len(store.saved) != 0 {
+		t.Fatalf("first pass: %+v saved=%d err=%v", res, len(store.saved), err)
+	}
+	if len(store.retry) != 1 || store.retry[0] != c[0] {
+		t.Fatalf("absent code was not remembered: %v", store.retry)
+	}
+
+	// Time passes; Leetify finishes processing. The next sync gets the code
+	// from the retry set even though NO source offers it any more — the chain
+	// walker has long advanced past it.
+	fetch.absent = map[string]bool{}
+	res2, err := s.Sync(context.Background(), 1)
+	if err != nil || res2.Fetched != 1 {
+		t.Fatalf("second pass: %+v err=%v", res2, err)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("recovered match was not saved")
+	}
+
+	// And once stored, later syncs must not fetch it a third time.
+	res3, _ := s.Sync(context.Background(), 1)
+	if res3.Fetched != 0 {
+		t.Errorf("stored code was fetched again: %+v", res3)
 	}
 }

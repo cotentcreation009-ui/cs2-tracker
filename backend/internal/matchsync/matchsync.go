@@ -43,6 +43,10 @@ type Store interface {
 	SaveMatch(ctx context.Context, m *leetify.Match) error
 	PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]db.PlayerMatchRow, error)
 	PlayerMatchCount(ctx context.Context, steamID uint64) (int, time.Time, error)
+	// The absent-code retry set: codes whose Leetify report was missing when
+	// first asked — usually "not processed YET", not "never existed".
+	RememberAbsentCode(ctx context.Context, steamID uint64, code string) error
+	AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error)
 }
 
 // Fetcher fetches one match report by share code. *leetify.Client satisfies it.
@@ -126,6 +130,19 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 			codes = append(codes, c)
 		}
 	}
+	// Second chance for codes that 404ed on an earlier pass. The chain walker
+	// finds a code minutes after the final round; Leetify takes up to a couple
+	// of hours to process the demo. Without this, the race would permanently
+	// drop exactly the matches connecting an account exists to deliver.
+	if retry, err := s.store.AbsentCodesToRetry(ctx, steamID); err == nil {
+		for _, c := range retry {
+			if c == "" || seen[c] || !leetify.ValidShareCode(c) {
+				continue
+			}
+			seen[c] = true
+			codes = append(codes, c)
+		}
+	}
 	res.Offered = len(codes)
 	if len(codes) == 0 {
 		return res, nil
@@ -155,9 +172,14 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 		m, err := s.fetch.MatchByShareCode(ctx, code)
 		switch {
 		case errors.Is(err, leetify.ErrNotFound):
-			// Nobody in that lobby was a Leetify user, so the match was never
-			// processed. Normal, and nothing to retry.
+			// Two indistinguishable cases share this answer: the match will
+			// never be processed (nobody in the lobby is a Leetify user), and
+			// the match is not processed YET. Remember the code and let the
+			// retry window separate them; it expires after a day.
 			res.Absent++
+			if rerr := s.store.RememberAbsentCode(ctx, steamID, code); rerr != nil {
+				s.log.Warn("matchsync: retry bookkeeping failed", "code", code, "err", rerr)
+			}
 			continue
 		case err != nil:
 			res.Failed++

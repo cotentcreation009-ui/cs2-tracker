@@ -130,6 +130,11 @@ func (s *Server) chainPoller(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		// Housekeeping first: fetched and hopeless retry rows drop away, so
+		// the retry set stays a handful of rows per active player.
+		if err := s.db.PruneRetryCodes(ctx); err != nil {
+			s.log.Warn("chain poller: prune failed", "err", err)
+		}
 		chains, err := s.db.ActiveAuthChains(ctx, 100)
 		if err != nil {
 			s.log.Warn("chain poller: listing failed", "err", err)
