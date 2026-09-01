@@ -132,6 +132,12 @@ export interface BridgeAggregate {
   leetifyRating?: number;
   kdRatio?: number;
   dpr?: number;
+  spottedAcc?: number; // percent
+  counterStrafe?: number; // percent
+  flashPerThrow?: number;
+  heDmgAvg?: number;
+  tradesWonPct?: number;
+  mvps?: number;
 }
 
 export function computeSuspicion(

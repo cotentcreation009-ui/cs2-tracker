@@ -37,7 +37,17 @@ export function recentFromBridge(rows: BridgeMatchRow[]): LeetifyRecentMatch[] {
         map_name: m.mapName!,
         leetify_rating: m.leetifyRating ?? 0,
         score: [won, lost] as [number, number],
-        rank_type: m.dataSource?.includes("competitive") ? 12 : undefined,
+        // Measured mapping: Leetify serves Premier games as "matchmaking"
+        // and competitive as "matchmaking_competitive". Wingman/others stay
+        // untyped and land in the Other tab rather than being mislabelled.
+        rank_type:
+          m.dataSource === "matchmaking"
+            ? 11
+            : m.dataSource?.includes("competitive")
+              ? 12
+              : undefined,
+        kills: m.totalKills,
+        deaths: m.totalDeaths,
         // Row units are the match endpoint's (seconds, fractions); the
         // recent-match shape wants the profile's (ms, percents).
         preaim: m.preaim ?? 0,
@@ -84,19 +94,19 @@ export function pseudoProfileFromBridge(
     },
     stats: {
       accuracy_head: agg.accuracyHead ?? 0,
-      accuracy_enemy_spotted: 0,
+      accuracy_enemy_spotted: agg.spottedAcc ?? 0,
       preaim: agg.preaim ?? 0,
       reaction_time_ms: agg.reactionTimeMs ?? 0,
       spray_accuracy: agg.sprayAccuracy ?? 0,
-      counter_strafing_good_shots_ratio: 0,
+      counter_strafing_good_shots_ratio: agg.counterStrafe ?? 0,
       ct_opening_duel_success_percentage: 0,
       t_opening_duel_success_percentage: 0,
-      trade_kills_success_percentage: 0,
+      trade_kills_success_percentage: agg.tradesWonPct ?? 0,
       traded_deaths_success_percentage: 0,
       trade_kill_opportunities_per_round: 0,
-      flashbang_hit_foe_per_flashbang: 0,
+      flashbang_hit_foe_per_flashbang: agg.flashPerThrow ?? 0,
       flashbang_leading_to_kill: 0,
-      he_foes_damage_avg: 0,
+      he_foes_damage_avg: agg.heDmgAvg ?? 0,
       utility_on_death_avg: 0,
     },
     ranks: {},
