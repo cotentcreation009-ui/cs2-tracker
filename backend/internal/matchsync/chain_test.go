@@ -9,12 +9,12 @@ import (
 )
 
 type fakeChainStore struct {
-	chain    db.AuthChain
-	noChain  bool
-	head     string
-	stamped  int
-	marked   string
-	advErr   error
+	chain   db.AuthChain
+	noChain bool
+	head    string
+	stamped int
+	marked  string
+	advErr  error
 }
 
 func (f *fakeChainStore) AuthChainFor(context.Context, uint64) (db.AuthChain, error) {
@@ -53,7 +53,8 @@ func TestChainAdvancesHeadToNewestCode(t *testing.T) {
 	src := ChainSource{Store: store, Valve: fakeWalker{codes: c}, Log: quiet()}
 
 	got, err := src.ShareCodes(context.Background(), 1)
-	if err != nil || len(got) != 3 {
+	// Head first, then the walked codes: the seed names a real match too.
+	if err != nil || len(got) != 4 || got[0] != "old" {
 		t.Fatalf("codes = %v, %v", got, err)
 	}
 	if store.head != c[2] {
@@ -105,7 +106,7 @@ func TestChainPartialWalkStillDeliversCodes(t *testing.T) {
 	store := &fakeChainStore{chain: db.AuthChain{Status: "active", HeadCode: "h"}}
 	src := ChainSource{Store: store, Valve: fakeWalker{codes: c, err: valvechain.ErrThrottled}, Log: quiet()}
 	got, err := src.ShareCodes(context.Background(), 1)
-	if err != nil || len(got) != 2 {
+	if err != nil || len(got) != 3 {
 		t.Fatalf("partial = %v, %v", got, err)
 	}
 	if store.marked != "" {
