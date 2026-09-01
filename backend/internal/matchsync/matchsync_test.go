@@ -402,3 +402,32 @@ func TestAbsentCodesAreRetriedUntilTheReportExists(t *testing.T) {
 		t.Errorf("stored code was fetched again: %+v", res3)
 	}
 }
+
+func TestOverflowCodesDrainAcrossSyncs(t *testing.T) {
+	// A long backlog (a freshly connected account) meets an 8-fetch budget.
+	// The walker advances past everything it walked, so whatever this pass
+	// cannot fetch would otherwise be stranded forever behind the head.
+	c := codes(10)
+	store := &fakeStore{stored: map[string]bool{}}
+	fetch := &fakeFetch{}
+	s := New(store, fetch, quiet(), fakeSource{codes: c})
+
+	res1, _ := s.Sync(context.Background(), 1)
+	if res1.Fetched != maxPerSync {
+		t.Fatalf("first pass fetched %d", res1.Fetched)
+	}
+	if len(store.retry) != 2 {
+		t.Fatalf("overflow parked %d codes, want 2", len(store.retry))
+	}
+
+	// Next sync: the source has gone quiet (walker is past these codes), but
+	// the parked overflow must still arrive via the retry set.
+	s2 := New(store, fetch, quiet(), fakeSource{codes: nil})
+	res2, _ := s2.Sync(context.Background(), 1)
+	if res2.Fetched != 2 {
+		t.Fatalf("second pass fetched %d, want the 2 parked codes", res2.Fetched)
+	}
+	if len(store.saved) != 10 {
+		t.Errorf("total saved %d, want all 10", len(store.saved))
+	}
+}

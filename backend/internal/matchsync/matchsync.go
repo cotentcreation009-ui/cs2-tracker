@@ -162,6 +162,16 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 	}
 	res.New = len(fresh)
 	if len(fresh) > maxPerSync {
+		// The codes beyond this pass's fetch budget must not be dropped: the
+		// chain walker has already advanced past them and will never offer
+		// them again. Park them in the retry set — later syncs drain it eight
+		// at a time until the backlog is gone.
+		for _, c := range fresh[maxPerSync:] {
+			if err := s.store.RememberAbsentCode(ctx, steamID, c); err != nil {
+				s.log.Warn("matchsync: overflow bookkeeping failed", "code", c, "err", err)
+				break
+			}
+		}
 		fresh = fresh[:maxPerSync]
 	}
 
