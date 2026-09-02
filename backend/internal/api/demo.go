@@ -403,6 +403,34 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Our own store first. A bridged match was fetched BY its share code, so
+	// the reference is already here — and Leetify's legacy endpoint only
+	// sometimes exposes one, which used to turn a perfectly resolvable match
+	// into "no demo reference available".
+	if code, finished, lerr := s.db.ShareCodeForMatch(r.Context(), gameID); lerr == nil && code != "" {
+		if s.cfg.GCBotURL == "" {
+			fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
+			return
+		}
+		if !finished.IsZero() && finished.Year() > 1971 && time.Since(finished) > valveReplayMaxAge {
+			fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
+			return
+		}
+		job, qerr := s.queue.Enqueue(r.Context(), queue.Job{
+			ID:        id,
+			Type:      queue.JobParseReplay,
+			Source:    "sharecode",
+			ShareCode: code,
+		})
+		if qerr != nil {
+			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "enqueue failed")
+			s.serverError(w, "enqueue", qerr)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+		return
+	}
+
 	gd, err := s.leetify.GetGameDetails(r.Context(), gameID)
 	if err != nil {
 		if errors.Is(err, leetify.ErrNotFound) {
