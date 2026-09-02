@@ -138,6 +138,9 @@ export interface BridgeAggregate {
   heDmgAvg?: number;
   tradesWonPct?: number;
   mvps?: number;
+  // OUR aim rating, averaged over demos we parsed. Distinct from Leetify's
+  // and labelled as such wherever it is shown.
+  ourAimRating?: number;
 }
 
 export function computeSuspicion(
@@ -279,7 +282,16 @@ export function computeSuspicion(
   const sGap = gap != null ? up(gapEff, 0.2, 1.0) : null;
   const sReaction = s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 560, 430) : null;
   const sPreaim = s && s.preaim > 0 ? down(s.preaim, 9, 3) : null;
-  const sAim = leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 85, 95) : null;
+  // Our own rating runs on a different scale to Leetify's, so it gets its own
+  // band rather than being forced through one calibrated for theirs. Ours is a
+  // 0-100 read where ordinary MM sits near the middle; unusually high is the
+  // signal, same as with theirs.
+  const sAim =
+    leetify && leetify.rating.aim > 0
+      ? up(leetify.rating.aim, 85, 95)
+      : bridged?.ourAimRating
+        ? up(bridged.ourAimRating, 72, 85)
+        : null;
   // Steam lifetime accuracy is all-mode (DM/casual inflate it) — shown as a
   // context card but NOT fed into the score.
   const sAccuracy = accuracyPct > 0 ? up(accuracyPct, 24, 40) : null;
@@ -377,7 +389,17 @@ export function computeSuspicion(
   add("preaim", "cross", "Crosshair placement", s ? `${s.preaim.toFixed(1)}°` : "—", "lower = unnaturally precise", sPreaim);
   add("accuracy", "target", "Shot accuracy", accuracyPct > 0 ? `${accuracyPct.toFixed(0)}%` : "—", "shots hit vs fired", sAccuracy);
   add("hs", "target", hsLabel, hsDisplay, hsDetail, sHs);
-  add("aim", "cross", "Aim rating", leetify ? leetify.rating.aim.toFixed(1) : "—", "aim quality (Leetify)", sAim);
+  // Aim rating: Leetify's when they serve a profile, ours from parsed demos
+  // otherwise. The detail line names whose number it is, because two
+  // different measurements sharing a row would otherwise be indistinguishable.
+  if (leetify) {
+    add("aim", "cross", "Aim rating", leetify.rating.aim.toFixed(1), "aim quality (Leetify)", sAim);
+  } else if (bridged?.ourAimRating) {
+    add("aim", "cross", "Aim rating", bridged.ourAimRating.toFixed(1),
+      "aim quality (CSRun, from parsed demos)", sAim);
+  } else {
+    add("aim", "cross", "Aim rating", "—", "aim quality", sAim);
+  }
   add("leetify", "chart", "Leetify rating", leetifyRating > 0 ? leetifyRating.toFixed(2) : "—", "overall performance (Leetify)", sLeetifyRating);
   add("kd", "target", "K/D ratio", kd > 0 ? kd.toFixed(2) : "—", "kills per death", sKd);
   if (leetify || steamExtras) {
