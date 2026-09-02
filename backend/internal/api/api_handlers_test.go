@@ -127,6 +127,12 @@ func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error
 }
 func (f *fakeStore) PruneRetryCodes(context.Context) error { return nil }
 
+func (f *fakeStore) MatchesNeedingRank(context.Context, uint64, int) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) SaveMatchRanks(context.Context, string, []db.MatchRank) error { return nil }
+
 func (f *fakeStore) ParsedShareCodes(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }

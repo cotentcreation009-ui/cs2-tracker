@@ -49,19 +49,28 @@ export function recentFromBridge(
         // Measured mapping: Leetify serves Premier games as "matchmaking"
         // and competitive as "matchmaking_competitive". Wingman/others stay
         // untyped and land in the Other tab rather than being mislabelled.
+        // Queue badge. Leetify's own rank_type wins when present; the data
+        // source is the fallback (Premier arrives as "matchmaking").
         rank_type:
-          m.dataSource === "matchmaking"
+          m.rankType ||
+          (m.dataSource === "matchmaking"
             ? 11
             : m.dataSource?.includes("competitive")
               ? 12
-              : undefined,
+              : undefined),
         kills: m.totalKills,
         deaths: m.totalDeaths,
         // Premier rating carried in and out of this match, ours from the demo.
         // Absent stays absent so the column shows a dash, never a rating of 0.
-        rank: rankByCode.get(m.shareCode ?? "")?.rankNew,
-        rank_before: rankByCode.get(m.shareCode ?? "")?.rankOld,
-        rank_delta: rankByCode.get(m.shareCode ?? "")?.rankChange,
+        // Ladder standing: Leetify's own for the match when we have it,
+        // falling back to the demo we parsed. Both describe the same thing;
+        // the stored one is simply available for far more matches.
+        rank: m.rankAfter || rankByCode.get(m.shareCode ?? "")?.rankNew,
+        rank_before: m.rankBefore || rankByCode.get(m.shareCode ?? "")?.rankOld,
+        rank_delta:
+          m.rankAfter && m.rankBefore
+            ? m.rankAfter - m.rankBefore
+            : rankByCode.get(m.shareCode ?? "")?.rankChange,
         // Row units are the match endpoint's (seconds, fractions); the
         // recent-match shape wants the profile's (ms, percents).
         preaim: m.preaim ?? 0,

@@ -142,6 +142,11 @@ export interface BridgeMatchRow {
   // The code this match was fetched by — the key that joins a Leetify row to
   // the demo we parsed ourselves.
   shareCode?: string;
+  // Ladder standing at match time. Zero = unrated lobby or not yet fetched;
+  // either way the column shows a dash rather than an invented number.
+  rankType?: number;
+  rankAfter?: number;
+  rankBefore?: number;
   mapName?: string;
   dataSource?: string;
   finishedAt?: string;

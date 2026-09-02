@@ -161,6 +161,9 @@ func (s *Server) chainPoller(ctx context.Context) {
 				// would never be parsed at all. The sweep is cheap when there
 				// is nothing to do: one indexed lookup, then it stops.
 				s.enqueueParses(cctx, c.SteamID)
+				// Ladder standings for the newest matches that lack them —
+				// the rank column reads from these.
+				s.fillRanks(cctx, c.SteamID)
 			}()
 		}
 	}

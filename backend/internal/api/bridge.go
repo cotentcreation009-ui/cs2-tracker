@@ -146,6 +146,10 @@ func (s *Server) syncBridgeAsync(steamID uint64) {
 		if res.Fetched > 0 {
 			s.enqueueParses(ctx, steamID)
 		}
+		// Rank enrichment applies to every bridged profile, connected or not:
+		// the matches are already stored, and this is what puts a number in
+		// the rank column instead of a dash.
+		s.fillRanks(ctx, steamID)
 		if res.Fetched > 0 || res.Failed > 0 || res.Absent > 0 {
 			s.log.Info("bridge sync", "steam", steamID,
 				"offered", res.Offered, "new", res.New,
