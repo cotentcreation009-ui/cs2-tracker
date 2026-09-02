@@ -22,19 +22,21 @@ import (
 // optional func field, defaulting to "not found" / empty so a test only sets
 // what it needs.
 type fakeStore struct {
-	corpusMates []db.CorpusTeammate
-	chain       db.AuthChain
-	parsedRows  []db.ParsedRow
-	profile     func(uint64) (models.PlayerProfile, error)
-	matches     func(uint64, int, int) ([]models.PlayerMatchSummary, error)
-	matchDet    func(int64) (models.MatchDetail, error)
-	weapons     func(uint64, int) ([]models.WeaponStat, error)
-	maps        func(uint64) ([]models.MapStat, error)
-	top         func(int) ([]models.LeaderboardEntry, error)
-	kills       func(int64) ([]models.Kill, error)
-	job         func(string) (models.IngestJob, error)
-	ping        func() error
-	count       func(uint64) (int, error)
+	corpusMates   []db.CorpusTeammate
+	chain         db.AuthChain
+	parsedRows    []db.ParsedRow
+	localCode     string
+	localFinished time.Time
+	profile       func(uint64) (models.PlayerProfile, error)
+	matches       func(uint64, int, int) ([]models.PlayerMatchSummary, error)
+	matchDet      func(int64) (models.MatchDetail, error)
+	weapons       func(uint64, int) ([]models.WeaponStat, error)
+	maps          func(uint64) ([]models.MapStat, error)
+	top           func(int) ([]models.LeaderboardEntry, error)
+	kills         func(int64) ([]models.Kill, error)
+	job           func(string) (models.IngestJob, error)
+	ping          func() error
+	count         func(uint64) (int, error)
 
 	invSnapshot  []byte
 	invFetchedAt time.Time
@@ -126,6 +128,10 @@ func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error
 	return nil, nil
 }
 func (f *fakeStore) PruneRetryCodes(context.Context) error { return nil }
+
+func (f *fakeStore) ShareCodeForMatch(context.Context, string) (string, time.Time, error) {
+	return f.localCode, f.localFinished, nil
+}
 
 func (f *fakeStore) MatchesNeedingRank(context.Context, uint64, int) ([]string, error) {
 	return nil, nil

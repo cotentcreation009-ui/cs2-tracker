@@ -90,6 +90,7 @@ type Store interface {
 	AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error)
 	PruneRetryCodes(ctx context.Context) error
 	// Our own parsed-demo stats.
+	ShareCodeForMatch(ctx context.Context, matchID string) (string, time.Time, error)
 	MatchesNeedingRank(ctx context.Context, steamID uint64, limit int) ([]string, error)
 	SaveMatchRanks(ctx context.Context, matchID string, ranks []db.MatchRank) error
 	ParsedShareCodes(ctx context.Context, codes []string) (map[string]bool, error)

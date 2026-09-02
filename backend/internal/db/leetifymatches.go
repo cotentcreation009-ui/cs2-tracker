@@ -423,3 +423,22 @@ func (d *DB) SaveMatchRanks(ctx context.Context, matchID string, ranks []MatchRa
 	}
 	return tx.Commit(ctx)
 }
+
+// ShareCodeForMatch returns the share code a stored match was fetched by, with
+// its finish time. Empty code means we hold no reference for it.
+//
+// This exists because Leetify's legacy per-game endpoint only sometimes
+// exposes a share code, and one-click analysis used to depend on it — which
+// meant a bridged match we had fetched BY its share code could still answer
+// "no demo reference available". The reference was in our own table.
+func (d *DB) ShareCodeForMatch(ctx context.Context, matchID string) (string, time.Time, error) {
+	var code string
+	var finished time.Time
+	err := d.Pool.QueryRow(ctx, `
+		SELECT COALESCE(source_id,''), COALESCE(finished_at, 'epoch'::timestamptz)
+		  FROM leetify_matches WHERE match_id = $1`, matchID).Scan(&code, &finished)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", time.Time{}, nil
+	}
+	return code, finished, err
+}
