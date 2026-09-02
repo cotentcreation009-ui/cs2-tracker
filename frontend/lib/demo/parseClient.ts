@@ -22,6 +22,10 @@ export interface ParseHandlers {
   onReady?: () => void; // upload accepted; server has started parsing
   onProgress?: (rounds: number) => void; // kept for API compatibility (unused)
   onPhase?: (phase: string) => void; // human-readable status updates
+  // Live server-side progress: the worker's stage (queued | downloading |
+  // parsing | saving) and that stage's own completion, 0-100. The display
+  // layer weighs stages into one bar; the wire stays honest per stage.
+  onServerProgress?: (phase: string, pct: number) => void;
   onUploadProgress?: (fraction: number) => void; // 0..1 bytes sent (upload phase)
   signal?: AbortSignal;
 }
@@ -46,6 +50,8 @@ interface DemoStatus {
   map: string;
   filename: string;
   error?: string;
+  phase?: string; // downloading | parsing | saving
+  progress?: number; // 0-100 within the phase
 }
 
 export function mb(bytes: number): string {
@@ -294,6 +300,10 @@ async function pollAndFetch(
     const r = await fetch(`/api/demos/${id}`, { signal, cache: "no-store" });
     if (!r.ok) throw new Error(await errText(r, "status check failed"));
     status = (await r.json()) as DemoStatus;
+    handlers.onServerProgress?.(
+      status.phase || status.status,
+      typeof status.progress === "number" ? status.progress : 0,
+    );
     if (status.status === "done") break;
     if (status.status === "failed") {
       throw new Error(status.error || "the server could not parse that demo");

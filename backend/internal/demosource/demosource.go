@@ -39,6 +39,51 @@ type ShareCodeResolver func(ctx context.Context, shareCode string) (string, erro
 // downloaded into workDir (and transparently decompressed). For DemoPath jobs
 // the user's file is used in place and never deleted. ShareCode jobs need a
 // Game Coordinator resolver — use NewResolver to supply one.
+// ProgressFunc receives a stage name and that stage's completion in 0..1.
+// A fraction below zero means "in progress, size unknown".
+type ProgressFunc func(phase string, fraction float64)
+
+type progressKey struct{}
+
+// WithProgress attaches a progress callback to ctx. Carried in the context
+// rather than a parameter so the resolver's signature — shared by two call
+// sites and a test fake — stays the same; a resolver without one reports
+// nothing and costs nothing.
+func WithProgress(ctx context.Context, fn ProgressFunc) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, progressKey{}, fn)
+}
+
+func progressFrom(ctx context.Context) ProgressFunc {
+	fn, _ := ctx.Value(progressKey{}).(ProgressFunc)
+	return fn
+}
+
+// progressReader reports how much of the COMPRESSED body has been consumed
+// against Content-Length. Compressed bytes are what the wire delivers, so this
+// is the honest measure of download progress even though the output on disk
+// is decompressed.
+type progressReader struct {
+	r     io.Reader
+	rb    *resumeBody
+	total int64
+	fn    ProgressFunc
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 && p.fn != nil {
+		if p.total > 0 {
+			p.fn("downloading", float64(p.rb.off)/float64(p.total))
+		} else {
+			p.fn("downloading", -1)
+		}
+	}
+	return n, err
+}
+
 func Resolve(ctx context.Context, job queue.Job, workDir string, maxBytes int64) (Resolved, error) {
 	return resolve(ctx, job, workDir, maxBytes, nil)
 }
@@ -302,7 +347,11 @@ func download(ctx context.Context, rawURL, workDir string, maxBytes int64) (stri
 	defer out.Close()
 
 	rb := &resumeBody{ctx: ctx, url: rawURL, body: resp.Body}
-	src, closeDec, err := decompressor(rawURL, rb)
+	var raw io.Reader = rb
+	if fn := progressFrom(ctx); fn != nil {
+		raw = &progressReader{r: rb, rb: rb, total: resp.ContentLength, fn: fn}
+	}
+	src, closeDec, err := decompressor(rawURL, raw)
 	if err != nil {
 		_ = os.Remove(out.Name())
 		return "", err

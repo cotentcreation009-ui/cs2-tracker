@@ -41,6 +41,62 @@ type Store interface {
 	// Our own per-player stats from a demo we parsed. Separate from the
 	// Leetify mirror on purpose — this data is ours.
 	SaveParsedMatch(ctx context.Context, shareCode, mapName string, finishedAt time.Time, rounds int, players []parser.PlayerSummary) error
+	// Live stage/percent for the progress bar. Called throttled.
+	SetDemoProgress(ctx context.Context, id, phase string, pct int) error
+}
+
+// progressReporter turns the stream of fractions from the download and parse
+// readers into a sparse set of row updates: a write when the percentage moves
+// by two points or the last write is over a second old, whichever comes first.
+// Without the throttle a 300MB download would issue thousands of updates.
+type progressReporter struct {
+	ctx       context.Context
+	store     Store
+	id        string
+	log       *slog.Logger
+	lastPhase string
+	lastPct   int
+	lastAt    time.Time
+}
+
+func (p *progressReporter) report(phase string, fraction float64) {
+	pct := -1
+	if fraction >= 0 {
+		pct = int(fraction*100 + 0.5)
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	if phase == p.lastPhase && pct >= 0 && pct-p.lastPct < 2 && time.Since(p.lastAt) < 1500*time.Millisecond {
+		return
+	}
+	p.lastPhase, p.lastPct, p.lastAt = phase, pct, time.Now()
+	if pct < 0 {
+		pct = 0
+	}
+	if err := p.store.SetDemoProgress(p.ctx, p.id, phase, pct); err != nil {
+		p.log.Warn("progress update failed", "id", p.id, "err", err)
+	}
+}
+
+// countingReader reports bytes consumed against a known total — parse
+// progress, since the parser reads the demo front to back.
+type countingReader struct {
+	r     io.Reader
+	n     int64
+	total int64
+	fn    func(fraction float64)
+}
+
+func (c *countingReader) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	if n > 0 {
+		c.n += int64(n)
+		if c.total > 0 {
+			c.fn(float64(c.n) / float64(c.total))
+		}
+	}
+	return n, err
 }
 
 // ReplayParseFunc extracts the normalized replay model from a demo reader.
@@ -157,6 +213,8 @@ func (w *Worker) Process(job *queue.Job) {
 func (w *Worker) runReplay(job *queue.Job, log *slog.Logger) error {
 	jobCtx, cancel := context.WithTimeout(context.Background(), w.JobTimeout)
 	defer cancel()
+	rep := &progressReporter{ctx: jobCtx, store: w.Store, id: job.ID, log: log}
+	jobCtx = demosource.WithProgress(jobCtx, rep.report)
 
 	// Resolve the demo to a local file. A "gcs" job was uploaded straight to
 	// object storage by the browser, so we pull it down here (and delete it from
@@ -195,10 +253,15 @@ func (w *Worker) runReplay(job *queue.Job, log *slog.Logger) error {
 	}
 	defer f.Close()
 
-	rm, err := w.ReplayParse(f)
+	var src io.Reader = f
+	if st, serr := f.Stat(); serr == nil && st.Size() > 0 {
+		src = &countingReader{r: f, total: st.Size(), fn: func(fr float64) { rep.report("parsing", fr) }}
+	}
+	rm, err := w.ReplayParse(src)
 	if err != nil {
 		return fmt.Errorf("parse replay: %w", err)
 	}
+	rep.report("saving", 1)
 
 	jsonB, err := json.Marshal(rm)
 	if err != nil {

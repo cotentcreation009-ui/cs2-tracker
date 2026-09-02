@@ -51,6 +51,8 @@ func (f *fakeStore) SaveDemoResult(context.Context, string, string, []byte) erro
 
 // Records what the worker chose to persist as OUR stats, so a test can assert
 // the share-code path stores them and the anonymous path does not.
+func (f *fakeStore) SetDemoProgress(context.Context, string, string, int) error { return nil }
+
 func (f *fakeStore) SaveParsedMatch(_ context.Context, shareCode, mapName string, _ time.Time, rounds int, players []parser.PlayerSummary) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
