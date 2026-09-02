@@ -32,12 +32,24 @@ const (
 // that we have not parsed yet. Best-effort throughout: this is an enrichment
 // pass, and no failure here may affect the sync that triggered it.
 func (s *Server) enqueueParses(ctx context.Context, steamID uint64) {
+	// Every exit path from this function logs. Silence has cost this project
+	// several debugging rounds: a sweep that returns quietly is
+	// indistinguishable from a sweep that never ran.
 	if s.queue == nil || s.bridge == nil {
+		s.log.Info("parse queue: skipped",
+			"steam", steamID, "why", "queue or bridge not configured")
 		return
 	}
 	// Only for accounts whose owner connected them.
 	chain, err := s.db.AuthChainFor(ctx, steamID)
-	if err != nil || chain.Status != "active" {
+	if err != nil {
+		s.log.Info("parse queue: skipped",
+			"steam", steamID, "why", "not a connected account")
+		return
+	}
+	if chain.Status != "active" {
+		s.log.Info("parse queue: skipped",
+			"steam", steamID, "why", "chain status "+chain.Status)
 		return
 	}
 
@@ -96,8 +108,7 @@ func (s *Server) enqueueParses(ctx context.Context, steamID uint64) {
 		}
 		queued++
 	}
-	if queued > 0 {
-		s.log.Info("queued our own demo parses",
-			"steam", steamID, "queued", queued, "candidates", len(codes))
-	}
+	s.log.Info("parse queue swept",
+		"steam", steamID, "queued", queued,
+		"candidates", len(codes), "already_parsed", len(done))
 }
