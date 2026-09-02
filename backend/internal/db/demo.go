@@ -15,6 +15,10 @@ type DemoJobStatus struct {
 	MapName  string `json:"map"`
 	Filename string `json:"filename"`
 	Error    string `json:"error,omitempty"`
+	// Where the worker is and how far along that stage is, for a progress bar
+	// that tracks the real work rather than a spinner.
+	Phase    string `json:"phase,omitempty"` // downloading | parsing | saving
+	Progress int    `json:"progress"`        // 0-100 within the phase
 }
 
 // CreateDemoJob records a queued demo parse before it's enqueued.
@@ -72,9 +76,10 @@ func (d *DB) SaveDemoResult(ctx context.Context, id, mapName string, gzipData []
 func (d *DB) GetDemoJob(ctx context.Context, id string) (DemoJobStatus, error) {
 	var s DemoJobStatus
 	err := d.Pool.QueryRow(ctx, `
-		SELECT id, status, COALESCE(map_name,''), COALESCE(filename,''), COALESCE(error,'')
+		SELECT id, status, COALESCE(map_name,''), COALESCE(filename,''), COALESCE(error,''),
+		       COALESCE(phase,''), COALESCE(progress,0)
 		FROM demo_results WHERE id=$1`, id).
-		Scan(&s.ID, &s.Status, &s.MapName, &s.Filename, &s.Error)
+		Scan(&s.ID, &s.Status, &s.MapName, &s.Filename, &s.Error, &s.Phase, &s.Progress)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s, ErrNotFound
 	}
@@ -106,4 +111,19 @@ func (d *DB) CountDemoJobsByIPSince(ctx context.Context, ip string, t time.Time)
 	err := d.Pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM demo_results WHERE client_ip=$1 AND created_at >= $2`, ip, t).Scan(&n)
 	return n, err
+}
+
+// SetDemoProgress records the worker's current stage and its completion. The
+// worker throttles calls; this is a plain row update.
+func (d *DB) SetDemoProgress(ctx context.Context, id, phase string, pct int) error {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	_, err := d.Pool.Exec(ctx, `
+		UPDATE demo_results SET phase=$2, progress=$3, updated_at=now()
+		 WHERE id=$1`, id, phase, pct)
+	return err
 }
