@@ -52,10 +52,39 @@ func (d *DB) Close() {
 // Ping verifies database connectivity (used by the API readiness check).
 func (d *DB) Ping(ctx context.Context) error { return d.Pool.Ping(ctx) }
 
-// Migrate applies any embedded migrations that have not yet run. Migrations are
-// applied in filename order and tracked in schema_migrations, so it is safe to
-// call on every service start.
+// migrateLockID is an arbitrary constant identifying this application's
+// migration lock. Any value works as long as nothing else in the database
+// picks the same one.
+const migrateLockID int64 = 0x63733272756E6D67 // "cs2runmg"
+
+// Migrate applies any embedded migrations that have not yet run, in filename
+// order, tracked in schema_migrations.
+//
+// Serialized across processes with a session advisory lock, because "safe to
+// call on every service start" was previously only true when starts did not
+// overlap. The api and worker containers boot together, and CREATE TABLE IF
+// NOT EXISTS is not atomic against a concurrent creation: both transactions
+// see no table, both create it, and the loser dies on a duplicate key in
+// pg_type — which is exactly how a worker crashed on 0020 in production.
+//
+// The lock is taken on a dedicated connection and held for the whole run, so
+// the second process waits and then finds every migration already recorded.
 func (d *DB) Migrate(ctx context.Context) error {
+	conn, err := d.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("db: acquire migration lock conn: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
+		return fmt.Errorf("db: take migration lock: %w", err)
+	}
+	defer func() {
+		// Best-effort: releasing the session lock explicitly returns the
+		// connection to the pool clean; dropping the connection would release
+		// it anyway.
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrateLockID)
+	}()
+
 	if _, err := d.Pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    TEXT PRIMARY KEY,
