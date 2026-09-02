@@ -339,6 +339,32 @@ var leetifyLegacyIDRe = regexp.MustCompile(`^[0-9a-fA-F]{6,32}-[0-9a-fA-F]{4,32}
 // than this get a clear "expired" error instead of a doomed download attempt.
 const valveReplayMaxAge = 31 * 24 * time.Hour
 
+// enqueueShareCode is the tail every resolvable Premier/MM match shares: the
+// bot must be configured, the replay must still exist on Valve's side, and
+// then the job goes on the queue.
+func (s *Server) enqueueShareCode(w http.ResponseWriter, r *http.Request, id string, fail func(int, string), code string, finished time.Time) {
+	if s.cfg.GCBotURL == "" {
+		fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
+		return
+	}
+	if !finished.IsZero() && finished.Year() > 1971 && time.Since(finished) > valveReplayMaxAge {
+		fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
+		return
+	}
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:        id,
+		Type:      queue.JobParseReplay,
+		Source:    "sharecode",
+		ShareCode: code,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "enqueue failed")
+		s.serverError(w, "enqueue", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
 // handleDemoAnalyzeMatch enqueues a demo parse for a match listed on a profile,
 // identified by its Leetify game id. The server looks the match up on Leetify:
 // FACEIT matches resolve via the FACEIT Download API; Premier/MM matches carry a
@@ -408,26 +434,7 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 	// sometimes exposes one, which used to turn a perfectly resolvable match
 	// into "no demo reference available".
 	if code, finished, lerr := s.db.ShareCodeForMatch(r.Context(), gameID); lerr == nil && code != "" {
-		if s.cfg.GCBotURL == "" {
-			fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
-			return
-		}
-		if !finished.IsZero() && finished.Year() > 1971 && time.Since(finished) > valveReplayMaxAge {
-			fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
-			return
-		}
-		job, qerr := s.queue.Enqueue(r.Context(), queue.Job{
-			ID:        id,
-			Type:      queue.JobParseReplay,
-			Source:    "sharecode",
-			ShareCode: code,
-		})
-		if qerr != nil {
-			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "enqueue failed")
-			s.serverError(w, "enqueue", qerr)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+		s.enqueueShareCode(w, r, id, fail, code, finished)
 		return
 	}
 
@@ -485,6 +492,16 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		shareCode = gd.SteamShareCode
 		source = "sharecode"
 	default:
+		// The legacy per-game route no longer carries a share code, but the
+		// profile MATCH LIST does. Resolve through it, keyed by the profile the
+		// match was listed on, which the button always sends.
+		if sid := parseSteamID64(strings.TrimSpace(req.SteamID)); sid != 0 {
+			if code, fin, lerr := s.leetify.GameShareCode(r.Context(), sid, gameID); lerr == nil && code != "" {
+				t, _ := time.Parse(time.RFC3339, fin)
+				s.enqueueShareCode(w, r, id, fail, code, t)
+				return
+			}
+		}
 		fail(http.StatusBadRequest, "no demo reference is available for that match")
 		return
 	}

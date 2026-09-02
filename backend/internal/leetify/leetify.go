@@ -734,3 +734,51 @@ func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetail
 		return nil, fmt.Errorf("leetify games: unexpected status %d", resp.StatusCode)
 	}
 }
+
+// GameShareCode resolves a Leetify game id to its Valve share code through the
+// player's v3 match list, returning the code and the game's finish time.
+//
+// This exists because the legacy per-game route stopped carrying a share code
+// (its steamShareCode field is simply absent on the current host), which broke
+// one-click analysis for every profile that Leetify serves. The v3 match list
+// still carries it as data_source_match_id, the only public surface that does.
+func (c *Client) GameShareCode(ctx context.Context, steam64 uint64, gameID string) (code, finishedAt string, err error) {
+	u := c.baseURL + "/v3/profile/matches?steam64_id=" + fmt.Sprint(steam64)
+	req, err := c.newReq(ctx, u)
+	if err != nil {
+		return "", "", err
+	}
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return "", "", fmt.Errorf("leetify matches: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return "", "", ErrNotFound
+	default:
+		return "", "", fmt.Errorf("leetify matches: unexpected status %d", resp.StatusCode)
+	}
+	var list []struct {
+		ID         string `json:"id"`
+		Code       string `json:"data_source_match_id"`
+		FinishedAt string `json:"finished_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return "", "", fmt.Errorf("leetify matches: decode: %w", err)
+	}
+	for _, m := range list {
+		if m.ID != gameID {
+			continue
+		}
+		// A FACEIT or unrecognised source carries a non-Valve id here; only a
+		// real share code can resolve a demo.
+		if !ValidShareCode(m.Code) {
+			return "", m.FinishedAt, ErrNotFound
+		}
+		return m.Code, m.FinishedAt, nil
+	}
+	return "", "", ErrNotFound
+}
