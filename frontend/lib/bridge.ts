@@ -12,7 +12,7 @@
 // bridge data) is untouched.
 
 import type { LeetifyProfile, LeetifyRecentMatch } from "./types";
-import type { BridgeMatchRow } from "./api";
+import type { BridgeMatchRow, ParsedRow } from "./api";
 import type { BridgeAggregate } from "./suspicion";
 
 /**
@@ -23,7 +23,16 @@ import type { BridgeAggregate } from "./suspicion";
  * that name themselves competitive; anything else lands in the "Other" queue
  * tab rather than being mislabelled Premier on an assumption.
  */
-export function recentFromBridge(rows: BridgeMatchRow[]): LeetifyRecentMatch[] {
+export function recentFromBridge(
+  rows: BridgeMatchRow[],
+  parsed: ParsedRow[] = [],
+): LeetifyRecentMatch[] {
+  // Rank comes from demos we parsed ourselves — it exists in no API we can
+  // reach. Keyed by share code, the one identifier both sides share.
+  const rankByCode = new Map<string, ParsedRow>();
+  for (const p of parsed) {
+    if (p.shareCode && (p.rankNew ?? 0) > 0) rankByCode.set(p.shareCode, p);
+  }
   return (rows ?? [])
     .filter((m) => m.mapName && (m.roundsCount ?? 0) > 0 && (m.roundsWon ?? 0) > 0)
     .map((m) => {
@@ -48,6 +57,11 @@ export function recentFromBridge(rows: BridgeMatchRow[]): LeetifyRecentMatch[] {
               : undefined,
         kills: m.totalKills,
         deaths: m.totalDeaths,
+        // Premier rating carried in and out of this match, ours from the demo.
+        // Absent stays absent so the column shows a dash, never a rating of 0.
+        rank: rankByCode.get(m.shareCode ?? "")?.rankNew,
+        rank_before: rankByCode.get(m.shareCode ?? "")?.rankOld,
+        rank_delta: rankByCode.get(m.shareCode ?? "")?.rankChange,
         // Row units are the match endpoint's (seconds, fractions); the
         // recent-match shape wants the profile's (ms, percents).
         preaim: m.preaim ?? 0,

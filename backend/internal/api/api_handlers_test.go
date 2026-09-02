@@ -24,6 +24,7 @@ import (
 type fakeStore struct {
 	corpusMates []db.CorpusTeammate
 	chain       db.AuthChain
+	parsedRows  []db.ParsedRow
 	profile     func(uint64) (models.PlayerProfile, error)
 	matches     func(uint64, int, int) ([]models.PlayerMatchSummary, error)
 	matchDet    func(int64) (models.MatchDetail, error)
@@ -125,6 +126,14 @@ func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error
 	return nil, nil
 }
 func (f *fakeStore) PruneRetryCodes(context.Context) error { return nil }
+
+func (f *fakeStore) ParsedShareCodes(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (f *fakeStore) ParsedRowsFor(context.Context, uint64, int) ([]db.ParsedRow, error) {
+	return f.parsedRows, nil
+}
 
 func (f *fakeStore) Ping(context.Context) error {
 	if f.ping != nil {

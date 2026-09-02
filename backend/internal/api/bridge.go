@@ -54,6 +54,12 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Our own parsed-demo stats for this player, if any exist yet.
+	parsed, perr := s.db.ParsedRowsFor(r.Context(), id, 100)
+	if perr != nil {
+		s.log.Warn("bridge: reading our parsed rows failed", "steam", id, "err", perr)
+	}
+
 	if s.shouldSync(r.Context(), id, agg.Matches) {
 		s.syncBridgeAsync(id)
 	}
@@ -81,6 +87,10 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 			"oldest": nullableTime(agg.Oldest),
 		},
 		"matches": rows,
+		// OUR numbers, from demos we parsed. Served under their own key and
+		// never merged into the Leetify rows: the page has to be able to tell
+		// a visitor which company measured what.
+		"parsed": parsed,
 	})
 }
 
@@ -128,6 +138,13 @@ func (s *Server) syncBridgeAsync(steamID uint64) {
 		if err != nil {
 			s.log.Warn("bridge sync failed", "steam", steamID, "err", err)
 			return
+		}
+		// New matches mean new demos worth parsing ourselves — but only for
+		// accounts whose owner connected them, which enqueueParses checks.
+		// Valve deletes demos after a month, so this cannot wait for a
+		// nightly job.
+		if res.Fetched > 0 {
+			s.enqueueParses(ctx, steamID)
 		}
 		if res.Fetched > 0 || res.Failed > 0 || res.Absent > 0 {
 			s.log.Info("bridge sync", "steam", steamID,

@@ -16,19 +16,22 @@ import { createPortal } from "react-dom";
 // rendered nodes (server components from ProfileView), so this stays a thin
 // client shell that just toggles which one is visible.
 
-type PeekKey = "matches" | "split" | "leetify" | "counter" | "matchstats" | "friends" | "inventory";
+type PeekKey = "matches" | "split" | "leetify" | "ourstats" | "counter" | "matchstats" | "friends" | "inventory";
 
 const META: Record<PeekKey, { label: string; hex: string; path: string }> = {
   matches: { label: "Matches", hex: "#38d6ff", path: "M12 8v4l2.5 1.5M12 3a9 9 0 1 0 9 9M17 3h4v4" },
   split: { label: "FACEIT vs Premier", hex: "#f5b942", path: "M4 8h13l-3-3M20 16H7l3 3" },
   leetify: { label: "Leetify stats", hex: "#5b9dff", path: "M4 20V10M10 20V4M16 20v-7M20 20H3" },
+  // Our own numbers get our own name on the button — the whole point is that
+  // a visitor can tell them apart from a third party's.
+  ourstats: { label: "CSRun stats", hex: "#38d6ff", path: "M3 17l5-6 4 3 5-8M3 21h18" },
   counter: { label: "Counter report", hex: "#f5694a", path: "M12 3 5 6v5c0 4 3 7 7 8 4-1 7-4 7-8V6z" },
   matchstats: { label: "Match stats", hex: "#46d369", path: "M3 5h18M3 12h18M3 19h11" },
   friends: { label: "Friends", hex: "#c792ff", path: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M15 3.1a4 4 0 0 1 0 7.8" },
   // briefcase — the skin economy's suitcase
   inventory: { label: "Inventory", hex: "#e8b04c", path: "M3 8h18v11H3zM8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18" },
 };
-const ORDER: PeekKey[] = ["matches", "split", "leetify", "counter", "matchstats", "friends", "inventory"];
+const ORDER: PeekKey[] = ["matches", "split", "leetify", "ourstats", "counter", "matchstats", "friends", "inventory"];
 
 function Glyph({ path, hex, className = "h-4 w-4" }: { path: string; hex: string; className?: string }) {
   return (
@@ -42,6 +45,7 @@ export function StatsPeek({
   matches,
   split,
   leetify,
+  ourstats,
   counter,
   matchstats,
   friends,
@@ -51,13 +55,14 @@ export function StatsPeek({
   matches?: ReactNode;
   split?: ReactNode;
   leetify?: ReactNode;
+  ourstats?: ReactNode;
   counter?: ReactNode;
   matchstats?: ReactNode;
   friends?: ReactNode;
   inventory?: ReactNode;
   className?: string;
 }) {
-  const nodes: Record<PeekKey, ReactNode> = { matches, split, leetify, counter, matchstats, friends, inventory };
+  const nodes: Record<PeekKey, ReactNode> = { matches, split, leetify, ourstats, counter, matchstats, friends, inventory };
   const items = ORDER.filter((k) => nodes[k]);
   const [open, setOpen] = useState<PeekKey | null>(null);
   const [mounted, setMounted] = useState(false);

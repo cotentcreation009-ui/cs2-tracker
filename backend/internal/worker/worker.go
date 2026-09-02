@@ -38,6 +38,9 @@ type Store interface {
 	// Demo-analysis (user-uploaded replay) results.
 	SetDemoStatus(ctx context.Context, id, status, errMsg string) error
 	SaveDemoResult(ctx context.Context, id, mapName string, gzipData []byte) error
+	// Our own per-player stats from a demo we parsed. Separate from the
+	// Leetify mirror on purpose — this data is ours.
+	SaveParsedMatch(ctx context.Context, shareCode, mapName string, finishedAt time.Time, rounds int, players []parser.PlayerSummary) error
 }
 
 // ReplayParseFunc extracts the normalized replay model from a demo reader.
@@ -212,6 +215,28 @@ func (w *Worker) runReplay(job *queue.Job, log *slog.Logger) error {
 
 	if err := w.Store.SaveDemoResult(jobCtx, job.ID, rm.Map, buf.Bytes()); err != nil {
 		return fmt.Errorf("save result: %w", err)
+	}
+
+	// A demo fetched by share code is a match we can attribute to real players,
+	// so keep the per-player stats too. Best-effort: the viewer result above is
+	// what the requester is waiting on, and losing the durable rows must not
+	// fail a job the user watched succeed.
+	if job.ShareCode != "" {
+		players := parser.SummarisePlayers(rm)
+		if err := w.Store.SaveParsedMatch(jobCtx, job.ShareCode, rm.Map,
+			time.Time{}, len(rm.RoundData), players); err != nil {
+			log.Warn("could not save parsed player stats",
+				"shareCode", job.ShareCode, "err", err)
+		} else {
+			var ranked int
+			for _, p := range players {
+				if p.RankNew > 0 {
+					ranked++
+				}
+			}
+			log.Info("stored our own match stats",
+				"shareCode", job.ShareCode, "players", len(players), "with_rank", ranked)
+		}
 	}
 	log.Info("demo replay parsed",
 		"map", rm.Map, "rounds", rm.Rounds, "players", len(rm.Players),
