@@ -305,7 +305,21 @@ export function CheatMeter({
   bridgeConnected?: boolean;
   bridgeParsed?: ParsedRow[];
 }) {
-  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
+  // Our own aim rating, averaged over the demos we parsed. Only matches that
+  // carried one count — an unmeasured demo is not a zero.
+  const ourAimSamples = (bridgeParsed ?? [])
+    .map((p) => p.aimRating ?? 0)
+    .filter((v) => v > 0);
+  const bridgeWithOurs =
+    bridge && ourAimSamples.length
+      ? {
+          ...bridge,
+          ourAimRating:
+            ourAimSamples.reduce((a, b) => a + b, 0) / ourAimSamples.length,
+        }
+      : bridge;
+
+  const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridgeWithOurs);
   if (!sus || !sus.hasEnough) return null;
 
   // identity + ranks for the hero (everything visible in the CheatMeter view)
@@ -314,8 +328,17 @@ export function CheatMeter({
     steamCreated && !Number.isNaN(steamCreated.getTime())
       ? (Date.now() - steamCreated.getTime()) / (365.25 * 24 * 3600 * 1000)
       : null;
-  const premier = leetify?.ranks?.premier ?? 0;
-  const premierHistory: PremierPoint[] = (leetify?.recent_matches ?? [])
+  // Premier rating. A registered player's comes from their profile; a bridged
+  // player's newest rated match IS their current rating, which is the same
+  // number by a different route — so the same card renders either way rather
+  // than a connected account looking like it has no rank at all.
+  const bridgedPremier = (bridgeMatches ?? []).find(
+    (m) => (m.rankType ?? 0) === 11 && (m.rankAfter ?? 0) > 0,
+  );
+  const premier = leetify?.ranks?.premier ?? bridgedPremier?.rankAfter ?? 0;
+  const premierHistory: PremierPoint[] = (
+    leetify?.recent_matches ?? recentFromBridge(bridgeMatches ?? [], bridgeParsed ?? [])
+  )
     .filter((m) => m.rank_type === 11 && (m.rank ?? 0) > 0)
     .map((m) => ({ rating: m.rank as number, date: m.finished_at }));
   const {
@@ -365,7 +388,11 @@ export function CheatMeter({
           rating: chrono30.map((m) => m.leetify_rating),
           outcomes: chrono30.map((m) => m.outcome),
         };
-  const showCareer = !!career && career.matches > 0;
+  // A parsed-demo career of a few matches must not displace the fuller card
+  // built from every source: parsing our own demos started this at three
+  // matches and it took over a ninety-five-match profile. The richer card
+  // wins; the parsed detail lives in its own labelled panel.
+  const showCareer = !!career && career.matches >= 10;
   const openTotal = career ? career.openingKills + career.openingDeaths : 0;
   const openPct = openTotal > 0 ? (career!.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career ? career.clutchesWon + career.clutchesLost : 0;
@@ -759,7 +786,12 @@ export function CheatMeter({
             <div className="stat-label mb-2">
               Career stats{" "}
               <span className="font-normal normal-case text-faint">
-                · {showCareer ? `${fmt(career!.matches)} parsed matches` : "Leetify / FACEIT / Steam"}
+                ·{" "}
+                {showCareer
+                  ? `${fmt(career!.matches)} matches parsed by CSRun`
+                  : bridge && bridge.matches > 0 && !leetify
+                    ? `${fmt(bridge.matches)} matches via Leetify match reports`
+                    : "Leetify / FACEIT / Steam"}
               </span>
             </div>
             {showCareer ? (
