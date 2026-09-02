@@ -35,9 +35,10 @@ import { CheatMeter } from "@/components/CheatMeter";
 import { PlatformSplit } from "@/components/PlatformSplit";
 import { computeSuspicion } from "@/lib/suspicion";
 import type { BridgeAggregate } from "@/lib/suspicion";
-import type { BridgeMatchRow } from "@/lib/api";
+import type { BridgeMatchRow, ParsedRow } from "@/lib/api";
 import { pseudoProfileFromBridge, recentFromBridge } from "@/lib/bridge";
 import { BridgeStatsPanel } from "@/components/BridgeStatsPanel";
+import { OurStatsPanel } from "@/components/OurStatsPanel";
 import Link from "next/link";
 import {
   flag,
@@ -78,6 +79,7 @@ export function ProfileView({
   bridgeMatches = [],
   bridgeNewest = null,
   bridgeConnected = false,
+  bridgeParsed = [],
 }: {
   profile: PlayerProfile;
   matches: PlayerMatchSummary[];
@@ -91,6 +93,7 @@ export function ProfileView({
   bridgeMatches?: BridgeMatchRow[];
   bridgeNewest?: string | null;
   bridgeConnected?: boolean;
+  bridgeParsed?: ParsedRow[];
 }) {
   const { player, career } = profile;
   const hasData = career.matches > 0;
@@ -253,6 +256,9 @@ export function ProfileView({
     ) : bridge && bridge.matches > 0 ? (
       <BridgeStatsPanel aggregate={bridge} rows={bridgeMatches} />
     ) : null,
+    // OUR numbers, in their own slot with their own button. Never merged into
+    // the Leetify panel: a visitor has to be able to tell whose is whose.
+    ourstats: bridgeParsed.length > 0 ? <OurStatsPanel rows={bridgeParsed} /> : null,
     counter: (leetify ?? pseudoLeetify) ? (
       <CounterReport
         leetify={(leetify ?? pseudoLeetify)!}
@@ -292,6 +298,7 @@ export function ProfileView({
           bridgeMatches={bridgeMatches}
           bridgeNewest={bridgeNewest}
           bridgeConnected={bridgeConnected}
+          bridgeParsed={bridgeParsed}
           player={player}
           leetify={leetify}
           faceit={faceit}

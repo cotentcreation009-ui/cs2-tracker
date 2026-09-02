@@ -12,6 +12,7 @@ import (
 
 	"github.com/cs2tracker/server/internal/demosource"
 	"github.com/cs2tracker/server/internal/models"
+	"github.com/cs2tracker/server/internal/parser"
 	"github.com/cs2tracker/server/internal/queue"
 )
 
@@ -22,10 +23,12 @@ type statusCall struct {
 }
 
 type fakeStore struct {
-	mu        sync.Mutex
-	statuses  []statusCall
-	matchID   int64
-	insertErr error
+	mu            sync.Mutex
+	statuses      []statusCall
+	matchID       int64
+	insertErr     error
+	parsedCode    string
+	parsedPlayers []parser.PlayerSummary
 }
 
 func (f *fakeStore) InsertParsedMatch(context.Context, *models.ParsedMatch) (int64, error) {
@@ -45,6 +48,16 @@ func (f *fakeStore) SetJobStatus(_ context.Context, _ string, status string, mat
 func (f *fakeStore) SetDemoStatus(context.Context, string, string, string) error { return nil }
 
 func (f *fakeStore) SaveDemoResult(context.Context, string, string, []byte) error { return nil }
+
+// Records what the worker chose to persist as OUR stats, so a test can assert
+// the share-code path stores them and the anonymous path does not.
+func (f *fakeStore) SaveParsedMatch(_ context.Context, shareCode, mapName string, _ time.Time, rounds int, players []parser.PlayerSummary) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.parsedCode = shareCode
+	f.parsedPlayers = players
+	return nil
+}
 
 func (f *fakeStore) countStatus(status string) int {
 	f.mu.Lock()

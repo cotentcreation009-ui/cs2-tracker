@@ -125,7 +125,10 @@ func (d *DB) SaveMatch(ctx context.Context, m *leetify.Match) error {
 
 // PlayerMatchRow is one stored match as it matters to a player.
 type PlayerMatchRow struct {
-	MatchID       string    `json:"matchId"`
+	MatchID string `json:"matchId"`
+	// The code this match was fetched by — the key that resolves its demo, so
+	// our own parser can be pointed at it.
+	ShareCode     string    `json:"shareCode,omitempty"`
 	MapName       string    `json:"mapName,omitempty"`
 	DataSource    string    `json:"dataSource,omitempty"`
 	FinishedAt    time.Time `json:"finishedAt"`
@@ -175,7 +178,7 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		limit = 100
 	}
 	rows, err := d.Pool.Query(ctx,
-		`SELECT p.match_id, COALESCE(m.map_name,''), COALESCE(m.data_source,''),
+		`SELECT p.match_id, COALESCE(m.source_id,''), COALESCE(m.map_name,''), COALESCE(m.data_source,''),
 		        COALESCE(p.finished_at, 'epoch'::timestamptz),
 		        COALESCE(p.preaim,0), COALESCE(p.reaction_time,0),
 		        COALESCE(p.accuracy_head,0), COALESCE(p.accuracy,0),
@@ -208,7 +211,7 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 	var out []PlayerMatchRow
 	for rows.Next() {
 		var r PlayerMatchRow
-		if err := rows.Scan(&r.MatchID, &r.MapName, &r.DataSource, &r.FinishedAt,
+		if err := rows.Scan(&r.MatchID, &r.ShareCode, &r.MapName, &r.DataSource, &r.FinishedAt,
 			&r.Preaim, &r.ReactionTime, &r.AccuracyHead, &r.Accuracy,
 			&r.SprayAccuracy, &r.LeetifyRating, &r.KDRatio, &r.DPR,
 			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount, &r.RoundsWon,

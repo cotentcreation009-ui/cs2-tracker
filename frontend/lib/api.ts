@@ -139,6 +139,9 @@ import type { BridgeAggregate } from "@/lib/suspicion";
 // the same as a player with nothing stored, so any failure returns null.
 export interface BridgeMatchRow {
   matchId: string;
+  // The code this match was fetched by — the key that joins a Leetify row to
+  // the demo we parsed ourselves.
+  shareCode?: string;
   mapName?: string;
   dataSource?: string;
   finishedAt?: string;
@@ -154,12 +157,44 @@ export interface BridgeMatchRow {
   mvps?: number;
 }
 
+// A line from a demo CSRun parsed itself. Kept in its own type, never merged
+// into BridgeMatchRow, because the page must be able to say which numbers are
+// ours and which are Leetify's.
+export interface ParsedRow {
+  shareCode: string;
+  mapName?: string;
+  finishedAt?: string;
+  rankOld?: number;
+  rankNew?: number;
+  rankChange?: number;
+  kills?: number;
+  deaths?: number;
+  assists?: number;
+  hsKills?: number;
+  damage?: number;
+  rounds?: number;
+  shots?: number;
+  hits?: number;
+  legHits?: number;
+  reactionMs?: number;
+  preaim?: number;
+  snapKills?: number;
+  openingKills?: number;
+  openingDeaths?: number;
+  wallbangs?: number;
+  throughSmoke?: number;
+  noScopes?: number;
+  blindKills?: number;
+  aimRating?: number;
+}
+
 export interface BridgeData {
   aggregate: BridgeAggregate;
   matches: BridgeMatchRow[];
   // True when this account's owner authorised their match history, so the
   // page can say "connected" instead of inviting them to connect again.
   connected: boolean;
+  parsed: ParsedRow[];
   // Date of the newest match the bridge holds — the page must SAY how current
   // its telemetry is rather than quietly presenting July as today.
   newest: string | null;
@@ -172,6 +207,7 @@ export async function getBridge(steamId: string): Promise<BridgeData | null> {
       aggregate?: BridgeAggregate;
       matches?: BridgeMatchRow[];
       connected?: boolean;
+      parsed?: ParsedRow[];
       span?: { newest?: string | null };
     }>(`/api/players/${steamId}/bridge`);
     if (!r?.enabled || !r.aggregate?.matches) return null;
@@ -179,6 +215,7 @@ export async function getBridge(steamId: string): Promise<BridgeData | null> {
       aggregate: r.aggregate,
       matches: r.matches ?? [],
       connected: !!r.connected,
+      parsed: r.parsed ?? [],
       newest: r.span?.newest ?? null,
     };
   } catch {

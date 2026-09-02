@@ -89,6 +89,9 @@ type Store interface {
 	RememberAbsentCode(ctx context.Context, steamID uint64, code string) error
 	AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error)
 	PruneRetryCodes(ctx context.Context) error
+	// Our own parsed-demo stats.
+	ParsedShareCodes(ctx context.Context, codes []string) (map[string]bool, error)
+	ParsedRowsFor(ctx context.Context, steamID uint64, limit int) ([]db.ParsedRow, error)
 	Ping(ctx context.Context) error
 }
 

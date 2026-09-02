@@ -28,7 +28,7 @@ import { StatsPeek } from "@/components/StatsPeek";
 import { RatingConsistencyChart } from "@/components/RatingConsistencyChart";
 import { MapWinChart } from "@/components/MapStrength";
 import type { ReactNode } from "react";
-import type { BridgeMatchRow } from "@/lib/api";
+import type { BridgeMatchRow, ParsedRow } from "@/lib/api";
 import { pseudoProfileFromBridge, recentFromBridge } from "@/lib/bridge";
 
 const PERSONA: Record<number, string> = { 1: "Online", 2: "Busy", 3: "Away", 4: "Snooze", 5: "Online", 6: "Online" };
@@ -284,6 +284,7 @@ export function CheatMeter({
   bridgeMatches = [],
   bridgeNewest = null,
   bridgeConnected = false,
+  bridgeParsed = [],
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
@@ -295,13 +296,14 @@ export function CheatMeter({
   generatedOn?: string;
   // Pre-rendered section nodes shown in the StatsPeek modal (built in ProfileView
   // so the server components render server-side); a missing slot hides its button.
-  panels?: { matches?: ReactNode; split?: ReactNode; leetify?: ReactNode; counter?: ReactNode; matchstats?: ReactNode; friends?: ReactNode; inventory?: ReactNode };
+  panels?: { matches?: ReactNode; split?: ReactNode; leetify?: ReactNode; ourstats?: ReactNode; counter?: ReactNode; matchstats?: ReactNode; friends?: ReactNode; inventory?: ReactNode };
   // Telemetry assembled from Leetify match reports, for players Leetify will
   // not serve a profile for. Carries the attribution their terms require.
   bridge?: BridgeAggregate | null;
   bridgeMatches?: BridgeMatchRow[];
   bridgeNewest?: string | null;
   bridgeConnected?: boolean;
+  bridgeParsed?: ParsedRow[];
 }) {
   const sus: Suspicion | null = computeSuspicion(leetify, faceit, steamStats, steamExtras, bridge);
   if (!sus || !sus.hasEnough) return null;
@@ -336,7 +338,7 @@ export function CheatMeter({
   // The map chart reads Leetify's recent-match shape; a bridged player's rows
   // are dressed in it by the shared adapter. Display only — scoring never
   // touches these.
-  const bridgedRecent = recentFromBridge(bridgeMatches ?? []);
+  const bridgedRecent = recentFromBridge(bridgeMatches ?? [], bridgeParsed ?? []);
   const recentMatches = leetify?.recent_matches ?? bridgedRecent;
   const distinctMaps = new Set(
     recentMatches.filter((m) => m.map_name).map((m) => m.map_name),
@@ -526,6 +528,7 @@ export function CheatMeter({
             matches={panels?.matches}
             split={panels?.split}
             leetify={panels?.leetify}
+            ourstats={panels?.ourstats}
             counter={panels?.counter}
             matchstats={panels?.matchstats}
             friends={panels?.friends}
