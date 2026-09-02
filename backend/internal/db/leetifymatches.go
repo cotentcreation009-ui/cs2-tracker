@@ -128,7 +128,12 @@ type PlayerMatchRow struct {
 	MatchID string `json:"matchId"`
 	// The code this match was fetched by — the key that resolves its demo, so
 	// our own parser can be pointed at it.
-	ShareCode     string    `json:"shareCode,omitempty"`
+	ShareCode string `json:"shareCode,omitempty"`
+	// Ladder standing at match time, from Leetify's legacy per-game endpoint.
+	// Zero means an unrated lobby or not fetched yet — a dash either way.
+	RankType      int       `json:"rankType,omitempty"`
+	RankAfter     int       `json:"rankAfter,omitempty"`
+	RankBefore    int       `json:"rankBefore,omitempty"`
 	MapName       string    `json:"mapName,omitempty"`
 	DataSource    string    `json:"dataSource,omitempty"`
 	FinishedAt    time.Time `json:"finishedAt"`
@@ -186,6 +191,7 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		        COALESCE(p.kd_ratio,0), COALESCE(p.dpr,0),
 		        COALESCE(p.total_kills,0), COALESCE(p.total_deaths,0),
 		        COALESCE(p.rounds_count,0),
+		        COALESCE(p.rank_type,0), COALESCE(p.rank_after,0), COALESCE(p.rank_before,0),
 		        COALESCE((me.st->>'rounds_won')::int, 0),
 		        COALESCE((me.st->>'accuracy_enemy_spotted')::float, 0),
 		        COALESCE((me.st->>'counter_strafing_shots_good_ratio')::float, 0),
@@ -214,7 +220,8 @@ func (d *DB) PlayerMatches(ctx context.Context, steamID uint64, limit int) ([]Pl
 		if err := rows.Scan(&r.MatchID, &r.ShareCode, &r.MapName, &r.DataSource, &r.FinishedAt,
 			&r.Preaim, &r.ReactionTime, &r.AccuracyHead, &r.Accuracy,
 			&r.SprayAccuracy, &r.LeetifyRating, &r.KDRatio, &r.DPR,
-			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount, &r.RoundsWon,
+			&r.TotalKills, &r.TotalDeaths, &r.RoundsCount,
+			&r.RankType, &r.RankAfter, &r.RankBefore, &r.RoundsWon,
 			&r.SpottedAcc, &r.CStrafeRatio, &r.FlashHitFoe, &r.FlashThrown,
 			&r.HEDmgAvg, &r.TradeWinPct, &r.MVPs); err != nil {
 			return nil, err
@@ -338,4 +345,81 @@ func (d *DB) CorpusTeammates(ctx context.Context, steamID uint64, limit int) ([]
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// MatchesNeedingRank returns stored matches for a player whose ladder standing
+// has not been fetched yet, newest first.
+//
+// Newest first because the rank column is read at the top of a match list: a
+// player scrolling their last ten games should see it fill in there, not in
+// the tail of a two-year history.
+func (d *DB) MatchesNeedingRank(ctx context.Context, steamID uint64, limit int) ([]string, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := d.Pool.Query(ctx, `
+		SELECT m.match_id
+		  FROM leetify_match_players p
+		  JOIN leetify_matches m ON m.match_id = p.match_id
+		 WHERE p.steam_id = $1
+		   AND m.rank_fetched_at IS NULL
+		 ORDER BY p.finished_at DESC NULLS LAST
+		 LIMIT $2`, int64(steamID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// MatchRank is one player's ladder standing in one match.
+type MatchRank struct {
+	SteamID    uint64
+	RankType   int
+	RankAfter  int
+	RankBefore int
+}
+
+// SaveMatchRanks records ladder standings for a match and marks it fetched.
+//
+// The match is marked fetched even when no player carried a rank — an unrated
+// lobby is an answer, and retrying it forever would spend the rate budget
+// learning the same nothing.
+func (d *DB) SaveMatchRanks(ctx context.Context, matchID string, ranks []MatchRank) error {
+	tx, err := d.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	for _, r := range ranks {
+		if r.SteamID == 0 || r.RankAfter <= 0 {
+			continue
+		}
+		var before any
+		if r.RankBefore > 0 {
+			before = r.RankBefore
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE leetify_match_players
+			   SET rank_type = $3, rank_after = $4, rank_before = $5
+			 WHERE match_id = $1 AND steam_id = $2`,
+			matchID, int64(r.SteamID), r.RankType, r.RankAfter, before); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE leetify_matches SET rank_fetched_at = now() WHERE match_id = $1`,
+		matchID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
