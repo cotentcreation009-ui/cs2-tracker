@@ -155,6 +155,12 @@ func (s *Server) chainPoller(ctx context.Context) {
 				if _, err := s.bridge.Sync(cctx, c.SteamID); err != nil {
 					s.log.Warn("chain poller: sync failed", "steam", c.SteamID, "err", err)
 				}
+				// Sweep for unparsed demos every round, not only when the sync
+				// found something new. A caught-up account fetches nothing, and
+				// gating the sweep on new matches meant its existing backlog
+				// would never be parsed at all. The sweep is cheap when there
+				// is nothing to do: one indexed lookup, then it stops.
+				s.enqueueParses(cctx, c.SteamID)
 			}()
 		}
 	}
