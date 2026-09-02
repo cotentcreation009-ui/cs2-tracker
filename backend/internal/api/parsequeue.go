@@ -63,6 +63,12 @@ func (s *Server) enqueueParses(ctx context.Context, steamID uint64) {
 		codes = append(codes, r.ShareCode)
 	}
 	if len(codes) == 0 {
+		// Nothing parseable. Worth saying once: a connected account with no
+		// share codes on its rows means the codes were never stamped (see the
+		// dedupe-key fix) or every match is past Valve's retention — both
+		// invisible without this line.
+		s.log.Info("parse queue: no parseable matches",
+			"steam", steamID, "rows", len(rows))
 		return
 	}
 
