@@ -123,6 +123,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               >
                 Guides
               </Link>
+              {/* Shop is a separate app on its own subdomain, so a plain
+                  anchor: Next's <Link> would try to client-route it. */}
+              <a
+                href="https://posters.csrun.win"
+                className="link-muted shrink-0 text-sm font-medium"
+              >
+                Shop
+              </a>
             </nav>
           </div>
         </header>
