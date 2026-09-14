@@ -121,7 +121,7 @@ adds `posters-web` + `posters-worker` to the same project and network, and the
 `posters.{$DOMAIN}` block at the end of the `Caddyfile` proxies to it. Its code is a
 separate repo cloned to `~/csrun-app` (the overlay's build contexts point at
 `../csrun-app`), and its Valve-derived art lives outside git under `~/csrun/`
-(`assets-cs2`, `backdrops`, `emblems`, `map-icons`) as bind mounts — see that repo's
+(`assets-cs2`, `backdrops`, `emblems`, `map-icons`, `gallery`) as bind mounts — see that repo's
 `docs/csrun/DEPLOY.md` for the bucket → VM steps. Bring it up with **both** files:
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.posters.yml up -d --build

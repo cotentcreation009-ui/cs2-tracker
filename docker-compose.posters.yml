@@ -94,6 +94,13 @@ services:
       # disk at request time, so mounting here needs no rebuild.
       - ../csrun/emblems:/repo/apps/csrun/public/emblems:ro
       - ../csrun/map-icons:/repo/apps/csrun/public/map-icons:ro
+      # The homepage's baked example posters (public/gallery, gitignored: they
+      # contain rendered weapons). WRITABLE, unlike the two above, because they
+      # are produced ON the box against the live worker and land here:
+      #   docker compose -f docker-compose.prod.yml -f docker-compose.posters.yml \
+      #     exec posters-web node scripts/build-gallery.mjs
+      # Empty -> the page composes the layout with no weapon and says so.
+      - ../csrun/gallery:/repo/apps/csrun/public/gallery
     depends_on:
       posters-worker:
         condition: service_started
