@@ -41,3 +41,39 @@
 	# internal Docker network. The backend is never exposed publicly.
 	reverse_proxy frontend:3000
 }
+# Append this block to the END of ~/cs2-tracker/Caddyfile, after the existing site's
+# closing brace. It is a second site in the same Caddy, on a subdomain, so it shares
+# nothing with the stats site's block above it -- not its headers, not its CSP, not
+# its proxy target. {$DOMAIN} is the same env the existing block uses.
+#
+# The Cloudflare ORIGIN certificate already covers *.{$DOMAIN} (the existing block
+# requires that for the www host), so posters.{$DOMAIN} needs no new certificate.
+# What it DOES need is a DNS record in Cloudflare: A posters -> the VM's IP, proxied.
+#
+# The CSP here is the stats site's, minus the Cloudflare beacon it does not load and
+# plus nothing: the storefront inlines its preview as a data: image (img-src data:)
+# and Next.js ships inline bootstrap scripts ('unsafe-inline'), both already allowed.
+
+posters.{$DOMAIN} {
+        encode zstd gzip
+        tls /etc/caddy/origin.pem /etc/caddy/origin.key
+
+        header {
+                Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                X-Content-Type-Options "nosniff"
+                Referrer-Policy "strict-origin-when-cross-origin"
+                X-Frame-Options "SAMEORIGIN"
+                Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+                Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
+                -Server
+        }
+
+        # A preview render can take longer than a page load; a print master longer still.
+        # Caddy's default is no timeout, so this only documents the intent -- the real
+        # ceiling is Cloudflare's ~100 s proxy timeout, see DEPLOY.md section 8.
+        reverse_proxy posters-web:3001 {
+                transport http {
+                        read_timeout 300s
+                }
+        }
+}
