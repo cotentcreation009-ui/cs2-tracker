@@ -1,0 +1,100 @@
+# The poster storefront and its render worker, as an OVERLAY on the cs2-tracker stack.
+#
+# Tracked here since it is deployed from here. Bring the stack up with BOTH files:
+#
+#     cd ~/cs2-tracker
+#     docker compose -f docker-compose.prod.yml -f docker-compose.posters.yml up -d --build
+#
+# Compose merges the two, so these services join the same project (cs2-tracker) and the
+# same internal network -- which is how Caddy reaches `posters-web:3001` exactly as it
+# reaches `frontend:3000`. docker-compose.prod.yml itself is NOT edited: removing the
+# poster tool is deleting this file and its Caddy block.
+#
+# Paths are relative to ~/cs2-tracker/. The poster repo is cloned BESIDE it:
+#
+#     ~/cs2-tracker/                 the stats site (this stack)
+#     ~/csrun-app/                   git clone of CSRun, branch feat/headless-renderer
+#     ~/csrun/assets-cs2/            ~17 GB CS2 source textures, from the GCS bucket
+#     ~/csrun/backdrops/             the nine inspect backdrops, from the GCS bucket
+#     ~/csrun/data/                  csrun.db (orders) -- the only record of every order link
+#     ~/csrun/masters/               approved print masters
+#
+# Secrets come from the SAME .env the stack already reads (~/cs2-tracker/.env). Add to it:
+#
+#     CSRUN_OPERATOR_KEY=<openssl rand -hex 24>
+#     CSRUN_ORDER_TOKEN_SECRET=<openssl rand -hex 32>
+#
+# THE TWO QUIET FAILURES, named here because nothing logs them: SKIN_RENDERER unset means
+# the storefront sells a labelled placeholder (factory.ts defaults to mock);
+# CSRUN_BACKDROPS_DIR pointing at an empty dir means the commissioned paintings -- the
+# placeholders the owner asked to replace -- with no error. Both are pinned below.
+
+services:
+  posters-worker:
+    build:
+      context: ../csrun-app
+      dockerfile: deploy/Dockerfile.worker
+    restart: unless-stopped
+    # THE CAP THAT MAKES "SAME BOX" A DECISION RATHER THAN A RISK. The renderer is
+    # software-rendered (SwiftShader) and pins every core it is given for the length of
+    # a render. This is an e2-standard-2: two cores, and the stats site needs one. So
+    # the worker gets ONE, and a poster render can never stall a stats user.
+    #   measured on the workstation: 4096 bake 47 CPU-s (so ~47 s wall on one core),
+    #   warm craft 4-5 s, cold Chromium start 151-187 s once per process.
+    cpus: 1.0
+    # One 4096 bake peaks at 2.1 GB plus ~850 MB of Chromium. Same rule as the stats
+    # worker above: a runaway render can only OOM this container.
+    mem_limit: 4g
+    environment:
+      # REAL_RENDERER=headless, CS2_ALLOW_LAUNCH=0 and the browser path are baked into
+      # the image (deploy/Dockerfile.worker); they cannot be unset from here.
+      CS2_ASSET_SNAPSHOT_DIR: /assets/cs2
+      CS2_MASTER_ARCHIVE_DIR: /data/masters
+      PORT: "8790"
+    volumes:
+      # READ-WRITE, deliberately: the worker writes its bake cache (_composited,
+      # _bakedcomp) INSIDE the asset tree, next to the textures it derives them from.
+      # A read-only mount here is a worker that renders nothing and says why only in
+      # its own log. The directory must be writable by uid 10001 (see DEPLOY.md).
+      - ../csrun/assets-cs2:/assets/cs2
+      - ../csrun/masters:/data/masters
+    healthcheck:
+      # The worker warms Chromium at boot on purpose; the health endpoint answers before
+      # the warm-up finishes, so start_period is generous rather than the check being.
+      # node, not wget: node:22-bookworm-slim ships neither wget nor curl, and a check
+      # that cannot run marks the container unhealthy for ever with no other symptom.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8790/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 240s
+    # no ports: only posters-web (same network) calls it at http://posters-worker:8790
+
+  posters-web:
+    build:
+      context: ../csrun-app
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      NODE_ENV: production
+      SKIN_RENDERER: external
+      SKIN_RENDER_WORKER_URL: http://posters-worker:8790
+      CSRUN_BACKDROPS_DIR: /backdrops
+      CSRUN_DATA_DIR: /data
+      CSRUN_OPERATOR_KEY: ${CSRUN_OPERATOR_KEY:?set CSRUN_OPERATOR_KEY in .env (openssl rand -hex 24)}
+      CSRUN_ORDER_TOKEN_SECRET: ${CSRUN_ORDER_TOKEN_SECRET:?set CSRUN_ORDER_TOKEN_SECRET in .env (openssl rand -hex 32)}
+    volumes:
+      - ../csrun/backdrops:/backdrops:ro
+      - ../csrun/data:/data
+      # Valve's collection crests and map coins. Gitignored in the poster repo (the
+      # same rule as every Valve-derived pixel there), so the image ships none and
+      # every card draws the initials monogram in its corner -- no error. Same road
+      # as the backdrops: bucket -> ~/csrun -> bind mount. Next serves public/ from
+      # disk at request time, so mounting here needs no rebuild.
+      - ../csrun/emblems:/repo/apps/csrun/public/emblems:ro
+      - ../csrun/map-icons:/repo/apps/csrun/public/map-icons:ro
+    depends_on:
+      posters-worker:
+        condition: service_started
+    # no ports: Caddy proxies to it at http://posters-web:3001

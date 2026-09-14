@@ -22,7 +22,7 @@ import (
 // predTeamStats is one team's aggregates over the tracked window, collected
 // during buildMatchHistory's single pass over cached results.
 type predTeamStats struct {
-	N         int     // finished series counted
+	N         int // finished series counted
 	Wins      int
 	Losses    int
 	Weighted  float64 // recency-weighted win credit (newest counts most)

@@ -113,6 +113,23 @@ docker compose -f docker-compose.prod.yml run --rm backend seed   # optional dem
 ```
 Migrations auto-run on backend boot — no separate migrate step.
 
+### The poster shop overlay (`posters.<domain>`)
+
+The skin-poster storefront is a second app on the same box, added as a Compose
+**overlay** so `docker-compose.prod.yml` stays untouched: `docker-compose.posters.yml`
+adds `posters-web` + `posters-worker` to the same project and network, and the
+`posters.{$DOMAIN}` block at the end of the `Caddyfile` proxies to it. Its code is a
+separate repo cloned to `~/csrun-app` (the overlay's build contexts point at
+`../csrun-app`), and its Valve-derived art lives outside git under `~/csrun/`
+(`assets-cs2`, `backdrops`, `emblems`, `map-icons`) as bind mounts — see that repo's
+`docs/csrun/DEPLOY.md` for the bucket → VM steps. Bring it up with **both** files:
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.posters.yml up -d --build
+```
+A stats-only deploy (`-f docker-compose.prod.yml up -d --build frontend`) leaves the
+shop running; Compose just warns about "orphan" containers. Never add
+`--remove-orphans` to a prod-only command — that warning is the shop.
+
 ## 5. Point the domain + lock the origin
 1. Cloudflare → **DNS** → A record `@` → the reserved static IP, **Proxied (orange)**.
    (Add `www` too if you want it.)

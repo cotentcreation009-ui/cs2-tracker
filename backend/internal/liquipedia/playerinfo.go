@@ -145,10 +145,10 @@ var steamID64Re = regexp.MustCompile(`\b7656119\d{10}\b`)
 var (
 	infoboxStart = regexp.MustCompile(`(?i)\{\{Infobox\s+player`)
 	// {{birth date and age|1997|10|2}} or plain 1997-10-02
-	birthRe  = regexp.MustCompile(`(\d{4})[|-](\d{1,2})[|-](\d{1,2})`)
-	linkRe   = regexp.MustCompile(`\[\[(?:[^|\]]*\|)?([^\]]+)\]\]`)
-	tmplRe   = regexp.MustCompile(`\{\{[^{}]*\}\}`)
-	refRe    = regexp.MustCompile(`<ref[^>]*>.*?</ref>|<ref[^/>]*/>|<[^>]+>`)
+	birthRe   = regexp.MustCompile(`(\d{4})[|-](\d{1,2})[|-](\d{1,2})`)
+	linkRe    = regexp.MustCompile(`\[\[(?:[^|\]]*\|)?([^\]]+)\]\]`)
+	tmplRe    = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+	refRe     = regexp.MustCompile(`<ref[^>]*>.*?</ref>|<ref[^/>]*/>|<[^>]+>`)
 	commentRe = regexp.MustCompile(`<!--.*?-->`)
 )
 

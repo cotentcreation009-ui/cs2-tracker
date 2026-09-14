@@ -18,11 +18,11 @@ func TestFaceitRoomID(t *testing.T) {
 		{"https://faceit.com/pt/cs2/room/" + id, id},
 		{"https://www.faceit.com/en/csgo/room/" + id, id}, // old title path
 		{id, id}, // bare match id
-		{"https://evil.com/en/cs2/room/" + id, ""},                 // wrong host
-		{"https://notfaceit.com/room/" + id, ""},                   // wrong host
-		{"https://www.faceit.com/en/players/someone", ""},          // not a room
-		{"https://www.faceit.com/en/cs2/room/not-a-match-id", ""},  // bad id
-		{"https://replay1.valve.net/730/x.dem.bz2", ""},            // direct demo URL
+		{"https://evil.com/en/cs2/room/" + id, ""},                // wrong host
+		{"https://notfaceit.com/room/" + id, ""},                  // wrong host
+		{"https://www.faceit.com/en/players/someone", ""},         // not a room
+		{"https://www.faceit.com/en/cs2/room/not-a-match-id", ""}, // bad id
+		{"https://replay1.valve.net/730/x.dem.bz2", ""},           // direct demo URL
 	}
 	for _, tc := range cases {
 		var u *url.URL

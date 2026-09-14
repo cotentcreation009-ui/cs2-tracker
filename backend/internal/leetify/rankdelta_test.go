@@ -11,14 +11,14 @@ func ip(v int) *int { return &v }
 // games, and spanning them would credit one game with a multi-game swing.
 func TestComputeRankDeltas(t *testing.T) {
 	ms := []RecentMatch{ // most recent first
-		{RankType: 11, Rank: 18240},                 // 0: +140 vs 18100
-		{DataSource: "faceit", Rank: 10, Elo: 2141}, // 1: +41 vs 2100
-		{RankType: 11, Rank: 18100},                 // 2: -50 vs 18150
-		{DataSource: "faceit", Rank: 10, Elo: 2100}, // 3: first rated faceit
-		{RankType: 11, Rank: 18150},                 // 4: first rated premier
+		{RankType: 11, Rank: 18240},                  // 0: +140 vs 18100
+		{DataSource: "faceit", Rank: 10, Elo: 2141},  // 1: +41 vs 2100
+		{RankType: 11, Rank: 18100},                  // 2: -50 vs 18150
+		{DataSource: "faceit", Rank: 10, Elo: 2100},  // 3: first rated faceit
+		{RankType: 11, Rank: 18150},                  // 4: first rated premier
 		{RankType: 12, Rank: 15, MapName: "de_nuke"}, // 5: first comp game on Nuke
-		{RankType: 11, Rank: 0},                     // 6: rating not recorded
-		{RankType: 11, Rank: 17800},                 // 7: chain broken by [6]
+		{RankType: 11, Rank: 0},                      // 6: rating not recorded
+		{RankType: 11, Rank: 17800},                  // 7: chain broken by [6]
 	}
 	computeRankDeltas(ms)
 
