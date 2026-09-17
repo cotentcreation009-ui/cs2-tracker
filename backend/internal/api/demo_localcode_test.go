@@ -153,3 +153,54 @@ func TestAnalyzeStillReportsNoReferenceWhenListLacksIt(t *testing.T) {
 		t.Fatalf("status = %d body=%s; want the honest 400", rr.Code, rr.Body.String())
 	}
 }
+
+// Leetify's legacy per-game host went behind a bot check on 2026-09-16 and
+// answers 511 to everyone. The public v3 list still carries the reference, and
+// it must be asked FIRST: a handler that consults legacy before the list turns
+// every unbridged click into "internal error" — which is what was live.
+func legacyBotCheckServer(t *testing.T, listedID, source, ref, finishedAt string) *Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/games/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNetworkAuthenticationRequired)
+		_, _ = w.Write([]byte(`{"error":"bot_check_required","challenge_url":"/.waldo/challenge"}`))
+	})
+	mux.HandleFunc("/v3/profile/matches", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"` + listedID + `","data_source":"` + source + `","data_source_match_id":"` + ref + `","finished_at":"` + finishedAt + `"}]`))
+	})
+	ls := httptest.NewServer(mux)
+	t.Cleanup(ls.Close)
+	q, err := queue.Connect("redis://127.0.0.1:1/0", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{CORSOrigins: []string{"*"}, GCBotURL: "http://gc-bot:7300"}
+	return NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(ls.URL, "", leetify.WithLegacyURL(ls.URL)),
+		nil, q, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func TestAnalyzeResolvesFromTheListWhileLegacyIsBotChecked(t *testing.T) {
+	old := time.Now().Add(-45 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	s := legacyBotCheckServer(t, bridgedGame, "matchmaking", "CSGO-dEvM2-2eRoD-czDcx-jZBJS-yGvjN", old)
+	rr := analyzeWithSteam(t, s)
+	// 410 is a share-code verdict reached WITHOUT the legacy route: the list
+	// resolved the code and the expiry check ran. A 500 here is the outage.
+	if rr.Code != http.StatusGone {
+		t.Fatalf("status = %d body=%s; want 410 from the list alone", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAnalyzeRoutesFaceitFromTheList(t *testing.T) {
+	fresh := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	// A FACEIT id from the list must take the FACEIT path, not be mistaken for
+	// a share code. With no FACEIT client configured that path answers 503
+	// (its own honest message), which is the proof it was taken.
+	s := legacyBotCheckServer(t, bridgedGame, "faceit", "1-b6da8261-7a4d-4067-8dee-06c6c47a7118", fresh)
+	rr := analyzeWithSteam(t, s)
+	if rr.Code == http.StatusInternalServerError || strings.Contains(rr.Body.String(), "no demo reference") {
+		t.Fatalf("status = %d body=%s; the FACEIT id was not routed to the FACEIT path", rr.Code, rr.Body.String())
+	}
+}
