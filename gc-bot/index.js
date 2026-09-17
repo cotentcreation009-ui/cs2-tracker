@@ -43,6 +43,14 @@ const RESOLVE_TIMEOUT_MS = Number(process.env.RESOLVE_TIMEOUT_MS || 20000);
 // process re-logs from the saved token and reconnects cleanly (the manual fix).
 const WATCHDOG_INTERVAL_MS = Number(process.env.WATCHDOG_INTERVAL_MS || 60000);
 const GC_STALE_MS = Number(process.env.GC_STALE_MS || 180000);
+// A logon call that produces NO event at all — not loggedOn, not error, not
+// steamGuard — for this long is dead, and nothing above would notice: the GC
+// watchdog waits for a session that once worked, and the container healthcheck
+// only pings HTTP. Seen 2026-09-08 → 09-17: after a Steam-level drop the fresh
+// process printed "logging on with saved refresh token" and then nothing for
+// eight days while reporting healthy. A REJECTED logon still fires "error" and
+// takes the backoff path, so bad credentials can never turn this into a loop.
+const LOGON_STALL_MS = Number(process.env.LOGON_STALL_MS || 10 * 60000);
 
 const CREDS_OK = !!(USER && PASS);
 if (!CREDS_OK) {
@@ -62,6 +70,8 @@ let guardDomain = null;
 let loginAttempts = 0;
 let everGcConnected = false;
 let lastHealthyAt = Date.now(); // baseline so startup gets the same grace window
+let logonCalledAt = 0; // when logOn() last asked Steam; 0 = never
+let logonSettled = true; // Steam answered that call (loggedOn / error / steamGuard)
 
 // share code → demo URL cache (immutable once resolved)
 const cache = new Map();
@@ -76,6 +86,8 @@ function readToken() {
 }
 
 function logOn() {
+  logonCalledAt = Date.now();
+  logonSettled = false;
   const refreshToken = readToken();
   if (refreshToken) {
     console.log("gc-bot: logging on with saved refresh token");
@@ -92,6 +104,7 @@ user.on("refreshToken", (token) => {
 });
 
 user.on("steamGuard", (domain, callback, lastCodeWrong) => {
+  logonSettled = true; // Steam answered; a human is the wait now, not the socket
   guardCallback = callback;
   guardDomain = domain;
   console.log(
@@ -102,6 +115,7 @@ user.on("steamGuard", (domain, callback, lastCodeWrong) => {
 });
 
 user.on("loggedOn", () => {
+  logonSettled = true;
   loggedOn = true;
   loginAttempts = 0;
   guardCallback = null;
@@ -128,6 +142,7 @@ user.on("disconnected", (eresult, msg) => {
 });
 
 user.on("error", (err) => {
+  logonSettled = true;
   loggedOn = false;
   gcConnected = false;
   // A pending Steam Guard prompt belongs to the session that just died — drop it
@@ -152,6 +167,12 @@ user.on("error", (err) => {
 // left to the exponential backoff above and bad creds never cause a restart loop.
 setInterval(() => {
   if (!CREDS_OK || guardCallback) return; // idle, or waiting on a human Guard code
+  if (!logonSettled && Date.now() - logonCalledAt > LOGON_STALL_MS) {
+    console.error(
+      `gc-bot: logon has produced no event for ${Math.round((Date.now() - logonCalledAt) / 1000)}s — exiting for a clean restart`,
+    );
+    process.exit(1);
+  }
   if (gcConnected) {
     lastHealthyAt = Date.now();
     return;

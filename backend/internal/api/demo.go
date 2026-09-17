@@ -438,15 +438,44 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	gd, err := s.leetify.GetGameDetails(r.Context(), gameID)
-	if err != nil {
-		if errors.Is(err, leetify.ErrNotFound) {
-			fail(http.StatusNotFound, "match not found")
+	// The PUBLIC v3 match list first. Leetify's legacy per-game route went
+	// behind a bot check on 2026-09-16 (511 bot_check_required, with or
+	// without the key), and this handler asked it first — so every click on
+	// a match we had not bridged ourselves died with "internal error" while
+	// the v3 list, which carries the same reference for every source, sat
+	// unasked. It is keyed by the profile the match was listed on, which the
+	// button always sends. Legacy is consulted only when the list cannot
+	// answer: no steamId, or a transport/unexpected-status failure.
+	var gd *leetify.GameDetails
+	if sid := parseSteamID64(strings.TrimSpace(req.SteamID)); sid != 0 {
+		ref, lerr := s.leetify.MatchReference(r.Context(), sid, gameID)
+		switch {
+		case lerr == nil:
+			gd = &leetify.GameDetails{ID: gameID, DataSource: ref.Source, FinishedAt: ref.FinishedAt}
+			switch {
+			case ref.Source == "faceit":
+				gd.FaceitMatchID = ref.ID
+			case leetify.ValidShareCode(ref.ID):
+				gd.SteamShareCode = ref.ID
+			}
+		case errors.Is(lerr, leetify.ErrNotFound):
+			// Listed nowhere on this profile: let legacy have its say below.
+		default:
+			s.log.Warn("leetify match list unavailable; trying legacy route", "err", lerr)
+		}
+	}
+	if gd == nil {
+		var err error
+		gd, err = s.leetify.GetGameDetails(r.Context(), gameID)
+		if err != nil {
+			if errors.Is(err, leetify.ErrNotFound) {
+				fail(http.StatusNotFound, "match not found")
+				return
+			}
+			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "match lookup failed")
+			s.serverError(w, "match lookup", err)
 			return
 		}
-		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "match lookup failed")
-		s.serverError(w, "match lookup", err)
-		return
 	}
 
 	var (

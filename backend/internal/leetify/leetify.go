@@ -735,6 +735,57 @@ func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetail
 	}
 }
 
+// MatchReference is what the v3 match list knows about one game: where it was
+// played and the id that source uses for it — a Valve share code for
+// matchmaking/Premier, a FACEIT match id for FACEIT — plus when it finished.
+type MatchReference struct {
+	Source     string // data_source: "matchmaking", "faceit", ...
+	ID         string // data_source_match_id, in that source's own form
+	FinishedAt string // RFC 3339
+}
+
+// MatchReference resolves a Leetify game id through the player's PUBLIC v3
+// match list. This is the primary lookup for one-click analysis, not a
+// fallback: the legacy per-game route sits behind a bot check since 2026-09
+// (511 bot_check_required, keyed or not), and the v3 list is the one public
+// surface that still carries a demo reference — for every source, not only
+// matchmaking.
+func (c *Client) MatchReference(ctx context.Context, steam64 uint64, gameID string) (MatchReference, error) {
+	u := c.baseURL + "/v3/profile/matches?steam64_id=" + fmt.Sprint(steam64)
+	req, err := c.newReq(ctx, u)
+	if err != nil {
+		return MatchReference{}, err
+	}
+	resp, err := c.doWithRetry(req)
+	if err != nil {
+		return MatchReference{}, fmt.Errorf("leetify matches: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return MatchReference{}, ErrNotFound
+	default:
+		return MatchReference{}, fmt.Errorf("leetify matches: unexpected status %d", resp.StatusCode)
+	}
+	var list []struct {
+		ID         string `json:"id"`
+		Source     string `json:"data_source"`
+		Code       string `json:"data_source_match_id"`
+		FinishedAt string `json:"finished_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return MatchReference{}, fmt.Errorf("leetify matches: decode: %w", err)
+	}
+	for _, m := range list {
+		if m.ID == gameID {
+			return MatchReference{Source: m.Source, ID: m.Code, FinishedAt: m.FinishedAt}, nil
+		}
+	}
+	return MatchReference{}, ErrNotFound
+}
+
 // GameShareCode resolves a Leetify game id to its Valve share code through the
 // player's v3 match list, returning the code and the game's finish time.
 //
@@ -743,42 +794,14 @@ func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetail
 // one-click analysis for every profile that Leetify serves. The v3 match list
 // still carries it as data_source_match_id, the only public surface that does.
 func (c *Client) GameShareCode(ctx context.Context, steam64 uint64, gameID string) (code, finishedAt string, err error) {
-	u := c.baseURL + "/v3/profile/matches?steam64_id=" + fmt.Sprint(steam64)
-	req, err := c.newReq(ctx, u)
+	ref, err := c.MatchReference(ctx, steam64, gameID)
 	if err != nil {
 		return "", "", err
 	}
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return "", "", fmt.Errorf("leetify matches: request failed: %w", err)
+	// A FACEIT or unrecognised source carries a non-Valve id here; only a
+	// real share code can resolve a demo.
+	if !ValidShareCode(ref.ID) {
+		return "", ref.FinishedAt, ErrNotFound
 	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound:
-		return "", "", ErrNotFound
-	default:
-		return "", "", fmt.Errorf("leetify matches: unexpected status %d", resp.StatusCode)
-	}
-	var list []struct {
-		ID         string `json:"id"`
-		Code       string `json:"data_source_match_id"`
-		FinishedAt string `json:"finished_at"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return "", "", fmt.Errorf("leetify matches: decode: %w", err)
-	}
-	for _, m := range list {
-		if m.ID != gameID {
-			continue
-		}
-		// A FACEIT or unrecognised source carries a non-Valve id here; only a
-		// real share code can resolve a demo.
-		if !ValidShareCode(m.Code) {
-			return "", m.FinishedAt, ErrNotFound
-		}
-		return m.Code, m.FinishedAt, nil
-	}
-	return "", "", ErrNotFound
+	return ref.ID, ref.FinishedAt, nil
 }
