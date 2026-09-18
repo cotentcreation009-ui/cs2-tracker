@@ -108,9 +108,17 @@ for r in $CF_V4 $CF_V6; do
 done
 ufw --force enable
 
-# key-only SSH
-sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-systemctl reload ssh || systemctl reload sshd || true
+# key-only SSH. A drop-in, not a sed on sshd_config: cloud images ship
+# /etc/ssh/sshd_config.d/50-cloud-init.conf with PasswordAuthentication yes, and
+# sshd takes the FIRST value it reads -- drop-ins are read before the main file,
+# in name order -- so only a drop-in that sorts before 50- actually wins.
+# (Contabo's image, 2026-09-18: 50-cloud-init.conf said yes, the main file said
+# no, and the box still took passwords.)
+printf 'PasswordAuthentication no
+KbdInteractiveAuthentication no
+' > /etc/ssh/sshd_config.d/00-keys-only.conf
+sshd -t && (systemctl reload ssh || systemctl reload sshd || true)
+sshd -T | grep -q '^passwordauthentication no' || { echo "password auth still on" >&2; exit 1; }
 
 # --- unattended upgrades -----------------------------------------------------
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
