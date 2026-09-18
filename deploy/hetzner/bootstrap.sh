@@ -39,10 +39,26 @@ apt-get update -q
 apt-get install -yq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker
 
+# Build cache GC: the GCE box accumulated 25 GB of BuildKit cache (21 GB
+# reclaimable) over 83 days of --build deploys, a third of its disk, and dockerd
+# sat at 385 MB RSS holding the metadata. Cap it.
 cat > /etc/docker/daemon.json <<'EOF'
-{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "builder": { "gc": { "enabled": true, "defaultKeepStorage": "4GB" } }
+}
 EOF
 systemctl restart docker
+
+# The GCE box's journal had grown to 941 MB with no cap.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/90-cap.conf <<'EOF'
+[Journal]
+SystemMaxUse=200M
+MaxRetentionSec=14day
+EOF
+systemctl restart systemd-journald
 
 # --- the cs2 user ------------------------------------------------------------
 if ! id cs2 >/dev/null 2>&1; then
