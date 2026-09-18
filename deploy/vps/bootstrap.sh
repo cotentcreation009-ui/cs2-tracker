@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# One-shot bootstrap for a fresh Hetzner Cloud Ubuntu 24.04 server that will run
-# the csrun.win stack (docker-compose.prod.yml + docker-compose.posters.yml).
+# One-shot bootstrap for a fresh Ubuntu 24.04 VPS (Contabo, Hetzner, anything with
+# root SSH) that will run the csrun.win stack (docker-compose.prod.yml +
+# docker-compose.posters.yml).
 #
 # Run ONCE as root on the new box:
 #   bash bootstrap.sh
 #
-# What it does, and why each piece is here (see docs/MIGRATE-TO-HETZNER.md):
+# What it does, and why each piece is here (see docs/MIGRATE-OFF-GCE.md):
 #   - Docker CE from Docker's own apt repo (Ubuntu's docker.io lags compose v2).
 #   - A `cs2` user that owns the checkouts and runs compose, sudo + docker group,
 #     with root's authorized_keys copied so the same SSH key works for both.
+#     OPERATOR_PUBKEY (env) is appended to both if set — Contabo's order form has
+#     no key field, so the first login is by emailed password and this is where
+#     the key gets in before password auth is switched off below.
 #   - ufw: SSH from anywhere (key-only), 80/443 ONLY from Cloudflare's published
 #     ranges — the same origin lockdown the GCE firewall rule `allow-cf-web` had.
 #     Cloudflare's ranges: https://www.cloudflare.com/ips (snapshot 2026-09-18).
@@ -67,10 +71,17 @@ fi
 usermod -aG sudo,docker cs2
 echo "cs2 ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/cs2
 chmod 0440 /etc/sudoers.d/cs2
-install -d -m 0700 -o cs2 -g cs2 /home/cs2/.ssh
-if [ -f /root/.ssh/authorized_keys ]; then
-  install -m 0600 -o cs2 -g cs2 /root/.ssh/authorized_keys /home/cs2/.ssh/authorized_keys
+install -d -m 0700 /root/.ssh
+if [ -n "${OPERATOR_PUBKEY:-}" ]; then
+  grep -qF "$OPERATOR_PUBKEY" /root/.ssh/authorized_keys 2>/dev/null || echo "$OPERATOR_PUBKEY" >> /root/.ssh/authorized_keys
+  chmod 600 /root/.ssh/authorized_keys
 fi
+if [ ! -s /root/.ssh/authorized_keys ]; then
+  echo "refusing to disable password auth: no key in /root/.ssh/authorized_keys (set OPERATOR_PUBKEY)" >&2
+  exit 1
+fi
+install -d -m 0700 -o cs2 -g cs2 /home/cs2/.ssh
+install -m 0600 -o cs2 -g cs2 /root/.ssh/authorized_keys /home/cs2/.ssh/authorized_keys
 install -d -o cs2 -g cs2 /home/cs2/backups /home/cs2/csrun
 
 # --- swap --------------------------------------------------------------------
