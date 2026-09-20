@@ -23,6 +23,11 @@
 #
 #     CSRUN_OPERATOR_KEY=<openssl rand -hex 24>
 #     CSRUN_ORDER_TOKEN_SECRET=<openssl rand -hex 32>
+#     STRIPE_SECRET_KEY=sk_test_... / sk_live_...   (present => the storefront SELLS;
+#                                                   absent => manual provider, no checkout)
+#     STRIPE_WEBHOOK_SECRET=whsec_...               (the posters.csrun.win/api/v1/payments/webhook endpoint)
+#     STRIPE_AUTOMATIC_TAX=                         (1 only once Stripe Tax is enabled in the dashboard)
+#     PRODIGI_API_KEY=...                           (the print client, when it lands)
 #
 # THE TWO QUIET FAILURES, named here because nothing logs them: SKIN_RENDERER unset means
 # the storefront sells a labelled placeholder (factory.ts defaults to mock);
@@ -84,9 +89,29 @@ services:
       CSRUN_DATA_DIR: /data
       CSRUN_OPERATOR_KEY: ${CSRUN_OPERATOR_KEY:?set CSRUN_OPERATOR_KEY in .env (openssl rand -hex 24)}
       CSRUN_ORDER_TOKEN_SECRET: ${CSRUN_ORDER_TOKEN_SECRET:?set CSRUN_ORDER_TOKEN_SECRET in .env (openssl rand -hex 32)}
+      # CHECKOUT (2026-09-19). Stripe's hosted page needs to know where to send the
+      # customer back to, and a route handler behind Caddy cannot be trusted to guess
+      # its own public origin.
+      CSRUN_PUBLIC_URL: https://posters.csrun.win
+      # Optional on purpose (no :? guard): an empty STRIPE_SECRET_KEY is the manual
+      # provider and an order panel that says checkout is not live -- the shop closed,
+      # not the container refusing to start.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_AUTOMATIC_TAX: ${STRIPE_AUTOMATIC_TAX:-}
+      PRODIGI_API_KEY: ${PRODIGI_API_KEY:-}
+      # WHERE A PAID ORDER'S FILES GO. Both used to default to paths inside the
+      # container (artifacts/orders, artifacts/masters), which a rebuild erases --
+      # and the order row records the path, so the customer's master download and
+      # the print submission would 404 after the first redeploy. Both now live on
+      # the host: the per-order sheet + SVG + provenance under the /data mount, the
+      # content-addressed archive in the same directory the worker archives to.
+      CSRUN_ORDERS_DIR: /data/orders
+      CS2_MASTER_ARCHIVE_DIR: /masters
     volumes:
       - ../csrun/backdrops:/backdrops:ro
       - ../csrun/data:/data
+      - ../csrun/masters:/masters
       # Valve's collection crests and map coins. Gitignored in the poster repo (the
       # same rule as every Valve-derived pixel there), so the image ships none and
       # every card draws the initials monogram in its corner -- no error. Same road
