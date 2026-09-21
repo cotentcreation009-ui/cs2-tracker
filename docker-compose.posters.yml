@@ -31,6 +31,8 @@
 #     PRODIGI_API_BASE=                             (https://api.sandbox.prodigi.com + a sandbox key = nothing prints)
 #     CSRUN_PRINT_CALLBACK_KEY=<openssl rand -hex 24>   (in every order's callbackUrl; wrong key = 401)
 #     CSRUN_PRINT_SUBMISSION=                       (auto | manual | off)
+#     CSRUN_QC_MODE=                                (auto: the customer is the QC | human)
+#     CSRUN_OPERATOR_EMAIL=                         (the owner's inbox for the exceptions)
 #     RESEND_API_KEY=                               (absent = customer emails are logged, not sent)
 #     CSRUN_EMAIL_FROM=CSRun <orders@csrun.win>     (domain verified in Resend)
 #
@@ -112,6 +114,11 @@ services:
       PRODIGI_API_BASE: ${PRODIGI_API_BASE:-}
       CSRUN_PRINT_CALLBACK_KEY: ${CSRUN_PRINT_CALLBACK_KEY:-}
       CSRUN_PRINT_SUBMISSION: ${CSRUN_PRINT_SUBMISSION:-}
+      # No operator page (owner's decision 2026-09-22): the customer approved the
+      # poster on screen, the render checks the file, and what needs a person is
+      # emailed to this address instead.
+      CSRUN_QC_MODE: ${CSRUN_QC_MODE:-}
+      CSRUN_OPERATOR_EMAIL: ${CSRUN_OPERATOR_EMAIL:-}
       # EMAIL. Without a key the two customer emails (order link on payment,
       # tracking on shipment) are logged and noted on the order, never lost.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
