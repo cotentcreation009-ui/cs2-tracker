@@ -27,7 +27,12 @@
 #                                                   absent => manual provider, no checkout)
 #     STRIPE_WEBHOOK_SECRET=whsec_...               (the posters.csrun.win/api/v1/payments/webhook endpoint)
 #     STRIPE_AUTOMATIC_TAX=                         (1 only once Stripe Tax is enabled in the dashboard)
-#     PRODIGI_API_KEY=...                           (the print client, when it lands)
+#     PRODIGI_API_KEY=...                           (LIVE: orders are real and charged)
+#     PRODIGI_API_BASE=                             (https://api.sandbox.prodigi.com + a sandbox key = nothing prints)
+#     CSRUN_PRINT_CALLBACK_KEY=<openssl rand -hex 24>   (in every order's callbackUrl; wrong key = 401)
+#     CSRUN_PRINT_SUBMISSION=                       (auto | manual | off)
+#     RESEND_API_KEY=                               (absent = customer emails are logged, not sent)
+#     CSRUN_EMAIL_FROM=CSRun <orders@csrun.win>     (domain verified in Resend)
 #
 # THE TWO QUIET FAILURES, named here because nothing logs them: SKIN_RENDERER unset means
 # the storefront sells a labelled placeholder (factory.ts defaults to mock);
@@ -99,7 +104,19 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_AUTOMATIC_TAX: ${STRIPE_AUTOMATIC_TAX:-}
+      # PRINT (2026-09-21). The partner is called from here; its callbacks land on
+      # /api/v1/print/webhook. A test-mode payment is never sent to a live key and a
+      # live payment never to the sandbox (lib/print/submit.ts), so a wrong pairing
+      # here is a refused submission with a note on the order, not a poster.
       PRODIGI_API_KEY: ${PRODIGI_API_KEY:-}
+      PRODIGI_API_BASE: ${PRODIGI_API_BASE:-}
+      CSRUN_PRINT_CALLBACK_KEY: ${CSRUN_PRINT_CALLBACK_KEY:-}
+      CSRUN_PRINT_SUBMISSION: ${CSRUN_PRINT_SUBMISSION:-}
+      # EMAIL. Without a key the two customer emails (order link on payment,
+      # tracking on shipment) are logged and noted on the order, never lost.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      CSRUN_EMAIL_FROM: ${CSRUN_EMAIL_FROM:-}
+      CSRUN_EMAIL_REPLY_TO: ${CSRUN_EMAIL_REPLY_TO:-}
       # WHERE A PAID ORDER'S FILES GO. Both used to default to paths inside the
       # container (artifacts/orders, artifacts/masters), which a rebuild erases --
       # and the order row records the path, so the customer's master download and
