@@ -9,12 +9,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-# Build all four binaries; the runtime image keeps them all on PATH so a single
-# image serves the api, the worker, and the parsedemo/seed tools.
+# Build all five binaries; the runtime image keeps them all on PATH so a single
+# image serves the api, the worker, the parsedemo/seed tools, and the Leetify
+# relay (docker-compose.relay.yml, on its own box).
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/parsedemo ./cmd/parsedemo \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/leetifyrelay ./cmd/leetifyrelay
 
 # ---- runtime stage ---------------------------------------------------------
 FROM alpine:3.20

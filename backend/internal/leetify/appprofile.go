@@ -3,10 +3,13 @@ package leetify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // THE APP-API FALLBACK, and the whole of why it exists.
@@ -38,6 +41,17 @@ import (
 // (LEETIFY_APP_FALLBACK=0) to turn the whole thing off the day it stops being
 // wise. Flipping the order is a one-line change in GetProfile if that is ever
 // what is wanted.
+//
+// THE WALL, AND THE RELAY. On 2026-09-24 the app host answered every request
+// from the VM with 511 bot_check_required — not because the VM is in a
+// datacenter (40 of 40 check-host nodes on hosting networks worldwide got 200
+// the same hour) but because of WHICH network: Contabo's AS40021, which the
+// wall refuses wholesale, just as Skinport's Cloudflare does. So the fallback
+// can be asked through a relay instead — cmd/leetifyrelay, a keyed forwarder
+// for exactly these routes, running on a network the wall answers
+// (LEETIFY_APP_RELAY_URL / _KEY; docs/LEETIFY-RELAY.md). That is a change of
+// return address, not a bypass: no challenge is solved, nothing is faked, and
+// a 511 arriving through the relay pauses the fallback here all the same.
 //
 // WHAT IT FILLS, AND HOW THAT WAS CHECKED. The ratings-and-micro-stats panel and
 // the headline Leetify rating. The units were verified against a registered
@@ -109,13 +123,44 @@ type appDataSources struct {
 // ratings from (see the header). The single-platform pools follow; the 2v2
 // formats come last because their numbers are not comparable to 5v5 play, but
 // a wingman-only player is still better shown, with the pool named, than not.
-var appSourcePreference = []string{"5v5", "matchmaking", "matchmaking_competitive", "matchmaking_wingman", "2v2"}
+var appSourcePreference = []string{"5v5", "faceit", "matchmaking", "matchmaking_competitive", "matchmaking_wingman", "2v2"}
+
+// errAppBlocked: the app host refused this NETWORK, not this player. Seen as
+// 511 ("bot check required") on every request from the VM's datacenter IP on
+// 2026-09-24, while the same URLs answered 200 from a home connection. This
+// is the same wall that took the legacy per-game route on this host away on
+// 2026-09-16.
+var errAppBlocked = errors.New("leetify app: this network is refused (511 bot check)")
+
+// appBlockedFor is how long the app routes are left alone after a 511. A wall
+// does not come down per player, and a few thousand misses a day knocking on
+// it would be both pointless and the surest way to get the IP flagged on the
+// public host too.
+const appBlockedFor = 30 * time.Minute
+
+func (c *Client) appBlocked() bool { return time.Now().UnixNano() < c.appBlockedUntil.Load() }
+
+// tripAppBlock pauses the fallback and says so once per pause, not once per
+// lookup — the log line that tells an operator the fallback is currently dead.
+func (c *Client) tripAppBlock() {
+	now := time.Now()
+	until := now.Add(appBlockedFor)
+	if prev := c.appBlockedUntil.Swap(until.UnixNano()); now.UnixNano() >= prev {
+		slog.Warn("leetify app host refused this network (511 bot check); fallback paused",
+			"until", until.UTC().Format(time.RFC3339))
+	}
+}
 
 // getAppJSON fetches one app-API route. A 403 (hidden by the player, or not
 // served anonymously) and a 404 are both "no", returned as ErrNotFound so a
-// caller cannot mistake either for something to retry.
+// caller cannot mistake either for something to retry. A 511 is the bot wall
+// refusing the whole network: it pauses the fallback (see errAppBlocked).
 func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
-	req, err := c.newReq(ctx, c.appHost()+path)
+	base := c.appHost()
+	if c.appRelayURL != "" {
+		base = c.appRelayURL // same path; the relay forwards it (see the header)
+	}
+	req, err := c.newReq(ctx, base+path)
 	if err != nil {
 		return err
 	}
@@ -124,6 +169,9 @@ func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
 	// a plain GET without a browser's Origin or Referer, so this traffic
 	// presents itself as what it is.
 	req.Header.Del("_leetify_key")
+	if c.appRelayURL != "" {
+		req.Header.Set("X-Relay-Key", c.appRelayKey)
+	}
 
 	resp, err := c.doWithRetry(req)
 	if err != nil {
@@ -139,6 +187,9 @@ func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
 		return nil
 	case http.StatusNotFound, http.StatusForbidden:
 		return ErrNotFound
+	case http.StatusNetworkAuthenticationRequired:
+		c.tripAppBlock()
+		return errAppBlocked
 	default:
 		return fmt.Errorf("leetify app: unexpected status %d for %s", resp.StatusCode, path)
 	}
@@ -148,6 +199,9 @@ func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
 // surface does not carry. Returns ErrNotFound when the app has nothing either,
 // which is the honest end of the line: no third source gets tried.
 func (c *Client) GetAppProfile(ctx context.Context, steam64 uint64) (*Profile, error) {
+	if c.appBlocked() {
+		return nil, errAppBlocked
+	}
 	id := strconv.FormatUint(steam64, 10)
 	base := "/api/profile/" + id
 

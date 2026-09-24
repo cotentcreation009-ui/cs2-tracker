@@ -110,7 +110,7 @@ func fixtureHandler(t *testing.T, inv http.HandlerFunc) *http.Client {
 	})
 	// reset the price cache between tests
 	priceMu.Lock()
-	priceMap, priceAt = nil, time.Time{}
+	priceMap, priceAt, priceSource = nil, time.Time{}, ""
 	priceMu.Unlock()
 	// The throttle guards Steam's per-IP budget; a fixture server has none, so
 	// tests read back-to-back with a clean gate.

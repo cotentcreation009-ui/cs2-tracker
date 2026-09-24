@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 // The CS2 skin-inventory showcase: total value up top, then the collection
 // itself — filterable by category and by whether an item carries a market
@@ -79,6 +79,10 @@ interface InvView {
   priced_items: number;
   // How many of priced_items are valued on real sales rather than an estimate.
   realized_items?: number;
+  // Which market the values are quoted from: "skinport" (cash market, the
+  // default) or "steam-market" (Steam's own, when Skinport won't talk to our
+  // server). Absent when nothing could be priced.
+  price_source?: string;
   item_count: number;
   distinct_count: number;
   marketable_count: number;
@@ -101,10 +105,24 @@ const usd = (v: number) =>
     ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
     : `$${v.toFixed(2)}`;
 
+// The market the figures come from, in words. The backend says which
+// (price_source); every tooltip below names it, because Skinport's cash prices
+// and Steam's wallet prices run a Steam-cut apart and "via Skinport" over a
+// Steam figure would be a lie in small print. Threaded by context so the
+// item cards and the detail modal need no extra props.
+const marketName = (source?: string) => (source === "steam-market" ? "Steam market" : "Skinport");
+const MarketCtx = createContext<string>("Skinport");
+// What a price with no sales behind it is: Skinport publishes a suggested
+// price; steamapis a smoothed current market value.
+const estimateNote = (market: string) =>
+  market === "Skinport"
+    ? "Skinport's suggested price — no recent sales to go on"
+    : "Current Steam market value — too few recent sales for a median";
+
 // Why an item carries no value. An unpriced item is usually not a gap in our
 // data — it's an item no market will carry, and saying so is more useful than
 // a dash. Steam tells us which kind of "no" it is.
-function priceGap(it: InvItem): { short: string; long: string } | null {
+function priceGap(it: InvItem, market: string): { short: string; long: string } | null {
   if (it.price) return null;
   if (!it.marketable) {
     return {
@@ -114,7 +132,7 @@ function priceGap(it: InvItem): { short: string; long: string } | null {
   }
   return {
     short: "No price",
-    long: "Sellable, but with nothing listed on Skinport and too few recent sales to take a median from, there's no figure worth quoting.",
+    long: `Sellable, but with nothing listed on ${market} and too few recent sales to take a median from, there's no figure worth quoting.`,
   };
 }
 
@@ -279,13 +297,13 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
                   {" · "}
                   <span
                     className="text-muted"
-                    title="Valued at the median of what actually sold on Skinport in the last 30 days, rather than at a suggested price"
+                    title={`Valued at the median of what actually sold on ${marketName(view.price_source)} in the last 30 days, rather than at an estimate`}
                   >
                     {view.realized_items} on real sale prices
                   </span>
                 </>
               ) : null}
-              {" · via Skinport"}
+              {view.priced_items > 0 ? ` · via ${marketName(view.price_source)}` : ""}
             </div>
             {view.truncated ? (
               <div className="mt-1 text-[11px] text-muted">
@@ -331,17 +349,31 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
       </div>
 
       {items.length > 0 ? (
-        <Collection items={items} />
+        <MarketCtx.Provider value={marketName(view.price_source)}>
+          <Collection items={items} />
+        </MarketCtx.Provider>
       ) : (
         <p className="px-4 py-8 text-center text-sm text-muted">No items to show.</p>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/60 pt-3">
         <p className="text-[10px] leading-snug text-faint">
-          Values in USD from Skinport: the median of the last 30 days of real sales where an item
-          sells often enough for that to mean something, otherwise Skinport&apos;s suggested price.
-          These are cash-market figures, not Steam wallet prices, and items with no market price
-          aren&apos;t counted. Inventory data from Steam; shown only for public inventories
+          {view.price_source === "steam-market" ? (
+            <>
+              Values in USD from the Steam Community Market (via steamapis): the last 30 days of
+              real sales where an item sells often enough for that to mean something, otherwise its
+              current smoothed market value. These are Steam wallet prices, which run above
+              cash-market figures, and items with no market price aren&apos;t counted.
+            </>
+          ) : (
+            <>
+              Values in USD from Skinport: the median of the last 30 days of real sales where an item
+              sells often enough for that to mean something, otherwise Skinport&apos;s suggested price.
+              These are cash-market figures, not Steam wallet prices, and items with no market price
+              aren&apos;t counted.
+            </>
+          )}{" "}
+          Inventory data from Steam; shown only for public inventories
           {asOf ? <> · read {asOf}</> : null}.
         </p>
         <a
@@ -544,7 +576,8 @@ function CatTab({
 function ItemCard({ it, onOpen }: { it: InvItem; onOpen: () => void }) {
   const hue = it.rarity_color || "#8a93a5";
   const wear = it.exterior ? (WEAR_SHORT[it.exterior] ?? it.exterior) : "";
-  const gap = priceGap(it);
+  const market = useContext(MarketCtx);
+  const gap = priceGap(it, market);
   return (
     <button
       type="button"
@@ -555,8 +588,8 @@ function ItemCard({ it, onOpen }: { it: InvItem; onOpen: () => void }) {
         it.price
           ? `${it.name} — ${usd(it.price)} each. ${
               it.sale_volume
-                ? `Median of ${it.sale_volume} sales in the last 30 days.`
-                : "Skinport's suggested price — no recent sales to go on."
+                ? `Median of ${it.sale_volume} ${market} sales in the last 30 days.`
+                : `${estimateNote(market)}.`
             }${
               it.price_variants
                 ? ` This skin comes in ${it.price_variants} separately-priced finishes and a public inventory doesn't say which one this is, so the figure is the median across them.`
@@ -647,7 +680,8 @@ function WearBar({ float }: { float: number }) {
 function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
   const [copied, setCopied] = useState<number | null>(null);
   const hue = it.rarity_color || "#8a93a5";
-  const gap = priceGap(it);
+  const market = useContext(MarketCtx);
+  const gap = priceGap(it, market);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -783,8 +817,8 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
               </div>
               <p className="max-w-[55%] text-right text-[10px] leading-snug text-faint">
                 {it.sale_volume
-                  ? `Median of ${it.sale_volume} Skinport sales in the last 30 days`
-                  : "Skinport's suggested price — no recent sales to go on"}
+                  ? `Median of ${it.sale_volume} ${market} sales in the last 30 days`
+                  : estimateNote(market)}
                 {it.price_variants
                   ? `. ${it.price_variants} finishes share this name; the figure is the median across them.`
                   : ""}

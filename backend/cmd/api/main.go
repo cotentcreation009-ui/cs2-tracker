@@ -60,7 +60,13 @@ func run(log *slog.Logger) error {
 		log.Warn("no STEAM_API_KEY set — vanity resolution and identity hydration are disabled until provided")
 	}
 
-	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey, leetify.WithAppFallback(cfg.LeetifyAppFallback))
+	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey,
+		leetify.WithAppFallback(cfg.LeetifyAppFallback),
+		leetify.WithAppRelay(cfg.LeetifyAppRelayURL, cfg.LeetifyAppRelayKey))
+	// Say which way the app fallback goes: a relay that was meant to be set and
+	// isn't looks exactly like Leetify having nothing for a third of lookups.
+	log.Info("leetify app fallback", "enabled", cfg.LeetifyAppFallback,
+		"relay", cfg.LeetifyAppRelayURL != "", "relay_url", cfg.LeetifyAppRelayURL)
 
 	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey, faceit.WithDownloadKey(cfg.FaceitDownloadKey))
 	if !faceitClient.HasKey() {

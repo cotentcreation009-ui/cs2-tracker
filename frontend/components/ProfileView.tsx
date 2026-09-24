@@ -142,14 +142,9 @@ export function ProfileView({
   const flashesPerRound = rounds > 0 ? career.enemiesFlashed / rounds : 0;
   const mvpsPerMatch = career.matches > 0 ? career.mvps / career.matches : 0;
 
-  // Full parsed-match detail + Steam lifetime stats + cross-source — everything
-  // that doesn't fit the compact CheatMeter box. Rendered inline on the fallback
-  // page, and behind the "Match stats" button when the box is the whole page, so
-  // no data is ever dropped. Each sub-section self-hides when its data is absent.
-  const matchStatsPanel =
-    hasData || steamStats || leetify || faceit ? (
-      <div className="space-y-5">
-        {hasData && (
+  // The parsed-demo detail (career stats, form, trend, recent matches, maps,
+  // weapons). Each sub-section self-hides when its data is absent.
+  const parsedSections = hasData ? (
           <>
             <section>
               <SectionTitle>Career stats</SectionTitle>
@@ -210,18 +205,37 @@ export function ProfileView({
               </div>
             </section>
           </>
-        )}
+  ) : null;
 
+  // OUR numbers — demos CSRun parsed itself: the parsed career above and the
+  // per-demo rows the connected-account pipeline keeps. One panel behind one
+  // button that carries our name, never merged into a third party's — a
+  // visitor has to be able to tell whose numbers are whose. When Leetify
+  // serves a profile, its numbers fill the hero and ours live here only
+  // (owner's call, 2026-09-24).
+  const ourStatsPanel =
+    hasData || bridgeParsed.length > 0 ? (
+      <div className="space-y-5">
+        {bridgeParsed.length > 0 && <OurStatsPanel rows={bridgeParsed} />}
+        {parsedSections}
+      </div>
+    ) : null;
+
+  // Steam lifetime stats + the cross-source strip — what doesn't fit the compact
+  // CheatMeter box and isn't ours. Rendered inline on the fallback page, and
+  // behind the "Match stats" button when the box is the whole page.
+  const matchStatsPanel =
+    steamStats || leetify || faceit ? (
+      <div className="space-y-5">
         {steamStats && <SteamStatsPanel data={steamStats} />}
-
         <CrossSource career={career} leetify={leetify} faceit={faceit} steamStats={steamStats} />
       </div>
     ) : null;
 
-  // With no parsed matches and no Steam lifetime stats, "Match stats" would be
-  // just the cross-source strip — too thin for its own button. Fold it into
-  // the Leetify panel instead and drop the button.
-  const richMatchStats = hasData || !!steamStats;
+  // With no Steam lifetime stats, "Match stats" would be just the cross-source
+  // strip — too thin for its own button. Fold it into the Leetify panel instead
+  // and drop the button.
+  const richMatchStats = !!steamStats;
   const crossNode = (
     <CrossSource career={career} leetify={leetify} faceit={faceit} steamStats={steamStats} />
   );
@@ -258,9 +272,9 @@ export function ProfileView({
     ) : bridge && bridge.matches > 0 ? (
       <BridgeStatsPanel aggregate={bridge} rows={bridgeMatches} />
     ) : null,
-    // OUR numbers, in their own slot with their own button. Never merged into
-    // the Leetify panel: a visitor has to be able to tell whose is whose.
-    ourstats: bridgeParsed.length > 0 ? <OurStatsPanel rows={bridgeParsed} /> : null,
+    // OUR numbers, in their own slot with their own button — the CheatMeter
+    // places it under the analysis scope, not in the header row.
+    ourstats: ourStatsPanel,
     counter: (leetify ?? pseudoLeetify) ? (
       <CounterReport
         leetify={(leetify ?? pseudoLeetify)!}
@@ -306,7 +320,9 @@ export function ProfileView({
           faceit={faceit}
           steamStats={steamStats}
           steamExtras={steamExtras}
-          rating={hasData ? career.rating : null}
+          // Our career rating sits on the hero only when no Leetify profile
+          // does; otherwise it is part of "our stats", one click away.
+          rating={hasData && !leetify ? career.rating : null}
           career={career}
           panels={panels}
           generatedOn={new Date().toLocaleDateString("en-US", {
@@ -419,7 +435,7 @@ export function ProfileView({
           </div>
 
           <div className="flex items-center gap-4 sm:flex-col sm:items-end">
-            {hasData && <RatingRing rating={career.rating} />}
+            {hasData && !leetify && <RatingRing rating={career.rating} />}
             <div className="flex gap-2">
               <ShareButton label="Share" />
               <Link
@@ -498,6 +514,8 @@ export function ProfileView({
           them yet — their Leetify/FACEIT profile may be private or unavailable.
         </div>
       )}
+
+      {ourStatsPanel}
 
       {matchStatsPanel}
 

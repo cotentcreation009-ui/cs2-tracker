@@ -37,6 +37,10 @@ var (
 	// What items actually sold for, rather than what Skinport suggests they
 	// are worth — 35k names with min/max/avg/median/volume per window.
 	skinportSalesURL = "https://api.skinport.com/v1/sales/history?app_id=730&currency=USD"
+	// Steam's own market, read in bulk through steamapis.com with the same key
+	// that carries inventory reads when Steam throttles this IP. Stands in when
+	// Skinport will not talk to this network at all (see prices).
+	steamapisMarketURL = "https://api.steamapis.com/market/items/730?api_key=%s"
 )
 
 const iconBase = "https://community.fastly.steamstatic.com/economy/image/"
@@ -136,6 +140,11 @@ type View struct {
 	// directly ("steamapis") — diagnostic, and lets ops verify the fallback
 	// is carrying reads during a Steam penalty.
 	Source string `json:"source,omitempty"`
+	// PriceSource names the market the values are quoted from — "skinport"
+	// (cash market) or "steam-market" (Steam's own, via steamapis). The panel
+	// must say which: the two run a Steam-cut apart, and "via Skinport" over a
+	// Steam figure would be a lie in small print.
+	PriceSource string `json:"price_source,omitempty"`
 
 	TotalValue  float64 `json:"total_value"`
 	PricedItems int     `json:"priced_items"`
@@ -187,10 +196,41 @@ func median(v []float64) float64 {
 const minVolume = 3
 
 var (
-	priceMu  sync.Mutex
-	priceMap map[string]Price
-	priceAt  time.Time
+	priceMu     sync.Mutex
+	priceMap    map[string]Price
+	priceAt     time.Time
+	priceSource string // which feed priceMap came from (priceSource* below)
 )
+
+// Price sources, in order of preference. Skinport is the cash market this
+// panel has always been valued on. Steam's own market, read through
+// steamapis.com, stands in when Skinport will not talk to this network: since
+// the move to Contabo (2026-09-19) api.skinport.com answers every request from
+// the VM with Cloudflare's "error code: 1005" — the hosting ASN is banned
+// outright, and no user-agent or header changes that — so every inventory
+// read $0.00 for days with only a WARN line to say why.
+const (
+	priceSourceSkinport    = "skinport"
+	priceSourceSteamMarket = "steam-market"
+)
+
+// priceTTL is how long a price map is kept. Skinport is keyless and cheap.
+// The steamapis feed is metered against the account (its per-call cost is
+// not published where a machine can read it), so it is refreshed rarely —
+// skin prices move over days, not hours.
+func priceTTL(source string) time.Duration {
+	if source == priceSourceSteamMarket {
+		return 6 * time.Hour
+	}
+	return time.Hour
+}
+
+// currentPriceSource names the feed behind the map prices() last returned.
+func currentPriceSource() string {
+	priceMu.Lock()
+	defer priceMu.Unlock()
+	return priceSource
+}
 
 // decompress unwraps a response we asked to be compressed. Setting
 // Accept-Encoding by hand opts out of net/http's transparent gzip handling,
@@ -251,24 +291,37 @@ func fetchSkinport(ctx context.Context, hc *http.Client, url string, out any) er
 	return nil
 }
 
-// prices builds the name→price map from Skinport's two feeds. The sales feed
-// is what people actually paid, so it wins wherever there is enough volume for
-// a median to mean something; the suggested-price feed covers everything else.
-// Both are one keyless call each and cached together for an hour.
+// prices returns the name→price map, refreshing it from the first source that
+// answers: Skinport, then the Steam market. Stale-if-error when neither does.
 func prices(ctx context.Context, hc *http.Client) map[string]Price {
 	priceMu.Lock()
 	defer priceMu.Unlock()
-	if priceMap != nil && time.Since(priceAt) < time.Hour {
+	if priceMap != nil && time.Since(priceAt) < priceTTL(priceSource) {
 		return priceMap
 	}
+	if m := skinportPrices(ctx, hc); len(m) > 0 {
+		priceMap, priceAt, priceSource = m, time.Now(), priceSourceSkinport
+		return priceMap
+	}
+	if m := steamMarketPrices(ctx, hc); len(m) > 0 {
+		priceMap, priceAt, priceSource = m, time.Now(), priceSourceSteamMarket
+		return priceMap
+	}
+	return priceMap // stale-if-error: keep whatever we had
+}
 
+// skinportPrices builds the map from Skinport's two feeds. The sales feed is
+// what people actually paid, so it wins wherever there is enough volume for a
+// median to mean something; the suggested-price feed covers everything else.
+// Both are one keyless call each. Nil when the listing feed fails.
+func skinportPrices(ctx context.Context, hc *http.Client) map[string]Price {
 	var listed []struct {
 		Name      string   `json:"market_hash_name"`
 		Suggested *float64 `json:"suggested_price"`
 		Min       *float64 `json:"min_price"`
 	}
 	if err := fetchSkinport(ctx, hc, skinportURL, &listed); err != nil {
-		return priceMap // stale-if-error: keep whatever we had
+		return nil
 	}
 	// Skinport publishes one row per finish, so a Doppler knife arrives as five
 	// or six rows sharing a market name. Assigning them into the map one by one
@@ -317,11 +370,73 @@ func prices(ctx context.Context, hc *http.Client) map[string]Price {
 			m[name] = Price{USD: median(ps), Volume: soldVolume[name], Variants: variants}
 		}
 	}
+	return m
+}
 
-	if len(m) > 0 {
-		priceMap, priceAt = m, time.Now()
+// steamMarketPrices builds the same map from steamapis.com's bulk feed of
+// Steam's own market: one keyed call, ~34k items. Their "safe" figure is the
+// smoothed current value they publish for every item; safe_ts.last_30d is the
+// same over the last 30 days of recorded sales, with sold.last_30d saying how
+// many. The mapping mirrors Skinport's: a 30-day figure backed by at least
+// minVolume sales is a realized price (Volume set), otherwise the smoothed
+// value stands in for a suggested price. Steam keys one row per market name,
+// so a Doppler is one figure here, not a median across finishes. Steam-market
+// prices include Steam's cut and run above cash-market ones — which is why
+// the view carries PriceSource. Nil without a key or when the feed fails.
+func steamMarketPrices(ctx context.Context, hc *http.Client) map[string]Price {
+	key := getFallbackKey()
+	if key == "" {
+		return nil
 	}
-	return priceMap
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf(steamapisMarketURL, url.QueryEscape(key)), nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "CSRun/1.0 (https://csrun.win)")
+	resp, err := hc.Do(req)
+	if err != nil {
+		slog.Warn("steam market price fetch failed", "err", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		slog.Warn("steam market price fetch failed", "status", resp.StatusCode,
+			"detail", strings.TrimSpace(string(snippet)))
+		return nil
+	}
+	// ~27 MB live; the limit is a guard against a runaway body, not a budget.
+	var feed struct {
+		Data []struct {
+			Name   string `json:"market_hash_name"`
+			Prices struct {
+				Safe   float64 `json:"safe"`
+				SafeTS struct {
+					Last30d float64 `json:"last_30d"`
+				} `json:"safe_ts"`
+				Sold struct {
+					Last30d int `json:"last_30d"`
+				} `json:"sold"`
+			} `json:"prices"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 96<<20)).Decode(&feed); err != nil {
+		slog.Warn("steam market price fetch failed", "detail", "decode: "+err.Error())
+		return nil
+	}
+	m := make(map[string]Price, len(feed.Data))
+	for _, r := range feed.Data {
+		p := r.Prices
+		switch {
+		case p.Sold.Last30d >= minVolume && p.SafeTS.Last30d > 0:
+			m[r.Name] = Price{USD: p.SafeTS.Last30d, Volume: p.Sold.Last30d, Variants: 1}
+		case p.Safe > 0:
+			m[r.Name] = Price{USD: p.Safe, Variants: 1}
+		}
+	}
+	return m
 }
 
 // --- request gate -----------------------------------------------------------
@@ -769,6 +884,7 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 	if viaFallback {
 		v.Source = "steamapis"
 	}
+	v.PriceSource = currentPriceSource()
 	catMap := map[string]*Category{}
 	rarMap := map[string]*RarityBand{}
 	for _, d := range inv.Descriptions {

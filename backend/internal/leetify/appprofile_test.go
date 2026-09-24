@@ -142,6 +142,62 @@ func TestGetProfile_AppAPIHasNothingEither(t *testing.T) {
 	}
 }
 
+// From a datacenter IP the app host answers 511 to everything (seen live on
+// the VM, 2026-09-24, while a home connection got 200). That must read as a
+// plain miss — never a 500 — and must pause the app routes for a while: a
+// wall is per network, not per player, so knocking again per lookup is noise.
+func TestGetProfile_AppHostBotWallPausesTheFallback(t *testing.T) {
+	var appCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			atomic.AddInt32(&appCalls, 1)
+			w.WriteHeader(http.StatusNetworkAuthenticationRequired)
+			_, _ = w.Write([]byte(`{"error":"bot_check_required"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+
+	for i := 0; i < 3; i++ {
+		if _, err := c.GetProfile(context.Background(), 42); err != ErrNotFound {
+			t.Fatalf("lookup %d: err = %v, want ErrNotFound", i, err)
+		}
+	}
+	if n := atomic.LoadInt32(&appCalls); n != 1 {
+		t.Errorf("app calls = %d, want 1: the first 511 pauses the fallback", n)
+	}
+	if !c.appBlocked() {
+		t.Error("the fallback should be paused after a 511")
+	}
+}
+
+// Any other failure inside the fallback is also a miss to the caller, but it
+// does not pause anything: a 500 from the app is a bad moment, not a wall.
+func TestGetProfile_AppErrorIsAMissNotAnError(t *testing.T) {
+	var appCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			atomic.AddInt32(&appCalls, 1)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+
+	for i := 0; i < 2; i++ {
+		if _, err := c.GetProfile(context.Background(), 42); err != ErrNotFound {
+			t.Fatalf("lookup %d: err = %v, want ErrNotFound", i, err)
+		}
+	}
+	if n := atomic.LoadInt32(&appCalls); n != 2 {
+		t.Errorf("app calls = %d, want 2: an ordinary error must not pause the fallback", n)
+	}
+}
+
 func TestGetProfile_AppFallbackOff(t *testing.T) {
 	var appCalls int32
 	srv := appServer(t, &appCalls)
