@@ -394,8 +394,11 @@ export function CheatMeter({
   // A parsed-demo career of a few matches must not displace the fuller card
   // built from every source: parsing our own demos started this at three
   // matches and it took over a ninety-five-match profile. The richer card
-  // wins; the parsed detail lives in its own labelled panel.
-  const showCareer = !!career && career.matches >= 10;
+  // wins; the parsed detail lives in its own labelled panel. And whenever a
+  // Leetify profile is on the page, the card is Leetify's regardless of how
+  // many demos we parsed — ours are behind the "CSRun stats" button under the
+  // analysis scope (owner's call, 2026-09-24).
+  const showCareer = !!career && career.matches >= 10 && !leetify;
   const openTotal = career ? career.openingKills + career.openingDeaths : 0;
   const openPct = openTotal > 0 ? (career!.openingKills / openTotal) * 100 : 0;
   const clutchTotal = career ? career.clutchesWon + career.clutchesLost : 0;
@@ -558,7 +561,6 @@ export function CheatMeter({
             matches={panels?.matches}
             split={panels?.split}
             leetify={panels?.leetify}
-            ourstats={panels?.ourstats}
             counter={panels?.counter}
             matchstats={panels?.matchstats}
             friends={panels?.friends}
@@ -687,6 +689,13 @@ export function CheatMeter({
               })()}
             </div>
           </div>
+          {/* OUR stats — demos CSRun parsed — sit behind this one button, under
+              the scope they were computed from, and nowhere else on the hero:
+              a third party's profile fills the cards, ours are one click away
+              and carry our name (owner's call, 2026-09-24). */}
+          {panels?.ourstats && (
+            <StatsPeek ourstats={panels.ourstats} align="start" className="pt-0.5" />
+          )}
           {/* extra account context — compact pills, matching the Steam row above */}
           {(() => {
             const extras: { label: string; value: string }[] = [];

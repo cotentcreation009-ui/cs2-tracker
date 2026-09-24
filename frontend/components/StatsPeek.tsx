@@ -51,6 +51,7 @@ export function StatsPeek({
   friends,
   inventory,
   className = "",
+  align = "center",
 }: {
   matches?: ReactNode;
   split?: ReactNode;
@@ -61,6 +62,9 @@ export function StatsPeek({
   friends?: ReactNode;
   inventory?: ReactNode;
   className?: string;
+  // Where the buttons sit in their row: centred under the player's name (the
+  // header row) or flush left (a single button inside a card).
+  align?: "center" | "start";
 }) {
   const nodes: Record<PeekKey, ReactNode> = { matches, split, leetify, ourstats, counter, matchstats, friends, inventory };
   const items = ORDER.filter((k) => nodes[k]);
@@ -122,7 +126,7 @@ export function StatsPeek({
 
   return (
     <>
-      <div className={`flex flex-wrap items-center justify-center gap-2 ${className}`}>
+      <div className={`flex flex-wrap items-center gap-2 ${align === "start" ? "justify-start" : "justify-center"} ${className}`}>
         {items.map((k) => {
           const m = META[k];
           const active = open === k;
