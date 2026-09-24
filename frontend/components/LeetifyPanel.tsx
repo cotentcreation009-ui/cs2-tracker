@@ -71,6 +71,17 @@ function stat(
     : { value: "—", valueClass: "text-faint" };
 }
 
+// The pools Leetify's app routes summarise a non-member by (types.ts `source`),
+// in the words a visitor would use. "5v5" is not a platform: it is every
+// five-a-side game across Premier, Competitive and FACEIT together.
+const POOL_LABEL: Record<string, string> = {
+  "5v5": "5v5",
+  matchmaking: "matchmaking",
+  matchmaking_competitive: "Competitive",
+  matchmaking_wingman: "Wingman",
+  "2v2": "2v2",
+};
+
 function Group({
   title,
   children,
@@ -119,6 +130,14 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
     s.accuracy_head === 0 &&
     s.preaim === 0 &&
     s.reaction_time_ms === 0;
+  // A profile from Leetify's app routes (types.ts `source`): the public API
+  // had none, so this is the summary of the player's last total_matches games
+  // in one pool. Positioning, clutch and opening are not in it, and neither
+  // are ranks or a match list — those cells must not render as zeros, because
+  // "Positioning 0" and "Clutch +0.00" read as measurements.
+  const appPool = p.source?.startsWith("app:") ? p.source.slice(4) : null;
+  const partial = appPool !== null;
+  const poolLabel = appPool ? (POOL_LABEL[appPool] ?? appPool) : "";
 
   return (
     <section className="card-2 px-5 py-5">
@@ -130,6 +149,14 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
           <h2 className="font-semibold">Leetify</h2>
           {p.privacy_mode && p.privacy_mode !== "public" && (
             <span className="pill bg-mid/15 text-mid">{p.privacy_mode}</span>
+          )}
+          {partial && (
+            <span
+              className="pill bg-mid/15 text-mid"
+              title={`Not a Leetify member — Leetify's summary of their last ${p.total_matches} ${poolLabel} games`}
+            >
+              recent games only
+            </span>
           )}
           {banCount > 0 ? (
             <span className="pill bg-bad/15 text-bad">
@@ -158,7 +185,10 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         {p.kd != null && p.kd > 0 && (
           <Mini label="K/D" value={p.kd.toFixed(2)} valueClass={kdTone(p.kd)} />
         )}
-        <Mini label="Matches" value={p.total_matches.toLocaleString("en-US")} />
+        <Mini
+          label={partial ? "Games in window" : "Matches"}
+          value={p.total_matches.toLocaleString("en-US")}
+        />
         <Mini label="Win rate" value={`${(p.winrate * 100).toFixed(1)}%`} />
         {r.premier != null && r.premier > 0 && (
           <Mini label="Premier" value={r.premier.toLocaleString("en-US")} valueHex={premierHex(r.premier)} />
@@ -214,20 +244,46 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
         </div>
       )}
 
-      {/* skill profile radar + the precise 0-100 bars */}
-      <div className="mt-5 grid items-center gap-4 sm:grid-cols-[240px_1fr]">
-        <RatingRadar rating={p.rating} />
-        <div className="grid gap-3">
+      {partial && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-mid/25 bg-mid/[0.06] px-3 py-2.5 text-xs leading-relaxed text-muted">
+          <span className="mt-px shrink-0 font-bold text-mid">ⓘ</span>
+          <span>
+            <span className="font-semibold text-mid">Not a Leetify member.</span>{" "}
+            This player never signed up for Leetify, so its public API has no
+            profile for them. Shown instead is Leetify&apos;s summary of their last{" "}
+            {p.total_matches} {poolLabel} games: ratings and mechanics, but no match
+            list, ranks, or positioning / clutch / opening ratings.
+          </span>
+        </div>
+      )}
+
+      {/* skill profile radar + the precise 0-100 bars. An app-sourced profile
+          has no positioning, clutch or opening, so no radar: three of its five
+          axes would be invented. */}
+      {partial ? (
+        <div className="mt-5 grid gap-3">
           <Bar label="Aim" value={p.rating.aim} />
-          <Bar label="Positioning" value={p.rating.positioning} />
           <Bar label="Utility" value={p.rating.utility} />
         </div>
-      </div>
+      ) : (
+        <div className="mt-5 grid items-center gap-4 sm:grid-cols-[240px_1fr]">
+          <RatingRadar rating={p.rating} />
+          <div className="grid gap-3">
+            <Bar label="Aim" value={p.rating.aim} />
+            <Bar label="Positioning" value={p.rating.positioning} />
+            <Bar label="Utility" value={p.rating.utility} />
+          </div>
+        </div>
+      )}
 
       {/* impact ratings (centred near 0) */}
       <Group title="Leetify impact ratings">
-        <Mini label="Clutch" value={signed(p.rating.clutch)} valueClass={impactColor(p.rating.clutch)} />
-        <Mini label="Opening" value={signed(p.rating.opening)} valueClass={impactColor(p.rating.opening)} />
+        {!partial && (
+          <>
+            <Mini label="Clutch" value={signed(p.rating.clutch)} valueClass={impactColor(p.rating.clutch)} />
+            <Mini label="Opening" value={signed(p.rating.opening)} valueClass={impactColor(p.rating.opening)} />
+          </>
+        )}
         <Mini label="CT rating" value={signed(p.rating.ct_leetify)} valueClass={impactColor(p.rating.ct_leetify)} />
         <Mini label="T rating" value={signed(p.rating.t_leetify)} valueClass={impactColor(p.rating.t_leetify)} />
       </Group>

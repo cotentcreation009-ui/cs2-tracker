@@ -791,7 +791,10 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 	}
 	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
 		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
-	if notFound || err != nil || prof == nil {
+	// A profile from Leetify's app routes (Source set) carries stats but no
+	// teammate list, so for this panel it counts as no profile: the bridge's
+	// own rows keep their say for a non-member exactly as before.
+	if notFound || err != nil || prof == nil || prof.Source != "" {
 		if err != nil && !notFound {
 			s.serverError(w, "leetify profile", err)
 			return

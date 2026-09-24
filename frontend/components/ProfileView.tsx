@@ -123,8 +123,10 @@ export function ProfileView({
   const splitMatches = leetify?.recent_matches ?? [];
   // A bridged player's stored rows, dressed in Leetify's shapes so the SAME
   // panels render for them. Display only; scoring reads the aggregate through
-  // its own gated path.
-  const bridgedRecent = leetify ? [] : recentFromBridge(bridgeMatches);
+  // its own gated path. Keyed on the LIST, not the profile: a profile from
+  // Leetify's app routes (`source` set) has stats and an empty match list, and
+  // the bridge's rows still belong on that page.
+  const bridgedRecent = splitMatches.length > 0 ? [] : recentFromBridge(bridgeMatches);
   const pseudoLeetify = leetify ? null : pseudoProfileFromBridge(bridge, bridgeMatches);
   const openTotal = career.openingKills + career.openingDeaths;
   const openWinPct = openTotal > 0 ? (career.openingKills / openTotal) * 100 : 0;

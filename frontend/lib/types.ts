@@ -166,6 +166,11 @@ export interface LeetifyProfile {
   avg_party_size?: number; // legacy endpoint only
   peak_premier?: number; // highest Premier rating across the match list
   privacy_mode: string;
+  // "app:<pool>" (e.g. "app:5v5") when the profile came from Leetify's app
+  // routes because the public API had none — a summary of the player's last
+  // total_matches games in that pool, with no match list, ranks, positioning,
+  // clutch or opening ratings. Absent for a public-API profile.
+  source?: string;
   first_match_date?: string;
   bans?: unknown[];
   rating: {
@@ -192,6 +197,7 @@ export interface LeetifyProfile {
     flashbang_hit_foe_per_flashbang: number;
     flashbang_leading_to_kill: number;
     he_foes_damage_avg: number;
+    he_friends_damage_avg?: number;
     utility_on_death_avg: number;
   };
   ranks: {

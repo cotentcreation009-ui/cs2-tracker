@@ -54,6 +54,10 @@ services:
       # notice once already; when it happens again the fix must be an .env edit
       # and a restart, not a rebuild.
       LEETIFY_BASE_URL: ${LEETIFY_BASE_URL:-}
+      # Profiles /v3 will not serve (non-members) come from Leetify's own app
+      # routes instead; 0/false switches that off, with a restart and no
+      # rebuild (backend/internal/leetify/appprofile.go).
+      LEETIFY_APP_FALLBACK: ${LEETIFY_APP_FALLBACK:-}
       # Assemble profiles for players Leetify will not serve one for, out of the
       # match reports they appear in. Off unless set to 1: it depends on a
       # carve-out Leetify could close without notice, so it must be switchable
