@@ -336,9 +336,14 @@ export function CheatMeter({
     (m) => (m.rankType ?? 0) === 11 && (m.rankAfter ?? 0) > 0,
   );
   const premier = leetify?.ranks?.premier ?? bridgedPremier?.rankAfter ?? 0;
-  const premierHistory: PremierPoint[] = (
-    leetify?.recent_matches ?? recentFromBridge(bridgeMatches ?? [], bridgeParsed ?? [])
-  )
+  // A profile from Leetify's app routes (`source` set) has stats but an EMPTY
+  // match list, so "is there a list" — not "is there a profile" — decides
+  // whether the bridge's rows stand in for it.
+  const bridgedRecent = recentFromBridge(bridgeMatches ?? [], bridgeParsed ?? []);
+  const recentMatches = leetify?.recent_matches?.length
+    ? leetify.recent_matches
+    : bridgedRecent;
+  const premierHistory: PremierPoint[] = recentMatches
     .filter((m) => m.rank_type === 11 && (m.rank ?? 0) > 0)
     .map((m) => ({ rating: m.rank as number, date: m.finished_at }));
   const {
@@ -359,10 +364,8 @@ export function CheatMeter({
   // Career stats + map win rates now fill the row where the scale cards used to
   // sit — those duplicated the factors column, whereas these are new signal.
   // The map chart reads Leetify's recent-match shape; a bridged player's rows
-  // are dressed in it by the shared adapter. Display only — scoring never
-  // touches these.
-  const bridgedRecent = recentFromBridge(bridgeMatches ?? [], bridgeParsed ?? []);
-  const recentMatches = leetify?.recent_matches ?? bridgedRecent;
+  // are dressed in it by the shared adapter (recentMatches above). Display
+  // only — scoring never touches these.
   const distinctMaps = new Set(
     recentMatches.filter((m) => m.map_name).map((m) => m.map_name),
   ).size;

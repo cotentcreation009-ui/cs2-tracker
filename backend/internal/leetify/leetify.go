@@ -32,9 +32,12 @@ const maxRecentMatches = 200
 // Client talks to the Leetify public API.
 type Client struct {
 	baseURL   string
-	legacyURL string // legacy fallback host (api.leetify.com)
+	legacyURL string // the app's own host (api.cs-prod.leetify.com); also the app-API fallback host
 	apiKey    string // optional; self-serve keys raise the rate tier
 	http      *http.Client
+	// appFallback: when /v3 has no profile, ask the app's own routes (see
+	// appprofile.go). On by default; LEETIFY_APP_FALLBACK=0 turns it off.
+	appFallback bool
 }
 
 // Option customises a Client.
@@ -42,6 +45,9 @@ type Option func(*Client)
 
 // WithHTTPClient injects a custom HTTP client (used in tests).
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
+
+// WithAppFallback turns the app-API fallback on or off (see appprofile.go).
+func WithAppFallback(on bool) Option { return func(c *Client) { c.appFallback = on } }
 
 // WithLegacyURL overrides the legacy fallback host (used in tests).
 func WithLegacyURL(u string) Option {
@@ -56,9 +62,10 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		// was an undocumented alias Leetify shut off without notice on
 		// 2026-09-01; this host serves the same legacy routes and is what
 		// their match pages themselves call.
-		legacyURL: "https://api.cs-prod.leetify.com",
-		apiKey:    apiKey,
-		http:      &http.Client{Timeout: 10 * time.Second},
+		legacyURL:   "https://api.cs-prod.leetify.com",
+		apiKey:      apiKey,
+		http:        &http.Client{Timeout: 10 * time.Second},
+		appFallback: true,
 	}
 	for _, o := range opts {
 		o(c)
@@ -109,7 +116,12 @@ type Stats struct {
 	FlashbangHitFoePerFlash float64 `json:"flashbang_hit_foe_per_flashbang"`
 	FlashbangLeadingToKill  float64 `json:"flashbang_leading_to_kill"`
 	HEFoesDamageAvg         float64 `json:"he_foes_damage_avg"`
-	UtilityOnDeathAvg       float64 `json:"utility_on_death_avg"`
+	// v3 has always returned this beside he_foes_damage_avg; it was simply
+	// never surfaced. The pair is how Leetify's own page reads the number
+	// ("AVG HE DMG 7.9 / 0.0" — damage to enemies against damage to teammates),
+	// and one half alone flatters a player who nades his own side.
+	HEFriendsDamageAvg float64 `json:"he_friends_damage_avg"`
+	UtilityOnDeathAvg  float64 `json:"utility_on_death_avg"`
 }
 
 // RecentMatch is one row of Leetify's recent-match list (most recent first).
@@ -161,6 +173,10 @@ type Profile struct {
 	Rating         Rating            `json:"rating"`
 	Stats          Stats             `json:"stats"`
 	Ranks          json.RawMessage   `json:"ranks"`
+	// Source names where the row came from when it was not /v3: "app:5v5",
+	// "app:matchmaking", … (see appprofile.go). Empty for a v3 profile, so
+	// existing consumers see no change.
+	Source string `json:"source,omitempty"`
 	// KD + AvgPartySize came from the legacy profile endpoint's per-match
 	// data (v3 doesn't expose them, so they're 0/omitted there); PeakPremier is
 	// the highest Premier rating seen across the match list (both sources).
@@ -417,14 +433,16 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		computeRankDeltas(p.PremierMatches)
 		return &p, nil
 	case http.StatusNotFound:
-		// Since Leetify's Jan 2026 policy, /v3 is the whole public surface for
-		// profiles: it serves REGISTERED accounts only, and the old
-		// api.leetify.com/api/profile/id/ fallback that quietly served everyone
-		// else was withdrawn upstream around July 2026 (404 for every account,
-		// including registered ones). A 404 here is therefore the final answer,
-		// and retrying the dead endpoint only made every miss pay for a second
-		// round trip.
-		return nil, ErrNotFound
+		// Since Leetify's Jan 2026 policy, /v3 serves REGISTERED accounts only,
+		// and the old api.leetify.com/api/profile/id/ route that quietly served
+		// everyone else was withdrawn around July 2026. What still answers for
+		// the rest is the app's own API — the routes leetify.com itself calls
+		// for an anonymous visitor — and that is the one fallback left
+		// (appprofile.go). Its own "no" is final; nothing is tried after it.
+		if !c.appFallback {
+			return nil, ErrNotFound
+		}
+		return c.GetAppProfile(ctx, steam64)
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 	}

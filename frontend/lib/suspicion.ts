@@ -486,8 +486,17 @@ export function computeSuspicion(
     (leetify ? 45 : bridged ? 40 : 30) +
       // Sample size comes from whichever source is actually being scored. Using
       // the larger of the two would let bridge rows inflate the confidence of a
-      // player whose read comes entirely from their own profile.
-      Math.min(leetify ? recent.length : (bridged?.matches ?? 0), 30) +
+      // player whose read comes entirely from their own profile. A profile from
+      // Leetify's app routes (`source` set) carries no match list, but its
+      // numbers are over total_matches real games — that IS its sample.
+      Math.min(
+        leetify
+          ? leetify.source
+            ? leetify.total_matches
+            : recent.length
+          : (bridged?.matches ?? 0),
+        30,
+      ) +
       (faceit ? 8 : 0) +
       (steamStats ? 6 : 0) +
       Math.min(F.length, 9),

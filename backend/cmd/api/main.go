@@ -60,7 +60,7 @@ func run(log *slog.Logger) error {
 		log.Warn("no STEAM_API_KEY set — vanity resolution and identity hydration are disabled until provided")
 	}
 
-	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey)
+	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey, leetify.WithAppFallback(cfg.LeetifyAppFallback))
 
 	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey, faceit.WithDownloadKey(cfg.FaceitDownloadKey))
 	if !faceitClient.HasKey() {

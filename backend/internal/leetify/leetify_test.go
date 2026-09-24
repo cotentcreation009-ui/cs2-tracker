@@ -53,12 +53,13 @@ func TestGetProfile(t *testing.T) {
 }
 
 func TestGetProfileNotFound(t *testing.T) {
-	// A v3 404 is the final answer. The legacy fallback used to turn every miss
-	// into a second round trip to an endpoint that is dead upstream — so the
-	// test asserts exactly ONE request total.
-	var calls int
+	// A v3 miss costs at most ONE more round trip — the app's data-sources
+	// route (appprofile.go). When that does not know the player either, the
+	// answer is final: no per-source probing, and never the legacy profile
+	// route that died upstream in July 2026.
+	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		paths = append(paths, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
@@ -67,8 +68,9 @@ func TestGetProfileNotFound(t *testing.T) {
 	if _, err := c.GetProfile(context.Background(), 1); err != ErrNotFound {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
-	if calls != 1 {
-		t.Errorf("requests = %d, want 1 (a miss must not retry the dead legacy endpoint)", calls)
+	want := []string{"/v3/profile", "/api/profile/1/recent-games/available-data-sources"}
+	if strings.Join(paths, " ") != strings.Join(want, " ") {
+		t.Errorf("requests = %v, want exactly %v", paths, want)
 	}
 }
 

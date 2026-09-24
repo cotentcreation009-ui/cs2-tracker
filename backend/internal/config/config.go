@@ -34,6 +34,9 @@ type Config struct {
 	// Leetify public API (keyless; key optional for higher rate limits)
 	LeetifyBaseURL string
 	LeetifyAPIKey  string
+	// When /v3 has no profile, ask the app's own routes (internal/leetify/appprofile.go).
+	// On unless LEETIFY_APP_FALLBACK is 0/false.
+	LeetifyAppFallback bool
 
 	// FACEIT Data API (requires a free key from https://developers.faceit.com)
 	FaceitBaseURL string
@@ -141,6 +144,10 @@ func Load() (*Config, error) {
 		// getBool, not == "1": writing true in a .env is the natural thing to do
 		// and an exact-match check would silently leave the feature off.
 		BridgeEnabled: getBool("LEETIFY_BRIDGE_ENABLED", false),
+		// Same tolerance, opposite default: on unless someone writes 0 or false.
+		// A fallback that quietly stayed off would look exactly like Leetify
+		// having nothing for a third of all lookups.
+		LeetifyAppFallback: getBool("LEETIFY_APP_FALLBACK", true),
 
 		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),

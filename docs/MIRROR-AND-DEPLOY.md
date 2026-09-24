@@ -60,7 +60,10 @@ with Caddy/nginx for TLS, and set `STEAM_API_KEY` + `DATABASE_URL` + `REDIS_URL`
 on the backend process. To light up the FACEIT panel, also set `FACEIT_API_KEY`
 (a free **server-side** key from https://developers.faceit.com); without it the
 FACEIT panel and the cross-source table are simply hidden. Optional:
-`LEETIFY_API_KEY`, `FACEIT_BASE_URL`, `EXTERNAL_CACHE_TTL`.
+`LEETIFY_API_KEY`, `FACEIT_BASE_URL`, `EXTERNAL_CACHE_TTL`, and
+`LEETIFY_APP_FALLBACK` (on by default: players Leetify's public API will not
+serve — non-members — are filled from Leetify's own app routes; `0` turns that
+off, see `backend/internal/leetify/appprofile.go`).
 
 Data sources that populate the pages:
 - **Leetify API** (built) — instant MM/Premier + Faceit stats per SteamID, live.

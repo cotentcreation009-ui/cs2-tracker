@@ -136,3 +136,62 @@ func TestTeammatesMissWithoutBridgeStaysEmpty(t *testing.T) {
 		t.Errorf("bridge off should answer empty, got %v", body.Teammates)
 	}
 }
+
+// A non-member now gets a profile from Leetify's app routes — stats, no
+// teammate list. For the Friends panel that must count as no profile, so the
+// corpus still answers exactly as it did when the miss was a plain 404.
+func TestTeammatesAppProfileStillUsesCorpus(t *testing.T) {
+	appLeetify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/profile/76561197995150836/recent-games/available-data-sources":
+			_, _ = w.Write([]byte(`{"dataSources":{"5v5":30}}`))
+		case "/api/profile/76561197995150836/recent-games/5v5":
+			_, _ = w.Write([]byte(`{"aimRating":80.5,"matchesPlayed":30,"kdRatio":1.1,"winRate":0.5}`))
+		case "/api/profile/76561197995150836/meta":
+			_, _ = w.Write([]byte(`{"steam64Id":"76561197995150836","name":"non-member"}`))
+		default: // /v3/profile and anything else
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer appLeetify.Close()
+
+	store := &fakeStore{corpusMates: []db.CorpusTeammate{
+		{SteamID: 76561198000000002, Name: "mate", Together: 5, TogetherWins: 3, TotalMatches: 9},
+	}}
+	cfg := &config.Config{CORSOrigins: []string{"*"}, BridgeEnabled: true}
+	s := NewServer(cfg, store, steam.New(""),
+		leetify.New(appLeetify.URL, "", leetify.WithLegacyURL(appLeetify.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// The profile itself resolves through the app routes…
+	rr := httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561197995150836/leetify", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("leetify profile status = %d body %s", rr.Code, rr.Body.String())
+	}
+	var prof struct {
+		Source string  `json:"source"`
+		Aim    float64 `json:"-"`
+		Rating struct {
+			Aim float64 `json:"aim"`
+		} `json:"rating"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &prof)
+	if prof.Source != "app:5v5" || prof.Rating.Aim != 80.5 {
+		t.Errorf("profile = %s", rr.Body.String())
+	}
+
+	// …and the teammates still come from the corpus.
+	rr = httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561197995150836/teammates", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("teammates status = %d", rr.Code)
+	}
+	var body struct {
+		Teammates []map[string]any `json:"teammates"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if len(body.Teammates) != 1 || body.Teammates[0]["name"] != "mate" {
+		t.Errorf("teammates = %v, want the corpus row", body.Teammates)
+	}
+}
