@@ -13,11 +13,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +40,9 @@ type Client struct {
 	// appFallback: when /v3 has no profile, ask the app's own routes (see
 	// appprofile.go). On by default; LEETIFY_APP_FALLBACK=0 turns it off.
 	appFallback bool
+	// appBlockedUntil (unix nanos) pauses the app routes after the app host
+	// refuses this network with a 511 bot check (appprofile.go).
+	appBlockedUntil atomic.Int64
 }
 
 // Option customises a Client.
@@ -442,7 +447,20 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		if !c.appFallback {
 			return nil, ErrNotFound
 		}
-		return c.GetAppProfile(ctx, steam64)
+		p, aerr := c.GetAppProfile(ctx, steam64)
+		if aerr == nil {
+			return p, nil
+		}
+		// Whatever went wrong in the fallback, v3's answer stands: "no
+		// profile" is all this site can serve, and the caller negative-caches
+		// a miss briefly. It must never become a 500 — on the first deploy the
+		// app host's bot wall turned a third of all lookups into errors. The
+		// reason is still logged (once per pause for the wall, every time for
+		// anything else) so a dead fallback stays visible.
+		if !errors.Is(aerr, ErrNotFound) && !errors.Is(aerr, errAppBlocked) {
+			slog.Warn("leetify app fallback failed", "steam64", steam64, "err", aerr)
+		}
+		return nil, ErrNotFound
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 	}
