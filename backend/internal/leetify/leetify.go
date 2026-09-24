@@ -40,6 +40,12 @@ type Client struct {
 	// appFallback: when /v3 has no profile, ask the app's own routes (see
 	// appprofile.go). On by default; LEETIFY_APP_FALLBACK=0 turns it off.
 	appFallback bool
+	// appRelayURL, when set, is where the app routes are asked instead of the
+	// app host: a keyed forwarder on a network Leetify's bot wall answers
+	// (cmd/leetifyrelay; appprofile.go explains). appRelayKey is the shared
+	// secret that makes the relay answer only to this backend.
+	appRelayURL string
+	appRelayKey string
 	// appBlockedUntil (unix nanos) pauses the app routes after the app host
 	// refuses this network with a 511 bot check (appprofile.go).
 	appBlockedUntil atomic.Int64
@@ -53,6 +59,15 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 
 // WithAppFallback turns the app-API fallback on or off (see appprofile.go).
 func WithAppFallback(on bool) Option { return func(c *Client) { c.appFallback = on } }
+
+// WithAppRelay routes the app-API fallback through a relay (see appprofile.go).
+// An empty url keeps the direct path.
+func WithAppRelay(url, key string) Option {
+	return func(c *Client) {
+		c.appRelayURL = strings.TrimRight(url, "/")
+		c.appRelayKey = key
+	}
+}
 
 // WithLegacyURL overrides the legacy fallback host (used in tests).
 func WithLegacyURL(u string) Option {

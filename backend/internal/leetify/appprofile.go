@@ -42,6 +42,17 @@ import (
 // wise. Flipping the order is a one-line change in GetProfile if that is ever
 // what is wanted.
 //
+// THE WALL, AND THE RELAY. On 2026-09-24 the app host answered every request
+// from the VM with 511 bot_check_required — not because the VM is in a
+// datacenter (40 of 40 check-host nodes on hosting networks worldwide got 200
+// the same hour) but because of WHICH network: Contabo's AS40021, which the
+// wall refuses wholesale, just as Skinport's Cloudflare does. So the fallback
+// can be asked through a relay instead — cmd/leetifyrelay, a keyed forwarder
+// for exactly these routes, running on a network the wall answers
+// (LEETIFY_APP_RELAY_URL / _KEY; docs/LEETIFY-RELAY.md). That is a change of
+// return address, not a bypass: no challenge is solved, nothing is faked, and
+// a 511 arriving through the relay pauses the fallback here all the same.
+//
 // WHAT IT FILLS, AND HOW THAT WAS CHECKED. The ratings-and-micro-stats panel and
 // the headline Leetify rating. The units were verified against a registered
 // player who exists on BOTH surfaces: their app 5v5 aimRating (85.31409…) is
@@ -145,7 +156,11 @@ func (c *Client) tripAppBlock() {
 // caller cannot mistake either for something to retry. A 511 is the bot wall
 // refusing the whole network: it pauses the fallback (see errAppBlocked).
 func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
-	req, err := c.newReq(ctx, c.appHost()+path)
+	base := c.appHost()
+	if c.appRelayURL != "" {
+		base = c.appRelayURL // same path; the relay forwards it (see the header)
+	}
+	req, err := c.newReq(ctx, base+path)
 	if err != nil {
 		return err
 	}
@@ -154,6 +169,9 @@ func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
 	// a plain GET without a browser's Origin or Referer, so this traffic
 	// presents itself as what it is.
 	req.Header.Del("_leetify_key")
+	if c.appRelayURL != "" {
+		req.Header.Set("X-Relay-Key", c.appRelayKey)
+	}
 
 	resp, err := c.doWithRetry(req)
 	if err != nil {

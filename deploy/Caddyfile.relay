@@ -1,0 +1,6 @@
+# TLS front for the Leetify relay (docker-compose.relay.yml). Caddy obtains and
+# renews the certificate itself; RELAY_DOMAIN must resolve to this box (a plain
+# DNS record — not proxied through Cloudflare, or the ACME challenge fails).
+{$RELAY_DOMAIN} {
+	reverse_proxy relay:7400
+}

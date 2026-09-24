@@ -37,6 +37,11 @@ type Config struct {
 	// When /v3 has no profile, ask the app's own routes (internal/leetify/appprofile.go).
 	// On unless LEETIFY_APP_FALLBACK is 0/false.
 	LeetifyAppFallback bool
+	// The app routes are asked through this relay when set — a keyed forwarder
+	// on a network Leetify's bot wall answers, because this box's own network
+	// may not be (cmd/leetifyrelay, docs/LEETIFY-RELAY.md). Empty = ask directly.
+	LeetifyAppRelayURL string
+	LeetifyAppRelayKey string
 
 	// FACEIT Data API (requires a free key from https://developers.faceit.com)
 	FaceitBaseURL string
@@ -148,6 +153,8 @@ func Load() (*Config, error) {
 		// A fallback that quietly stayed off would look exactly like Leetify
 		// having nothing for a third of all lookups.
 		LeetifyAppFallback: getBool("LEETIFY_APP_FALLBACK", true),
+		LeetifyAppRelayURL: getEnv("LEETIFY_APP_RELAY_URL", ""),
+		LeetifyAppRelayKey: getEnv("LEETIFY_APP_RELAY_KEY", ""),
 
 		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),

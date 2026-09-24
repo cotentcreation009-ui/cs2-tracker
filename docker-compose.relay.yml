@@ -1,0 +1,41 @@
+# The Leetify relay on its own small box (docs/LEETIFY-RELAY.md): the keyed
+# forwarder from backend/cmd/leetifyrelay behind Caddy, which gets and renews
+# a Let's Encrypt certificate for RELAY_DOMAIN by itself. Nothing else runs
+# here; the box needs ports 80 and 443 open and an A record pointing at it.
+#
+#   printf 'RELAY_DOMAIN=relay.example.com\nLEETIFY_RELAY_KEY=%s\n' "$(openssl rand -hex 32)" > .env
+#   docker compose -f docker-compose.relay.yml up -d --build
+#   curl -s https://relay.example.com/healthz          # → ok
+
+services:
+  relay:
+    build: ./backend
+    command: ["leetifyrelay", "-listen", ":7400"]
+    restart: unless-stopped
+    environment:
+      LEETIFY_RELAY_KEY: ${LEETIFY_RELAY_KEY:?set LEETIFY_RELAY_KEY in .env (openssl rand -hex 32)}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7400/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # no ports: only Caddy (same network) reaches it
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set RELAY_DOMAIN=relay.yourdomain (host only) in .env}
+    volumes:
+      - ./deploy/Caddyfile.relay:/etc/caddy/Caddyfile:ro
+      - relay_caddy_data:/data
+      - relay_caddy_config:/config
+    depends_on:
+      - relay
+
+volumes:
+  relay_caddy_data:
+  relay_caddy_config:

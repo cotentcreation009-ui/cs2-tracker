@@ -58,6 +58,11 @@ services:
       # routes instead; 0/false switches that off, with a restart and no
       # rebuild (backend/internal/leetify/appprofile.go).
       LEETIFY_APP_FALLBACK: ${LEETIFY_APP_FALLBACK:-}
+      # Where those app routes are asked when this box's own network is on
+      # Leetify's bot wall (Contabo's is): a keyed forwarder on a network
+      # Leetify answers — docs/LEETIFY-RELAY.md. Empty = ask Leetify directly.
+      LEETIFY_APP_RELAY_URL: ${LEETIFY_APP_RELAY_URL:-}
+      LEETIFY_APP_RELAY_KEY: ${LEETIFY_APP_RELAY_KEY:-}
       # Assemble profiles for players Leetify will not serve one for, out of the
       # match reports they appear in. Off unless set to 1: it depends on a
       # carve-out Leetify could close without notice, so it must be switchable
