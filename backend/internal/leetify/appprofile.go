@@ -62,13 +62,14 @@ import (
 // So nothing here is renamed or rescaled beyond that one established
 // conversion. It does NOT fill positioning, clutch or opening (the app's
 // leetifyRatingCategories are a different breakdown; Clutches 2.1 for a player
-// whose v3 clutch is 0.1068 — not the same number on any scale), nor the rank
-// block. Inventing a mapping for those is how a stats page starts lying; the
-// frontend renders what is absent as absent. The match list DOES come along,
-// from /match-history (appMatchHistory below): the last 30 games with map,
-// score, K/D, the game's rating, the pool and the ladder standing — but no
-// game ids and no dates, so those rows carry no "when", no per-game deep
-// stats and no demo button.
+// whose v3 clutch is 0.1068 — not the same number on any scale). Inventing a
+// mapping for those is how a stats page starts lying; the frontend renders
+// what is absent as absent. The match list DOES come along, from
+// /match-history (appMatchHistory below): the last 30 games with map, score,
+// K/D, the game's rating, the pool and the ladder standing — but no game ids
+// and no dates, so those rows carry no "when", no per-game deep stats and no
+// demo button. The rank block is read off that list: the newest Premier
+// game's rating and the newest FACEIT game's level, nothing more.
 
 // appHost is the app's own API — the host leetify.com calls from the browser.
 // It is the same host as legacyURL, so tests point both at one server.
@@ -309,12 +310,26 @@ func (c *Client) GetAppProfile(ctx context.Context, steam64 uint64) (*Profile, e
 	computeRankDeltas(faceit)
 	computeRankDeltas(premier)
 
-	// The one conversion (header): the headline rating onto v3's ranks scale.
-	// Rounded because 0.0242×100 is 2.4200000000000004 in a float, and the
-	// number is displayed to two places anyway.
-	ranks, _ := json.Marshal(map[string]float64{
+	// The rank block, read off the history rather than invented. The headline
+	// rating is the one conversion (header): onto v3's ranks scale, rounded
+	// because 0.0242×100 is 2.4200000000000004 in a float and it is displayed
+	// to two places anyway. The Premier rating is what the player left their
+	// newest Premier game with — which is what Leetify shows as the current
+	// rating (verified in matches.go against members' v3 profiles) — and the
+	// FACEIT level rides on every FACEIT row. What the list does not carry
+	// (elo, wingman, per-map competitive groups) stays absent.
+	rankMap := map[string]float64{
 		"leetify": math.Round(games.LeetifyRating*100*10000) / 10000,
-	})
+	}
+	for _, m := range matches { // newest first
+		if _, ok := rankMap["premier"]; !ok && m.RankType == 11 && m.Rank > 0 {
+			rankMap["premier"] = float64(m.Rank)
+		}
+		if _, ok := rankMap["faceit"]; !ok && m.DataSource == "faceit" && m.Rank >= 1 && m.Rank <= 10 {
+			rankMap["faceit"] = float64(m.Rank)
+		}
+	}
+	ranks, _ := json.Marshal(rankMap)
 
 	return &Profile{
 		Name:      meta.Name,

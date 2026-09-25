@@ -122,14 +122,15 @@ func TestGetProfile_FallsBackToAppAPIAndSkipsRefusedPool(t *testing.T) {
 	if p.KD != 1.228643216080402 || p.Winrate != 0.4666666666666667 || p.TotalMatches != 30 {
 		t.Errorf("kd/winrate/matches = %v/%v/%v", p.KD, p.Winrate, p.TotalMatches)
 	}
-	// The headline rating lands on v3's ranks scale (×100), and nothing else
-	// is claimed about ranks.
+	// The rank block: the headline rating on v3's ranks scale (×100), the
+	// newest Premier game's rating, the newest FACEIT game's level — and
+	// nothing else (no elo, no wingman, no per-map groups).
 	var ranks map[string]float64
 	if err := json.Unmarshal(p.Ranks, &ranks); err != nil {
 		t.Fatalf("ranks = %s: %v", p.Ranks, err)
 	}
-	if len(ranks) != 1 || ranks["leetify"] != 2.42 {
-		t.Errorf("ranks = %v, want exactly {leetify: 2.42}", ranks)
+	if len(ranks) != 3 || ranks["leetify"] != 2.42 || ranks["premier"] != 33426 || ranks["faceit"] != 10 {
+		t.Errorf("ranks = %v, want exactly {leetify: 2.42, premier: 33426, faceit: 10}", ranks)
 	}
 	// The match list, in v3's vocabulary: competitive folds into "matchmaking"
 	// with rank_type 12; FACEIT keeps its level as rank; the Premier chain
@@ -184,6 +185,12 @@ func TestGetProfile_AppProfileWithoutMatchHistoryStillStands(t *testing.T) {
 	}
 	if p.Rating.Aim != 80.5 || p.RecentMatches == nil || len(p.RecentMatches) != 0 {
 		t.Errorf("profile = %+v", p)
+	}
+	// No history → no ranks beyond the headline rating; badges stay absent.
+	var ranks map[string]float64
+	_ = json.Unmarshal(p.Ranks, &ranks)
+	if len(ranks) != 1 {
+		t.Errorf("ranks = %v, want only the headline rating without a history", ranks)
 	}
 }
 
