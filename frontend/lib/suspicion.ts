@@ -268,8 +268,9 @@ export function computeSuspicion(
   //   typical legit (650ms/12°/aim70)            → ~2   very low
   //   strong pro, no gap (480ms/6.5°/aim92)      → ~55  moderate (must NOT reach High)
   //   near-max aim + fast reaction (99/436ms), normal K/D/HS → ~70 High
-  //   blatant aimbot, no gap (380ms/2°/aim99)    → ~86  very high
-  //   same aimbot but cross-platform-consistent  → ~86  very high (not exonerated)
+  //   blatant aimbot, no gap (380ms/2°/aim99)    → 100  very high (overshoot, below)
+  //   same aimbot but cross-platform-consistent  → 100  very high (not exonerated)
+  //   beyond human (305ms/3.9°/aim100/KD4.1)     → 100  very high
   //   no mechanical data (K/D + HS% only)        → capped at 39 (Moderate)
 
   // --- sub-scores (0 = normal, 100 = extreme) ---
@@ -344,16 +345,39 @@ export function computeSuspicion(
   // Score: mechanics drive it. The cross-platform gap (Leetify only) works BOTH
   // ways — a big gap amplifies + adds on top; a near-zero gap is exculpatory. No
   // gap to cross-check → mechanics mostly stand. A ban floors the score high.
+  // Beyond-elite overshoot. Every sub-score above saturates at its top-
+  // percentile anchor, so a 305 ms reaction reads exactly like 430 ms — yet
+  // the distance between "as fast as the best humans" and "faster than any
+  // human" is the whole question. Each direct tell gets a second ramp, from
+  // its elite anchor to an inhuman one (reaction 430→350 ms, crosshair
+  // 3→1.5°, aim 95→99.5), and the LOWER of the two strongest is the overshoot:
+  // two tells must be past human before it counts at all, so one extreme stat
+  // (a 99.4 aim beside a human 436 ms) moves nothing. Calibrated 2026-09-25 on
+  // a profile the owner vouched for — 305 ms / 3.9° / aim 100.0 / K/D 4.1 over
+  // 30 games — which scored 89 under the old ceiling: every tell saturated,
+  // and only the 0.9 "no cross-check" discount kept it from 100. A read that
+  // far past human needs no FACEIT gap to confirm it, so the overshoot lifts
+  // that discount and adds up to +12 on top.
+  const overs = [
+    s && s.reaction_time_ms > 0 ? down(s.reaction_time_ms, 430, 350) : null,
+    s && s.preaim > 0 ? down(s.preaim, 3, 1.5) : null,
+    leetify && leetify.rating.aim > 0 ? up(leetify.rating.aim, 95, 99.5) : null,
+  ]
+    .filter((v): v is number => v != null)
+    .sort((a, b) => b - a);
+  const overshoot = overs.length >= 2 ? overs[1] / 100 : 0;
+
   let score: number;
   if (sGap != null) {
     // A big cross-platform gap amplifies; a near-zero gap nudges down only
     // slightly. gap=0 must equal the no-gap baseline (mech*0.9) so having FACEIT
     // data can never LOWER a score — the old 0.6 floor exonerated cross-platform-
     // consistent cheaters (a uniform aimbot dropped from ~90 to ~60).
-    score = mech * (0.9 + 0.1 * (sGap / 100)) + sGap * 0.25;
+    score = mech * (0.9 + 0.1 * Math.max(sGap / 100, overshoot)) + sGap * 0.25;
   } else {
-    score = mech * 0.9;
+    score = mech * (0.9 + 0.1 * overshoot);
   }
+  score += 12 * overshoot;
   // No mechanical (Leetify) tells → only skill-linked stats; cap below High so a
   // FACEIT/Steam-only K/D + HS% read can't publicly assert High/Very High.
   if (core.length === 0) score = Math.min(score, 39);

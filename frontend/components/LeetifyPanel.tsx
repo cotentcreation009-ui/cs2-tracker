@@ -138,6 +138,9 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
   const appPool = p.source?.startsWith("app:") ? p.source.slice(4) : null;
   const partial = appPool !== null;
   const poolLabel = appPool ? (POOL_LABEL[appPool] ?? appPool) : "";
+  // The app's match history rides along when the relay knows the route; the
+  // note must not claim "no match list" under a list that is right there.
+  const hasList = (p.recent_matches?.length ?? 0) > 0;
 
   return (
     <section className="card-2 px-5 py-5">
@@ -251,8 +254,9 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
             <span className="font-semibold text-mid">Not a Leetify member.</span>{" "}
             This player never signed up for Leetify, so its public API has no
             profile for them. Shown instead is Leetify&apos;s summary of their last{" "}
-            {p.total_matches} {poolLabel} games: ratings and mechanics, but no match
-            list, ranks, or positioning / clutch / opening ratings.
+            {p.total_matches} {poolLabel} games: ratings and mechanics
+            {hasList ? " and the games themselves (without dates)" : ""}, but no ranks
+            or positioning / clutch / opening ratings{hasList ? "" : ", and no match list"}.
           </span>
         </div>
       )}

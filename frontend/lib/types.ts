@@ -168,8 +168,9 @@ export interface LeetifyProfile {
   privacy_mode: string;
   // "app:<pool>" (e.g. "app:5v5") when the profile came from Leetify's app
   // routes because the public API had none — a summary of the player's last
-  // total_matches games in that pool, with no match list, ranks, positioning,
-  // clutch or opening ratings. Absent for a public-API profile.
+  // total_matches games in that pool, with no ranks, positioning, clutch or
+  // opening ratings, and a match list that carries no ids or dates. Absent
+  // for a public-API profile.
   source?: string;
   first_match_date?: string;
   bans?: unknown[];

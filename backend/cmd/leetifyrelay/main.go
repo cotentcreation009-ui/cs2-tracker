@@ -28,9 +28,9 @@ import (
 )
 
 // allowed is the whole surface this relay will forward: a 17-digit SteamID64's
-// pool list, one pool's recent-games summary, and its display name. Anything
-// else is a 404 here before it becomes a request there.
-var allowed = regexp.MustCompile(`^/api/profile/[0-9]{17}/(meta|recent-games/(available-data-sources|[a-z0-9_]{1,32}))$`)
+// pool list, one pool's recent-games summary, its display name, and its last
+// 30 games. Anything else is a 404 here before it becomes a request there.
+var allowed = regexp.MustCompile(`^/api/profile/[0-9]{17}/(meta|match-history|recent-games/(available-data-sources|[a-z0-9_]{1,32}))$`)
 
 // maxBody caps what is copied back; a recent-games summary is ~2 KB.
 const maxBody = 4 << 20

@@ -51,8 +51,8 @@ func TestGetProfile_AppRoutesGoThroughTheRelayWhenConfigured(t *testing.T) {
 	if n := atomic.LoadInt32(&directCalls); n != 0 {
 		t.Errorf("app host asked directly %d times with a relay configured", n)
 	}
-	if n := atomic.LoadInt32(&relayCalls); n != 3 {
-		t.Errorf("relay calls = %d, want 3 (sources, pool, meta)", n)
+	if n := atomic.LoadInt32(&relayCalls); n != 4 {
+		t.Errorf("relay calls = %d, want 4 (sources, pool, meta, match-history)", n)
 	}
 }
 

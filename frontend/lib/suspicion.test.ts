@@ -119,6 +119,32 @@ describe("CheatMeter calibration probes", () => {
     expect(sus!.band).toBe("veryhigh");
   });
 
+  it("beyond human on two direct tells (no gap) → 100, the top of the scale", () => {
+    // The owner-vouched profile of 2026-09-25: 305 ms / 3.9° / aim 100.0 /
+    // HS 58% / K/D 4.1 / Leetify 12.5 over 30 games. Every sub-score saturates
+    // at "elite" — only the overshoot past the elite anchors separates this
+    // from a great player, and it must carry the read all the way.
+    const sus = computeSuspicion(
+      {
+        ...mkLeetify({ reaction: 305, preaim: 3.9, aim: 100, head: 58 }),
+        kd: 4.1,
+        ranks: { leetify: 12.5 },
+      },
+      null,
+      null,
+    );
+    expect(sus!.score).toBe(100);
+    expect(sus!.band).toBe("veryhigh");
+  });
+
+  it("one tell past human beside a human one does not trigger the overshoot", () => {
+    // aim 99.9 (past human) but 470 ms reaction and 8° crosshair (human): the
+    // overshoot needs TWO tells past the elite anchors, so this is the same
+    // read as before — a hot aim rating on its own cannot pin the top.
+    const sus = computeSuspicion(mkLeetify({ reaction: 470, preaim: 8, aim: 99.9, head: 30 }), null, null);
+    expect(sus!.score).toBeLessThan(80);
+  });
+
   it("consistent cheater (gap≈0) is NOT exonerated", () => {
     const recent = [
       ...Array.from({ length: 10 }, () => mkMatch({ data_source: "matchmaking", leetify_rating: 1.0 })),

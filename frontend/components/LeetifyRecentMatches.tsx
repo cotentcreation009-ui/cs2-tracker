@@ -836,9 +836,13 @@ const LIMIT_OPTIONS = [20, 50, 100, 150, 0]; // 0 = all
 export function LeetifyRecentMatches({
   matches,
   steamId,
+  pageHref,
 }: {
   matches: LeetifyRecentMatch[];
   steamId: string;
+  // When the list is inside a modal, where the full-page version lives — a
+  // permanent, linkable URL for the whole history. Omitted on that page itself.
+  pageHref?: string;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [queue, setQueue] = useState<"all" | "premier" | "faceit" | "comp" | "other">("all");
@@ -1155,6 +1159,13 @@ export function LeetifyRecentMatches({
         })}
         </div>
       </div>
+      {pageHref ? (
+        <div className="mt-2 text-right">
+          <a href={pageHref} className="text-sm font-medium text-brand hover:underline">
+            View all matches on their own page →
+          </a>
+        </div>
+      ) : null}
       <p className="mt-1.5 text-[10px] text-faint">
         Rank shows the Premier rating / FACEIT elo you carried into the game → what you left with,
         and the change. Badges carry the in-game tier colour, so a rating crossing a bracket
