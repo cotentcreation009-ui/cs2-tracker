@@ -62,10 +62,13 @@ import (
 // So nothing here is renamed or rescaled beyond that one established
 // conversion. It does NOT fill positioning, clutch or opening (the app's
 // leetifyRatingCategories are a different breakdown; Clutches 2.1 for a player
-// whose v3 clutch is 0.1068 — not the same number on any scale), nor the
-// recent-match list or the rank block, whose app shapes do not match what v3
-// hands the frontend. Inventing a mapping for those is how a stats page starts
-// lying; the frontend renders what is absent as absent.
+// whose v3 clutch is 0.1068 — not the same number on any scale), nor the rank
+// block. Inventing a mapping for those is how a stats page starts lying; the
+// frontend renders what is absent as absent. The match list DOES come along,
+// from /match-history (appMatchHistory below): the last 30 games with map,
+// score, K/D, the game's rating, the pool and the ladder standing — but no
+// game ids and no dates, so those rows carry no "when", no per-game deep
+// stats and no demo button.
 
 // appHost is the app's own API — the host leetify.com calls from the browser.
 // It is the same host as legacyURL, so tests point both at one server.
@@ -115,6 +118,53 @@ type appMeta struct {
 // eating a refusal.
 type appDataSources struct {
 	DataSources map[string]int `json:"dataSources"`
+}
+
+// appMatchHistory is /api/profile/{id}/match-history: the player's last 30
+// games across every pool — the one list the app exposes for a non-member
+// (no paging; every query parameter is ignored). No game ids, no dates
+// (gameFinishedAt is a position, "29" down to "0", newest first) and no
+// per-game aim detail: map, score, K/D, the game's Leetify rating, the pool
+// and the ladder standing after it. Enough for the match list, the form
+// strip, the map chart, the rank-movement chain and the FACEIT-vs-MM gap.
+type appMatchHistory struct {
+	Games []struct {
+		DataSource    string  `json:"dataSource"` // matchmaking | matchmaking_competitive | matchmaking_wingman | faceit
+		Kills         int     `json:"kills"`
+		Deaths        int     `json:"deaths"`
+		LeetifyRating float64 `json:"leetifyRating"`       // raw fraction, like v3's per-game leetify_rating
+		MapName       string  `json:"mapName"`             // "de_dust2"
+		MatchResult   string  `json:"matchResult"`         // win | loss | tie
+		RankType      int     `json:"matchmakingRankType"` // 11 Premier, 12 Competitive; null (→ 0) otherwise
+		Rank          int     `json:"rank"`                // Premier rating / comp skill group / FACEIT level
+		Scores        []int   `json:"scores"`
+	} `json:"games"`
+}
+
+// recentMatches maps the app's history onto v3's vocabulary, so everything
+// that reads recent_matches works unchanged. v3 says "matchmaking" for both
+// Valve queues and tells them apart by rank_type, so the app's
+// matchmaking_competitive folds into that; the rest already agree.
+func (h *appMatchHistory) recentMatches() []RecentMatch {
+	out := make([]RecentMatch, 0, len(h.Games))
+	for _, g := range h.Games {
+		m := RecentMatch{
+			DataSource:    g.DataSource,
+			Outcome:       g.MatchResult,
+			MapName:       g.MapName,
+			LeetifyRating: g.LeetifyRating,
+			Score:         g.Scores,
+			Rank:          g.Rank,
+			RankType:      g.RankType,
+			Kills:         g.Kills,
+			Deaths:        g.Deaths,
+		}
+		if g.DataSource == "matchmaking_competitive" {
+			m.DataSource = "matchmaking"
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // appSourcePreference is the order to try. "5v5" leads because it is not one
@@ -245,6 +295,20 @@ func (c *Client) GetAppProfile(ctx context.Context, steam64 uint64) (*Profile, e
 		return nil, err
 	}
 
+	// So is the match list: without it the profile stands and only the
+	// match-driven panels stay hidden. (Through a relay this route has to be on
+	// its allowlist — an older relay answers 404, which is simply "no list".)
+	var history appMatchHistory
+	if err := c.getAppJSON(ctx, base+"/match-history", &history); err != nil &&
+		!errors.Is(err, ErrNotFound) && !errors.Is(err, errAppBlocked) {
+		slog.Warn("leetify app match history failed", "steam64", id, "err", err)
+	}
+	matches := history.recentMatches()
+	faceit, premier := faceitOnly(matches), premierOnly(matches)
+	computeRankDeltas(matches)
+	computeRankDeltas(faceit)
+	computeRankDeltas(premier)
+
 	// The one conversion (header): the headline rating onto v3's ranks scale.
 	// Rounded because 0.0242×100 is 2.4200000000000004 in a float, and the
 	// number is displayed to two places anyway.
@@ -286,8 +350,11 @@ func (c *Client) GetAppProfile(ctx context.Context, steam64 uint64) (*Profile, e
 			HEFriendsDamageAvg:      games.HeFriendsDamageAvg,
 			UtilityOnDeathAvg:       games.UtilityOnDeathAvg,
 		},
-		// Deliberately empty (see the header): a half-filled list reads as a
-		// player who has stopped playing rather than as data we do not have.
-		RecentMatches: []RecentMatch{},
+		// Never nil: an empty list must serialise as [], not null — the
+		// frontend keys the bridge's stand-in rows on the list's length.
+		RecentMatches:  matches,
+		FaceitMatches:  faceit,
+		PremierMatches: premier,
+		PeakPremier:    peakPremier(matches),
 	}, nil
 }

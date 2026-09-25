@@ -19,6 +19,8 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 		case "/api/profile/76561197965792900/recent-games/5v5":
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_, _ = w.Write([]byte(`{"aimRating":72.2}`))
+		case "/api/profile/76561197965792900/match-history":
+			_, _ = w.Write([]byte(`{"games":[]}`))
 		case "/api/profile/76561197965792900/meta":
 			// The wall, as it answers a refused network: passed through as is.
 			w.WriteHeader(http.StatusNetworkAuthenticationRequired)
@@ -52,6 +54,9 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 	if code, _ := get("/api/profile/76561197965792900/meta", "s3cret", http.MethodGet); code != http.StatusNetworkAuthenticationRequired {
 		t.Errorf("a 511 upstream must come back as 511, got %d", code)
 	}
+	if code, body := get("/api/profile/76561197965792900/match-history", "s3cret", http.MethodGet); code != 200 || body != `{"games":[]}` {
+		t.Errorf("match-history = %d %q", code, body)
+	}
 	if code, _ := get("/api/profile/76561197965792900/recent-games/5v5", "wrong", http.MethodGet); code != http.StatusUnauthorized {
 		t.Errorf("wrong key = %d, want 401", code)
 	}
@@ -76,8 +81,8 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 	if code, body := get("/healthz", "", http.MethodGet); code != 200 || body != "ok" {
 		t.Errorf("healthz = %d %q", code, body)
 	}
-	// Only the two allowed requests ever reached Leetify.
-	if len(seen) != 2 {
-		t.Errorf("upstream saw %v, want exactly the two allowed routes", seen)
+	// Only the three allowed requests ever reached Leetify.
+	if len(seen) != 3 {
+		t.Errorf("upstream saw %v, want exactly the three allowed routes", seen)
 	}
 }

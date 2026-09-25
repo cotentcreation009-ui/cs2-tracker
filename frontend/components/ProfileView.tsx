@@ -248,6 +248,7 @@ export function ProfileView({
         <LeetifyRecentMatches
           matches={splitMatches.length > 0 ? splitMatches : bridgedRecent}
           steamId={player.steamId64}
+          pageHref={`/profiles/${player.steamId64}/matches`}
         />
       ) : null,
     split:

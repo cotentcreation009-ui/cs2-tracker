@@ -50,6 +50,16 @@ func appServer(t *testing.T, appCalls *int32) *httptest.Server {
 				}`))
 			case "/api/profile/42/meta":
 				_ = json.NewEncoder(w).Encode(map[string]any{"steam64Id": "42", "name": "Malone Lam"})
+			case "/api/profile/42/match-history":
+				// Live shape 2026-09-25: newest first, gameFinishedAt is a
+				// position, competitive is its own dataSource, FACEIT's rank is
+				// the level and its rank type is null.
+				_, _ = w.Write([]byte(`{"games":[
+					{"dataSource":"matchmaking","deaths":4,"gameFinishedAt":"29","kills":27,"leetifyRating":0.3736,"mapName":"de_dust2","matchmakingRankType":11,"matchResult":"win","rank":33426,"scores":[13,4]},
+					{"dataSource":"matchmaking_competitive","deaths":11,"gameFinishedAt":"28","kills":26,"leetifyRating":0.1934,"mapName":"de_dust2","matchmakingRankType":12,"matchResult":"win","rank":11,"scores":[13,7]},
+					{"dataSource":"faceit","deaths":18,"gameFinishedAt":"27","kills":20,"leetifyRating":0.0155,"mapName":"de_ancient","matchmakingRankType":null,"matchResult":"loss","rank":10,"scores":[10,13]},
+					{"dataSource":"matchmaking","deaths":9,"gameFinishedAt":"26","kills":21,"leetifyRating":0.12,"mapName":"de_mirage","matchmakingRankType":11,"matchResult":"loss","rank":33100,"scores":[9,13]}
+				]}`))
 			case "/api/profile/7/recent-games/available-data-sources":
 				// Never seen by Leetify at all.
 				_ = json.NewEncoder(w).Encode(map[string]any{"dataSources": map[string]int{}})
@@ -121,8 +131,59 @@ func TestGetProfile_FallsBackToAppAPIAndSkipsRefusedPool(t *testing.T) {
 	if len(ranks) != 1 || ranks["leetify"] != 2.42 {
 		t.Errorf("ranks = %v, want exactly {leetify: 2.42}", ranks)
 	}
-	if p.RecentMatches == nil || len(p.RecentMatches) != 0 {
-		t.Errorf("recent_matches must be present and empty, got %v", p.RecentMatches)
+	// The match list, in v3's vocabulary: competitive folds into "matchmaking"
+	// with rank_type 12; FACEIT keeps its level as rank; the Premier chain
+	// yields the rating movement between the two Premier games; no ids, no
+	// dates.
+	if len(p.RecentMatches) != 4 {
+		t.Fatalf("recent_matches = %d rows, want 4", len(p.RecentMatches))
+	}
+	m0, m1, m2 := p.RecentMatches[0], p.RecentMatches[1], p.RecentMatches[2]
+	if m0.DataSource != "matchmaking" || m0.RankType != 11 || m0.Rank != 33426 || m0.Outcome != "win" ||
+		m0.Kills != 27 || m0.Deaths != 4 || m0.MapName != "de_dust2" || m0.LeetifyRating != 0.3736 ||
+		len(m0.Score) != 2 || m0.Score[0] != 13 || m0.Score[1] != 4 {
+		t.Errorf("premier row = %+v", m0)
+	}
+	if m0.ID != "" || m0.FinishedAt != "" {
+		t.Errorf("the app history has no ids or dates; got id %q finished_at %q", m0.ID, m0.FinishedAt)
+	}
+	if m1.DataSource != "matchmaking" || m1.RankType != 12 || m1.Rank != 11 {
+		t.Errorf("competitive row must fold into matchmaking/rank_type 12, got %+v", m1)
+	}
+	if m2.DataSource != "faceit" || m2.RankType != 0 || m2.Rank != 10 || m2.Outcome != "loss" {
+		t.Errorf("faceit row = %+v", m2)
+	}
+	if m0.RankBefore != 33100 || m0.RankDelta == nil || *m0.RankDelta != 326 {
+		t.Errorf("premier movement = before %d delta %v, want 33100 → +326", m0.RankBefore, m0.RankDelta)
+	}
+	if len(p.PremierMatches) != 2 || len(p.FaceitMatches) != 1 || p.PeakPremier != 33426 {
+		t.Errorf("premier %d / faceit %d / peak %d, want 2 / 1 / 33426", len(p.PremierMatches), len(p.FaceitMatches), p.PeakPremier)
+	}
+}
+
+// A relay that does not know match-history yet (or a player without one)
+// answers 404 there; that is "no list", never a failed profile.
+func TestGetProfile_AppProfileWithoutMatchHistoryStillStands(t *testing.T) {
+	var appCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&appCalls, 1)
+		switch r.URL.Path {
+		case "/api/profile/9/recent-games/available-data-sources":
+			_, _ = w.Write([]byte(`{"dataSources":{"5v5":30}}`))
+		case "/api/profile/9/recent-games/5v5":
+			_, _ = w.Write([]byte(`{"aimRating":80.5,"matchesPlayed":30,"kdRatio":1.1}`))
+		default: // /v3/profile, /meta, /match-history
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+	p, err := c.GetProfile(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("GetProfile: %v", err)
+	}
+	if p.Rating.Aim != 80.5 || p.RecentMatches == nil || len(p.RecentMatches) != 0 {
+		t.Errorf("profile = %+v", p)
 	}
 }
 

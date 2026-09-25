@@ -10,13 +10,14 @@
 //   LEETIFY_APP_RELAY_KEY=<the same secret>
 // and restart the backend. Full runbook: docs/LEETIFY-RELAY.md.
 //
-// It forwards exactly the three profile routes the fallback needs, only with
-// the key, and hands the answer back status and all — a 511 here is a 511
-// there. No challenge is solved and no header is faked.
+// It forwards exactly the four profile routes the fallback needs (pool list,
+// one pool's summary, display name, last 30 games), only with the key, and
+// hands the answer back status and all — a 511 here is a 511 there. No
+// challenge is solved and no header is faked.
 
 const UPSTREAM = "https://api.cs-prod.leetify.com";
 const ALLOWED =
-  /^\/api\/profile\/[0-9]{17}\/(meta|recent-games\/(available-data-sources|[a-z0-9_]{1,32}))$/;
+  /^\/api\/profile\/[0-9]{17}\/(meta|match-history|recent-games\/(available-data-sources|[a-z0-9_]{1,32}))$/;
 
 export default {
   async fetch(request, env) {

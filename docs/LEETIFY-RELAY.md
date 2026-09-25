@@ -21,8 +21,9 @@ does the same to it, which is why inventory prices moved to the Steam market —
 `backend/internal/steaminv/steaminv.go`.)
 
 So the fallback can be asked **through a relay on a network Leetify answers**.
-The relay is a keyed forwarder for exactly three routes — a player's pool list,
-one pool's recent-games summary, and their display name. It solves no
+The relay is a keyed forwarder for exactly four routes — a player's pool list,
+one pool's recent-games summary, their display name, and their last 30 games
+(`match-history`). It solves no
 challenge, fakes no header, and hands Leetify's answer back status and all: if
 the relay's network is ever walled too, the backend sees the 511 and pauses
 the fallback exactly as it does today. Leetify's refusals for a player
