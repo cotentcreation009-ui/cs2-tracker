@@ -41,6 +41,12 @@ var (
 	// that carries inventory reads when Steam throttles this IP. Stands in when
 	// Skinport will not talk to this network at all (see prices).
 	steamapisMarketURL = "https://api.steamapis.com/market/items/730?api_key=%s"
+	// CSFloat's public price list: every market name with how many are listed
+	// and the lowest asking price, in cents. Keyless, ~2.6 MB, and — unlike
+	// Skinport — it answers this network (verified from the VM 2026-09-26).
+	// A second, independent valuation shown beside the Steam one: the cash
+	// price a collector could actually list at, with no Steam cut in it.
+	csfloatPriceListURL = "https://csfloat.com/api/v1/listings/price-list"
 )
 
 const iconBase = "https://community.fastly.steamstatic.com/economy/image/"
@@ -92,6 +98,10 @@ type Item struct {
 	// phases and their rare variants) and Price is the median across them —
 	// which finish this one is cannot be read from a public inventory.
 	PriceVariants int `json:"price_variants,omitempty"`
+	// CsfloatPrice is the lowest asking price for this market name on CSFloat
+	// right now, per unit, USD — a cash-market figure with no Steam cut, shown
+	// beside Price rather than instead of it. Zero when nothing is listed.
+	CsfloatPrice float64 `json:"csfloat_price,omitempty"`
 	// Applied stickers/charms/patches on this copy, and each copy's own
 	// float/seed/inspect payload. Entries carrying either never merge with
 	// their plain namesakes.
@@ -140,14 +150,21 @@ type View struct {
 	// directly ("steamapis") — diagnostic, and lets ops verify the fallback
 	// is carrying reads during a Steam penalty.
 	Source string `json:"source,omitempty"`
-	// PriceSource names the market the values are quoted from — "skinport"
-	// (cash market) or "steam-market" (Steam's own, via steamapis). The panel
-	// must say which: the two run a Steam-cut apart, and "via Skinport" over a
-	// Steam figure would be a lie in small print.
+	// PriceSource names the market TotalValue is quoted from — "steam-market"
+	// (Steam's own, via steamapis; the first choice) or "skinport" (cash
+	// market, without a key). The panel must say which: the two run a
+	// Steam-cut apart, and "via Skinport" over a Steam figure would be a lie
+	// in small print. CsfloatValue below is always CSFloat's.
 	PriceSource string `json:"price_source,omitempty"`
 
 	TotalValue  float64 `json:"total_value"`
 	PricedItems int     `json:"priced_items"`
+	// CsfloatValue is the same inventory valued at CSFloat's lowest current
+	// asking prices (csfloatPrices), and CsfloatPricedItems how many items
+	// that covers. Independent of TotalValue: a second opinion, not a
+	// replacement, and zero when the feed is down.
+	CsfloatValue       float64 `json:"csfloat_value,omitempty"`
+	CsfloatPricedItems int     `json:"csfloat_priced_items,omitempty"`
 	// RealizedItems is how many of PricedItems are valued at a median of real
 	// sales rather than a suggested price — i.e. how much of the total is
 	// backed by money that changed hands.
@@ -292,22 +309,88 @@ func fetchSkinport(ctx context.Context, hc *http.Client, url string, out any) er
 }
 
 // prices returns the name→price map, refreshing it from the first source that
-// answers: Skinport, then the Steam market. Stale-if-error when neither does.
+// answers: the Steam market (with a steamapis key), then Skinport. Steam went
+// first on 2026-09-26, when the panel started showing this figure as "the
+// Steam value" beside CSFloat's — it has to BE the Steam value wherever a key
+// exists, not whichever cash market answered first. Stale-if-error when
+// neither does.
 func prices(ctx context.Context, hc *http.Client) map[string]Price {
 	priceMu.Lock()
 	defer priceMu.Unlock()
 	if priceMap != nil && time.Since(priceAt) < priceTTL(priceSource) {
 		return priceMap
 	}
-	if m := skinportPrices(ctx, hc); len(m) > 0 {
-		priceMap, priceAt, priceSource = m, time.Now(), priceSourceSkinport
-		return priceMap
-	}
 	if m := steamMarketPrices(ctx, hc); len(m) > 0 {
 		priceMap, priceAt, priceSource = m, time.Now(), priceSourceSteamMarket
 		return priceMap
 	}
+	if m := skinportPrices(ctx, hc); len(m) > 0 {
+		priceMap, priceAt, priceSource = m, time.Now(), priceSourceSkinport
+		return priceMap
+	}
 	return priceMap // stale-if-error: keep whatever we had
+}
+
+// --- CSFloat lowest-listing cache (process-wide, 1h) -----------------------
+
+var (
+	csfloatMu  sync.Mutex
+	csfloatMap map[string]float64 // market name → lowest asking price, USD
+	csfloatAt  time.Time
+)
+
+const csfloatTTL = time.Hour
+
+// csfloatPrices returns CSFloat's name→lowest-asking-price map, refreshed
+// hourly from their public price list. Nil (and every inventory's CSFloat
+// value zero) when the feed is down and nothing was cached; stale-if-error
+// otherwise. Never a reason for an inventory read to fail.
+func csfloatPrices(ctx context.Context, hc *http.Client) map[string]float64 {
+	csfloatMu.Lock()
+	defer csfloatMu.Unlock()
+	if csfloatMap != nil && time.Since(csfloatAt) < csfloatTTL {
+		return csfloatMap
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, csfloatPriceListURL, nil)
+	if err != nil {
+		return csfloatMap
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "CSRun/1.0 (https://csrun.win)")
+	resp, err := hc.Do(req)
+	if err != nil {
+		slog.Warn("csfloat price fetch failed", "err", err)
+		return csfloatMap
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		slog.Warn("csfloat price fetch failed", "status", resp.StatusCode,
+			"detail", strings.TrimSpace(string(snippet)))
+		return csfloatMap
+	}
+	var rows []struct {
+		Name     string `json:"market_hash_name"`
+		Quantity int    `json:"quantity"`
+		MinPrice int    `json:"min_price"` // cents
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&rows); err != nil {
+		slog.Warn("csfloat price fetch failed", "detail", "decode: "+err.Error())
+		return csfloatMap
+	}
+	m := make(map[string]float64, len(rows))
+	for _, r := range rows {
+		if r.Name == "" || r.MinPrice <= 0 || r.Quantity <= 0 {
+			continue
+		}
+		m[r.Name] = float64(r.MinPrice) / 100
+	}
+	if len(m) == 0 {
+		slog.Warn("csfloat price fetch failed", "detail", "empty price list")
+		return csfloatMap
+	}
+	csfloatMap, csfloatAt = m, time.Now()
+	return csfloatMap
 }
 
 // skinportPrices builds the map from Skinport's two feeds. The sales feed is
@@ -869,6 +952,7 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 		}
 	}
 	pm := prices(ctx, hc)
+	cf := csfloatPrices(ctx, hc)
 
 	// byName merges the descriptions that share one market_hash_name; order
 	// keeps the first-seen sequence so the result is deterministic before the
@@ -960,6 +1044,11 @@ func Build(ctx context.Context, hc *http.Client, steam64 uint64) (*View, error) 
 			if p.Volume > 0 {
 				v.RealizedItems += n
 			}
+		}
+		if cp, ok := cf[d.MarketName]; ok && cp > 0 {
+			it.CsfloatPrice = cp
+			v.CsfloatValue += cp * float64(n)
+			v.CsfloatPricedItems += n
 		}
 		if it.Marketable {
 			v.MarketableCount += n

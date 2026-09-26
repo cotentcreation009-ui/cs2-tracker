@@ -43,6 +43,10 @@ interface InvItem {
   // rare variants) and price is the median across them — which one this is
   // can't be read from a public inventory.
   price_variants?: number;
+  // The lowest asking price on CSFloat right now, per unit — a cash figure
+  // with no Steam cut, shown beside the market price. Absent when nothing is
+  // listed there.
+  csfloat_price?: number;
   // stickers/charms/patches applied to this copy, and each copy's own
   // float / paint seed / inspect-link payload
   applied?: AppliedMod[];
@@ -77,11 +81,16 @@ interface InvView {
   total_items?: number;
   total_value: number;
   priced_items: number;
+  // The same items valued at CSFloat's lowest current asking prices, and how
+  // many that covers. A second opinion beside total_value, not a replacement;
+  // absent when their feed is down.
+  csfloat_value?: number;
+  csfloat_priced_items?: number;
   // How many of priced_items are valued on real sales rather than an estimate.
   realized_items?: number;
-  // Which market the values are quoted from: "skinport" (cash market, the
-  // default) or "steam-market" (Steam's own, when Skinport won't talk to our
-  // server). Absent when nothing could be priced.
+  // Which market total_value is quoted from: "steam-market" (Steam's own, the
+  // first choice) or "skinport" (cash market, the fallback). Absent when
+  // nothing could be priced.
   price_source?: string;
   item_count: number;
   distinct_count: number;
@@ -285,8 +294,9 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
       <div className="relative overflow-hidden rounded-xl border border-line bg-panel2/40 p-4 sm:p-5">
         <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-56 w-56 rounded-full bg-[#e8b04c] opacity-[0.10] blur-3xl" />
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div className="flex flex-wrap gap-x-8 gap-y-3">
           <div>
-            <div className="stat-label">Estimated inventory value</div>
+            <div className="stat-label">{marketName(view.price_source)} value</div>
             <div className="mt-1 text-3xl font-extrabold tabular-nums text-ink sm:text-4xl">
               {usd(view.total_value)}
             </div>
@@ -312,6 +322,21 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
                 {view.total_items ? ` of ${view.total_items}` : ""} items — the real total is higher.
               </div>
             ) : null}
+          </div>
+          {view.csfloat_value ? (
+            <div>
+              <div className="stat-label">CSFloat value</div>
+              <div
+                className="mt-1 text-3xl font-extrabold tabular-nums text-ink sm:text-4xl"
+                title="What the same items would fetch listed at CSFloat's lowest current asking prices — a cash marketplace, no Steam cut"
+              >
+                {usd(view.csfloat_value)}
+              </div>
+              <div className="mt-1 text-[11px] text-faint">
+                {view.csfloat_priced_items ?? 0} of {view.item_count} items listed there · lowest asking price
+              </div>
+            </div>
+          ) : null}
           </div>
           <div className="flex gap-5">
             <div>
@@ -373,6 +398,12 @@ export function InventoryPanel({ steamId }: { steamId: string }) {
               aren&apos;t counted.
             </>
           )}{" "}
+          {view.csfloat_value ? (
+            <>
+              CSFloat figures are the lowest current asking price for each item on csfloat.com, a
+              cash marketplace, and run below Steam wallet prices.{" "}
+            </>
+          ) : null}
           Inventory data from Steam; shown only for public inventories
           {asOf ? <> · read {asOf}</> : null}.
         </p>
@@ -646,6 +677,12 @@ function ItemCard({ it, onOpen }: { it: InvItem; onOpen: () => void }) {
           </>
         )}
       </div>
+      {it.csfloat_price ? (
+        <div className="mt-0.5 text-[9px] tabular-nums text-faint" title="Lowest asking price on CSFloat right now">
+          CSFloat {usd(it.csfloat_price * it.count)}
+          {it.count > 1 ? ` · ${usd(it.csfloat_price)} ea` : ""}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -825,6 +862,20 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
               </p>
             </div>
           )}
+          {it.csfloat_price ? (
+            <div className="mt-2 flex items-baseline justify-between gap-2 border-t border-line/60 pt-2">
+              <div>
+                <div className="stat-label">CSFloat</div>
+                <div className="text-lg font-extrabold tabular-nums text-ink">
+                  {usd(it.csfloat_price)}
+                  {it.count > 1 ? <span className="text-xs font-semibold text-muted"> each</span> : null}
+                </div>
+              </div>
+              <p className="max-w-[55%] text-right text-[10px] leading-snug text-faint">
+                Lowest asking price listed on CSFloat right now — a cash marketplace, so no Steam cut in it
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/* per-copy inspect links */}
