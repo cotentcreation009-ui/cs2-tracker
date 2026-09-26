@@ -27,7 +27,11 @@
 #                                                   absent => manual provider, no checkout)
 #     STRIPE_WEBHOOK_SECRET=whsec_...               (the posters.csrun.win/api/v1/payments/webhook endpoint)
 #     STRIPE_AUTOMATIC_TAX=                         (1 only once Stripe Tax is enabled in the dashboard)
-#     PRODIGI_API_KEY=...                           (LIVE: orders are real and charged)
+#     CSRUN_PRINT_PROVIDER=printful                 (printful, the default | prodigi)
+#     PRINTFUL_API_TOKEN=...                        (private token for the CSRun store)
+#     PRINTFUL_STORE_ID=                            (optional; only an account-level token needs it)
+#     PRINTFUL_MODE=                                (draft, the default: orders wait unconfirmed | live: printed and charged)
+#     PRODIGI_API_KEY=...                           (fallback partner; LIVE key: orders are real and charged)
 #     PRODIGI_API_BASE=                             (https://api.sandbox.prodigi.com + a sandbox key = nothing prints)
 #     CSRUN_PRINT_CALLBACK_KEY=<openssl rand -hex 24>   (in every order's callbackUrl; wrong key = 401)
 #     CSRUN_PRINT_SUBMISSION=                       (auto | manual | off)
@@ -110,6 +114,16 @@ services:
       # /api/v1/print/webhook. A test-mode payment is never sent to a live key and a
       # live payment never to the sandbox (lib/print/submit.ts), so a wrong pairing
       # here is a refused submission with a note on the order, not a poster.
+      # PRINTFUL (2026-09-26): the partner NEW orders go to (CSRUN_PRINT_PROVIDER,
+      # default printful). Printful has no sandbox: PRINTFUL_MODE=draft (the default)
+      # creates orders that wait, unconfirmed and uncharged, in the Printful
+      # dashboard; live confirms them as they are created. The same mode check pairs
+      # draft with test payments and live with live ones.
+      CSRUN_PRINT_PROVIDER: ${CSRUN_PRINT_PROVIDER:-}
+      PRINTFUL_API_TOKEN: ${PRINTFUL_API_TOKEN:-}
+      PRINTFUL_STORE_ID: ${PRINTFUL_STORE_ID:-}
+      PRINTFUL_MODE: ${PRINTFUL_MODE:-}
+      # PRODIGI: the fallback partner; a job it already owns keeps syncing through it.
       PRODIGI_API_KEY: ${PRODIGI_API_KEY:-}
       PRODIGI_API_BASE: ${PRODIGI_API_BASE:-}
       CSRUN_PRINT_CALLBACK_KEY: ${CSRUN_PRINT_CALLBACK_KEY:-}
