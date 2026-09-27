@@ -128,7 +128,10 @@ export function DetailPopover({
       role="tooltip"
       style={style}
       // bg-panel2 over .card: a panel floating over dense rows must be opaque.
-      className={`modal-pop card pointer-events-none z-30 rounded-xl bg-panel2 p-3 text-xs text-muted shadow-2xl ${
+      // No entrance animation: a tooltip that fades in over live scores reads
+      // as see-through for its first frames, and a panel that appears at once
+      // is the one the screenshots looked right on.
+      className={`card pointer-events-none z-40 rounded-xl bg-panel2 p-3 text-xs text-muted shadow-2xl ${
         place === "inline" ? "absolute left-0 top-full mt-1" : ""
       }`}
     >
