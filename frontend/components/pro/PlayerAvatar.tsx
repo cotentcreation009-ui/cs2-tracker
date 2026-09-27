@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { invalidatePlayerPhoto, resolvePlayerPhoto } from "@/lib/liquipediaClient";
+import { invalidatePlayerPhoto, rememberPlayerPhoto, resolvePlayerPhoto } from "@/lib/liquipediaClient";
 
 // Pro-player avatar: team-tinted placeholder that upgrades to the player's
 // Liquipedia photo (CC BY-SA). Resolution happens in the BROWSER, batched for
@@ -14,12 +14,19 @@ export function PlayerAvatar({
   hex,
   size = 28,
   shape = "circle",
+  photoUrl = null,
 }: {
   nick: string;
   hex: string;
   size?: number;
   /** "circle" = inline avatar; "card" = fills its parent (HLTV-style photo tile) */
   shape?: "circle" | "card";
+  /**
+   * A photo the server already knows (the spotlight's crowd cache): shown at
+   * once, no Liquipedia lookup. Without it the browser resolves the photo
+   * itself and reports it, so the next visitor gets it this way.
+   */
+  photoUrl?: string | null;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -27,6 +34,13 @@ export function PlayerAvatar({
 
   useEffect(() => {
     let alive = true;
+    if (photoUrl) {
+      setSrc(photoUrl);
+      rememberPlayerPhoto(nick, photoUrl);
+      return () => {
+        alive = false;
+      };
+    }
     resolvePlayerPhoto(nick)
       .then((u) => {
         if (alive && u) setSrc(u);
@@ -37,7 +51,7 @@ export function PlayerAvatar({
     return () => {
       alive = false;
     };
-  }, [nick]);
+  }, [nick, photoUrl]);
 
   // A resolved URL can still fail to load (CDN hiccup): retry the image once
   // with a cache-buster; a second failure clears the cached verdict so the

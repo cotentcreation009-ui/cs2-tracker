@@ -48,6 +48,8 @@ export interface SpotlightPlayer {
   teamGridId?: string;
   color?: string;
   live?: boolean;
+  /** From the spotlight's crowd cache (photos), when a visitor has resolved it. */
+  photoUrl?: string;
 }
 export interface FaceitRanked {
   playerId?: string;
@@ -66,6 +68,8 @@ export interface SpotlightResponse {
   faceit: FaceitRanked[];
   faceitRegion?: string;
   updatedAt?: string;
+  /** Liquipedia photo URLs visitors' browsers resolved and reported, keyed by lower-cased nick. */
+  photos?: Record<string, string>;
 }
 
 // FACEIT's own level colours, so a level 10 reads as a level 10.
@@ -161,7 +165,12 @@ export function PlayersRail() {
         // player card only invited reading it as the player's own rank.
         subtitle: p.teamName,
         media: (
-          <PlayerAvatar nick={p.nick} hex={p.color || "#6ad0ff"} shape="card" />
+          <PlayerAvatar
+            nick={p.nick}
+            hex={p.color || "#6ad0ff"}
+            shape="card"
+            photoUrl={data?.photos?.[p.nick.trim().toLowerCase()] ?? null}
+          />
         ),
       })),
     [data],

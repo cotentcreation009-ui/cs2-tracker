@@ -87,6 +87,10 @@ type Store interface {
 	AdvanceAuthChain(ctx context.Context, steamID uint64, headCode string) error
 	MarkAuthChain(ctx context.Context, steamID uint64, status string) error
 	RememberAbsentCode(ctx context.Context, steamID uint64, code string) error
+	// The crowd cache for pro-player photos (prophotos.go): what visitors'
+	// browsers resolved from Liquipedia, kept for every later visitor.
+	UpsertProPhotos(ctx context.Context, photos []db.ProPhoto) error
+	ProPhotos(ctx context.Context, nicks []string) (map[string]string, error)
 	AbsentCodesToRetry(ctx context.Context, steamID uint64) ([]string, error)
 	PruneRetryCodes(ctx context.Context) error
 	// Our own parsed-demo stats.
@@ -369,6 +373,9 @@ func (s *Server) Router() http.Handler {
 			// One request feeds all three spotlight rails; see prospotlight.go for
 			// what each list can honestly claim to be.
 			r.Get("/pro-matches/spotlight", s.handleProSpotlight)
+			// Browsers report the photos they resolved from Liquipedia; the
+			// spotlight hands them to everyone else (prophotos.go).
+			r.Post("/pro-matches/photos", s.handleProPhotoReport)
 			r.Get("/pro-matches/{seriesId}", s.handleProMatch)
 			r.Get("/pro-matches/{seriesId}/history", s.handleProMatchHistory)
 			r.Get("/pro-matches/team/{teamId}", s.handleProTeam)
