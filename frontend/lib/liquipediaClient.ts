@@ -3,9 +3,17 @@
 // while residential visitor IPs are fine).
 //
 // Requests are BATCHED: avatars that mount together are collected for 250ms,
-// then resolved for the whole group in two API calls (MediaWiki accepts up to
-// 50 titles per query) — a full lineup resolves in ~3s instead of a serial
-// per-player queue.
+// then resolved for the group in two API calls — a lineup resolves in ~4s
+// instead of a serial per-player queue.
+//
+// THE BATCH IS SMALL ON PURPOSE (2026-09-26). MediaWiki takes up to 50 titles
+// per query, but prop=images returns at most 500 file titles per CALL and a
+// player page carries 35-40 files (every event icon and team crest it has ever
+// shown), so a 50-player batch needs 2,000 titles: the continuation cap ran out
+// and the players the API listed last had no photo at all — 40 of the 100
+// rows on the pro board, tN1R and zont1x among them, though their pages carry
+// "TN1R at IEM Cologne 2026.jpg". Twelve players fit in one 500-title answer,
+// and the column fills progressively, standings order first.
 //
 // Terms compliance (liquipedia.net/api-terms-of-use), per visiting client:
 //  - calls are spaced >2s apart (their 1-req/2s limit); batching means a page
@@ -20,7 +28,14 @@ const HIT_TTL_MS = 14 * 864e5;
 const MISS_TTL_MS = 3 * 864e5;
 const GAP_MS = 2100;
 const BATCH_WAIT_MS = 250;
+/** Titles per query where the answer is one row per title (thumbnails, infoboxes). */
 const MAX_TITLES = 50;
+/** Player pages per prop=images query: 12 x ~40 files stays under the 500-file answer. */
+const PHOTO_BATCH = 12;
+/** Team pages carry ~100 files each; five per query. */
+const TEAM_BATCH = 5;
+/** Continuation pages followed per images query — a safety net, not the plan. */
+const IMAGE_PAGES = 4;
 
 type CacheEntry = { u: string | null; t: number };
 
@@ -333,7 +348,7 @@ export function resolvePlayerPhoto(nick: string): Promise<string | null> {
 
 function flushBatch(): void {
   batchTimer = null;
-  const batch = pending.splice(0, MAX_TITLES);
+  const batch = pending.splice(0, PHOTO_BATCH);
   if (batch.length === 0) return;
   batchChain = batchChain.then(() => execBatch(batch)).catch(() => {});
   if (pending.length > 0) batchTimer = setTimeout(flushBatch, 0);
@@ -387,7 +402,7 @@ async function listPageFiles(
   const files: string[] = [];
   const redirects = new Map<string, string>();
   let cont: string | null = null;
-  for (let page = 0; page < 3; page++) {
+  for (let page = 0; page < IMAGE_PAGES; page++) {
     const params = new URLSearchParams({
       action: "query",
       format: "json",
@@ -482,7 +497,7 @@ export function resolveTeamLogo(name: string): Promise<string | null> {
 
 function flushTeamBatch(): void {
   teamTimer = null;
-  const batch = teamPending.splice(0, MAX_TITLES);
+  const batch = teamPending.splice(0, TEAM_BATCH);
   if (batch.length === 0) return;
   batchChain = batchChain.then(() => execTeamBatch(batch)).catch(() => {});
   if (teamPending.length > 0) teamTimer = setTimeout(flushTeamBatch, 0);
