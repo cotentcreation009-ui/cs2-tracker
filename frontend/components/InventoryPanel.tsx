@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { posterStudioHref, posterUnavailableNote } from "@/lib/posterStudio";
 
 // The CS2 skin-inventory showcase: total value up top, then the collection
 // itself — filterable by category and by whether an item carries a market
@@ -737,6 +738,11 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
 
   const copies = it.copies ?? [];
   const first = copies[0];
+  // The poster studio on posters.csrun.win takes this exact craft by name plus
+  // the best copy's float and seed (lib/posterStudio.ts); knives, gloves and a
+  // few weapons are not in it yet, and the item says so instead of a dead end.
+  const posterHref = posterStudioHref(it, first ?? null);
+  const posterNote = posterHref ? null : posterUnavailableNote(it);
 
   return (
     <div
@@ -897,6 +903,17 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
                       <a href={inspectLink(c.inspect)} className="btn btn-ghost h-7 px-2.5 text-[11px]">
                         Open in game
                       </a>
+                      {copies.length > 1 && posterStudioHref(it, c) ? (
+                        <a
+                          href={posterStudioHref(it, c)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-ghost h-7 px-2.5 text-[11px]"
+                          title="Open this copy in the poster studio with its own float and pattern"
+                        >
+                          Poster ↗
+                        </a>
+                      ) : null}
                     </span>
                   </div>
                 ) : null,
@@ -911,6 +928,17 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
 
         {/* outbound */}
         <div className="mt-4 flex flex-wrap gap-2">
+          {posterHref ? (
+            <a
+              href={posterHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary h-8 px-3 text-xs"
+              title="Open this exact craft in the CSRun poster studio — finish, float, pattern and stickers pre-filled"
+            >
+              Make it a poster ↗
+            </a>
+          ) : null}
           {it.marketable ? (
             <a
               href={`https://steamcommunity.com/market/listings/730/${encodeURIComponent(it.market_hash_name)}`}
@@ -932,6 +960,9 @@ function ItemDetail({ it, onClose }: { it: InvItem; onClose: () => void }) {
             </a>
           ) : null}
         </div>
+        {posterNote ? (
+          <p className="mt-1.5 text-[10px] leading-snug text-faint">{posterNote}</p>
+        ) : null}
       </div>
     </div>
   );
