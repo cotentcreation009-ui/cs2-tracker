@@ -251,3 +251,22 @@ body {
     display: none;
   }
 }
+
+/* The pro-matches board runs three columns from xl up — pro players on the
+   left, the matches in the middle, FACEIT's leaderboard on the right — so it
+   takes the header's width instead of the reading width every other page
+   keeps. :has() lets the server-rendered HTML pick the width on first paint:
+   no body-class toggle, no flash of the narrow container. */
+@media (min-width: 80rem) {
+  main:has(.pro-board) {
+    max-width: 1800px;
+    padding-inline: 2rem;
+  }
+}
+
+/* Fade the ends of a horizontal strip whose CHILD scrolls (a mask straight on
+   the scroll container would travel with its content). */
+.edge-fade-x {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent);
+}

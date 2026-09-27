@@ -15,10 +15,16 @@ export function TeamCrest({
   name,
   logoUrl,
   hex,
+  compact = false,
 }: {
   name: string;
   logoUrl?: string;
   hex: string;
+  /**
+   * A small inline mark (a list row, a chip) rather than a card tile: the
+   * crest fills more of the box and the fallback initial is sized to fit it.
+   */
+  compact?: boolean;
 }) {
   const [src, setSrc] = useState<string | null>(logoUrl || null);
   const [failed, setFailed] = useState(false);
@@ -57,11 +63,17 @@ export function TeamCrest({
           referrerPolicy="no-referrer"
           onError={() => setFailed(true)}
           // contain, not cover: a crest cropped to fill loses the mark.
-          className="h-[62%] w-[76%] object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,.55)]"
+          className={
+            compact
+              ? "h-[82%] w-[82%] object-contain"
+              : "h-[62%] w-[76%] object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,.55)]"
+          }
         />
       ) : (
         <span
-          className="text-5xl font-black uppercase leading-none opacity-40"
+          className={`font-black uppercase leading-none ${
+            compact ? "text-[11px] opacity-80" : "text-5xl opacity-40"
+          }`}
           style={{ color: hex }}
         >
           {name.slice(0, 1)}

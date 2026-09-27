@@ -16,12 +16,12 @@ import { TeamCrest } from "./TeamCrest";
 // appears in the matches we happen to track says nothing about how good they
 // are. Player rosters come from the same standings.
 
-const POLL_MS = 120_000; // rosters and leaderboards move slowly
+export const SPOTLIGHT_POLL_MS = 120_000; // rosters and leaderboards move slowly
 
 // FACEIT's own region codes. Kept in step with the allowlist in
 // backend/internal/faceit/rankings.go — an unlisted code is refused there
 // rather than being passed through to their API.
-const REGIONS = [
+export const REGIONS = [
   { code: "EU", label: "Europe" },
   { code: "NA", label: "N. America" },
   { code: "SA", label: "S. America" },
@@ -29,7 +29,7 @@ const REGIONS = [
   { code: "OCE", label: "Oceania" },
 ] as const;
 
-interface SpotlightTeam {
+export interface SpotlightTeam {
   standing: number;
   points: number;
   name: string;
@@ -41,7 +41,7 @@ interface SpotlightTeam {
   live?: boolean;
   asOf?: string;
 }
-interface SpotlightPlayer {
+export interface SpotlightPlayer {
   nick: string;
   teamName?: string;
   teamRank?: number;
@@ -49,7 +49,7 @@ interface SpotlightPlayer {
   color?: string;
   live?: boolean;
 }
-interface FaceitRanked {
+export interface FaceitRanked {
   playerId?: string;
   nickname: string;
   country?: string;
@@ -59,7 +59,7 @@ interface FaceitRanked {
   avatar?: string;
   faceitUrl?: string;
 }
-interface SpotlightResponse {
+export interface SpotlightResponse {
   enabled: boolean;
   teams: SpotlightTeam[];
   players: SpotlightPlayer[];
@@ -69,7 +69,7 @@ interface SpotlightResponse {
 }
 
 // FACEIT's own level colours, so a level 10 reads as a level 10.
-function levelHex(lvl?: number): string {
+export function levelHex(lvl?: number): string {
   if (!lvl || lvl < 1) return "var(--brand, #6ad0ff)";
   if (lvl >= 10) return "#e8332e";
   if (lvl >= 8) return "#ff7a18";
@@ -83,8 +83,8 @@ function levelHex(lvl?: number): string {
 // they are separate components. Both read the same endpoint; it is cached for
 // a minute at the proxy, so the second poll is a conditional round trip rather
 // than duplicated work at the backend.
-function useSpotlight() {
-  return usePoll<SpotlightResponse>("/api/pro-matches/spotlight", POLL_MS);
+export function useSpotlight() {
+  return usePoll<SpotlightResponse>("/api/pro-matches/spotlight", SPOTLIGHT_POLL_MS);
 }
 
 export function ProSpotlight() {
@@ -187,7 +187,7 @@ export function FaceitLeaderboardRail() {
   const [region, setRegion] = useState<string>("EU");
   const { data, loading } = usePoll<SpotlightResponse>(
     `/api/pro-matches/spotlight?only=faceit&region=${region}`,
-    POLL_MS,
+    SPOTLIGHT_POLL_MS,
   );
 
   const faceit: RailCard[] = useMemo(

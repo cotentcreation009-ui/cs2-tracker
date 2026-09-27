@@ -6,7 +6,16 @@ import { formatTag, validHex } from "./format";
 // Finished-series row for the board's "Recent results" section: winner reads
 // at a glance (bold + colored score, loser dimmed), links to the durable
 // result page. Mirrors UpcomingRow's shape so the board scans as one list.
-export function ResultRow({ match, now }: { match: MatchState; now: number }) {
+export function ResultRow({
+  match,
+  now,
+  describedBy,
+}: {
+  match: MatchState;
+  now: number;
+  /** id of the row's hover/focus detail panel while it is open (BoardSections). */
+  describedBy?: string;
+}) {
   const a = match.teams?.[0];
   const b = match.teams?.[1];
   const sa = match.seriesScore?.[a?.gridId ?? ""] ?? 0;
@@ -28,6 +37,7 @@ export function ResultRow({ match, now }: { match: MatchState; now: number }) {
   return (
     <Link
       href={`/pro-matches/${match.seriesId}`}
+      aria-describedby={describedBy}
       className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-line bg-panel2/25 py-2.5 pl-4 pr-3 transition duration-150 hover:-translate-y-px hover:border-line2 hover:bg-panel2/50 sm:gap-4"
     >
       <span
