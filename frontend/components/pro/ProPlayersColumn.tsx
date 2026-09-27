@@ -101,16 +101,29 @@ export const ProPlayersColumn = memo(function ProPlayersColumn({
   live,
   upcoming,
   loading,
+  photos,
 }: {
   players: SpotlightPlayer[];
   /** The standings: each lineup's roster, GRID crest and live flag. */
   teams: SpotlightTeam[];
+  /** The spotlight's crowd cache of Liquipedia photos, keyed by lower-cased nick. */
+  photos?: Record<string, string>;
   /** The board's live and scheduled series, for "playing now / next" on hover. */
   live: MatchState[];
   upcoming: MatchState[];
   loading: boolean;
 }) {
-  const groups = useMemo(() => groupByTeam(players, teams), [players, teams]);
+  const groups = useMemo(() => {
+    const built = groupByTeam(players, teams);
+    // Photos the server already knows paint at once; the rest resolve in the
+    // browser and are reported, so they are known next time.
+    if (photos) {
+      for (const g of built) {
+        for (const p of g.players) if (!p.photoUrl) p.photoUrl = photos[nickKey(p.nick)];
+      }
+    }
+    return built;
+  }, [players, teams, photos]);
   const { anchor, bind } = useDetailAnchor();
   const openRow = useMemo(() => {
     if (!anchor) return null;
@@ -233,7 +246,7 @@ function PlayerRow({
       className="flex items-center gap-2 rounded-lg px-2 py-1 text-[13px] font-semibold text-ink transition-colors hover:bg-panel2 focus-visible:bg-panel2"
       {...bind}
     >
-      <PlayerAvatar nick={p.nick} hex={p.color || g.color} size={26} />
+      <PlayerAvatar nick={p.nick} hex={p.color || g.color} size={26} photoUrl={p.photoUrl ?? null} />
       <span className="min-w-0 flex-1 truncate">{p.nick}</span>
       {p.live && (
         <>
@@ -264,7 +277,7 @@ function PlayerDetail({
   return (
     <>
       <div className="flex items-center gap-2.5">
-        <PlayerAvatar nick={p.nick} hex={p.color || g.color} size={44} />
+        <PlayerAvatar nick={p.nick} hex={p.color || g.color} size={44} photoUrl={p.photoUrl ?? null} />
         <div className="min-w-0">
           <p className="truncate text-sm font-extrabold text-ink">{p.nick}</p>
           <p className="flex items-center gap-1.5 text-[11px] text-muted">

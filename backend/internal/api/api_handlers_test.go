@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,9 @@ type fakeStore struct {
 	invSnapshot  []byte
 	invFetchedAt time.Time
 	invSaved     []byte
+
+	// what browsers reported as pro-player photos (prophotos.go)
+	photos []db.ProPhoto
 }
 
 func (f *fakeStore) CountPlayerMatches(_ context.Context, id uint64) (int, error) {
@@ -128,6 +132,21 @@ func (f *fakeStore) AbsentCodesToRetry(context.Context, uint64) ([]string, error
 	return nil, nil
 }
 func (f *fakeStore) PruneRetryCodes(context.Context) error { return nil }
+func (f *fakeStore) UpsertProPhotos(_ context.Context, photos []db.ProPhoto) error {
+	f.photos = append(f.photos, photos...)
+	return nil
+}
+func (f *fakeStore) ProPhotos(_ context.Context, nicks []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, p := range f.photos {
+		for _, n := range nicks {
+			if strings.EqualFold(strings.TrimSpace(n), strings.TrimSpace(p.Nick)) {
+				out[strings.ToLower(strings.TrimSpace(p.Nick))] = p.URL
+			}
+		}
+	}
+	return out, nil
+}
 
 func (f *fakeStore) ShareCodeForMatch(context.Context, string) (string, time.Time, error) {
 	return f.localCode, f.localFinished, nil

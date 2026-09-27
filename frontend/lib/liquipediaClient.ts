@@ -23,9 +23,12 @@
 // The CC BY-SA attribution is rendered next to every table that shows photos.
 
 const API = "https://liquipedia.net/counterstrike/api.php";
-const CACHE_PREFIX = "lp:img2:";
+// v3 (2026-09-26): v2 held three-day misses written by the fifty-page batches
+// that truncated, so every visitor from that week kept the gaps; the prefix
+// change retires them, and a miss now expires in hours, not days.
+const CACHE_PREFIX = "lp:img3:";
 const HIT_TTL_MS = 14 * 864e5;
-const MISS_TTL_MS = 3 * 864e5;
+const MISS_TTL_MS = 6 * 3600e3;
 const GAP_MS = 2100;
 const BATCH_WAIT_MS = 250;
 /** Titles per query where the answer is one row per title (thumbnails, infoboxes). */
@@ -303,6 +306,63 @@ const LP_ISO: Record<string, string> = {
   uzbekistan: "UZ", vietnam: "VN",
 };
 
+/**
+ * A photo the server already knew — the crowd cache that rides on the
+ * spotlight response — remembered locally so every other view of this
+ * player (history, team page, drawer) is instant as well.
+ */
+export function rememberPlayerPhoto(nick: string, url: string): void {
+  if (!readCache(nick)?.u) writeCache(nick, url);
+}
+
+// ---- reporting back --------------------------------------------------------
+// A photo THIS browser resolved is reported to our backend, which folds it
+// into the spotlight response for everyone else (api/pro-matches/photos).
+// Batched, and each nick is reported once per browser session; a failed
+// report is simply lost — the next resolving visitor sends it again.
+const REPORT_WAIT_MS = 1500;
+const REPORT_MAX = 60;
+const REPORTED_KEY = "lp:reported1";
+let reportQueue: { nick: string; url: string }[] = [];
+let reportTimer: ReturnType<typeof setTimeout> | null = null;
+
+function reportedThisSession(): Set<string> {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem(REPORTED_KEY) ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+export function reportPlayerPhoto(nick: string, url: string): void {
+  const key = nick.toLowerCase();
+  const done = reportedThisSession();
+  if (done.has(key)) return;
+  done.add(key);
+  try {
+    sessionStorage.setItem(REPORTED_KEY, JSON.stringify([...done].slice(-500)));
+  } catch {
+    // no session storage: report anyway, possibly twice
+  }
+  reportQueue.push({ nick, url });
+  if (reportTimer == null) reportTimer = setTimeout(flushReports, REPORT_WAIT_MS);
+}
+
+function flushReports(): void {
+  reportTimer = null;
+  const batch = reportQueue.splice(0, REPORT_MAX);
+  if (batch.length === 0) return;
+  fetch("/api/pro-matches/photos", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ photos: batch }),
+    keepalive: true,
+  }).catch(() => {
+    // lost report: the next visitor who resolves it sends it again
+  });
+  if (reportQueue.length > 0) reportTimer = setTimeout(flushReports, REPORT_WAIT_MS);
+}
+
 export function invalidatePlayerPhoto(nick: string): void {
   try {
     localStorage.removeItem(CACHE_PREFIX + nick.toLowerCase());
@@ -381,6 +441,7 @@ async function execBatch(batch: Pending[]): Promise<void> {
         const title = bestByNick.get(k) ?? null;
         const u = (title ? urls.get(title) : null) ?? null;
         writeCache(arr[0].nick, u);
+        if (u) reportPlayerPhoto(arr[0].nick, u);
         for (const b of arr) b.resolve(u);
       }
       return;

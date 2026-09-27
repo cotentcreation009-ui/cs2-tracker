@@ -94,6 +94,10 @@ type spotlightResp struct {
 	// implying a world ranking.
 	FaceitRegion string `json:"faceitRegion,omitempty"`
 	UpdatedAt    string `json:"updatedAt"`
+	// Photos is the crowd cache (prophotos.go): every rail nick a visitor's
+	// browser has resolved a Liquipedia photo for, keyed by lower-cased nick,
+	// so the page paints them at once instead of after a paced lookup.
+	Photos map[string]string `json:"photos,omitempty"`
 }
 
 // handleProSpotlight serves all three rails in one request — they render
@@ -166,6 +170,9 @@ func (s *Server) handleProSpotlight(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	if out.Faceit == nil {
 		out.Faceit = []faceit.RankedPlayer{}
+	}
+	if photos := s.knownPhotos(r, out); len(photos) > 0 {
+		out.Photos = photos
 	}
 	setEdgeCache(w, 60*time.Second)
 	writeJSON(w, http.StatusOK, out)

@@ -200,6 +200,7 @@ function WideBoard({ board }: { board: BoardModel }) {
         live={board.live}
         upcoming={board.upcoming}
         loading={spotlightLoading}
+        photos={enabled ? data?.photos : undefined}
       />
       <MatchesColumn teams={teams} teamsLoading={spotlightLoading} board={board} />
       <FaceitColumn />
