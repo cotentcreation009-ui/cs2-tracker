@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 };
 
 export default function ProMatchesPage() {
-  // The rails now live INSIDE the board, between the first event and the rest
-  // of the schedule — see ProBoard.
+  // Below xl the rails live INSIDE the board, between the first event and the
+  // rest of the schedule; from xl up the board is three columns — see ProBoard.
   return <ProBoard />;
 }

@@ -5,7 +5,14 @@ import { dayGroup, formatTag, startInfo, validHex } from "./format";
 
 // Upcoming-match row: a team-colour edge, the start time, both teams with badge
 // logos, the tournament, and a Bo tag. Links to the detail route.
-export function UpcomingRow({ match }: { match: MatchState }) {
+export function UpcomingRow({
+  match,
+  describedBy,
+}: {
+  match: MatchState;
+  /** id of the row's hover/focus detail panel while it is open (BoardSections). */
+  describedBy?: string;
+}) {
   const a = match.teams?.[0];
   const b = match.teams?.[1];
   const { rel, abs, date, delayed } = startInfo(match.startScheduled);
@@ -21,6 +28,7 @@ export function UpcomingRow({ match }: { match: MatchState }) {
   return (
     <Link
       href={`/pro-matches/${match.seriesId}`}
+      aria-describedby={describedBy}
       className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-line bg-panel2/25 py-2.5 pl-4 pr-3 transition duration-150 hover:-translate-y-px hover:border-line2 hover:bg-panel2/50 sm:gap-4"
     >
       {/* team-colour left edge */}

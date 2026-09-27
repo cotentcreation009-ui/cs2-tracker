@@ -1,17 +1,36 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
-import type { MatchState, ProMatchesResponse } from "./types";
+import { useMemo, useState } from "react";
+import type { ProMatchesResponse } from "./types";
 import { usePoll, useNow } from "./usePoll";
+import { useMediaQuery } from "./useMediaQuery";
 import { agoShort } from "./format";
-import { LiveMatchCard } from "./LiveMatchCard";
-import { UpcomingRow } from "./UpcomingRow";
-import { ResultRow } from "./ResultRow";
-import { ProSpotlight, PlayersRail, FaceitLeaderboardRail } from "./ProSpotlight";
+import {
+  ProSpotlight,
+  PlayersRail,
+  FaceitLeaderboardRail,
+  useSpotlight,
+} from "./ProSpotlight";
+import {
+  LiveSection,
+  UpcomingSection,
+  ResultsSection,
+  NoMatches,
+  StateCard,
+  type EventGroup,
+} from "./BoardSections";
+import { ProPlayersColumn } from "./ProPlayersColumn";
+import { FaceitColumn } from "./FaceitColumn";
+import { MatchesColumn, type BoardModel } from "./MatchesColumn";
 
 const POLL_MS = 10_000;
 
-type EventGroup = { label: string; logo?: string; items: MatchState[] };
+// Tailwind's xl breakpoint. Below it the board is the single stacked column
+// with the drifting rails; from here up it is three columns — pro players on
+// the left, the matches in the middle, FACEIT's leaderboard on the right.
+// Decided in JS rather than with hidden/visible duplicates so only one copy
+// of every list, link, photo and poll exists at a time.
+const WIDE_QUERY = "(min-width: 80rem)";
 
 export function ProBoard() {
   // include=finished: recently finished series (kept ~48h server-side) power
@@ -21,11 +40,12 @@ export function ProBoard() {
     POLL_MS,
   );
   const now = useNow(1000);
+  const wide = useMediaQuery(WIDE_QUERY);
   // event filter for the upcoming section — the label, not an index, because
   // the feed re-groups every poll
   const [pickedEvent, setPickedEvent] = useState<string | null>(null);
 
-  const { live, upcomingGroups, finished } = useMemo(() => {
+  const { live, upcoming, upcomingGroups, finished } = useMemo(() => {
     const matches = data?.matches ?? [];
     const live = matches.filter((m) => m.status === "live");
     const finished = matches
@@ -56,7 +76,7 @@ export function ProBoard() {
         byEvent.set(label, { label, logo: m.tournamentLogoUrl, items: [m] });
       }
     }
-    return { live, upcomingGroups: [...byEvent.values()], finished };
+    return { live, upcoming, upcomingGroups: [...byEvent.values()], finished };
   }, [data]);
 
   // Resolve the pick against the CURRENT groups every render: once an event's
@@ -69,8 +89,22 @@ export function ProBoard() {
     : upcomingGroups;
   const upcomingTotal = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
 
+  const board: BoardModel = {
+    live,
+    upcoming,
+    upcomingGroups,
+    shownGroups,
+    activeEvent,
+    upcomingTotal,
+    finished,
+    now,
+    onPickEvent: (label) => setPickedEvent((cur) => (cur === label ? null : label)),
+  };
+
   return (
-    <div className="space-y-5">
+    // .pro-board: globals.css widens <main> to the header's width for this
+    // page from xl up, where the three columns need the room.
+    <div className="pro-board space-y-5">
       <Header
         updatedAt={data?.updatedAt}
         now={now}
@@ -86,92 +120,89 @@ export function ProBoard() {
           title="Can't load pro matches right now"
           body="We couldn't reach the live match feed. It'll retry automatically — check back in a moment."
         />
+      ) : wide ? (
+        <WideBoard board={board} />
       ) : (
-        <>
-          {/* The ranking sits directly under the title — it is the thing that
-              frames everything below it, and it reads as a strip rather than a
-              section, so it costs little height. */}
-          <ProSpotlight />
-
-          {live.length > 0 && (
-            <section className="space-y-2">
-              <SectionHeading label="Live now" count={live.length} live />
-              {/* Three across on a wide screen: the cards are half the height
-                  they were, so two of them left the row looking empty. */}
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {live.map((m) => (
-                  <LiveMatchCard key={m.seriesId} match={m} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {upcomingGroups.length > 0 && (
-            <section className="space-y-3">
-              <SectionHeading label={activeEvent ?? "Upcoming · by event"} />
-              {/* one event = nothing to choose between, so the row stays hidden */}
-              {upcomingGroups.length > 1 && (
-                <EventFilter
-                  groups={upcomingGroups}
-                  total={upcomingTotal}
-                  active={activeEvent}
-                  onPick={(label) =>
-                    setPickedEvent((cur) => (cur === label ? null : label))
-                  }
-                />
-              )}
-              <div className="space-y-6">
-                {shownGroups.map((g, gi) => (
-                  <Fragment key={g.label}>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 border-b border-line/50 pb-1.5">
-                      {g.logo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={g.logo} alt="" loading="lazy" className="h-5 w-5 shrink-0 rounded object-contain" />
-                      ) : (
-                        <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70" />
-                      )}
-                      <span className="truncate text-xs font-bold uppercase tracking-wider text-muted">
-                        {g.label}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-faint">
-                        {g.items.length}
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {g.items.map((m) => (
-                        <UpcomingRow key={m.seriesId} match={m} />
-                      ))}
-                    </div>
-                  </div>
-                  {/* After the first event, so the rails are met while
-                      scrolling the schedule rather than under it. */}
-                  {gi === 0 && (
-                    <div className="space-y-6 pt-2">
-                      <PlayersRail />
-                      <FaceitLeaderboardRail />
-                    </div>
-                  )}
-                  </Fragment>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {finished.length > 0 && (
-            <section className="space-y-3">
-              <SectionHeading label="Recent results" count={finished.length} />
-              <div className="space-y-2">
-                {finished.map((m) => (
-                  <ResultRow key={m.seriesId} match={m} now={now} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {live.length === 0 && upcomingGroups.length === 0 && finished.length === 0 && <NoMatches />}
-        </>
+        <StackedBoard board={board} />
       )}
+    </div>
+  );
+}
+
+// Below xl: one column. The ranking sits directly under the title — it is the
+// thing that frames everything below it, and it reads as a strip rather than
+// a section — then live, the schedule (with the players and FACEIT rails
+// after its first event, so they are met while scrolling rather than under
+// it), then results.
+function StackedBoard({ board }: { board: BoardModel }) {
+  const {
+    live,
+    upcomingGroups,
+    shownGroups,
+    activeEvent,
+    upcomingTotal,
+    finished,
+    now,
+    onPickEvent,
+  } = board;
+
+  return (
+    <>
+      <ProSpotlight />
+
+      {live.length > 0 && (
+        // Three across on a wide screen: the cards are half the height they
+        // were, so two of them left the row looking empty.
+        <LiveSection live={live} gridClass="grid gap-3 md:grid-cols-2 xl:grid-cols-3" />
+      )}
+
+      {upcomingGroups.length > 0 && (
+        <UpcomingSection
+          groups={upcomingGroups}
+          shown={shownGroups}
+          active={activeEvent}
+          total={upcomingTotal}
+          onPick={onPickEvent}
+          afterFirst={
+            <div className="space-y-6 pt-2">
+              <PlayersRail />
+              <FaceitLeaderboardRail />
+            </div>
+          }
+        />
+      )}
+
+      {finished.length > 0 && <ResultsSection finished={finished} now={now} />}
+
+      {live.length === 0 && upcomingGroups.length === 0 && finished.length === 0 && <NoMatches />}
+    </>
+  );
+}
+
+// From xl up: pro players | matches | FACEIT leaderboard. The sidebars are
+// pinned under the header and scroll on their own (see COLUMN_CLS); the
+// middle column scrolls with the page. Narrower sidebars until 2xl so the
+// matches keep room at 1280px.
+function WideBoard({ board }: { board: BoardModel }) {
+  // One spotlight poll feeds both the players column and the standings strip;
+  // the FACEIT column has its own (?only=faceit) so a region change is cheap.
+  const { data, loading } = useSpotlight();
+  const enabled = data?.enabled !== false;
+  const teams = enabled ? (data?.teams ?? []) : [];
+  const players = enabled ? (data?.players ?? []) : [];
+  const spotlightLoading = loading && !data;
+
+  return (
+    <div className="grid items-start gap-4 xl:grid-cols-[240px_minmax(0,1fr)_260px] 2xl:grid-cols-[260px_minmax(0,1fr)_280px]">
+      <ProPlayersColumn
+        players={players}
+        teams={teams}
+        live={board.live}
+        upcoming={board.upcoming}
+        loading={spotlightLoading}
+      />
+      <MatchesColumn teams={teams} teamsLoading={spotlightLoading} board={board} />
+      <FaceitColumn />
     </div>
   );
 }
@@ -207,116 +238,6 @@ function Header({
             : "Auto-refreshing"}
       </div>
     </div>
-  );
-}
-
-function SectionHeading({
-  label,
-  count,
-  live = false,
-}: {
-  label: string;
-  count?: number;
-  live?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {live ? (
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ff4655] opacity-75 motion-reduce:hidden" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-[#ff4655]" />
-        </span>
-      ) : null}
-      <h2 className="text-sm font-bold uppercase tracking-wider text-ink">
-        {label}
-      </h2>
-      {count != null && count > 0 ? (
-        <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted">
-          {count}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-// Event picker for the upcoming section: one tap narrows the schedule to a
-// single tournament, tapping the live chip again (or "All events") widens back.
-function EventFilter({
-  groups,
-  total,
-  active,
-  onPick,
-}: {
-  groups: EventGroup[];
-  total: number;
-  active: string | null;
-  onPick: (label: string | null) => void;
-}) {
-  const base =
-    "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors";
-  const on = "border-brand bg-brand/15 font-bold text-ink";
-  const off =
-    "border-line bg-panel/70 font-medium text-muted hover:border-line2 hover:text-ink";
-  const badge = "rounded-full px-1.5 text-[10px] font-semibold tabular-nums";
-
-  return (
-    <div
-      role="group"
-      aria-label="Filter upcoming matches by event"
-      className="scroll-slim flex items-center gap-2 overflow-x-auto pb-1"
-    >
-      <button
-        type="button"
-        onClick={() => onPick(null)}
-        aria-pressed={active === null}
-        className={`${base} ${active === null ? on : off}`}
-      >
-        All events
-        <span className={`${badge} ${active === null ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
-          {total}
-        </span>
-      </button>
-      {groups.map((g) => {
-        const picked = active === g.label;
-        return (
-          <button
-            key={g.label}
-            type="button"
-            onClick={() => onPick(g.label)}
-            aria-pressed={picked}
-            title={g.label}
-            className={`${base} ${picked ? on : off}`}
-          >
-            {g.logo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={g.logo} alt="" loading="lazy" className="h-4 w-4 shrink-0 rounded object-contain" />
-            ) : null}
-            <span className="max-w-56 truncate">{g.label}</span>
-            <span className={`${badge} ${picked ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
-              {g.items.length}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function StateCard({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="card-2 flex flex-col items-center gap-2 px-6 py-14 text-center">
-      <p className="text-base font-semibold text-ink">{title}</p>
-      <p className="max-w-md text-sm text-muted">{body}</p>
-    </div>
-  );
-}
-
-function NoMatches() {
-  return (
-    <StateCard
-      title="No live pro matches right now"
-      body="Nothing is live at the moment and there's nothing on the schedule in the next few days. Check back at match time — the board updates on its own."
-    />
   );
 }
 
