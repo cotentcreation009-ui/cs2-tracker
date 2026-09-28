@@ -9,8 +9,8 @@ import {
   UpcomingSection,
   ResultsSection,
   NoMatches,
-  type EventGroup,
 } from "./BoardSections";
+import type { EventOrder, RankedEventGroup } from "./eventRank";
 import {
   DetailHint,
   DetailLine,
@@ -25,10 +25,15 @@ export interface BoardModel {
   live: MatchState[];
   /** Every scheduled series, in start order (the groups below are these, by event). */
   upcoming: MatchState[];
-  upcomingGroups: EventGroup[];
-  shownGroups: EventGroup[];
+  /** By event, ranked by who plays in them (eventRank.ts) — or by start, per eventOrder. */
+  upcomingGroups: RankedEventGroup[];
+  shownGroups: RankedEventGroup[];
   activeEvent: string | null;
   upcomingTotal: number;
+  eventOrder: EventOrder;
+  onOrder: (order: EventOrder) => void;
+  /** The top-20 standings the board polled: rank pills and "Standing" lines on both layouts. */
+  standings?: SpotlightTeam[];
   finished: MatchState[];
   now: number;
   onPickEvent: (label: string | null) => void;
@@ -56,6 +61,8 @@ export function MatchesColumn({
     shownGroups,
     activeEvent,
     upcomingTotal,
+    eventOrder,
+    onOrder,
     finished,
     now,
     onPickEvent,
@@ -81,6 +88,8 @@ export function MatchesColumn({
             active={activeEvent}
             total={upcomingTotal}
             onPick={onPickEvent}
+            order={eventOrder}
+            onOrder={onOrder}
             standings={teams}
           />
         )}

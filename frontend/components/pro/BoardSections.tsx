@@ -1,10 +1,12 @@
 "use client";
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { MatchState, ProTeam } from "./types";
 import type { SpotlightTeam } from "./ProSpotlight";
 import { LiveMatchCard } from "./LiveMatchCard";
 import { UpcomingRow } from "./UpcomingRow";
+import { TeamLogo } from "./TeamLogo";
+import { ranksByGrid, type EventOrder, type RankedEventGroup } from "./eventRank";
 import { ResultRow } from "./ResultRow";
 import { DetailHint, DetailLine, DetailPopover, useDetailAnchor } from "./DetailPopover";
 import { endedAgo, prettyFormat, streamHost, whenLabel } from "./boardDetail";
@@ -18,7 +20,7 @@ import { endedAgo, prettyFormat, streamHost, whenLabel } from "./boardDetail";
 // on hover or focus a panel with the rest of what the feed knows about it,
 // on click the page that has everything.
 
-export type EventGroup = { label: string; logo?: string; items: MatchState[] };
+export type { EventGroup } from "./eventRank";
 
 /**
  * The sidebar shell of the three-column board: a panel pinned under the site
@@ -54,69 +56,6 @@ export function SectionHeading({
           {count}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-// Event picker for the upcoming section: one tap narrows the schedule to a
-// single tournament, tapping the live chip again (or "All events") widens back.
-export function EventFilter({
-  groups,
-  total,
-  active,
-  onPick,
-}: {
-  groups: EventGroup[];
-  total: number;
-  active: string | null;
-  onPick: (label: string | null) => void;
-}) {
-  const base =
-    "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors";
-  const on = "border-brand bg-brand/15 font-bold text-ink";
-  const off =
-    "border-line bg-panel/70 font-medium text-muted hover:border-line2 hover:text-ink";
-  const badge = "rounded-full px-1.5 text-[10px] font-semibold tabular-nums";
-
-  return (
-    <div
-      role="group"
-      aria-label="Filter upcoming matches by event"
-      className="scroll-slim flex items-center gap-2 overflow-x-auto pb-1"
-    >
-      <button
-        type="button"
-        onClick={() => onPick(null)}
-        aria-pressed={active === null}
-        className={`${base} ${active === null ? on : off}`}
-      >
-        All events
-        <span className={`${badge} ${active === null ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
-          {total}
-        </span>
-      </button>
-      {groups.map((g) => {
-        const picked = active === g.label;
-        return (
-          <button
-            key={g.label}
-            type="button"
-            onClick={() => onPick(g.label)}
-            aria-pressed={picked}
-            title={g.label}
-            className={`${base} ${picked ? on : off}`}
-          >
-            {g.logo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={g.logo} alt="" loading="lazy" className="h-4 w-4 shrink-0 rounded object-contain" />
-            ) : null}
-            <span className="max-w-56 truncate">{g.label}</span>
-            <span className={`${badge} ${picked ? "bg-brand/20 text-brand" : "bg-bg/50 text-faint"}`}>
-              {g.items.length}
-            </span>
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -231,59 +170,73 @@ function ResultDetail({
   );
 }
 
-// The schedule, grouped by event, with the event filter once there is a
-// choice to make.
+// The schedule, grouped by event. Events are RANKED by who plays in them
+// (eventRank.ts): the best-placed top-20 team first, then the count of
+// top-20 teams, then the start — or by start alone when the reader asks.
+// The first few groups are open; the rest collapse behind one line, because
+// the calendar is mostly qualifiers and a hundred rows of them buried the
+// matches that matter. A group header names the event once; the rows under
+// it do not repeat it, and a ranked team wears its standing beside its name.
 export function UpcomingSection({
   groups,
   shown,
   active,
   total,
   onPick,
+  order,
+  onOrder,
   afterFirst,
   standings,
+  collapsedAfter = 4,
 }: {
-  groups: EventGroup[];
-  shown: EventGroup[];
+  groups: RankedEventGroup[];
+  shown: RankedEventGroup[];
   active: string | null;
   total: number;
   onPick: (label: string | null) => void;
+  order: EventOrder;
+  onOrder: (order: EventOrder) => void;
   /** Rendered after the first event group (the stacked page parks the rails there). */
   afterFirst?: ReactNode;
-  /** The top-20 standings, for the detail panel's "Standing" line. */
+  /** The top-20 standings: the rank pills on rows and the detail panel's "Standing" line. */
   standings?: SpotlightTeam[];
+  /** How many event groups stay open before the rest fold behind one line. */
+  collapsedAfter?: number;
 }) {
   const { anchor, bind } = useDetailAnchor();
+  const [expanded, setExpanded] = useState(false);
+  const ranks = useMemo(() => ranksByGrid(standings), [standings]);
+  const visible = active || expanded ? shown : shown.slice(0, collapsedAfter);
+  const folded = shown.slice(visible.length);
+  const foldedMatches = folded.reduce((n, g) => n + g.items.length, 0);
+
   return (
     <section className="space-y-3">
-      <SectionHeading label={active ?? "Upcoming · by event"} />
-      {/* one event = nothing to choose between, so the row stays hidden */}
-      {groups.length > 1 && (
-        <EventFilter groups={groups} total={total} active={active} onPick={onPick} />
-      )}
-      <div className="space-y-6">
-        {shown.map((g, gi) => (
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <SectionHeading label={active ?? "Upcoming"} count={active ? undefined : total} />
+        {groups.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <OrderToggle order={order} onOrder={onOrder} />
+            <EventPicker groups={groups} total={total} active={active} onPick={onPick} />
+          </div>
+        )}
+      </div>
+      <div className="space-y-5">
+        {visible.map((g, gi) => (
           <Fragment key={g.label}>
             <div className="space-y-2">
-              <div className="flex items-center gap-2 border-b border-line/50 pb-1.5">
-                {g.logo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={g.logo} alt="" loading="lazy" className="h-5 w-5 shrink-0 rounded object-contain" />
-                ) : (
-                  <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70" />
-                )}
-                <h3 className="truncate text-xs font-bold uppercase tracking-wider text-muted">
-                  {g.label}
-                </h3>
-                <span className="shrink-0 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-faint">
-                  {g.items.length}
-                </span>
-              </div>
+              <EventHeader group={g} />
               <ul role="list" className="space-y-2">
                 {g.items.map((m) => {
                   const open = anchor?.key === m.seriesId;
                   return (
                     <li key={m.seriesId} className="relative" {...bind(m.seriesId)}>
-                      <UpcomingRow match={m} describedBy={open ? UPCOMING_POP : undefined} />
+                      <UpcomingRow
+                        match={m}
+                        ranks={ranks}
+                        showEvent={false}
+                        describedBy={open ? UPCOMING_POP : undefined}
+                      />
                       {open && anchor ? (
                         <DetailPopover id={UPCOMING_POP} anchor={anchor.rect} place="inline" width={320}>
                           <UpcomingDetail match={m} standings={standings} />
@@ -298,7 +251,115 @@ export function UpcomingSection({
           </Fragment>
         ))}
       </div>
+      {folded.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="btn btn-ghost h-9 w-full text-xs"
+        >
+          Show {folded.length} more event{folded.length === 1 ? "" : "s"} · {foldedMatches} match{foldedMatches === 1 ? "" : "es"}
+        </button>
+      ) : expanded && !active && shown.length > collapsedAfter ? (
+        <button type="button" onClick={() => setExpanded(false)} className="btn btn-ghost h-9 w-full text-xs">
+          Show fewer events
+        </button>
+      ) : null}
     </section>
+  );
+}
+
+// "Top teams first" or "Soonest first": the one choice the schedule offers.
+function OrderToggle({ order, onOrder }: { order: EventOrder; onOrder: (order: EventOrder) => void }) {
+  const button = (value: EventOrder, label: string) => (
+    <button
+      type="button"
+      aria-pressed={order === value}
+      onClick={() => onOrder(value)}
+      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+        order === value ? "bg-brand/15 text-ink" : "text-muted hover:text-ink"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="group" aria-label="Order events" className="flex items-center rounded-full border border-line bg-panel/70 p-0.5">
+      {button("top", "Top teams first")}
+      {button("soon", "Soonest first")}
+    </div>
+  );
+}
+
+// One event, or all of them: a select instead of a row of chips that scrolled
+// off the screen — the same choice, no clutter, keyboard-friendly.
+function EventPicker({
+  groups,
+  total,
+  active,
+  onPick,
+}: {
+  groups: RankedEventGroup[];
+  total: number;
+  active: string | null;
+  onPick: (label: string | null) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2">
+      <span className="sr-only">Show one event</span>
+      <select
+        value={active ?? ""}
+        onChange={(e) => onPick(e.target.value || null)}
+        className="max-w-72 rounded-full border border-line bg-panel/70 px-3 py-1.5 text-xs font-medium text-ink"
+      >
+        <option value="">All events · {total}</option>
+        {groups.map((g) => (
+          <option key={g.label} value={g.label}>
+            {g.label} · {g.items.length}
+            {g.best !== Infinity ? ` · top team #${g.best}` : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// The event's line: its name once, how many matches, which of the top 20 are
+// in it (crest + standing, best first), and when it starts.
+function EventHeader({ group: g }: { group: RankedEventGroup }) {
+  const from = g.soonest === Infinity ? "" : whenLabel(new Date(g.soonest).toISOString());
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line/50 pb-1.5">
+      <div className="flex min-w-0 items-center gap-2">
+        {g.logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={g.logo} alt="" loading="lazy" className="h-5 w-5 shrink-0 rounded object-contain" />
+        ) : (
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70" />
+        )}
+        <h3 className="truncate text-xs font-bold uppercase tracking-wider text-muted">{g.label}</h3>
+        <span className="shrink-0 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-faint">
+          {g.items.length}
+        </span>
+      </div>
+      {g.ranked.length > 0 ? (
+        <div
+          className="flex items-center gap-1.5"
+          title={g.ranked.map((t) => `#${t.standing} ${t.name}`).join(", ")}
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-brand">Top 20</span>
+          {g.ranked.slice(0, 4).map((t) => (
+            <span
+              key={t.gridId}
+              className="flex items-center gap-1 rounded-full bg-panel px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink"
+            >
+              <TeamLogo name={t.name} src={t.logoUrl} color={t.color} size={14} />#{t.standing}
+            </span>
+          ))}
+          {g.ranked.length > 4 ? <span className="text-[10px] text-faint">+{g.ranked.length - 4}</span> : null}
+        </div>
+      ) : null}
+      {from ? <span className="ml-auto shrink-0 text-[11px] tabular-nums text-faint">from {from}</span> : null}
+    </div>
   );
 }
 
