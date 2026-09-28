@@ -3,6 +3,7 @@ package leetify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -229,10 +230,14 @@ func TestGetProfile_AppHostBotWallPausesTheFallback(t *testing.T) {
 	c := New(srv.URL, "", WithLegacyURL(srv.URL))
 
 	for i := 0; i < 3; i++ {
-		if _, err := c.GetProfile(context.Background(), 42); err != ErrNotFound {
-			t.Fatalf("lookup %d: err = %v, want ErrNotFound", i, err)
+		_, err := c.GetProfile(context.Background(), 42)
+		// A wall reads as a miss to every existing check — and as the wall to
+		// the one that cares (the cache keeps it for seconds, not minutes).
+		if !errors.Is(err, ErrNotFound) || !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("lookup %d: err = %v, want ErrUnavailable (which is also ErrNotFound)", i, err)
 		}
 	}
+	// Asked directly (no relay) a 511 is the network being refused: no retry.
 	if n := atomic.LoadInt32(&appCalls); n != 1 {
 		t.Errorf("app calls = %d, want 1: the first 511 pauses the fallback", n)
 	}

@@ -148,6 +148,12 @@ type Server struct {
 // views of profile-less players don't keep hitting the upstream.
 const negativeCacheTTL = 5 * time.Minute
 
+// unavailableCacheTTL is how long a miss the provider could not verify is
+// kept (leetify.ErrUnavailable: the bot wall refused the relay's hop). Long
+// enough to absorb a burst of page loads, short enough that the next visit
+// asks again once the wall has moved on.
+const unavailableCacheTTL = 45 * time.Second
+
 // staleCacheTTL is how long a last-known-good copy is retained to serve when the
 // upstream is failing (stale-on-error), well beyond the fresh TTL.
 const staleCacheTTL = 24 * time.Hour
@@ -1326,6 +1332,20 @@ func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch
 		return val, nil
 	})
 	if err != nil {
+		// A miss the provider could not verify: the last-known-good copy when
+		// there is one, else a miss kept for seconds rather than minutes so the
+		// next visit asks again. Checked before ErrNotFound, which it also is.
+		if errors.Is(err, leetify.ErrUnavailable) {
+			if s.cache != nil {
+				var stale T
+				if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
+					s.log.Warn("serving stale upstream data", "key", key, "err", err)
+					return stale, false, nil
+				}
+				_ = s.cache.SetJSONTTL(ctx, missKey, true, unavailableCacheTTL)
+			}
+			return zero, true, nil
+		}
 		if errors.Is(err, leetify.ErrNotFound) || errors.Is(err, faceit.ErrNotFound) {
 			if s.cache != nil {
 				_ = s.cache.SetJSONTTL(ctx, missKey, true, negativeCacheTTL)
