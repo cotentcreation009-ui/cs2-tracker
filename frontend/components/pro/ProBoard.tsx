@@ -22,6 +22,7 @@ import {
 import { ProPlayersColumn } from "./ProPlayersColumn";
 import { FaceitColumn } from "./FaceitColumn";
 import { MatchesColumn, type BoardModel } from "./MatchesColumn";
+import { rankEventGroups, type EventOrder } from "./eventRank";
 
 const POLL_MS = 10_000;
 
@@ -44,6 +45,12 @@ export function ProBoard() {
   // event filter for the upcoming section — the label, not an index, because
   // the feed re-groups every poll
   const [pickedEvent, setPickedEvent] = useState<string | null>(null);
+  // events ranked by the top-20 teams playing in them, or by start time
+  const [eventOrder, setEventOrder] = useState<EventOrder>("top");
+  // One spotlight poll for the whole board: it ranks the schedule here and
+  // feeds the players column and the standings strip from xl up.
+  const spotlight = useSpotlight();
+  const standings = spotlight.data?.enabled === false ? undefined : spotlight.data?.teams;
 
   const { live, upcoming, upcomingGroups, finished } = useMemo(() => {
     const matches = data?.matches ?? [];
@@ -82,23 +89,30 @@ export function ProBoard() {
   // Resolve the pick against the CURRENT groups every render: once an event's
   // last match starts or finishes it leaves the upcoming feed, and a stale pick
   // would otherwise filter the section down to nothing. Absent label = show all.
+  const rankedGroups = useMemo(
+    () => rankEventGroups(upcomingGroups, standings, eventOrder),
+    [upcomingGroups, standings, eventOrder],
+  );
   const activeEvent =
-    pickedEvent && upcomingGroups.some((g) => g.label === pickedEvent) ? pickedEvent : null;
+    pickedEvent && rankedGroups.some((g) => g.label === pickedEvent) ? pickedEvent : null;
   const shownGroups = activeEvent
-    ? upcomingGroups.filter((g) => g.label === activeEvent)
-    : upcomingGroups;
-  const upcomingTotal = upcomingGroups.reduce((n, g) => n + g.items.length, 0);
+    ? rankedGroups.filter((g) => g.label === activeEvent)
+    : rankedGroups;
+  const upcomingTotal = rankedGroups.reduce((n, g) => n + g.items.length, 0);
 
   const board: BoardModel = {
     live,
     upcoming,
-    upcomingGroups,
+    upcomingGroups: rankedGroups,
     shownGroups,
     activeEvent,
     upcomingTotal,
+    eventOrder,
+    onOrder: setEventOrder,
+    standings,
     finished,
     now,
-    onPickEvent: (label) => setPickedEvent((cur) => (cur === label ? null : label)),
+    onPickEvent: (label) => setPickedEvent(label),
   };
 
   return (
@@ -121,7 +135,7 @@ export function ProBoard() {
           body="We couldn't reach the live match feed. It'll retry automatically — check back in a moment."
         />
       ) : wide ? (
-        <WideBoard board={board} />
+        <WideBoard board={board} spotlight={spotlight} />
       ) : (
         <StackedBoard board={board} />
       )}
@@ -141,6 +155,9 @@ function StackedBoard({ board }: { board: BoardModel }) {
     shownGroups,
     activeEvent,
     upcomingTotal,
+    eventOrder,
+    onOrder,
+    standings,
     finished,
     now,
     onPickEvent,
@@ -163,6 +180,9 @@ function StackedBoard({ board }: { board: BoardModel }) {
           active={activeEvent}
           total={upcomingTotal}
           onPick={onPickEvent}
+          order={eventOrder}
+          onOrder={onOrder}
+          standings={standings}
           afterFirst={
             <div className="space-y-6 pt-2">
               <PlayersRail />
@@ -172,7 +192,7 @@ function StackedBoard({ board }: { board: BoardModel }) {
         />
       )}
 
-      {finished.length > 0 && <ResultsSection finished={finished} now={now} />}
+      {finished.length > 0 && <ResultsSection finished={finished} now={now} standings={standings} />}
 
       {live.length === 0 && upcomingGroups.length === 0 && finished.length === 0 && <NoMatches />}
     </>
@@ -183,10 +203,10 @@ function StackedBoard({ board }: { board: BoardModel }) {
 // pinned under the header and scroll on their own (see COLUMN_CLS); the
 // middle column scrolls with the page. Narrower sidebars until 2xl so the
 // matches keep room at 1280px.
-function WideBoard({ board }: { board: BoardModel }) {
-  // One spotlight poll feeds both the players column and the standings strip;
-  // the FACEIT column has its own (?only=faceit) so a region change is cheap.
-  const { data, loading } = useSpotlight();
+function WideBoard({ board, spotlight }: { board: BoardModel; spotlight: ReturnType<typeof useSpotlight> }) {
+  // The board's one spotlight poll feeds the players column and the standings
+  // strip; the FACEIT column has its own (?only=faceit) so a region change is cheap.
+  const { data, loading } = spotlight;
   const enabled = data?.enabled !== false;
   const teams = enabled ? (data?.teams ?? []) : [];
   const players = enabled ? (data?.players ?? []) : [];
