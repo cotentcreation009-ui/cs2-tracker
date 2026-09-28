@@ -26,6 +26,25 @@ import (
 // ErrNotFound means Leetify has no (public) profile for the SteamID.
 var ErrNotFound = errors.New("leetify: profile not found")
 
+// ErrUnavailable is a miss the site could not verify: the app-route fallback
+// was refused by the bot wall (appprofile.go) instead of answering "no". It
+// satisfies errors.Is(err, ErrNotFound) — every caller that already handles
+// a miss handles this the same way, and nothing becomes a 500 — while
+// errors.Is(err, ErrUnavailable) still tells the two apart, which is how the
+// cache layer (api.cachedExternal) keeps it for seconds rather than the
+// minutes a real miss earns. A player who IS on Leetify was reading as
+// "no Leetify profile" for most of a day because of that difference.
+var ErrUnavailable error = &unavailableError{}
+
+type unavailableError struct{}
+
+func (*unavailableError) Error() string {
+	return "leetify: profile temporarily unavailable (the app host refused this network)"
+}
+
+// Is makes ErrUnavailable read as ErrNotFound to the checks that already exist.
+func (*unavailableError) Is(target error) bool { return target == ErrNotFound }
+
 // maxRecentMatches caps the recent-match list we surface. Kept generous so the
 // Premier-vs-FACEIT split can find a player's FACEIT games even when they last
 // queued it a while back (they may sit deep in a Premier-heavy history).
@@ -49,6 +68,9 @@ type Client struct {
 	// appBlockedUntil (unix nanos) pauses the app routes after the app host
 	// refuses this network with a 511 bot check (appprofile.go).
 	appBlockedUntil atomic.Int64
+	// appWallStreak counts walls met since the last answered app request; it
+	// sets how long the next pause lasts (appprofile.go tripAppBlock).
+	appWallStreak atomic.Int32
 }
 
 // Option customises a Client.
@@ -467,12 +489,15 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			return p, nil
 		}
 		// Whatever went wrong in the fallback, v3's answer stands: "no
-		// profile" is all this site can serve, and the caller negative-caches
-		// a miss briefly. It must never become a 500 — on the first deploy the
-		// app host's bot wall turned a third of all lookups into errors. The
-		// reason is still logged (once per pause for the wall, every time for
-		// anything else) so a dead fallback stays visible.
-		if !errors.Is(aerr, ErrNotFound) && !errors.Is(aerr, errAppBlocked) {
+		// profile" is all this site can serve. It must never become a 500 — on
+		// the first deploy the app host's bot wall turned a third of all
+		// lookups into errors. A wall is reported as ErrUnavailable, which
+		// reads as a miss everywhere but is cached for seconds, not minutes;
+		// anything else is logged every time so a dead fallback stays visible.
+		if errors.Is(aerr, errAppBlocked) {
+			return nil, ErrUnavailable
+		}
+		if !errors.Is(aerr, ErrNotFound) {
 			slog.Warn("leetify app fallback failed", "steam64", steam64, "err", aerr)
 		}
 		return nil, ErrNotFound

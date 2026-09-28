@@ -183,24 +183,44 @@ var appSourcePreference = []string{"5v5", "faceit", "matchmaking", "matchmaking_
 // 2026-09-16.
 var errAppBlocked = errors.New("leetify app: this network is refused (511 bot check)")
 
-// appBlockedFor is how long the app routes are left alone after a 511. A wall
-// does not come down per player, and a few thousand misses a day knocking on
-// it would be both pointless and the surest way to get the IP flagged on the
-// public host too.
-const appBlockedFor = 30 * time.Minute
+// How long the app routes are left alone after a wall. ESCALATING, not flat:
+// two minutes the first time, doubling for every wall met without an
+// answered request in between, capped at thirty. Through the relay a 511 is
+// one Cloudflare egress address being refused, not the network — the same
+// routes answered 20 of 20 from the relay minutes after the backend logged a
+// wall (2026-09-28) — and a flat half-hour pause was turning each refused
+// request into thirty minutes of "no Leetify profile" for every non-member:
+// 28 pauses in one day, fourteen hours dark. A wall that persists still
+// earns the long pause; it just has to prove itself first.
+const (
+	appBlockFirst = 2 * time.Minute
+	appBlockMax   = 30 * time.Minute
+)
 
 func (c *Client) appBlocked() bool { return time.Now().UnixNano() < c.appBlockedUntil.Load() }
 
-// tripAppBlock pauses the fallback and says so once per pause, not once per
-// lookup — the log line that tells an operator the fallback is currently dead.
+// tripAppBlock pauses the fallback for the streak's pause and says so once
+// per pause, not once per lookup — the log line that tells an operator the
+// fallback is currently dead, and for how long.
 func (c *Client) tripAppBlock() {
+	streak := c.appWallStreak.Add(1)
+	pause := appBlockFirst
+	for i := int32(1); i < streak && pause < appBlockMax; i++ {
+		pause *= 2
+	}
+	if pause > appBlockMax {
+		pause = appBlockMax
+	}
 	now := time.Now()
-	until := now.Add(appBlockedFor)
+	until := now.Add(pause)
 	if prev := c.appBlockedUntil.Swap(until.UnixNano()); now.UnixNano() >= prev {
 		slog.Warn("leetify app host refused this network (511 bot check); fallback paused",
-			"until", until.UTC().Format(time.RFC3339))
+			"until", until.UTC().Format(time.RFC3339), "pause", pause.String(), "walls_in_a_row", streak)
 	}
 }
+
+// noteAppAnswered resets the escalation: the wall let a request through.
+func (c *Client) noteAppAnswered() { c.appWallStreak.Store(0) }
 
 // getAppJSON fetches one app-API route. A 403 (hidden by the player, or not
 // served anonymously) and a 404 are both "no", returned as ErrNotFound so a
@@ -211,32 +231,49 @@ func (c *Client) getAppJSON(ctx context.Context, path string, out any) error {
 	if c.appRelayURL != "" {
 		base = c.appRelayURL // same path; the relay forwards it (see the header)
 	}
-	req, err := c.newReq(ctx, base+path)
-	if err != nil {
-		return err
-	}
-	// The app's routes are browser-called; the public-API key means nothing
-	// here and is not sent. Nothing else is added either — the routes answer
-	// a plain GET without a browser's Origin or Referer, so this traffic
-	// presents itself as what it is.
-	req.Header.Del("_leetify_key")
-	if c.appRelayURL != "" {
-		req.Header.Set("X-Relay-Key", c.appRelayKey)
-	}
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return fmt.Errorf("leetify app: request failed: %w", err)
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		req, err := c.newReq(ctx, base+path)
+		if err != nil {
+			return err
+		}
+		// The app's routes are browser-called; the public-API key means nothing
+		// here and is not sent. Nothing else is added either — the routes answer
+		// a plain GET without a browser's Origin or Referer, so this traffic
+		// presents itself as what it is.
+		req.Header.Del("_leetify_key")
+		if c.appRelayURL != "" {
+			req.Header.Set("X-Relay-Key", c.appRelayKey)
+		}
+		resp, err = c.doWithRetry(req)
+		if err != nil {
+			return fmt.Errorf("leetify app: request failed: %w", err)
+		}
+		// Through the relay a 511 is one egress address being refused, not the
+		// network: asked once more, the relay's next hop is usually let
+		// through. Only then is it a wall.
+		if resp.StatusCode == http.StatusNetworkAuthenticationRequired && c.appRelayURL != "" && attempt == 0 {
+			resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
+			continue
+		}
+		break
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
+		c.noteAppAnswered()
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 			return fmt.Errorf("leetify app: decode %s: %w", path, err)
 		}
 		return nil
 	case http.StatusNotFound, http.StatusForbidden:
+		c.noteAppAnswered()
 		return ErrNotFound
 	case http.StatusNetworkAuthenticationRequired:
 		c.tripAppBlock()

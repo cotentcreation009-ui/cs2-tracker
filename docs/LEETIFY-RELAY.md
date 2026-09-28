@@ -97,6 +97,24 @@ misses expire within 5 minutes.
 - A relay that is down, or refuses the key, is a plain miss on the profile page
   — never an error — and is logged on the backend as `leetify app fallback failed`.
 
+## When the wall hits the relay (2026-09-28)
+
+Leetify's wall refuses some of Cloudflare's egress addresses, not all: the backend logged
+28 refusals in a day while the same routes answered 20 of 20 from the relay minutes later.
+Under the original rule — one 511 pauses the fallback for thirty minutes — that was fourteen
+hours a day of "no Leetify profile" for every non-member, cached five minutes each. Now:
+
+- the Worker asks Leetify again, twice, before passing a 511 back (paste the current
+  `deploy/leetify-relay.worker.js` into the Worker to get this);
+- the backend asks the relay once more before believing a wall;
+- a wall that survives pauses the fallback for two minutes, doubling for every wall met
+  after a pause lapses (up to thirty), and any answered request resets it;
+- a lookup refused by the wall is `leetify.ErrUnavailable` — a miss to every caller, but
+  cached for 45 seconds instead of five minutes, with the last-known-good copy served when
+  there is one.
+
+The log line still says `fallback paused`, now with the pause length and the streak.
+
 ## Not yet done
 
 Skinport prices through the same box (`SKINPORT_BASE_URL` does not exist yet;

@@ -12,8 +12,11 @@
 //
 // It forwards exactly the four profile routes the fallback needs (pool list,
 // one pool's summary, display name, last 30 games), only with the key, and
-// hands the answer back status and all — a 511 here is a 511 there. No
-// challenge is solved and no header is faked.
+// hands the answer back status and all. The one thing it adds (2026-09-28):
+// the wall refuses some of this network's egress addresses, not all — the
+// same route answered 20 of 20 minutes after a refusal — so a 511 is asked
+// again, twice, before it is passed back as a 511. No challenge is solved and
+// no header is faked.
 
 const UPSTREAM = "https://api.cs-prod.leetify.com";
 const ALLOWED =
@@ -31,7 +34,11 @@ export default {
 
     let upstream;
     try {
-      upstream = await fetch(UPSTREAM + url.pathname, { headers: { accept: "application/json" } });
+      for (let attempt = 0; ; attempt++) {
+        upstream = await fetch(UPSTREAM + url.pathname, { headers: { accept: "application/json" } });
+        if (upstream.status !== 511 || attempt >= 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+      }
     } catch {
       return new Response("upstream unreachable", { status: 502 });
     }
