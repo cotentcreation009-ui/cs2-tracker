@@ -43,21 +43,30 @@ describe("the bridge from an inventory item to the poster studio", () => {
     expect(url.searchParams.has("inspect")).toBe(false);
   });
 
-  it("leaves out what a copy does not know, and never sends a knife, gloves or a case", () => {
+  it("leaves out what a copy does not know, and never sends gloves or a case", () => {
     const plain = new URL(posterStudioHref({ market_hash_name: "AWP | Asiimov (Field-Tested)", type: "Sniper Rifle" })!);
     expect(plain.searchParams.has("float")).toBe(false);
     expect(plain.searchParams.has("seed")).toBe(false);
     expect(plain.searchParams.has("stattrak")).toBe(false);
-    expect(posterStudioHref({ market_hash_name: "★ Karambit | Doppler (Factory New)", type: "Knife" })).toBeNull();
     expect(posterStudioHref({ market_hash_name: "★ Sport Gloves | Hedge Maze (Field-Tested)", type: "Gloves" })).toBeNull();
     expect(posterStudioHref({ market_hash_name: "Dreams & Nightmares Case", type: "Container" })).toBeNull();
     expect(posterStudioHref({ market_hash_name: "XM1014 | Tranquility (Field-Tested)", type: "Shotgun" })).not.toBeNull();
     expect(posterStudioHref({ market_hash_name: "Negev | Mjölnir (Factory New)", type: "Machinegun" })).not.toBeNull();
   });
 
+  it("sends a knife to the studio by its market name, star and all", () => {
+    const knife = new URL(posterStudioHref({ market_hash_name: "★ Karambit | Doppler (Factory New)", type: "Knife" }, { float: 0.0123, seed: 412 })!);
+    expect(knife.searchParams.get("name")).toBe("★ Karambit | Doppler (Factory New)");
+    expect(knife.searchParams.get("seed")).toBe("412");
+    expect(posterStudioHref({ market_hash_name: "★ StatTrak™ M9 Bayonet | Fade (Factory New)", type: "Knife", stattrak: true })).not.toBeNull();
+    expect(posterStudioHref({ market_hash_name: "★ Shadow Daggers | Slaughter (Minimal Wear)", type: "Knife" })).not.toBeNull();
+    expect(posterUnavailableNote({ market_hash_name: "★ Karambit | Doppler (Factory New)", type: "Knife" })).toBeNull();
+  });
+
   it("says why there is no button, only when the customer would expect one", () => {
-    expect(posterUnavailableNote({ market_hash_name: "★ Karambit | Doppler (Factory New)", type: "Knife" })).toMatch(/Knives and gloves/);
-    expect(posterUnavailableNote({ market_hash_name: "★ Sport Gloves | Hedge Maze (Field-Tested)", type: "Gloves" })).toMatch(/Knives and gloves/);
+    expect(posterUnavailableNote({ market_hash_name: "★ Sport Gloves | Hedge Maze (Field-Tested)", type: "Gloves" })).toBe("Gloves aren't in the poster studio yet.");
+    expect(posterUnavailableNote({ market_hash_name: "★ Hand Wraps | Cobalt Skulls (Field-Tested)", type: "Gloves" })).toMatch(/Gloves/);
+    expect(posterUnavailableNote({ market_hash_name: "★ Driver Gloves | Crimson Weave (Field-Tested)" })).toBe("Gloves aren't in the poster studio yet.");
     expect(posterUnavailableNote({ market_hash_name: "XM1014 | Tranquility (Field-Tested)", type: "Shotgun" })).toBeNull();
     expect(posterUnavailableNote({ market_hash_name: "Ray Gun | Prototype (Factory New)", type: "Rifle" })).toBe("The Ray Gun isn't in the poster studio yet.");
     expect(posterUnavailableNote({ market_hash_name: "AK-47 | Redline (Field-Tested)", type: "Rifle" })).toBeNull();
