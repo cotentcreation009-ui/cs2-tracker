@@ -53,11 +53,13 @@ services:
     restart: unless-stopped
     # THE CAP THAT MAKES "SAME BOX" A DECISION RATHER THAN A RISK. The renderer is
     # software-rendered (SwiftShader) and pins every core it is given for the length of
-    # a render. This is an e2-standard-2: two cores, and the stats site needs one. So
-    # the worker gets ONE, and a poster render can never stall a stats user.
-    #   measured on the workstation: 4096 bake 47 CPU-s (so ~47 s wall on one core),
+    # a render. The box is a Contabo VPS 4 with four vCPUs since 2026-09-19 (it was a
+    # two-core e2-standard-2, which is why this said 1.0): the stats stack keeps two,
+    # the worker gets two, and a poster render still cannot stall a stats user.
+    #   measured on the workstation: 4096 bake 47 CPU-s (~47 s wall on one core,
+    #   56-65 s single-thread, 25 s with a 1-thread pool, 6.5-7 s with the pool),
     #   warm craft 4-5 s, cold Chromium start 151-187 s once per process.
-    cpus: 1.0
+    cpus: 2.0
     # One 4096 bake peaks at 2.1 GB plus ~850 MB of Chromium. Same rule as the stats
     # worker above: a runaway render can only OOM this container.
     mem_limit: 4g
@@ -67,6 +69,13 @@ services:
       CS2_ASSET_SNAPSHOT_DIR: /assets/cs2
       CS2_MASTER_ARCHIVE_DIR: /data/masters
       PORT: "8790"
+      # The paint bake runs on a worker_threads pool ONLY when this is set: the pool
+      # sizes itself from the host's core count minus four, so inside a cgroup on a
+      # four-vCPU box it sees zero threads and falls back to baking synchronously on
+      # the main event loop -- /health stops answering for the whole bake (23 s gaps
+      # measured) and a warm render arriving meanwhile fails. Two threads match the
+      # two cores above and cut a cold bake from ~54 s to well under half of that.
+      CSRUN_COMPOSITE_THREADS: "2"
     volumes:
       # READ-WRITE, deliberately: the worker writes its bake cache (_composited,
       # _bakedcomp) INSIDE the asset tree, next to the textures it derives them from.
