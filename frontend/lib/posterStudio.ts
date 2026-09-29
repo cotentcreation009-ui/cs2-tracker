@@ -43,7 +43,14 @@ export type PosterCandidate = {
   applied?: { kind: "sticker" | "charm" | "patch"; name: string }[];
 };
 
-export type PosterCopy = { float?: number; seed?: number };
+/**
+ * One copy of the item: its float and seed from Steam's asset properties, and
+ * its inspect payload — the hex the game accepts, which since 2026-09-28 the
+ * studio can read too (the first byte is a XOR key, not a lock). The payload
+ * is what carries each sticker's SLOT and wear; the name list beside it only
+ * knows which stickers are on the item, in order.
+ */
+export type PosterCopy = { float?: number; seed?: number; inspect?: string };
 
 /** Why an item has no poster button, in the customer's words; null when it does have one or is not a weapon at all. */
 export function posterUnavailableNote(item: PosterCandidate): string | null {
@@ -75,6 +82,8 @@ export function posterStudioHref(item: PosterCandidate, copy?: PosterCopy | null
   for (const mod of item.applied ?? []) {
     if (mod.kind === "sticker" && mod.name.trim()) params.append("sticker", mod.name.trim());
   }
+  // The payload wins in the studio; the fields above are its fallback.
+  if (copy?.inspect && /^[0-9A-Fa-f]{12,4096}$/.test(copy.inspect)) params.set("inspect", copy.inspect.toUpperCase());
   params.set("from", "csrun-inventory");
   return `${POSTER_STUDIO_URL}?${params.toString()}`;
 }
