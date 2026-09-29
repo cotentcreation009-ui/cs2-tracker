@@ -23,7 +23,7 @@ describe("the bridge from an inventory item to the poster studio", () => {
           { kind: "sticker", name: "iBUYPOWER (Holo) | Katowice 2014" },
         ],
       },
-      { float: 0.008227616548538208, seed: 12 },
+      { float: 0.008227616548538208, seed: 12, inspect: "2131f1beeabfe620392001040925112519c1bbe1fb2261b6254324292031a80749465125813b47eb" },
     );
     expect(href).not.toBeNull();
     const url = new URL(href!);
@@ -33,7 +33,14 @@ describe("the bridge from an inventory item to the poster studio", () => {
     expect(url.searchParams.get("seed")).toBe("12");
     expect(url.searchParams.get("stattrak")).toBe("1");
     expect(url.searchParams.getAll("sticker")).toEqual(["Titan (Holo) | Katowice 2014", "iBUYPOWER (Holo) | Katowice 2014"]);
+    // the copy's inspect payload rides along, upper-cased, so the studio can read the slots
+    expect(url.searchParams.get("inspect")).toBe("2131F1BEEABFE620392001040925112519C1BBE1FB2261B6254324292031A80749465125813B47EB");
     expect(url.searchParams.get("from")).toBe("csrun-inventory");
+  });
+
+  it("does not forward a payload that is not hex", () => {
+    const url = new URL(posterStudioHref({ market_hash_name: "AWP | Asiimov (Field-Tested)", type: "Sniper Rifle" }, { inspect: "steam://nope" })!);
+    expect(url.searchParams.has("inspect")).toBe(false);
   });
 
   it("leaves out what a copy does not know, and never sends a knife, gloves or a case", () => {
