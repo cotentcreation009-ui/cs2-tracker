@@ -2,16 +2,16 @@
  * The bridge from an inventory item to the poster studio on posters.csrun.win.
  *
  * The studio takes a craft by NAME plus its numbers — the finish, the float,
- * the paint seed, StatTrak, and the applied stickers in slot order — because
- * the inspect payload Steam hands out for someone else's inventory is keyed
- * (its first byte is a key id, not the 0x00 of a plain payload), so the
- * studio's decoder cannot read it. Everything the studio needs is already on
- * the item and its copies; nothing here calls anything.
+ * the paint seed, StatTrak, and the applied stickers in slot order — and,
+ * since 2026-09-28, the copy's inspect payload, which the studio decodes
+ * itself (its first byte is a XOR key, not a lock) to learn each sticker's
+ * slot and wear. Everything the studio needs is already on the item and its
+ * copies; nothing here calls anything.
  *
  * The weapon list mirrors the studio's catalogue (CSRun packages/skin-art
- * catalog.ts WEAPONS): every gun. Knives and gloves are not in the studio
- * yet, and the item detail says so instead of sending the customer somewhere
- * that refuses them.
+ * schema.ts WEAPON_IDS): every gun and, since 2026-09-29 (CSRun PR #36), the
+ * twenty knives. Gloves are not in the studio yet, and the item detail says
+ * so instead of sending the customer somewhere that refuses them.
  */
 
 export const POSTER_STUDIO_URL = "https://posters.csrun.win/store/personalized-skin-art";
@@ -22,6 +22,10 @@ const POSTER_WEAPONS = new Set([
   "Desert Eagle", "USP-S", "Glock-18", "P250", "Five-SeveN", "Tec-9", "CZ75-Auto", "Dual Berettas", "P2000", "R8 Revolver", "Zeus x27",
   "P90", "MP9", "MAC-10", "MP7", "MP5-SD", "UMP-45", "PP-Bizon",
   "Nova", "XM1014", "Sawed-Off", "MAG-7", "M249", "Negev",
+  // Knives, as Steam names them after the ★ (craftNameParts strips the star).
+  "Bayonet", "Bowie Knife", "Butterfly Knife", "Classic Knife", "Falchion Knife", "Flip Knife", "Gut Knife",
+  "Huntsman Knife", "Karambit", "Kukri Knife", "M9 Bayonet", "Navaja Knife", "Nomad Knife", "Paracord Knife",
+  "Shadow Daggers", "Skeleton Knife", "Stiletto Knife", "Survival Knife", "Talon Knife", "Ursus Knife",
 ]);
 
 /** "StatTrak™ AK-47 | Redline (Field-Tested)" → { weapon: "AK-47", finish: "Redline" }; null when it is not a "Weapon | Finish" name. */
@@ -57,8 +61,13 @@ export function posterUnavailableNote(item: PosterCandidate): string | null {
   const parts = craftNameParts(item.market_hash_name);
   if (!parts || POSTER_WEAPONS.has(parts.weapon)) return null;
   const type = (item.type ?? "").toLowerCase();
-  if (item.market_hash_name.startsWith("★") || type === "knife" || type === "gloves") {
-    return "Knives and gloves aren't in the poster studio yet.";
+  if (type === "gloves" || /(^| )(gloves?|hand wraps)( |$)/i.test(parts.weapon)) {
+    return "Gloves aren't in the poster studio yet.";
+  }
+  if (item.market_hash_name.startsWith("★") || type === "knife") {
+    // A knife the studio's roster does not carry (none today; the list above
+    // is the full set of twenty).
+    return `The ${parts.weapon} isn't in the poster studio yet.`;
   }
   if (type === "shotgun" || type === "machinegun" || type === "machine gun" || type === "pistol" || type === "rifle" || type === "smg" || type === "sniper rifle") {
     return `The ${parts.weapon} isn't in the poster studio yet.`;
