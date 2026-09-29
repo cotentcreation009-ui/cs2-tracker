@@ -9,9 +9,11 @@
  * copies; nothing here calls anything.
  *
  * The weapon list mirrors the studio's catalogue (CSRun packages/skin-art
- * schema.ts WEAPON_IDS): every gun and, since 2026-09-29 (CSRun PR #36), the
- * twenty knives. Gloves are not in the studio yet, and the item detail says
- * so instead of sending the customer somewhere that refuses them.
+ * schema.ts WEAPON_IDS): every gun, the twenty knives (CSRun PR #36) and,
+ * since CSRun PR #38, the eight glove types with their 72 classic finishes.
+ * The 22 newest glove finishes use a 2025 shader the studio does not render
+ * yet; the item detail says so for those instead of sending the customer
+ * somewhere that refuses them.
  */
 
 export const POSTER_STUDIO_URL = "https://posters.csrun.win/store/personalized-skin-art";
@@ -26,7 +28,29 @@ const POSTER_WEAPONS = new Set([
   "Bayonet", "Bowie Knife", "Butterfly Knife", "Classic Knife", "Falchion Knife", "Flip Knife", "Gut Knife",
   "Huntsman Knife", "Karambit", "Kukri Knife", "M9 Bayonet", "Navaja Knife", "Nomad Knife", "Paracord Knife",
   "Shadow Daggers", "Skeleton Knife", "Stiletto Knife", "Survival Knife", "Talon Knife", "Ursus Knife",
+  // Gloves, as Steam names them after the ★.
+  "Bloodhound Gloves", "Broken Fang Gloves", "Driver Gloves", "Hand Wraps", "Hydra Gloves", "Moto Gloves",
+  "Specialist Gloves", "Sport Gloves",
 ]);
+
+/**
+ * Glove finishes the studio cannot render yet: the 2025 "volatile" kits, on a
+ * shader the studio has not transcribed (CSRun docs/renderer/GLOVES.md). Keyed
+ * "Weapon | Finish" as craftNameParts reads them; drop an entry when the studio
+ * gains that finish.
+ */
+const STUDIO_MISSING_GLOVE_FINISHES = new Set([
+  "Driver Gloves | Brocade Crane", "Driver Gloves | Brocade Flowers", "Driver Gloves | Dragon Fists", "Driver Gloves | Garden",
+  "Driver Gloves | Hand Sweaters", "Driver Gloves | Plum Quill", "Driver Gloves | Seigaiha", "Driver Gloves | Wave Chaser",
+  "Specialist Gloves | Lime Polycam", "Specialist Gloves | Cloud Chaser", "Specialist Gloves | Blackbook",
+  "Specialist Gloves | Chocolate Chesterfield", "Specialist Gloves | Pillow Punchers", "Specialist Gloves | Sunburst",
+  "Specialist Gloves | Big Swell",
+  "Sport Gloves | Violet Beadwork", "Sport Gloves | Frosty", "Sport Gloves | Blaze", "Sport Gloves | Creme Pinstripe",
+  "Sport Gloves | Red Racer", "Sport Gloves | Ultra Violent", "Sport Gloves | Occult",
+]);
+
+const studioHasCraft = (parts: { weapon: string; finish: string }) =>
+  POSTER_WEAPONS.has(parts.weapon) && !STUDIO_MISSING_GLOVE_FINISHES.has(`${parts.weapon} | ${parts.finish}`);
 
 /** "StatTrak™ AK-47 | Redline (Field-Tested)" → { weapon: "AK-47", finish: "Redline" }; null when it is not a "Weapon | Finish" name. */
 export function craftNameParts(marketName: string): { weapon: string; finish: string } | null {
@@ -59,14 +83,13 @@ export type PosterCopy = { float?: number; seed?: number; inspect?: string };
 /** Why an item has no poster button, in the customer's words; null when it does have one or is not a weapon at all. */
 export function posterUnavailableNote(item: PosterCandidate): string | null {
   const parts = craftNameParts(item.market_hash_name);
-  if (!parts || POSTER_WEAPONS.has(parts.weapon)) return null;
-  const type = (item.type ?? "").toLowerCase();
-  if (type === "gloves" || /(^| )(gloves?|hand wraps)( |$)/i.test(parts.weapon)) {
-    return "Gloves aren't in the poster studio yet.";
+  if (!parts || studioHasCraft(parts)) return null;
+  if (STUDIO_MISSING_GLOVE_FINISHES.has(`${parts.weapon} | ${parts.finish}`)) {
+    return "This glove finish isn't in the poster studio yet.";
   }
-  if (item.market_hash_name.startsWith("★") || type === "knife") {
-    // A knife the studio's roster does not carry (none today; the list above
-    // is the full set of twenty).
+  const type = (item.type ?? "").toLowerCase();
+  if (item.market_hash_name.startsWith("★") || type === "knife" || type === "gloves") {
+    // A knife or glove type the studio's roster does not carry (none today).
     return `The ${parts.weapon} isn't in the poster studio yet.`;
   }
   if (type === "shotgun" || type === "machinegun" || type === "machine gun" || type === "pistol" || type === "rifle" || type === "smg" || type === "sniper rifle") {
@@ -82,7 +105,7 @@ export function posterUnavailableNote(item: PosterCandidate): string | null {
  */
 export function posterStudioHref(item: PosterCandidate, copy?: PosterCopy | null): string | null {
   const parts = craftNameParts(item.market_hash_name);
-  if (!parts || !POSTER_WEAPONS.has(parts.weapon)) return null;
+  if (!parts || !studioHasCraft(parts)) return null;
   const params = new URLSearchParams();
   params.set("name", item.market_hash_name);
   if (copy?.float != null && Number.isFinite(copy.float)) params.set("float", copy.float.toFixed(6));

@@ -43,12 +43,12 @@ describe("the bridge from an inventory item to the poster studio", () => {
     expect(url.searchParams.has("inspect")).toBe(false);
   });
 
-  it("leaves out what a copy does not know, and never sends gloves or a case", () => {
+  it("leaves out what a copy does not know, and never sends a case or a finish the studio lacks", () => {
     const plain = new URL(posterStudioHref({ market_hash_name: "AWP | Asiimov (Field-Tested)", type: "Sniper Rifle" })!);
     expect(plain.searchParams.has("float")).toBe(false);
     expect(plain.searchParams.has("seed")).toBe(false);
     expect(plain.searchParams.has("stattrak")).toBe(false);
-    expect(posterStudioHref({ market_hash_name: "★ Sport Gloves | Hedge Maze (Field-Tested)", type: "Gloves" })).toBeNull();
+    expect(posterStudioHref({ market_hash_name: "★ Sport Gloves | Occult (Field-Tested)", type: "Gloves" })).toBeNull();
     expect(posterStudioHref({ market_hash_name: "Dreams & Nightmares Case", type: "Container" })).toBeNull();
     expect(posterStudioHref({ market_hash_name: "XM1014 | Tranquility (Field-Tested)", type: "Shotgun" })).not.toBeNull();
     expect(posterStudioHref({ market_hash_name: "Negev | Mjölnir (Factory New)", type: "Machinegun" })).not.toBeNull();
@@ -63,10 +63,17 @@ describe("the bridge from an inventory item to the poster studio", () => {
     expect(posterUnavailableNote({ market_hash_name: "★ Karambit | Doppler (Factory New)", type: "Knife" })).toBeNull();
   });
 
+  it("sends classic gloves to the studio and withholds the 2025 finishes it cannot render", () => {
+    const vice = new URL(posterStudioHref({ market_hash_name: "★ Sport Gloves | Vice (Factory New)", type: "Gloves" }, { float: 0.06, seed: 500 })!);
+    expect(vice.searchParams.get("name")).toBe("★ Sport Gloves | Vice (Factory New)");
+    expect(posterStudioHref({ market_hash_name: "★ Hand Wraps | Cobalt Skulls (Field-Tested)", type: "Gloves" })).not.toBeNull();
+    expect(posterUnavailableNote({ market_hash_name: "★ Hand Wraps | Cobalt Skulls (Field-Tested)", type: "Gloves" })).toBeNull();
+    expect(posterUnavailableNote({ market_hash_name: "★ Driver Gloves | Crimson Weave (Field-Tested)" })).toBeNull();
+    expect(posterUnavailableNote({ market_hash_name: "★ Specialist Gloves | Big Swell (Minimal Wear)", type: "Gloves" })).toBe("This glove finish isn't in the poster studio yet.");
+    expect(posterStudioHref({ market_hash_name: "★ Driver Gloves | Wave Chaser (Field-Tested)", type: "Gloves" })).toBeNull();
+  });
+
   it("says why there is no button, only when the customer would expect one", () => {
-    expect(posterUnavailableNote({ market_hash_name: "★ Sport Gloves | Hedge Maze (Field-Tested)", type: "Gloves" })).toBe("Gloves aren't in the poster studio yet.");
-    expect(posterUnavailableNote({ market_hash_name: "★ Hand Wraps | Cobalt Skulls (Field-Tested)", type: "Gloves" })).toMatch(/Gloves/);
-    expect(posterUnavailableNote({ market_hash_name: "★ Driver Gloves | Crimson Weave (Field-Tested)" })).toBe("Gloves aren't in the poster studio yet.");
     expect(posterUnavailableNote({ market_hash_name: "XM1014 | Tranquility (Field-Tested)", type: "Shotgun" })).toBeNull();
     expect(posterUnavailableNote({ market_hash_name: "Ray Gun | Prototype (Factory New)", type: "Rifle" })).toBe("The Ray Gun isn't in the poster studio yet.");
     expect(posterUnavailableNote({ market_hash_name: "AK-47 | Redline (Field-Tested)", type: "Rifle" })).toBeNull();
