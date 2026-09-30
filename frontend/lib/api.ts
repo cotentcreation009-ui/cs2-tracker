@@ -131,11 +131,12 @@ export async function getLeetify(
   }
 }
 
-// getLeetifyState is getLeetify for the profile page, which has to tell two
-// nothings apart: "no Leetify profile" (a 404, the panel is simply absent)
-// and "Leetify is rate-limiting this site" (the backend answers 503 while
-// its pause lasts) — the page says so instead of silently dropping the
-// ratings and the full match list. Every other caller keeps getLeetify.
+// getLeetifyState is getLeetify for the pages that have to tell two nothings
+// apart: "no Leetify profile" (a 404, the panel is simply absent) and
+// "Leetify is rate-limiting this site" (the backend answers 503 while its
+// pause lasts) — the profile page, its /id/<vanity> twin and the matches
+// page say so instead of silently dropping the ratings and the full match
+// list. Every other caller keeps getLeetify.
 export async function getLeetifyState(
   steamId: string,
 ): Promise<{ profile: LeetifyProfile | null; paused: boolean }> {

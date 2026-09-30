@@ -48,6 +48,18 @@ export function timeAgo(iso: string): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
+// ageMs is how long ago an RFC 3339 stamp was, in milliseconds — or null when
+// there is no usable stamp: missing, unparseable, or a zero time. Go's zero
+// time serialises as "0001-01-01T00:00:00Z", which parses fine and would read
+// as "2025y ago"; anything at or before the Unix epoch is no stamp at all,
+// and a caller shows no age rather than a fake one.
+export function ageMs(iso: string | null | undefined, now = Date.now()): number | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then) || then <= 0) return null;
+  return now - then;
+}
+
 export function mapLabel(map: string): string {
   return map.replace(/^de_/, "").replace(/^cs_/, "");
 }

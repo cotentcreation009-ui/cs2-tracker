@@ -3,7 +3,7 @@ import {
   ApiError,
   getBridge,
   getFaceit,
-  getLeetify,
+  getLeetifyState,
   getMapStats,
   getPlayerMatches,
   getProfile,
@@ -45,13 +45,13 @@ export default async function ProfileByVanity({
   const { vanity } = await params;
   try {
     const steamId = await resolveSteamId(vanity);
-    const [profile, matches, weapons, maps, leetify, faceit, steamExtras, steamStats, bridge] =
+    const [profile, matches, weapons, maps, leetifyState, faceit, steamExtras, steamStats, bridge] =
       await Promise.all([
         getProfile(steamId),
         getPlayerMatches(steamId),
         getWeaponStats(steamId).catch(() => []),
         getMapStats(steamId).catch(() => []),
-        getLeetify(steamId),
+        getLeetifyState(steamId),
         getFaceit(steamId),
         getSteamExtras(steamId),
         getSteamStats(steamId),
@@ -63,7 +63,8 @@ export default async function ProfileByVanity({
         matches={matches}
         weapons={weapons}
         maps={maps}
-        leetify={leetify}
+        leetify={leetifyState.profile}
+        leetifyPaused={leetifyState.paused}
         faceit={faceit}
         steamExtras={steamExtras}
         steamStats={steamStats}

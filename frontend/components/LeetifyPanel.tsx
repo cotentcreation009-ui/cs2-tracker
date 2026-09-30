@@ -1,7 +1,7 @@
 import type { LeetifyProfile } from "@/lib/types";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { RatingRadar } from "@/components/RatingRadar";
-import { premierHex, tierColor, timeAgo } from "@/lib/format";
+import { ageMs, premierHex, tierColor, timeAgo } from "@/lib/format";
 
 // A copy older than this is one the backend served because Leetify is not
 // answering (its fresh cache is 15 minutes): say so rather than pass it off
@@ -146,8 +146,10 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
   // The app's match history rides along when the relay knows the route; the
   // note must not claim "no match list" under a list that is right there.
   const hasList = (p.recent_matches?.length ?? 0) > 0;
-  const fetchedAtMs = p.fetched_at ? new Date(p.fetched_at).getTime() : NaN;
-  const stale = !Number.isNaN(fetchedAtMs) && Date.now() - fetchedAtMs > STALE_AFTER_MS;
+  // The copy's age, when the stamp is usable. A missing or zero stamp is
+  // "unknown" and shows no age at all (ageMs) — never "2025y ago".
+  const age = ageMs(p.fetched_at);
+  const stale = age !== null && age > STALE_AFTER_MS;
 
   return (
     <section className="card-2 px-5 py-5">

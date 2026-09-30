@@ -133,17 +133,27 @@ What the backend does now (`backend/internal/leetify/publicpause.go`):
 - a 429 from the public host is never retried (`transientStatus` no longer lists it);
 - it pauses **every** v3/v2 call from the process — `GetProfile`, `MatchReference`
   (one-click analysis) and the bridge's match fetches — for five minutes (the one
-  back-off Leetify has ever published), doubling for each 429 met after a pause lapses,
-  capped at thirty; a `Retry-After` is honoured when it asks for longer;
-- while paused, a profile lookup falls through to the app routes via the relay (another
-  network); their answer is served, their "no" is `ErrUnavailable`, never a five-minute
-  miss;
+  back-off Leetify has ever published), doubling for each 429 met **after a pause has
+  lapsed**, capped at thirty. 429s that arrive while a pause is open were in flight when
+  it was tripped (the homepage's featured strip fires five lookups at once): they are one
+  limit, not five — no escalation, no extra log line. A `Retry-After` is honoured when it
+  asks for longer, up to the same thirty-minute cap;
+- while paused, nothing is asked of Leetify — not the app routes either, though through
+  the relay they would answer: `/v3` never said "no", so a member would come back as the
+  app's thin non-member summary ("recent games only", "not a Leetify member") and evict
+  their last full copy from the cache. A lookup is `ErrUnavailable`, which the cache layer
+  answers with the 24 h stale copy when there is one (the page shows its age) and
+  otherwise with a miss kept for 45 s or until the pause lapses, whichever is sooner —
+  never the five-minute miss a real 404 earns;
 - the bridge parks the codes it could not fetch in the retry set instead of dropping
   them, `shouldSync` says no without stamping the tried key, and the chain poller skips
   its round;
 - the profile route answers `503` with a reason (`Cache-Control: no-store`,
-  `Retry-After: 60`) instead of `500 internal error`; the page says why the panel is
-  missing, and a stale copy says how old it is (`fetched_at`).
+  `Retry-After: 60`) instead of `500 internal error`; the profile page, its `/id/<vanity>`
+  twin and the matches page say why the panel is missing, and a stale copy says how old
+  it is (`fetched_at`, stamped on every copy the backend caches — the profile route, the
+  teammates route and its per-friend rows share the key; a copy without a stamp shows no
+  age).
 
 Log lines to grep:
 
@@ -156,7 +166,8 @@ matchsync: leetify paused; codes parked for retry
 
 The first `answers this address again` timestamp minus the deploy time is the empirical
 length of Leetify's block. Kill switch: `LEETIFY_PUBLIC_BREAKER=0` in the VM `.env` and
-`up -d backend` (no rebuild) restores the old behaviour verbatim.
+`up -d backend` (no rebuild) restores the pre-pause behaviour — except that a 429 is still
+not retried, which is deliberate.
 
 ### Follow-up: the public routes through the relay (not built)
 

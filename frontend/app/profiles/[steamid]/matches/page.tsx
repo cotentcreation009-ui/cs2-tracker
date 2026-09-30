@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ApiError, getLeetify, getProfile } from "@/lib/api";
+import { ApiError, getLeetifyState, getProfile } from "@/lib/api";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { FetchError } from "@/components/FetchError";
 import { BackButton } from "@/components/BackButton";
@@ -32,12 +32,12 @@ export default async function PlayerMatchesPage({
 }) {
   const { steamid } = await params;
   try {
-    const [profile, leetify] = await Promise.all([
+    const [profile, leetifyState] = await Promise.all([
       getProfile(steamid),
-      getLeetify(steamid),
+      getLeetifyState(steamid),
     ]);
     const name = profile.player.personaName || profile.player.steamId64;
-    const matches = leetify?.recent_matches ?? [];
+    const matches = leetifyState.profile?.recent_matches ?? [];
     return (
       <div className="space-y-4">
         <BackButton />
@@ -56,7 +56,11 @@ export default async function PlayerMatchesPage({
           <LeetifyRecentMatches matches={matches} steamId={steamid} />
         ) : (
           <div className="card px-5 py-6 text-sm text-muted">
-            No recent Leetify matches for this player.
+            {/* An empty list during a pause is not "no matches": the backend
+                answered 503 because Leetify is rate-limiting the site. */}
+            {leetifyState.paused
+              ? "Leetify is not answering this site right now, so this player's recent Leetify matches are hidden. They come back on their own."
+              : "No recent Leetify matches for this player."}
           </div>
         )}
       </div>

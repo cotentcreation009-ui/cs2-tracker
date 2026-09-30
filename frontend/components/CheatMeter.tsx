@@ -273,6 +273,7 @@ const VERDICT_TITLE: Record<Band, string> = {
 export function CheatMeter({
   player,
   leetify,
+  leetifyPaused = false,
   faceit,
   steamStats,
   steamExtras,
@@ -288,6 +289,10 @@ export function CheatMeter({
 }: {
   player: Player;
   leetify?: LeetifyProfile | null;
+  // Leetify's public API is rate-limiting the site (the backend answered
+  // 503, not 404): the hero says so in the scope box, not only behind the
+  // "Leetify stats" button.
+  leetifyPaused?: boolean;
   faceit?: FaceitProfile | null;
   steamStats?: SteamGameStats | null;
   steamExtras?: SteamExtras | null;
@@ -647,6 +652,9 @@ export function CheatMeter({
                 // page misleads mid-game. Say when the telemetry ends — and,
                 // when Steam offers it, whether the player is active NOW.
                 const lines: string[] = [];
+                if (!leetify && leetifyPaused) {
+                  lines.push("Leetify is not answering right now · its ratings and full match list are hidden");
+                }
                 if (!leetify && bridgeNewest) {
                   const d = new Date(bridgeNewest);
                   if (!Number.isNaN(d.getTime())) {

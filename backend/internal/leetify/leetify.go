@@ -35,6 +35,9 @@ var ErrNotFound = errors.New("leetify: profile not found")
 // cache layer (api.cachedExternal) keeps it for seconds rather than the
 // minutes a real miss earns. A player who IS on Leetify was reading as
 // "no Leetify profile" for most of a day because of that difference.
+//
+// Ordering gotcha for callers: because it is also ErrNotFound, a check for
+// ErrUnavailable must come BEFORE one for ErrNotFound or it is never reached.
 var ErrUnavailable error = &unavailableError{}
 
 type unavailableError struct{}
@@ -241,9 +244,13 @@ type Profile struct {
 	// existing consumers see no change.
 	Source string `json:"source,omitempty"`
 	// FetchedAt is when Leetify answered this copy, stamped by the API layer
-	// on a successful fetch. The stale copy served while Leetify is not
-	// answering carries it, so the page can say how old what it shows is.
-	FetchedAt time.Time `json:"fetched_at,omitempty"`
+	// (api.fetchLeetifyProfile, behind every writer of the cache key) on a
+	// successful fetch. The stale copy served while Leetify is not answering
+	// carries it, so the page can say how old what it shows is. A pointer so
+	// an unstamped copy serialises as no field at all: encoding/json's
+	// omitempty never omits a time.Time, and a zero stamp reached the page as
+	// "last updated 2025 years ago".
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
 	// KD + AvgPartySize came from the legacy profile endpoint's per-match
 	// data (v3 doesn't expose them, so they're 0/omitted there); PeakPremier is
 	// the highest Premier rating seen across the match list (both sources).
@@ -473,11 +480,15 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 
 // GetProfile fetches a player's Leetify profile by SteamID64.
 func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, error) {
-	// While the public API is rate-limiting this address, nothing is asked of
-	// it: the pause answers locally (publicpause.go), and the app routes —
-	// on another network, through the relay — get their say instead.
+	// While the public API is rate-limiting this address nothing is asked of
+	// Leetify — not the app routes either, though through the relay they
+	// would answer: /v3 never said "no", so for a member they would hand back
+	// the app's thin non-member summary ("recent games only", "not a Leetify
+	// member") in place of the profile, and the cache layer would file it
+	// over their last full copy. ErrUnavailable is what lets that layer serve
+	// the copy instead (api.cachedExternal), with its age.
 	if c.publicPaused() {
-		return c.profileWhilePaused(ctx, steam64)
+		return nil, ErrUnavailable
 	}
 	q := url.Values{}
 	q.Set("steam64_id", strconv.FormatUint(steam64, 10))
@@ -500,7 +511,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 			return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 		}
 		c.tripPublicPause(resp.Header.Get("Retry-After"))
-		return c.profileWhilePaused(ctx, steam64)
+		return nil, ErrUnavailable
 	case http.StatusOK:
 		c.notePublicAnswered()
 		var p Profile
@@ -549,33 +560,6 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 	}
-}
-
-// profileWhilePaused is the profile lookup while the public API is
-// rate-limiting this address. The app routes are asked (they leave through
-// the relay, another network, and carry their own wall breaker), and what
-// they give is served — a member's app summary beats an empty panel. But
-// their "no" is NOT believed as a miss: /v3 never answered, so a player who
-// IS on Leetify would otherwise read as "no Leetify profile" for the five
-// minutes a real miss is cached. Everything but an answer is ErrUnavailable.
-//
-// Ordering gotcha for callers: ErrUnavailable satisfies errors.Is(err,
-// ErrNotFound), so a check for ErrUnavailable must come BEFORE one for
-// ErrNotFound or it is never reached.
-func (c *Client) profileWhilePaused(ctx context.Context, steam64 uint64) (*Profile, error) {
-	if !c.appFallback {
-		return nil, ErrUnavailable
-	}
-	p, aerr := c.GetAppProfile(ctx, steam64)
-	if aerr == nil {
-		return p, nil
-	}
-	// Same rule as the 404 branch: a wall and a plain "no" are quiet, anything
-	// else is logged every time so a dead fallback stays visible.
-	if !errors.Is(aerr, ErrNotFound) && !errors.Is(aerr, errAppBlocked) {
-		slog.Warn("leetify app fallback failed while the public API is paused", "steam64", steam64, "err", aerr)
-	}
-	return nil, ErrUnavailable
 }
 
 // GameStats is the curated per-player slice of Leetify's per-game payload

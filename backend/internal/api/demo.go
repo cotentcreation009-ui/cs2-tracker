@@ -460,9 +460,12 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 			}
 		case errors.Is(lerr, leetify.ErrUnavailable):
 			// BEFORE ErrNotFound, which ErrUnavailable also satisfies. Leetify
-			// is rate-limiting this address: the legacy host below is walled
-			// too, so say so and keep the job out of 'failed' — the click
-			// works again on its own once the pause lifts.
+			// is rate-limiting this address and the legacy host below is
+			// walled too: say so instead of "internal error". The job row
+			// records that reason like every other refused click — quota is
+			// charged up front by design, and a row left 'queued' with nothing
+			// enqueued would be the lie — and the click works again on its own
+			// once the pause lifts.
 			fail(http.StatusServiceUnavailable, "Leetify is rate-limiting this server right now; try again in a few minutes")
 			return
 		case errors.Is(lerr, leetify.ErrNotFound):
