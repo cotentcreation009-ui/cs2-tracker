@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,5 +197,154 @@ func TestTeammatesAppProfileStillUsesCorpus(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &body)
 	if len(body.Teammates) != 1 || body.Teammates[0]["name"] != "mate" {
 		t.Errorf("teammates = %v, want the corpus row", body.Teammates)
+	}
+}
+
+// While Leetify's public API is rate-limiting this address, the profile
+// route says so — a 503 with a reason and no caching — instead of the
+// "internal error" 500 that hid the outage for a day (827 of them in 24 h
+// on 2026-09-30). A real 404 from Leetify is still a 404.
+func TestLeetifyPausedAnswers503NotInternalError(t *testing.T) {
+	var upstreamCalls int32
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamCalls, 1)
+		if r.URL.Path == "/v3/profile" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"Calm down son"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound) // an app route — must not be asked while paused
+	}))
+	defer limited.Close()
+
+	cfg := &config.Config{CORSOrigins: []string{"*"}}
+	s := NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(limited.URL, "", leetify.WithLegacyURL(limited.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for i := 0; i < 2; i++ {
+		rr := httptest.NewRecorder()
+		s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("view %d: status = %d body %s, want 503", i, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "rate-limiting") {
+			t.Errorf("view %d: body = %s, want the reason", i, rr.Body.String())
+		}
+		if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("view %d: Cache-Control = %q, want no-store", i, cc)
+		}
+		if ra := rr.Header().Get("Retry-After"); ra != "60" {
+			t.Errorf("view %d: Retry-After = %q, want 60", i, ra)
+		}
+	}
+	// One /v3 attempt and nothing else: the app routes are not asked while
+	// paused (for a member they would answer with a non-member summary), and
+	// the second view asked nothing at all — the pause answered it.
+	if n := atomic.LoadInt32(&upstreamCalls); n != 1 {
+		t.Errorf("two paused views cost %d upstream requests, want the one /v3 attempt", n)
+	}
+	first := atomic.LoadInt32(&upstreamCalls)
+	rr := httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+	if got := atomic.LoadInt32(&upstreamCalls); got != first {
+		t.Errorf("a paused view still cost %d upstream requests", got-first)
+	}
+
+	// A genuine 404, not paused: still a 404.
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer missing.Close()
+	s = NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(missing.URL, "", leetify.WithLegacyURL(missing.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rr = httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("404 upstream: status = %d, want 404", rr.Code)
+	}
+}
+
+// A profile view during the pause must not schedule a bridge sync: it would
+// fetch nothing. Without a cache shouldSync says yes to every thin profile;
+// paused, it says no. What this cannot assert — Server.cache is the concrete
+// Redis client, with no double to stand in for it — is that the tried key
+// stays unwritten; that rests on the paused gate being the first thing in
+// shouldSync, before the cache is touched (bridge.go).
+func TestBridgeSkipsSyncWhilePaused(t *testing.T) {
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"Calm down son"}`))
+	}))
+	defer limited.Close()
+	lc := leetify.New(limited.URL, "", leetify.WithLegacyURL(limited.URL), leetify.WithAppFallback(false))
+	cfg := &config.Config{CORSOrigins: []string{"*"}, BridgeEnabled: true}
+	s := NewServer(cfg, &fakeStore{}, steam.New(""), lc,
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ctx := context.Background()
+	if !s.shouldSync(ctx, 76561198200413817, 0) {
+		t.Fatal("a thin profile with nothing tried must sync when Leetify answers")
+	}
+	// Trip the pause the way production does: one 429 on a profile lookup.
+	if _, err := lc.GetProfile(ctx, 76561198200413817); !errors.Is(err, leetify.ErrUnavailable) {
+		t.Fatalf("GetProfile: err = %v", err)
+	}
+	if !lc.Paused() {
+		t.Fatal("client should be paused")
+	}
+	if s.shouldSync(ctx, 76561198200413817, 0) {
+		t.Error("shouldSync said yes while Leetify is paused")
+	}
+}
+
+// Every copy the profile route serves carries fetched_at — the age the page
+// shows once the copy is old — and it is a real time, never Go's zero time.
+// The three writers of the cache key (this route, the teammates route and
+// its per-friend rows) all stamp through fetchLeetifyProfile.
+func TestLeetifyProfileCarriesFetchedAt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/profile" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"dane","steam64_id":"76561198200413817","total_matches":3,"privacy_mode":"public","recent_matches":[]}`))
+	}))
+	defer srv.Close()
+	cfg := &config.Config{CORSOrigins: []string{"*"}}
+	s := NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(srv.URL, "", leetify.WithLegacyURL(srv.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	before := time.Now().Add(-time.Minute)
+	rr := httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		FetchedAt *time.Time `json:"fetched_at"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.FetchedAt == nil {
+		t.Fatalf("fetched_at missing from %s", rr.Body.String())
+	}
+	if body.FetchedAt.Before(before) || body.FetchedAt.After(time.Now().Add(time.Minute)) {
+		t.Errorf("fetched_at = %v, want about now", body.FetchedAt)
+	}
+
+	// The stamp is the API layer's, the same on every writer: the client
+	// hands back an unstamped profile, and unstamped serialises as absent —
+	// not as the year 1, which the page would have shown as an age.
+	p, err := s.fetchLeetifyProfile(context.Background(), 76561198200413817)
+	if err != nil || p.FetchedAt == nil {
+		t.Fatalf("fetchLeetifyProfile: p = %+v, err = %v", p, err)
+	}
+	raw, _ := json.Marshal(&leetify.Profile{Name: "unstamped"})
+	if strings.Contains(string(raw), "fetched_at") {
+		t.Errorf("an unstamped profile serialised a stamp: %s", raw)
 	}
 }

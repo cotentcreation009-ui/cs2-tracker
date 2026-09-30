@@ -738,6 +738,23 @@ func (s *Server) handleWeapons(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"weapons": weapons})
 }
 
+// fetchLeetifyProfile is the one fetch behind every writer of
+// cache.LeetifyKey: the profile route, the teammates route and its per-friend
+// rows all fill the same key, and a copy any of them cached unstamped was
+// served by the profile route with no age to show — or, while FetchedAt was
+// a plain time.Time, with an age of two thousand years. The stamp is when
+// Leetify answered; the FACEIT enrichment the profile route adds afterwards
+// does not move it.
+func (s *Server) fetchLeetifyProfile(ctx context.Context, id uint64) (*leetify.Profile, error) {
+	p, err := s.leetify.GetProfile(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	p.FetchedAt = &now
+	return p, nil
+}
+
 // handleLeetify fetches a player's Leetify profile, shown live with attribution.
 // A short Redis cache (ExternalCacheTTL) coalesces repeat views so we don't
 // re-hit Leetify on every request — important under load. NOTE: confirm a short
@@ -754,7 +771,7 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 	}
 	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
 		func() (*leetify.Profile, error) {
-			p, err := s.leetify.GetProfile(r.Context(), id)
+			p, err := s.fetchLeetifyProfile(r.Context(), id)
 			if err != nil {
 				return nil, err
 			}
@@ -776,6 +793,16 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 			return p, nil
 		})
 	if notFound {
+		// A miss while Leetify is rate-limiting this address is not "no
+		// profile": the page says why the panel is missing, and nothing
+		// caches the answer — it comes back on its own once Leetify answers.
+		if s.leetify.Paused() {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Retry-After", "60")
+			writeError(w, http.StatusServiceUnavailable,
+				"Leetify is rate-limiting this site right now; the panel returns on its own once it answers again")
+			return
+		}
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
 		return
 	}
@@ -803,7 +830,7 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	prof, notFound, err := cachedExternal(s, r.Context(), cache.LeetifyKey(id),
-		func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), id) })
+		func() (*leetify.Profile, error) { return s.fetchLeetifyProfile(r.Context(), id) })
 	// A profile from Leetify's app routes (Source set) carries stats but no
 	// teammate list, so for this panel it counts as no profile: the bridge's
 	// own rows keep their say for a non-member exactly as before.
@@ -914,7 +941,7 @@ func (s *Server) handleLeetifyTeammates(w http.ResponseWriter, r *http.Request) 
 			defer wg.Done()
 			fr := &row{Steam64ID: tm.Steam64ID, MatchesTogether: tm.RecentMatchesCount}
 			fp, fnf, ferr := cachedExternal(s, r.Context(), cache.LeetifyKey(fid),
-				func() (*leetify.Profile, error) { return s.leetify.GetProfile(r.Context(), fid) })
+				func() (*leetify.Profile, error) { return s.fetchLeetifyProfile(r.Context(), fid) })
 			if ferr == nil && !fnf && fp != nil {
 				fr.Name = fp.Name
 				fr.Winrate = fp.Winrate
@@ -1335,14 +1362,26 @@ func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch
 		// A miss the provider could not verify: the last-known-good copy when
 		// there is one, else a miss kept for seconds rather than minutes so the
 		// next visit asks again. Checked before ErrNotFound, which it also is.
+		// Logged at Info, not Warn: with the public pause in front of the
+		// fetch these fire per view at zero upstream cost, and at Warn they
+		// were 4,788 lines a day that hid the one line that mattered.
 		if errors.Is(err, leetify.ErrUnavailable) {
 			if s.cache != nil {
 				var stale T
 				if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
-					s.log.Warn("serving stale upstream data", "key", key, "err", err)
+					s.log.Info("serving stale upstream data", "key", key, "err", err)
 					return stale, false, nil
 				}
-				_ = s.cache.SetJSONTTL(ctx, missKey, true, unavailableCacheTTL)
+				// Never past the end of the public pause: a miss that outlived
+				// it would answer "no profile", with no reason, for up to 45 s
+				// after Leetify was worth asking again.
+				ttl := unavailableCacheTTL
+				if s.leetify != nil {
+					if left := s.leetify.PausedFor(); left > 0 && left < ttl {
+						ttl = left
+					}
+				}
+				_ = s.cache.SetJSONTTL(ctx, missKey, true, ttl)
 			}
 			return zero, true, nil
 		}
@@ -1356,7 +1395,7 @@ func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch
 		if s.cache != nil {
 			var stale T
 			if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
-				s.log.Warn("serving stale upstream data", "key", key, "err", err)
+				s.log.Info("serving stale upstream data", "key", key, "err", err)
 				return stale, false, nil
 			}
 		}

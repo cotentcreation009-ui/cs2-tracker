@@ -2,10 +2,14 @@ package leetify
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // A trimmed real response shape: the fields the CheatMeter actually scores.
@@ -170,5 +174,39 @@ func TestMatchLimiterIsShared(t *testing.T) {
 	}
 	if burst := matchLimiter.Burst(); burst != 1 {
 		t.Errorf("burst = %d, want 1 (a burst lets one page spend the whole window)", burst)
+	}
+}
+
+// A 429 on a match report pauses the public routes, and while paused a match
+// lookup spends NO budget: no limiter token, no wait, no request. With a
+// one-token-an-hour limiter the second call would otherwise block for an
+// hour; it must answer at once.
+func TestMatch_RateLimitPausesAndSpendsNoBudget(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"Calm down son"}`))
+	}))
+	defer srv.Close()
+	restore := matchLimiter
+	matchLimiter = rate.NewLimiter(rate.Every(time.Hour), 1)
+	defer func() { matchLimiter = restore }()
+
+	c := New(srv.URL, "", WithLegacyURL(srv.URL))
+	code := "CSGO-X5EDM-CJCpX-dTvfS-kMP7u-EhMMB"
+	if _, err := c.MatchByShareCode(context.Background(), code); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("first call: err = %v, want ErrUnavailable", err)
+	}
+	start := time.Now()
+	_, err := c.MatchByShareCode(context.Background(), code)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("paused call: err = %v, want ErrUnavailable", err)
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("paused call took %v: it must not wait on the limiter", d)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("upstream asked %d times, want 1", n)
 	}
 }

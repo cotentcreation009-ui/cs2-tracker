@@ -62,11 +62,13 @@ func run(log *slog.Logger) error {
 
 	leetifyClient := leetify.New(cfg.LeetifyBaseURL, cfg.LeetifyAPIKey,
 		leetify.WithAppFallback(cfg.LeetifyAppFallback),
-		leetify.WithAppRelay(cfg.LeetifyAppRelayURL, cfg.LeetifyAppRelayKey))
+		leetify.WithAppRelay(cfg.LeetifyAppRelayURL, cfg.LeetifyAppRelayKey),
+		leetify.WithPublicBreaker(cfg.LeetifyPublicBreaker))
 	// Say which way the app fallback goes: a relay that was meant to be set and
 	// isn't looks exactly like Leetify having nothing for a third of lookups.
 	log.Info("leetify app fallback", "enabled", cfg.LeetifyAppFallback,
-		"relay", cfg.LeetifyAppRelayURL != "", "relay_url", cfg.LeetifyAppRelayURL)
+		"relay", cfg.LeetifyAppRelayURL != "", "relay_url", cfg.LeetifyAppRelayURL,
+		"public_breaker", cfg.LeetifyPublicBreaker)
 
 	faceitClient := faceit.New(cfg.FaceitBaseURL, cfg.FaceitAPIKey, faceit.WithDownloadKey(cfg.FaceitDownloadKey))
 	if !faceitClient.HasKey() {

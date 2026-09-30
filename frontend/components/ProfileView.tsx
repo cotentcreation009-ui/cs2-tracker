@@ -72,6 +72,7 @@ export function ProfileView({
   weapons = [],
   maps = [],
   leetify = null,
+  leetifyPaused = false,
   faceit = null,
   steamExtras = null,
   steamStats = null,
@@ -86,6 +87,9 @@ export function ProfileView({
   weapons?: WeaponStat[];
   maps?: MapStat[];
   leetify?: LeetifyProfile | null;
+  // Leetify's public API is rate-limiting the site right now (the backend
+  // answered 503, not 404): the panel is missing for a reason worth saying.
+  leetifyPaused?: boolean;
   faceit?: FaceitProfile | null;
   steamExtras?: SteamExtras | null;
   steamStats?: SteamGameStats | null;
@@ -240,6 +244,19 @@ export function ProfileView({
     <CrossSource career={career} leetify={leetify} faceit={faceit} steamStats={steamStats} />
   );
 
+  // Why the Leetify panel is missing when it is missing for a reason: the
+  // backend answered 503 (Leetify is rate-limiting the site), not 404. Shown
+  // wherever the panel would have been — the popup slot on the CheatMeter
+  // page, inline on the plain page — so the reason is never a click away.
+  const leetifyPausedNote =
+    !leetify && leetifyPaused ? (
+      <p className="text-xs leading-relaxed text-muted">
+        Leetify is not answering this site right now, so its ratings and full
+        match list (including FACEIT games) are hidden; they come back on their
+        own. Everything else on this page is live.
+      </p>
+    ) : null;
+
   const panels = {
     // Recent matches with one-click demo analysis — previously buried at the
     // bottom of the Leetify panel; now a first-class button of its own.
@@ -270,8 +287,13 @@ export function ProfileView({
         <LeetifyPanel profile={leetify} />
         {!richMatchStats && crossNode}
       </div>
-    ) : bridge && bridge.matches > 0 ? (
-      <BridgeStatsPanel aggregate={bridge} rows={bridgeMatches} />
+    ) : leetifyPausedNote || (bridge && bridge.matches > 0) ? (
+      <div className="space-y-5">
+        {leetifyPausedNote}
+        {bridge && bridge.matches > 0 && (
+          <BridgeStatsPanel aggregate={bridge} rows={bridgeMatches} />
+        )}
+      </div>
     ) : null,
     // OUR numbers, in their own slot with their own button — the CheatMeter
     // places it under the analysis scope, not in the header row.
@@ -318,6 +340,7 @@ export function ProfileView({
           bridgeParsed={bridgeParsed}
           player={player}
           leetify={leetify}
+          leetifyPaused={leetifyPaused}
           faceit={faceit}
           steamStats={steamStats}
           steamExtras={steamExtras}
@@ -501,6 +524,7 @@ export function ProfileView({
       )}
 
       {leetify && <LeetifyPanel profile={leetify} />}
+      {leetifyPausedNote && <div className="card px-5 py-4">{leetifyPausedNote}</div>}
 
       {/* Other platforms */}
       {faceit && <FaceitPanel profile={faceit} />}
@@ -509,7 +533,9 @@ export function ProfileView({
         <MapStrength matches={leetify.recent_matches} />
       )}
 
-      {!hasData && !leetify && !faceit && !steamStats && (
+      {/* The paused note above already says why Leetify is missing; this
+          card is for the case where nothing is known at all. */}
+      {!hasData && !leetify && !faceit && !steamStats && !leetifyPaused && (
         <div className="card px-5 py-6 text-sm text-muted">
           We know this player&apos;s Steam identity, but have no CS2 stats for
           them yet — their Leetify/FACEIT profile may be private or unavailable.

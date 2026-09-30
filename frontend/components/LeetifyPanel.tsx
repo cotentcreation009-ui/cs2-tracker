@@ -1,7 +1,12 @@
 import type { LeetifyProfile } from "@/lib/types";
 import { LeetifyRecentMatches } from "@/components/LeetifyRecentMatches";
 import { RatingRadar } from "@/components/RatingRadar";
-import { premierHex, tierColor } from "@/lib/format";
+import { ageMs, premierHex, tierColor, timeAgo } from "@/lib/format";
+
+// A copy older than this is one the backend served because Leetify is not
+// answering (its fresh cache is 15 minutes): say so rather than pass it off
+// as live.
+const STALE_AFTER_MS = 30 * 60 * 1000;
 
 function Bar({ label, value }: { label: string; value: number }) {
   const pct = Math.max(0, Math.min(value, 100));
@@ -141,6 +146,10 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
   // The app's match history rides along when the relay knows the route; the
   // note must not claim "no match list" under a list that is right there.
   const hasList = (p.recent_matches?.length ?? 0) > 0;
+  // The copy's age, when the stamp is usable. A missing or zero stamp is
+  // "unknown" and shows no age at all (ageMs) — never "2025y ago".
+  const age = ageMs(p.fetched_at);
+  const stale = age !== null && age > STALE_AFTER_MS;
 
   return (
     <section className="card-2 px-5 py-5">
@@ -243,6 +252,16 @@ export function LeetifyPanel({ profile: p }: { profile: LeetifyProfile }) {
             Skill ratings, ranks and results are still available. The CheatMeter also
             needs that hidden aim/reaction data, so it can&apos;t be scored for this
             account.
+          </span>
+        </div>
+      )}
+
+      {stale && p.fetched_at && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-mid/25 bg-mid/[0.06] px-3 py-2.5 text-xs leading-relaxed text-muted">
+          <span className="mt-px shrink-0 font-bold text-mid">ⓘ</span>
+          <span>
+            <span className="font-semibold text-mid">Last updated {timeAgo(p.fetched_at)}</span>{" "}
+            &mdash; Leetify is not answering right now, so this is the last copy we have.
           </span>
         </div>
       )}

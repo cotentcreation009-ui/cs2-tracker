@@ -135,6 +135,13 @@ func (s *Server) chainPoller(ctx context.Context) {
 		if err := s.db.PruneRetryCodes(ctx); err != nil {
 			s.log.Warn("chain poller: prune failed", "err", err)
 		}
+		// Leetify is rate-limiting this address: every fetch this round would
+		// be answered locally, and the chain walks would only hand codes to
+		// the retry set. They keep until the first round after the pause.
+		if s.leetify != nil && s.leetify.Paused() {
+			s.log.Info("chain poller round skipped: leetify paused")
+			continue
+		}
 		chains, err := s.db.ActiveAuthChains(ctx, 100)
 		if err != nil {
 			s.log.Warn("chain poller: listing failed", "err", err)
