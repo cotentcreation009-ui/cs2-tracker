@@ -82,6 +82,7 @@ type fakeFetch struct {
 	calls  []string
 	absent map[string]bool
 	fail   map[string]bool
+	paused bool          // Leetify is rate-limiting this address: every fetch is ErrUnavailable
 	delay  time.Duration // makes concurrent callers genuinely overlap
 }
 
@@ -91,6 +92,9 @@ func (f *fakeFetch) MatchByShareCode(_ context.Context, code string) (*leetify.M
 	f.mu.Unlock()
 	if f.delay > 0 {
 		time.Sleep(f.delay)
+	}
+	if f.paused {
+		return nil, leetify.ErrUnavailable
 	}
 	if f.absent[code] {
 		return nil, leetify.ErrNotFound
@@ -429,5 +433,52 @@ func TestOverflowCodesDrainAcrossSyncs(t *testing.T) {
 	}
 	if len(store.saved) != 10 {
 		t.Errorf("total saved %d, want all 10", len(store.saved))
+	}
+}
+
+// Leetify rate-limiting this address (ErrUnavailable) is not eight separate
+// failures: the first answer stops the pass, and every code it could not
+// fetch — this one and the rest — is parked in the retry set, because the
+// chain walker has already advanced past them and would never offer them
+// again. One fetch call, nothing lost, the result says why.
+func TestSyncParksEverythingWhenLeetifyIsPaused(t *testing.T) {
+	c := codes(8)
+	store := &fakeStore{stored: map[string]bool{}}
+	fetch := &fakeFetch{paused: true}
+	s := New(store, fetch, quiet(), fakeSource{codes: c})
+
+	res, err := s.Sync(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fetch.calls) != 1 {
+		t.Errorf("fetch called %d times, want 1: the first refusal ends the pass", len(fetch.calls))
+	}
+	if !res.Paused || res.Fetched != 0 {
+		t.Errorf("result = %+v, want Paused with nothing fetched", res)
+	}
+	if res.Failed != 8 {
+		t.Errorf("failed = %d, want all 8 counted", res.Failed)
+	}
+	parked := map[string]bool{}
+	for _, code := range store.retry {
+		parked[code] = true
+	}
+	for _, code := range c {
+		if !parked[code] {
+			t.Errorf("code %s was not parked for retry", code)
+		}
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("saved %d matches while paused", len(store.saved))
+	}
+
+	// The pause lifts: the parked codes arrive through the retry set, and
+	// the source having gone quiet does not matter.
+	fetch.paused = false
+	s2 := New(store, fetch, quiet(), fakeSource{codes: nil})
+	res2, _ := s2.Sync(context.Background(), 1)
+	if res2.Fetched != 8 {
+		t.Errorf("after the pause fetched %d, want the 8 parked codes", res2.Fetched)
 	}
 }

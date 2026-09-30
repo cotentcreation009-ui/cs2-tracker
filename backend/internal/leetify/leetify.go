@@ -27,7 +27,8 @@ import (
 var ErrNotFound = errors.New("leetify: profile not found")
 
 // ErrUnavailable is a miss the site could not verify: the app-route fallback
-// was refused by the bot wall (appprofile.go) instead of answering "no". It
+// was refused by the bot wall (appprofile.go), or the public API rate-limited
+// this address (publicpause.go), instead of answering "no". It
 // satisfies errors.Is(err, ErrNotFound) — every caller that already handles
 // a miss handles this the same way, and nothing becomes a 500 — while
 // errors.Is(err, ErrUnavailable) still tells the two apart, which is how the
@@ -39,7 +40,7 @@ var ErrUnavailable error = &unavailableError{}
 type unavailableError struct{}
 
 func (*unavailableError) Error() string {
-	return "leetify: profile temporarily unavailable (the app host refused this network)"
+	return "leetify: temporarily unavailable (Leetify refused this network)"
 }
 
 // Is makes ErrUnavailable read as ErrNotFound to the checks that already exist.
@@ -71,6 +72,22 @@ type Client struct {
 	// appWallStreak counts walls met since the last answered app request; it
 	// sets how long the next pause lasts (appprofile.go tripAppBlock).
 	appWallStreak atomic.Int32
+
+	// publicBreaker: a 429 from the public API (api-public) pauses every
+	// v3/v2 call from this process instead of being retried (publicpause.go).
+	// On by default; LEETIFY_PUBLIC_BREAKER=0 turns it off.
+	publicBreaker bool
+	// publicPausedUntil (unix nanos, 0 = open) is the pause's deadline.
+	publicPausedUntil atomic.Int64
+	// publicLimitStreak counts 429s met since the last answered public
+	// request; it sets how long the next pause lasts.
+	publicLimitStreak atomic.Int32
+	// publicRefused counts the requests the pause answered locally without
+	// asking Leetify — reported once, when the API answers again.
+	publicRefused atomic.Int64
+	// publicPausedSince (unix nanos) is when the current run of pauses began,
+	// so the "answers again" line can say how long the address was limited.
+	publicPausedSince atomic.Int64
 }
 
 // Option customises a Client.
@@ -81,6 +98,9 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 
 // WithAppFallback turns the app-API fallback on or off (see appprofile.go).
 func WithAppFallback(on bool) Option { return func(c *Client) { c.appFallback = on } }
+
+// WithPublicBreaker turns the public-API 429 pause on or off (see publicpause.go).
+func WithPublicBreaker(on bool) Option { return func(c *Client) { c.publicBreaker = on } }
 
 // WithAppRelay routes the app-API fallback through a relay (see appprofile.go).
 // An empty url keeps the direct path.
@@ -104,10 +124,11 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 		// was an undocumented alias Leetify shut off without notice on
 		// 2026-09-01; this host serves the same legacy routes and is what
 		// their match pages themselves call.
-		legacyURL:   "https://api.cs-prod.leetify.com",
-		apiKey:      apiKey,
-		http:        &http.Client{Timeout: 10 * time.Second},
-		appFallback: true,
+		legacyURL:     "https://api.cs-prod.leetify.com",
+		apiKey:        apiKey,
+		http:          &http.Client{Timeout: 10 * time.Second},
+		appFallback:   true,
+		publicBreaker: true,
 	}
 	for _, o := range opts {
 		o(c)
@@ -219,6 +240,10 @@ type Profile struct {
 	// "app:matchmaking", … (see appprofile.go). Empty for a v3 profile, so
 	// existing consumers see no change.
 	Source string `json:"source,omitempty"`
+	// FetchedAt is when Leetify answered this copy, stamped by the API layer
+	// on a successful fetch. The stale copy served while Leetify is not
+	// answering carries it, so the page can say how old what it shows is.
+	FetchedAt time.Time `json:"fetched_at,omitempty"`
 	// KD + AvgPartySize came from the legacy profile endpoint's per-match
 	// data (v3 doesn't expose them, so they're 0/omitted there); PeakPremier is
 	// the highest Premier rating seen across the match list (both sources).
@@ -403,17 +428,23 @@ func (p *Profile) ApplyFaceitElo(hist []FaceitEloGame) {
 	apply(p.FaceitMatches)
 }
 
+// transientStatus names the answers worth one more try. A 429 is NOT one of
+// them: Leetify's public API sends it per source address with no Retry-After
+// ("Calm down son", 2026-09-29), so a request repeated 200 ms later is another
+// 429 — the retry was doubling the very traffic the limit was answering, some
+// 20,000 refused requests a day from one box. A 429 is handled by the public
+// pause instead (publicpause.go) and never retried.
 func transientStatus(code int) bool {
 	switch code {
-	case http.StatusTooManyRequests, http.StatusBadGateway,
-		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return true
 	}
 	return false
 }
 
 // doWithRetry performs req with one bounded retry on transient failures (network
-// error or 429/502/503/504), with a short ctx-aware backoff.
+// error or 502/503/504), with a short ctx-aware backoff. A 429 is returned as
+// is on the first attempt; the caller trips the public pause on it.
 func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 	const attempts = 2
 	var resp *http.Response
@@ -442,6 +473,12 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 
 // GetProfile fetches a player's Leetify profile by SteamID64.
 func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, error) {
+	// While the public API is rate-limiting this address, nothing is asked of
+	// it: the pause answers locally (publicpause.go), and the app routes —
+	// on another network, through the relay — get their say instead.
+	if c.publicPaused() {
+		return c.profileWhilePaused(ctx, steam64)
+	}
 	q := url.Values{}
 	q.Set("steam64_id", strconv.FormatUint(steam64, 10))
 	u := c.baseURL + "/v3/profile?" + q.Encode()
@@ -458,7 +495,14 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		if !c.publicBreaker {
+			return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
+		}
+		c.tripPublicPause(resp.Header.Get("Retry-After"))
+		return c.profileWhilePaused(ctx, steam64)
 	case http.StatusOK:
+		c.notePublicAnswered()
 		var p Profile
 		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 			return nil, fmt.Errorf("leetify: decode: %w", err)
@@ -475,6 +519,7 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		computeRankDeltas(p.PremierMatches)
 		return &p, nil
 	case http.StatusNotFound:
+		c.notePublicAnswered()
 		// Since Leetify's Jan 2026 policy, /v3 serves REGISTERED accounts only,
 		// and the old api.leetify.com/api/profile/id/ route that quietly served
 		// everyone else was withdrawn around July 2026. What still answers for
@@ -504,6 +549,33 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	default:
 		return nil, fmt.Errorf("leetify: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// profileWhilePaused is the profile lookup while the public API is
+// rate-limiting this address. The app routes are asked (they leave through
+// the relay, another network, and carry their own wall breaker), and what
+// they give is served — a member's app summary beats an empty panel. But
+// their "no" is NOT believed as a miss: /v3 never answered, so a player who
+// IS on Leetify would otherwise read as "no Leetify profile" for the five
+// minutes a real miss is cached. Everything but an answer is ErrUnavailable.
+//
+// Ordering gotcha for callers: ErrUnavailable satisfies errors.Is(err,
+// ErrNotFound), so a check for ErrUnavailable must come BEFORE one for
+// ErrNotFound or it is never reached.
+func (c *Client) profileWhilePaused(ctx context.Context, steam64 uint64) (*Profile, error) {
+	if !c.appFallback {
+		return nil, ErrUnavailable
+	}
+	p, aerr := c.GetAppProfile(ctx, steam64)
+	if aerr == nil {
+		return p, nil
+	}
+	// Same rule as the 404 branch: a wall and a plain "no" are quiet, anything
+	// else is logged every time so a dead fallback stays visible.
+	if !errors.Is(aerr, ErrNotFound) && !errors.Is(aerr, errAppBlocked) {
+		slog.Warn("leetify app fallback failed while the public API is paused", "steam64", steam64, "err", aerr)
+	}
+	return nil, ErrUnavailable
 }
 
 // GameStats is the curated per-player slice of Leetify's per-game payload
@@ -827,6 +899,9 @@ type MatchReference struct {
 // surface that still carries a demo reference — for every source, not only
 // matchmaking.
 func (c *Client) MatchReference(ctx context.Context, steam64 uint64, gameID string) (MatchReference, error) {
+	if c.publicPaused() {
+		return MatchReference{}, ErrUnavailable
+	}
 	u := c.baseURL + "/v3/profile/matches?steam64_id=" + fmt.Sprint(steam64)
 	req, err := c.newReq(ctx, u)
 	if err != nil {
@@ -840,8 +915,16 @@ func (c *Client) MatchReference(ctx context.Context, steam64 uint64, gameID stri
 
 	switch resp.StatusCode {
 	case http.StatusOK:
+		c.notePublicAnswered()
 	case http.StatusNotFound:
+		c.notePublicAnswered()
 		return MatchReference{}, ErrNotFound
+	case http.StatusTooManyRequests:
+		if !c.publicBreaker {
+			return MatchReference{}, fmt.Errorf("leetify matches: unexpected status %d", resp.StatusCode)
+		}
+		c.tripPublicPause(resp.Header.Get("Retry-After"))
+		return MatchReference{}, ErrUnavailable
 	default:
 		return MatchReference{}, fmt.Errorf("leetify matches: unexpected status %d", resp.StatusCode)
 	}

@@ -169,6 +169,13 @@ func (c *Client) MatchByID(ctx context.Context, matchID string) (*Match, error) 
 }
 
 func (c *Client) match(ctx context.Context, path string) (*Match, error) {
+	// While the public API is rate-limiting this address the answer is known
+	// before any budget is spent: no limiter token, no 7.5 s wait, no request
+	// (publicpause.go). ErrUnavailable lets matchsync tell "paused" from
+	// "failed" and park the code instead of dropping it.
+	if c.publicPaused() {
+		return nil, ErrUnavailable
+	}
 	// Wait for budget BEFORE the request. A 429 here costs the same minute as
 	// waiting politely, and burning the window makes every other caller wait.
 	if err := matchLimiter.Wait(ctx); err != nil {
@@ -186,6 +193,7 @@ func (c *Client) match(ctx context.Context, path string) (*Match, error) {
 
 	switch resp.StatusCode {
 	case 200:
+		c.notePublicAnswered()
 		var m Match
 		if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
 			return nil, fmt.Errorf("leetify: decode match: %w", err)
@@ -195,12 +203,21 @@ func (c *Client) match(ctx context.Context, path string) (*Match, error) {
 		}
 		return &m, nil
 	case 404:
+		c.notePublicAnswered()
 		return nil, ErrNotFound
 	case 500:
 		// The route is generic and unguarded upstream: a code Leetify has no
 		// record of comes back as a 500 rather than a 404. Treat it as absent,
 		// not as an outage to retry — retrying only spends the rate budget.
+		// It is still an ANSWERED request as far as the rate limit goes.
+		c.notePublicAnswered()
 		return nil, ErrNotFound
+	case 429:
+		if !c.publicBreaker {
+			return nil, fmt.Errorf("leetify: match: unexpected status %d", resp.StatusCode)
+		}
+		c.tripPublicPause(resp.Header.Get("Retry-After"))
+		return nil, ErrUnavailable
 	default:
 		return nil, fmt.Errorf("leetify: match: unexpected status %d", resp.StatusCode)
 	}

@@ -96,6 +96,13 @@ func (s *Server) handleBridge(w http.ResponseWriter, r *http.Request) {
 
 // shouldSync decides whether to spend rate budget on this player now.
 func (s *Server) shouldSync(ctx context.Context, steamID uint64, have int) bool {
+	// While Leetify is rate-limiting this address a sync would be answered
+	// locally and fetch nothing. Say no WITHOUT stamping the tried key: a
+	// view during the outage must neither spend budget nor push this
+	// player's next real sync half an hour out.
+	if s.leetify != nil && s.leetify.Paused() {
+		return false
+	}
 	if s.cache == nil {
 		return have < bridgeThinBelow
 	}
@@ -148,12 +155,16 @@ func (s *Server) syncBridgeAsync(steamID uint64) {
 		}
 		// Rank enrichment applies to every bridged profile, connected or not:
 		// the matches are already stored, and this is what puts a number in
-		// the rank column instead of a dash.
-		s.fillRanks(ctx, steamID)
-		if res.Fetched > 0 || res.Failed > 0 || res.Absent > 0 {
+		// the rank column instead of a dash. Not while Leetify is pausing us
+		// and nothing arrived: fillRanks only re-hits the walled legacy host.
+		if !(res.Paused && res.Fetched == 0) {
+			s.fillRanks(ctx, steamID)
+		}
+		if res.Fetched > 0 || res.Failed > 0 || res.Absent > 0 || res.Paused {
 			s.log.Info("bridge sync", "steam", steamID,
 				"offered", res.Offered, "new", res.New,
-				"fetched", res.Fetched, "absent", res.Absent, "failed", res.Failed)
+				"fetched", res.Fetched, "absent", res.Absent, "failed", res.Failed,
+				"paused", res.Paused)
 		}
 	}()
 }

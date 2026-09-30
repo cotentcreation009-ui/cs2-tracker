@@ -88,6 +88,9 @@ type Result struct {
 	Fetched int // reports actually retrieved
 	Absent  int // codes Leetify has no report for (nobody in the lobby was a user)
 	Failed  int // fetches that errored
+	// Paused: Leetify's public API is rate-limiting this address, so the
+	// fetch loop stopped and parked what was left for a later sync.
+	Paused bool
 }
 
 // Sync gathers share codes for a player and fetches the ones not already
@@ -175,12 +178,38 @@ func (s *Syncer) sync(ctx context.Context, steamID uint64) (Result, error) {
 		fresh = fresh[:maxPerSync]
 	}
 
-	for _, code := range fresh {
+fetch:
+	for i, code := range fresh {
 		if ctx.Err() != nil {
 			break
 		}
 		m, err := s.fetch.MatchByShareCode(ctx, code)
 		switch {
+		case errors.Is(err, leetify.ErrUnavailable):
+			// FIRST, before ErrNotFound: ErrUnavailable also satisfies
+			// errors.Is(err, ErrNotFound), so the other order would file a
+			// rate limit as "no report" and never reach this case.
+			//
+			// Leetify is rate-limiting this address. Nothing else in this pass
+			// will be answered either, and every code here was walked off a
+			// chain that has already advanced past it — dropped now, it is
+			// dropped for good. Park this one and the rest in the retry set
+			// (the same set that carries overflow) and stop; the syncs that
+			// re-offer them while the pause lasts cost zero HTTP.
+			rest := fresh[i:]
+			parked := 0
+			for _, c := range rest {
+				if rerr := s.store.RememberAbsentCode(ctx, steamID, c); rerr != nil {
+					s.log.Warn("matchsync: pause bookkeeping failed", "code", c, "err", rerr)
+					break
+				}
+				parked++
+			}
+			res.Failed += len(rest)
+			res.Paused = true
+			s.log.Info("matchsync: leetify paused; codes parked for retry",
+				"steam", steamID, "parked", parked)
+			break fetch
 		case errors.Is(err, leetify.ErrNotFound):
 			// Two indistinguishable cases share this answer: the match will
 			// never be processed (nobody in the lobby is a Leetify user), and

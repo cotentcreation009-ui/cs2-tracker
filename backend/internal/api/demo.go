@@ -458,6 +458,13 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 			case leetify.ValidShareCode(ref.ID):
 				gd.SteamShareCode = ref.ID
 			}
+		case errors.Is(lerr, leetify.ErrUnavailable):
+			// BEFORE ErrNotFound, which ErrUnavailable also satisfies. Leetify
+			// is rate-limiting this address: the legacy host below is walled
+			// too, so say so and keep the job out of 'failed' — the click
+			// works again on its own once the pause lifts.
+			fail(http.StatusServiceUnavailable, "Leetify is rate-limiting this server right now; try again in a few minutes")
+			return
 		case errors.Is(lerr, leetify.ErrNotFound):
 			// Listed nowhere on this profile: let legacy have its say below.
 		default:

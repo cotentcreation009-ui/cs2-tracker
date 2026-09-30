@@ -758,6 +758,9 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, err
 			}
+			// Stamp the answer's age: the stale copy served while Leetify is
+			// not answering carries it, so the page can say how old it is.
+			p.FetchedAt = time.Now().UTC()
 			// Enrich faceit rows with FACEIT's OWN per-match elo (+/− change) —
 			// the only surface that still has it (Leetify's copy is null on
 			// recent games). Best-effort: no FACEIT key, an unknown player or
@@ -776,6 +779,16 @@ func (s *Server) handleLeetify(w http.ResponseWriter, r *http.Request) {
 			return p, nil
 		})
 	if notFound {
+		// A miss while Leetify is rate-limiting this address is not "no
+		// profile": the page says why the panel is missing, and nothing
+		// caches the answer — it comes back on its own once Leetify answers.
+		if s.leetify.Paused() {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Retry-After", "60")
+			writeError(w, http.StatusServiceUnavailable,
+				"Leetify is rate-limiting this site right now; the panel returns on its own once it answers again")
+			return
+		}
 		writeError(w, http.StatusNotFound, "no Leetify profile for this player")
 		return
 	}
@@ -1335,11 +1348,14 @@ func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch
 		// A miss the provider could not verify: the last-known-good copy when
 		// there is one, else a miss kept for seconds rather than minutes so the
 		// next visit asks again. Checked before ErrNotFound, which it also is.
+		// Logged at Info, not Warn: with the public pause in front of the
+		// fetch these fire per view at zero upstream cost, and at Warn they
+		// were 4,788 lines a day that hid the one line that mattered.
 		if errors.Is(err, leetify.ErrUnavailable) {
 			if s.cache != nil {
 				var stale T
 				if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
-					s.log.Warn("serving stale upstream data", "key", key, "err", err)
+					s.log.Info("serving stale upstream data", "key", key, "err", err)
 					return stale, false, nil
 				}
 				_ = s.cache.SetJSONTTL(ctx, missKey, true, unavailableCacheTTL)
@@ -1356,7 +1372,7 @@ func cachedExternalCond[T any](s *Server, ctx context.Context, key string, fetch
 		if s.cache != nil {
 			var stale T
 			if hit, _ := s.cache.GetJSON(ctx, staleKey, &stale); hit {
-				s.log.Warn("serving stale upstream data", "key", key, "err", err)
+				s.log.Info("serving stale upstream data", "key", key, "err", err)
 				return stale, false, nil
 			}
 		}

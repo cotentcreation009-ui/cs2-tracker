@@ -172,6 +172,10 @@ export interface LeetifyProfile {
   // opening ratings, and a match list that carries no ids or dates. Absent
   // for a public-API profile.
   source?: string;
+  // When Leetify answered this copy (RFC 3339). While Leetify is not
+  // answering, the backend serves its last good copy and this says how old
+  // that is; absent on copies cached before the field existed.
+  fetched_at?: string;
   first_match_date?: string;
   bans?: unknown[];
   rating: {

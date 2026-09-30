@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,5 +197,99 @@ func TestTeammatesAppProfileStillUsesCorpus(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &body)
 	if len(body.Teammates) != 1 || body.Teammates[0]["name"] != "mate" {
 		t.Errorf("teammates = %v, want the corpus row", body.Teammates)
+	}
+}
+
+// While Leetify's public API is rate-limiting this address, the profile
+// route says so — a 503 with a reason and no caching — instead of the
+// "internal error" 500 that hid the outage for a day (827 of them in 24 h
+// on 2026-09-30). A real 404 from Leetify is still a 404.
+func TestLeetifyPausedAnswers503NotInternalError(t *testing.T) {
+	var upstreamCalls int32
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamCalls, 1)
+		if r.URL.Path == "/v3/profile" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"Calm down son"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound) // the app routes have nothing either
+	}))
+	defer limited.Close()
+
+	cfg := &config.Config{CORSOrigins: []string{"*"}}
+	s := NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(limited.URL, "", leetify.WithLegacyURL(limited.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for i := 0; i < 2; i++ {
+		rr := httptest.NewRecorder()
+		s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("view %d: status = %d body %s, want 503", i, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "rate-limiting") {
+			t.Errorf("view %d: body = %s, want the reason", i, rr.Body.String())
+		}
+		if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("view %d: Cache-Control = %q, want no-store", i, cc)
+		}
+		if ra := rr.Header().Get("Retry-After"); ra != "60" {
+			t.Errorf("view %d: Retry-After = %q, want 60", i, ra)
+		}
+	}
+	// One /v3 attempt plus the app-route fan-out; the second view asked
+	// nothing of /v3 (the pause answered it).
+	first := atomic.LoadInt32(&upstreamCalls)
+	rr := httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+	if got := atomic.LoadInt32(&upstreamCalls); got-first > 1 {
+		t.Errorf("a paused view still cost %d upstream requests", got-first)
+	}
+
+	// A genuine 404, not paused: still a 404.
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer missing.Close()
+	s = NewServer(cfg, &fakeStore{}, steam.New(""),
+		leetify.New(missing.URL, "", leetify.WithLegacyURL(missing.URL)),
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	rr = httptest.NewRecorder()
+	s.Router().ServeHTTP(rr, httptest.NewRequest("GET", "/api/players/76561198200413817/leetify", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("404 upstream: status = %d, want 404", rr.Code)
+	}
+}
+
+// A profile view during the pause must not schedule a bridge sync — it
+// would fetch nothing — and, because the gate sits before the tried-key
+// write, it must not push the player's next real sync half an hour out
+// either. Without a cache shouldSync says yes to every thin profile; paused,
+// it says no.
+func TestBridgeSkipsSyncWhilePausedWithoutMarkingTried(t *testing.T) {
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"Calm down son"}`))
+	}))
+	defer limited.Close()
+	lc := leetify.New(limited.URL, "", leetify.WithLegacyURL(limited.URL), leetify.WithAppFallback(false))
+	cfg := &config.Config{CORSOrigins: []string{"*"}, BridgeEnabled: true}
+	s := NewServer(cfg, &fakeStore{}, steam.New(""), lc,
+		nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ctx := context.Background()
+	if !s.shouldSync(ctx, 76561198200413817, 0) {
+		t.Fatal("a thin profile with nothing tried must sync when Leetify answers")
+	}
+	// Trip the pause the way production does: one 429 on a profile lookup.
+	if _, err := lc.GetProfile(ctx, 76561198200413817); !errors.Is(err, leetify.ErrUnavailable) {
+		t.Fatalf("GetProfile: err = %v", err)
+	}
+	if !lc.Paused() {
+		t.Fatal("client should be paused")
+	}
+	if s.shouldSync(ctx, 76561198200413817, 0) {
+		t.Error("shouldSync said yes while Leetify is paused")
 	}
 }

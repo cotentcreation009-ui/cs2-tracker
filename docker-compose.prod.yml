@@ -58,6 +58,10 @@ services:
       # routes instead; 0/false switches that off, with a restart and no
       # rebuild (backend/internal/leetify/appprofile.go).
       LEETIFY_APP_FALLBACK: ${LEETIFY_APP_FALLBACK:-}
+      # A 429 from Leetify's public API pauses every v3/v2 call (5 min,
+      # doubling to 30) instead of being retried; 0/false switches the pause
+      # off with a restart and no rebuild (backend/internal/leetify/publicpause.go).
+      LEETIFY_PUBLIC_BREAKER: ${LEETIFY_PUBLIC_BREAKER:-}
       # Where those app routes are asked when this box's own network is on
       # Leetify's bot wall (Contabo's is): a keyed forwarder on a network
       # Leetify answers — docs/LEETIFY-RELAY.md. Empty = ask Leetify directly.

@@ -115,6 +115,76 @@ hours a day of "no Leetify profile" for every non-member, cached five minutes ea
 
 The log line still says `fallback paused`, now with the pause length and the streak.
 
+## Public API 429 (2026-09-29)
+
+A different wall, on the other host. From 2026-09-29 ~20:30 UTC
+`api-public.cs-prod.leetify.com` answered **every** request from the VPS's address with
+`429 {"error":"Calm down son"}` (`server: LRL`, no `Retry-After`) — keyed or not, on the
+bare root as much as on `/v3/profile` — while the same key from a home connection got
+200. A per-address block, not a per-key quota. The client at the time retried a 429
+after 200 ms and cached nothing, and the bridge kept spending its 8/min budget: about
+870 refused requests an hour for a day, two thirds of them self-inflicted (the homepage's
+featured strip, the same 1,078 share codes re-fetched up to 65 times each). Profiles
+without a 24 h stale copy answered `500 internal error`; the rest went dark when the
+stale copies expired at ~20:30 UTC on 09-30.
+
+What the backend does now (`backend/internal/leetify/publicpause.go`):
+
+- a 429 from the public host is never retried (`transientStatus` no longer lists it);
+- it pauses **every** v3/v2 call from the process — `GetProfile`, `MatchReference`
+  (one-click analysis) and the bridge's match fetches — for five minutes (the one
+  back-off Leetify has ever published), doubling for each 429 met after a pause lapses,
+  capped at thirty; a `Retry-After` is honoured when it asks for longer;
+- while paused, a profile lookup falls through to the app routes via the relay (another
+  network); their answer is served, their "no" is `ErrUnavailable`, never a five-minute
+  miss;
+- the bridge parks the codes it could not fetch in the retry set instead of dropping
+  them, `shouldSync` says no without stamping the tried key, and the chain poller skips
+  its round;
+- the profile route answers `503` with a reason (`Cache-Control: no-store`,
+  `Retry-After: 60`) instead of `500 internal error`; the page says why the panel is
+  missing, and a stale copy says how old it is (`fetched_at`).
+
+Log lines to grep:
+
+```
+leetify public API rate-limited this address     # one Warn per pause, with until/pause/limits_in_a_row
+leetify public API answers this address again     # one Info when it lifts: paused_for + refused_while_paused
+chain poller round skipped: leetify paused
+matchsync: leetify paused; codes parked for retry
+```
+
+The first `answers this address again` timestamp minus the deploy time is the empirical
+length of Leetify's block. Kill switch: `LEETIFY_PUBLIC_BREAKER=0` in the VM `.env` and
+`up -d backend` (no rebuild) restores the old behaviour verbatim.
+
+### Follow-up: the public routes through the relay (not built)
+
+The key is address-independent, so the direct fix for the block itself is to send the
+keyed public calls through the Worker while the pause lasts. Design, for when it is
+worth a Worker paste:
+
+- **Worker** (`deploy/leetify-relay.worker.js`, mirrored in `cmd/leetifyrelay`): two
+  upstreams (`APP = api.cs-prod.leetify.com`, `PUBLIC = api-public.cs-prod.leetify.com`);
+  keep the app allowlist; add a public one for `/v3/profile`, `/v3/profile/matches`,
+  `/v2/matches/{id}` and `/v2/matches/matchmaking/{share code}`; for public routes
+  forward ONLY a validated `steam64_id` query (today the query string is dropped, which
+  would make `/v3/profile` useless) and the `_leetify_key` header (never for app
+  routes); no retry on a 429 — pass it back untouched with any `Retry-After`.
+- **Backend**: `LEETIFY_PUBLIC_RELAY=1` + `WithPublicRelay`; a `publicReq` helper that
+  builds `baseURL+path` while not paused and `appRelayURL+path` with `X-Relay-Key` while
+  paused (direct first, relay only during the outage, one direct probe when the pause
+  lapses); a 429 through the relay too stays `ErrUnavailable`.
+- **Proof before the flag**: paste the Worker, then from the VPS
+  `curl -H "X-Relay-Key: …" -H "_leetify_key: …" "https://leetify-relay.…workers.dev/v3/profile?steam64_id=76561198200413817"`.
+  A 200 settles that Cloudflare's egress is answered for the keyed public route; a 429
+  means the egress is limited too and the relay buys nothing.
+- Budget: ~10k relayed requests a day at today's volume, 10% of the Worker free tier.
+- Say it out loud: routing around a per-address block is a change of source address, not
+  a challenge bypass, but Leetify could read it as evasion. Their Discord
+  (https://discord.gg/UNygC8BAVg) is the only documented channel; a note naming
+  89.117.150.114 and the developer account may end the block on its own.
+
 ## Not yet done
 
 Skinport prices through the same box (`SKINPORT_BASE_URL` does not exist yet;
