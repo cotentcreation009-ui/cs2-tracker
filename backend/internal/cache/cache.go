@@ -138,8 +138,10 @@ func ProFaceitRankingKey(region string) string {
 
 // FaceitTopKey caches the homepage's FACEIT top-players snapshot per region
 // (faceitrankings.go): one hour fresh, with a ":stale" twin kept a day so a
-// FACEIT outage serves yesterday's board instead of nothing. Separate from
-// ProFaceitRankingKey so the pro board keeps its 30-minute contract.
+// FACEIT outage serves yesterday's board instead of nothing; a region with
+// no board at all is remembered as empty for ten minutes under the fresh key
+// alone. Separate from ProFaceitRankingKey so the pro board keeps its
+// 30-minute contract.
 func FaceitTopKey(region string) string {
 	return "cs2:faceit:top1:" + strings.ToLower(region)
 }

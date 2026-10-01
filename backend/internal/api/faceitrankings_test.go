@@ -1,15 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/config"
 	"github.com/cs2tracker/server/internal/faceit"
 	"github.com/cs2tracker/server/internal/steam"
@@ -179,5 +183,187 @@ func TestFaceitRankingsIdentityFailureKeepsRows(t *testing.T) {
 		if p.SteamID64 != "" || p.Avatar != "" {
 			t.Errorf("row enriched from a failing route: %+v", p)
 		}
+	}
+}
+
+// A fake FACEIT whose rankings page has nobody on it — what the AS region
+// answers at the time of writing.
+func emptyFaceit(t *testing.T, calls *int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(calls, 1)
+		if !strings.HasPrefix(r.URL.Path, "/rankings/games/cs2/regions/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"start":0,"end":0,"items":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A fake FACEIT that never answers: it holds every request until the caller
+// gives up (or the test ends), which is what a hang looks like from here.
+func hangingFaceit(t *testing.T, calls *int32) *httptest.Server {
+	t.Helper()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(calls, 1)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	// Cleanups run last-registered first: every held request is released
+	// before Close waits for them.
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	return srv
+}
+
+// logSpy keeps each record's level and message so a test can say what a
+// route must NOT have logged — here, that an empty region is not a Warn
+// dressed up as an outage.
+type logSpy struct {
+	mu   sync.Mutex
+	recs []struct {
+		level slog.Level
+		msg   string
+	}
+}
+
+func (l *logSpy) Enabled(context.Context, slog.Level) bool { return true }
+
+func (l *logSpy) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.recs = append(l.recs, struct {
+		level slog.Level
+		msg   string
+	}{r.Level, r.Message})
+	return nil
+}
+
+func (l *logSpy) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *logSpy) WithGroup(string) slog.Handler      { return l }
+
+// count is how many records at exactly level carry part in their message.
+func (l *logSpy) count(level slog.Level, part string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, r := range l.recs {
+		if r.level == level && strings.Contains(r.msg, part) {
+			n++
+		}
+	}
+	return n
+}
+
+// An empty ranking is FACEIT's answer, not an outage: it is remembered ten
+// minutes under the fresh key alone and served as the empty list the strip
+// hides a pill for, so an empty region costs six rankings calls an hour and
+// not one per homepage regeneration — and it is one Info line per miss,
+// never a Warn.
+func TestFaceitRankingsEmptyRegionIsRememberedBriefly(t *testing.T) {
+	var calls int32
+	up := emptyFaceit(t, &calls)
+	s := rankingsServer(up.URL, "k")
+	spy := &logSpy{}
+	s.log = slog.New(spy)
+	kv := newMapKV()
+	s.kvOverride = kv
+
+	rr, b := getRankings(t, s, "/api/faceit/rankings?region=AS")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body %s, want 200: an empty region is an answer, not an outage", rr.Code, rr.Body.String())
+	}
+	if !b.Enabled || b.Region != "AS" || b.Stale || len(b.Players) != 0 || b.FetchedAt == "" {
+		t.Errorf("envelope = %+v, want enabled, not stale, no players, a fetchedAt", b)
+	}
+	if cc := rr.Header().Get("Cache-Control"); !strings.Contains(cc, "s-maxage=60") {
+		t.Errorf("Cache-Control = %q, want a one-minute edge life, never no-store", cc)
+	}
+	key := cache.FaceitTopKey("AS")
+	if kv.ttl[key] != faceitTopEmptyTTL {
+		t.Errorf("fresh ttl = %v, want the %v negative cache", kv.ttl[key], faceitTopEmptyTTL)
+	}
+	if _, ok := kv.data[key+":stale"]; ok {
+		t.Error("an empty answer was written as the stale twin")
+	}
+
+	// The second ask is served from the negative cache: no upstream call.
+	rr2, b2 := getRankings(t, s, "/api/faceit/rankings?region=AS")
+	if rr2.Code != http.StatusOK || !b2.Enabled || b2.Stale || len(b2.Players) != 0 {
+		t.Errorf("second ask: status %d body %s, want the same empty answer", rr2.Code, rr2.Body.String())
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("upstream calls = %d, want 1: the empty answer must be remembered", n)
+	}
+	if n := spy.count(slog.LevelWarn, ""); n != 0 {
+		t.Errorf("logged %d Warn line(s) for an empty region; want none, it is not an outage", n)
+	}
+	if n := spy.count(slog.LevelInfo, "empty region"); n != 1 {
+		t.Errorf("logged the empty region %d time(s) at Info, want once per miss", n)
+	}
+}
+
+// A FACEIT that hangs rather than fails must still end in the stale copy.
+// Left to the client, a hang is three attempts on a 10 s timeout each, past
+// the route's 30 s, by which time the twin can no longer be read; the
+// rankings budget ends it in one attempt with time to spare.
+func TestFaceitRankingsHangingUpstreamEndsInStaleCopyWithinBudget(t *testing.T) {
+	// The real budget is eight seconds; the proof does not need them.
+	restore := faceitTopRankingsBudget
+	faceitTopRankingsBudget = 300 * time.Millisecond
+	t.Cleanup(func() { faceitTopRankingsBudget = restore })
+
+	var calls int32
+	up := hangingFaceit(t, &calls)
+	s := rankingsServer(up.URL, "k")
+	kv := newMapKV()
+	s.kvOverride = kv
+	yesterday := faceitTopSnapshot{
+		Region:    "EU",
+		Rows:      []faceit.RankedPlayer{{PlayerID: "p1", Nickname: "donk", Country: "ru", Position: 1, Elo: 4212, SkillLevel: 10}},
+		FetchedAt: time.Now().Add(-2 * time.Hour).UTC(),
+	}
+	_ = kv.SetJSONTTL(context.Background(), cache.FaceitTopKey("EU")+":stale", yesterday, faceitTopStaleTTL)
+
+	started := time.Now()
+	rr, b := getRankings(t, s, "/api/faceit/rankings?region=EU")
+	took := time.Since(started)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body %s, want 200 with the stale copy", rr.Code, rr.Body.String())
+	}
+	if !b.Stale || len(b.Players) != 1 || b.Players[0].Nickname != "donk" {
+		t.Errorf("body = %+v, want yesterday's board marked stale", b)
+	}
+	if cc := rr.Header().Get("Cache-Control"); !strings.Contains(cc, "s-maxage=60") {
+		t.Errorf("Cache-Control = %q, want the one-minute stale edge life", cc)
+	}
+	// One client timeout alone would be ten seconds; the budget is a fraction
+	// of a second here, and a generous margin still proves the point.
+	if took > 3*time.Second {
+		t.Errorf("answered after %v, want within the %v budget", took, faceitTopRankingsBudget)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("upstream attempts = %d, want 1: a hang must not be retried into the route's deadline", n)
+	}
+	if _, ok := kv.data[cache.FaceitTopKey("EU")]; ok {
+		t.Error("a hang was cached as a fresh copy")
+	}
+
+	// With nothing to serve, the same hang is the 503 with Retry-After —
+	// still within the budget, never chi's 504 after thirty seconds.
+	s2 := rankingsServer(up.URL, "k")
+	s2.kvOverride = newMapKV()
+	started = time.Now()
+	rr2, _ := getRankings(t, s2, "/api/faceit/rankings?region=NA")
+	took = time.Since(started)
+	if rr2.Code != http.StatusServiceUnavailable || rr2.Header().Get("Retry-After") != "300" || took > 3*time.Second {
+		t.Errorf("no stale copy: status %d Retry-After %q after %v, want 503 with Retry-After 300 within the budget",
+			rr2.Code, rr2.Header().Get("Retry-After"), took)
 	}
 }

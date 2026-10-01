@@ -47,8 +47,12 @@ type jsonKV interface {
 
 // kv returns the server's cache as a jsonKV, or a nil INTERFACE when no cache
 // is configured. A nil *cache.Cache stored in an interface is non-nil and
-// panics on the first call — the classic typed-nil trap.
+// panics on the first call — the classic typed-nil trap. A test's kvOverride
+// wins when set.
 func (s *Server) kv() jsonKV {
+	if s.kvOverride != nil {
+		return s.kvOverride
+	}
 	if s.cache == nil {
 		return nil
 	}
