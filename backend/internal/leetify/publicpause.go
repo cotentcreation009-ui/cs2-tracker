@@ -29,6 +29,15 @@ package leetify
 // they are one rate limit, not five, and neither escalate nor log. A
 // Retry-After, should Leetify ever send one, is honoured when it asks for
 // longer, up to the same cap.
+//
+// The pause bought time; it did not end the block. From 2026-10-01 07:01 UTC
+// every probe after every pause was refused again — 26 pauses in a row at
+// the cap, the same request answering 200 from a home connection at the
+// same minute — so the address itself is burned, and since then the v3/v2
+// routes are asked through the keyed relay FIRST (publicrelay.go), with the
+// direct host as the fallback. Nothing here changes for that: a 429 that
+// arrives through the relay is handed back status and headers intact and
+// trips this same pause, with the same escalation and the same Retry-After.
 
 import (
 	"log/slog"

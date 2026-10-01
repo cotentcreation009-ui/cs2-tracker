@@ -46,6 +46,14 @@ type Config struct {
 	// may not be (cmd/leetifyrelay, docs/LEETIFY-RELAY.md). Empty = ask directly.
 	LeetifyAppRelayURL string
 	LeetifyAppRelayKey string
+	// The public API (v3/v2) is asked through this relay FIRST when set,
+	// because api-public refuses this box's own address outright
+	// (internal/leetify/publicrelay.go). LEETIFY_PUBLIC_RELAY_URL/_KEY each
+	// default to the app relay's, so one Worker serves both; LEETIFY_PUBLIC_RELAY=0
+	// keeps the direct path only, without unsetting anything.
+	LeetifyPublicRelay    bool
+	LeetifyPublicRelayURL string
+	LeetifyPublicRelayKey string
 
 	// FACEIT Data API (requires a free key from https://developers.faceit.com)
 	FaceitBaseURL string
@@ -162,6 +170,14 @@ func Load() (*Config, error) {
 		LeetifyPublicBreaker: getBool("LEETIFY_PUBLIC_BREAKER", true),
 		LeetifyAppRelayURL:   getEnv("LEETIFY_APP_RELAY_URL", ""),
 		LeetifyAppRelayKey:   getEnv("LEETIFY_APP_RELAY_KEY", ""),
+		// On unless 0/false, like the breaker: the day the relay is the wrong
+		// road, the way back is an .env edit, not an unset-and-hope.
+		LeetifyPublicRelay: getBool("LEETIFY_PUBLIC_RELAY", true),
+		// Each half defaults to the app relay's counterpart separately, so a
+		// second Worker with its own key and the one Worker with one key are
+		// both a plain .env. Resolved below, once the app values are known.
+		LeetifyPublicRelayURL: getEnv("LEETIFY_PUBLIC_RELAY_URL", ""),
+		LeetifyPublicRelayKey: getEnv("LEETIFY_PUBLIC_RELAY_KEY", ""),
 
 		DemoGCSBucket:      getEnv("DEMO_GCS_BUCKET", ""),
 		DemoGCSCredentials: getEnv("DEMO_GCS_CREDENTIALS", getEnv("GOOGLE_APPLICATION_CREDENTIALS", "")),
@@ -171,6 +187,16 @@ func Load() (*Config, error) {
 		ExternalCacheTTL:   getDuration("EXTERNAL_CACHE_TTL", 15*time.Minute),
 		RateLimitRPS:       getFloat("RATE_LIMIT_RPS", 10),
 		RateLimitBurst:     getInt("RATE_LIMIT_BURST", 20),
+	}
+
+	if cfg.LeetifyPublicRelayURL == "" {
+		cfg.LeetifyPublicRelayURL = cfg.LeetifyAppRelayURL
+	}
+	if cfg.LeetifyPublicRelayKey == "" {
+		cfg.LeetifyPublicRelayKey = cfg.LeetifyAppRelayKey
+	}
+	if !cfg.LeetifyPublicRelay {
+		cfg.LeetifyPublicRelayURL, cfg.LeetifyPublicRelayKey = "", ""
 	}
 
 	if cfg.DatabaseURL == "" {
