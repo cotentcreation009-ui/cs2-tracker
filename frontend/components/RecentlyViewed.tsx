@@ -3,21 +3,45 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { PlayerHit } from "@/lib/types";
-import { getRecentPlayers } from "@/lib/recent";
+import {
+  clearRecentPlayers,
+  getRecentPlayers,
+  subscribeRecent,
+} from "@/lib/recent";
+import { SectionHeading } from "@/components/SectionHeading";
 
-// Shows the visitor's own recently-viewed players (from localStorage). Renders
-// nothing until there's history, so a first-time visitor never sees an empty box.
+// Shows the visitor's own recently-viewed players, from this browser's
+// localStorage and nowhere else: the server never sees the list, the server
+// HTML and the first client render are both empty (no hydration mismatch),
+// and a first-time visitor never sees the heading. Clear here or in the
+// search box's Recent list empties both — they subscribe to the same change.
 export function RecentlyViewed() {
   const [items, setItems] = useState<PlayerHit[]>([]);
-  useEffect(() => setItems(getRecentPlayers()), []);
+  useEffect(() => {
+    const read = () => setItems(getRecentPlayers());
+    read();
+    return subscribeRecent(read);
+  }, []);
   if (items.length === 0) return null;
 
   return (
-    <section className="mt-6">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-        Recently viewed
-      </h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <section className="mt-8" aria-labelledby="recently-viewed-heading">
+      <SectionHeading
+        id="recently-viewed-heading"
+        eyebrow="Recently viewed"
+        subline="Saved in this browser only."
+        action={
+          <button
+            type="button"
+            onClick={() => clearRecentPlayers()}
+            aria-label="Clear recently viewed players"
+            className="text-sm font-semibold text-brand hover:underline"
+          >
+            Clear
+          </button>
+        }
+      />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {items.map((p) => (
           <Link
             key={p.steamId64}
@@ -32,7 +56,10 @@ export function RecentlyViewed() {
                 className="h-9 w-9 shrink-0 rounded-lg object-cover"
               />
             ) : (
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel text-sm font-bold text-faint">
+              <span
+                aria-hidden
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-panel text-sm font-bold text-faint"
+              >
                 {(p.personaName || "?").slice(0, 1).toUpperCase()}
               </span>
             )}

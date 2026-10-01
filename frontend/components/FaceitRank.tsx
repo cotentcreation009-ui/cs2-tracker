@@ -1,15 +1,12 @@
 "use client";
 
 import type { FaceitProfile } from "@/lib/types";
+import { faceitLevelHex } from "@/lib/format";
 
 // Official FACEIT skill-level colours (1 grey · 2–4 green · 5–7 yellow · 8–9
-// orange · 10 red).
+// orange · 10 red) — the one table lives in lib/format.
 export function faceitColor(lvl: number): string {
-  if (lvl >= 10) return "#e8332e";
-  if (lvl >= 8) return "#ff7a18";
-  if (lvl >= 5) return "#ffc220";
-  if (lvl >= 2) return "#36cf4a";
-  return "#dfe5ec";
+  return faceitLevelHex(lvl);
 }
 
 // FaceitBadge — the FACEIT emblem button. Open/close is controlled by the parent

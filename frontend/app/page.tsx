@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
-import { SearchBar } from "@/components/SearchBar";
-import { Leaderboard } from "@/components/Leaderboard";
-import { FeaturedPlayers } from "@/components/FeaturedPlayers";
-import { RecentlyViewed } from "@/components/RecentlyViewed";
 import Link from "next/link";
-import { getLeaderboard } from "@/lib/api";
+import { SearchBar } from "@/components/SearchBar";
+import { RecentlyViewed } from "@/components/RecentlyViewed";
+import { FaceitTopPlayers } from "@/components/FaceitTopPlayers";
+import { Leaderboard } from "@/components/Leaderboard";
+import { SectionHeading } from "@/components/SectionHeading";
 import { JsonLd } from "@/components/JsonLd";
+import { getTopAnalysed } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 import { GUIDES } from "@/lib/guides";
+import type { TopAnalysedResponse } from "@/lib/types";
 import {
   graph,
   organizationSchema,
@@ -31,8 +34,9 @@ const FEATURED_GUIDES = FEATURED_GUIDE_SLUGS.map((slug) => {
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
-// Cache the homepage (ISR); featured-player data and the leaderboard degrade
-// gracefully when the backend is unavailable.
+// Cache the homepage (ISR). Everything it fetches is Redis-served at the
+// backend (the FACEIT snapshot an hour, the board ten minutes) and degrades
+// to an honest one-liner, never a blank, when the backend is unavailable.
 export const revalidate = 60;
 
 // Self-referencing canonical so query-param/trailing-slash/host variants of the
@@ -42,23 +46,79 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-const FEATURES = [
+// A known-rich, public account the hero can point a first-time visitor at.
+// A LINK, never a fetch: the page itself asks nothing about this profile.
+const DEMO_PROFILE_ID = "76561198077030352";
+
+// The analysed-players board's floor and window. Five demos and ninety days:
+// 384 of the 402 career rows in production are a single lobby, and a one-
+// match row with a 9.00 K/D over six rounds is noise, not a top player. If
+// the board runs thin as demos age, these are the two numbers to move.
+const BOARD_MIN_DEMOS = 5;
+const BOARD_WINDOW_DAYS = 90;
+
+type FeatureIcon = "layers" | "chart" | "shield";
+
+const FEATURES: { title: string; body: string; accent: string; icon: FeatureIcon }[] = [
   {
     title: "Every rank in one place",
     body: "Premier rating, FACEIT level & ELO, Wingman rank and Leetify rating for any account — pulled live from a single SteamID.",
     accent: "bg-brand/10 text-brand",
+    icon: "layers",
   },
   {
     title: "Deep Leetify analytics",
     body: "Aim, positioning and utility ratings, opening duels, clutches, trading and recent-match form — the numbers past the scoreboard.",
     accent: "bg-brand2/10 text-brand2",
+    icon: "chart",
   },
   {
     title: "Steam identity & trust",
     body: "Account age, CS2 friend code, friends and ban checks — vet a teammate or scope an opponent in seconds.",
     accent: "bg-mid/10 text-mid",
+    icon: "shield",
   },
 ];
+
+// Inline, stroke="currentColor" like the search glyph, so each tile's icon
+// takes the tile's accent colour.
+function FeatureGlyph({ icon }: { icon: FeatureIcon }) {
+  const common = {
+    className: "h-5 w-5",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (icon) {
+    case "layers":
+      return (
+        <svg {...common}>
+          <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+          <path d="m3 12.5 9 5 9-5" />
+          <path d="m3 17 9 5 9-5" />
+        </svg>
+      );
+    case "chart":
+      return (
+        <svg {...common}>
+          <path d="M3 20h18" />
+          <path d="m4 15 5-5 4 4 7-8" />
+          <path d="M16 6h4v4" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...common}>
+          <path d="M12 3 4.5 6v5.2c0 4.7 3.2 8.3 7.5 9.8 4.3-1.5 7.5-5.1 7.5-9.8V6L12 3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      );
+  }
+}
 
 // Three-step explainer for the "how to look up CS2 stats" section.
 const STEPS: { n: string; t: string; d: string }[] = [
@@ -101,8 +161,27 @@ const HOME_FAQ: { q: string; a: string }[] = [
   },
 ];
 
+// The board's subline is the server's statement of what the rows are — the
+// floor, the window and the count come from the response, never from copy.
+function boardSubline(board: TopAnalysedResponse | null): string {
+  const base = "HLTV 1.0 rating across demos analysed on CSRun";
+  if (!board) return base;
+  const parts = [base, `${board.minMatches}+ demos`];
+  if (board.windowDays > 0) parts.push(`last ${board.windowDays} days`);
+  parts.push(`${board.qualified} ${board.qualified === 1 ? "player qualifies" : "players qualify"}`);
+  if (board.asOf) {
+    const ago = timeAgo(board.asOf);
+    if (ago) parts.push(`updated ${ago}`);
+  }
+  return parts.join(" · ");
+}
+
 export default async function HomePage() {
-  const leaders = await getLeaderboard(10).catch(() => []);
+  const board = await getTopAnalysed({
+    limit: 10,
+    min: BOARD_MIN_DEMOS,
+    days: BOARD_WINDOW_DAYS,
+  }).catch(() => null);
 
   const homeSchema = graph([
     organizationSchema(siteUrl),
@@ -110,11 +189,21 @@ export default async function HomePage() {
     faqSchema(siteUrl, "/", HOME_FAQ),
   ]);
 
+  const boardWindow =
+    board && board.windowDays > 0 ? ` in the last ${board.windowDays} days` : "";
+
   return (
     <div>
       <JsonLd data={homeSchema} />
+      {/* No overflow-hidden here: the search box's dropdown lives inside this
+          card and was being clipped at its bottom edge (two "Recent" rows and
+          a slice of a third). The rounded corners still clip the card's own
+          background and the glow is a box-shadow, so nothing else needed it.
+          z-10 keeps the overflowing dropdown above the hover-lifted cards
+          below (their transform makes a stacking context) and under the
+          header's z-20. */}
       <section
-        className="relative overflow-hidden rounded-2xl border border-brand/25 bg-panel2/40 px-6 py-16 text-center backdrop-blur-sm sm:px-10 sm:py-24"
+        className="relative z-10 rounded-2xl border border-brand/25 bg-panel2/40 px-6 py-16 text-center backdrop-blur-sm sm:px-10 sm:py-24"
         style={{ boxShadow: "0 0 60px -14px rgba(56,214,255,0.30)" }}
       >
         <div className="relative mx-auto max-w-2xl">
@@ -136,9 +225,9 @@ export default async function HomePage() {
           <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted">
             <Link
               className="font-medium text-brand hover:underline"
-              href="/profiles/76561198077030352"
+              href={`/profiles/${DEMO_PROFILE_ID}`}
             >
-              Try a live profile →
+              See an example profile →
             </Link>
             <span aria-hidden>·</span>
             <span>Public data from Leetify · FACEIT · Steam</span>
@@ -148,19 +237,17 @@ export default async function HomePage() {
 
       <RecentlyViewed />
 
-      <FeaturedPlayers />
+      <FaceitTopPlayers />
 
-      <section className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">
-          What you get
-        </h2>
+      <section className="mt-10" aria-labelledby="what-you-get-heading">
+        <SectionHeading id="what-you-get-heading" eyebrow="What you get" />
         <div className="grid gap-4 md:grid-cols-3">
           {FEATURES.map((f) => (
-            <div key={f.title} className="card lift px-5 py-5">
+            <div key={f.title} className="card px-5 py-5">
               <div
                 className={`mb-3 grid h-9 w-9 place-items-center rounded-lg ${f.accent}`}
               >
-                <span className="h-2 w-2 rounded-full bg-current" />
+                <FeatureGlyph icon={f.icon} />
               </div>
               <h3 className="font-semibold">{f.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted">{f.body}</p>
@@ -169,14 +256,45 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {leaders.length > 0 && (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">
-            Top tracked players
-          </h2>
-          <Leaderboard players={leaders} />
-        </section>
-      )}
+      {/* Never silently absent: a thin board says it is thin, a failed fetch
+          says it failed, and the demo analyzer is the way onto it either way. */}
+      <section className="mt-10" aria-labelledby="analysed-heading">
+        <SectionHeading
+          id="analysed-heading"
+          eyebrow="Top analysed players"
+          subline={boardSubline(board)}
+          action={
+            <Link
+              href="/demos"
+              className="text-sm font-semibold text-brand hover:underline"
+            >
+              Analyse a demo →
+            </Link>
+          }
+        />
+        {board === null ? (
+          <div className="card-2 px-5 py-6 text-center text-sm text-muted">
+            The board couldn&apos;t load — try again in a minute.
+          </div>
+        ) : board.qualified >= 3 && board.players.length > 0 ? (
+          <Leaderboard
+            players={board.players}
+            minMatches={board.minMatches}
+            windowDays={board.windowDays}
+          />
+        ) : (
+          <div className="card-2 px-5 py-6 text-center text-sm text-muted">
+            Not enough players with {board.minMatches}+ analysed demos
+            {boardWindow} yet ({board.qualified} so far).{" "}
+            <Link
+              href="/demos"
+              className="font-semibold text-brand hover:underline"
+            >
+              Analyse a demo →
+            </Link>
+          </div>
+        )}
+      </section>
 
       {/* Editorial content — makes the homepage substantial and keyword-relevant
           for search, without pushing the search tool below the fold. */}
@@ -233,12 +351,21 @@ export default async function HomePage() {
           </h2>
           <div className="mt-4 space-y-3">
             {HOME_FAQ.map((f) => (
-              <details
-                key={f.q}
-                className="card px-5 py-4 [&_summary]:cursor-pointer"
-              >
-                <summary className="font-semibold text-ink marker:text-faint">
+              <details key={f.q} className="card group px-5 py-4">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold text-ink [&::-webkit-details-marker]:hidden">
                   {f.q}
+                  <svg
+                    className="h-4 w-4 shrink-0 text-faint transition-transform group-open:rotate-180"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
                 </summary>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{f.a}</p>
               </details>

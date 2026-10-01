@@ -5,6 +5,7 @@ import { usePoll } from "./usePoll";
 import { SpotlightRail, type RailCard } from "./SpotlightRail";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { TeamCrest } from "./TeamCrest";
+import { faceitLevelHex } from "@/lib/format";
 
 // Three rails: the world's top 20 teams, their players, and FACEIT's
 // leaderboard. Every one of them is somebody's published ranking — none is a
@@ -72,14 +73,11 @@ export interface SpotlightResponse {
   photos?: Record<string, string>;
 }
 
-// FACEIT's own level colours, so a level 10 reads as a level 10.
+// FACEIT's own level colours, so a level 10 reads as a level 10. One table
+// for the whole site, in lib/format — this module is "use client", and the
+// homepage's server-rendered strip needs the same colours.
 export function levelHex(lvl?: number): string {
-  if (!lvl || lvl < 1) return "var(--brand, #6ad0ff)";
-  if (lvl >= 10) return "#e8332e";
-  if (lvl >= 8) return "#ff7a18";
-  if (lvl >= 5) return "#ffc220";
-  if (lvl >= 2) return "#36cf4a";
-  return "#dfe5ec";
+  return faceitLevelHex(lvl);
 }
 
 
