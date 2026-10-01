@@ -181,11 +181,7 @@ func (c *Client) match(ctx context.Context, path string) (*Match, error) {
 	if err := matchLimiter.Wait(ctx); err != nil {
 		return nil, err
 	}
-	req, err := c.newReq(ctx, c.baseURL+path)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.doWithRetry(req)
+	resp, err := c.publicGet(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("leetify: match request failed: %w", err)
 	}

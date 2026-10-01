@@ -67,6 +67,14 @@ services:
       # Leetify answers — docs/LEETIFY-RELAY.md. Empty = ask Leetify directly.
       LEETIFY_APP_RELAY_URL: ${LEETIFY_APP_RELAY_URL:-}
       LEETIFY_APP_RELAY_KEY: ${LEETIFY_APP_RELAY_KEY:-}
+      # The public API (v3/v2) goes through the relay FIRST, because
+      # api-public refuses this box's own address outright (since 2026-10-01;
+      # backend/internal/leetify/publicrelay.go). URL and key each default to
+      # the app relay's, so one Worker serves both and nothing new is needed
+      # in .env; 0/false keeps the direct path only (restart, no rebuild).
+      LEETIFY_PUBLIC_RELAY: ${LEETIFY_PUBLIC_RELAY:-}
+      LEETIFY_PUBLIC_RELAY_URL: ${LEETIFY_PUBLIC_RELAY_URL:-}
+      LEETIFY_PUBLIC_RELAY_KEY: ${LEETIFY_PUBLIC_RELAY_KEY:-}
       # Assemble profiles for players Leetify will not serve one for, out of the
       # match reports they appear in. Off unless set to 1: it depends on a
       # carve-out Leetify could close without notice, so it must be switchable

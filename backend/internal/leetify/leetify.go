@@ -91,6 +91,17 @@ type Client struct {
 	// publicPausedSince (unix nanos) is when the current run of pauses began,
 	// so the "answers again" line can say how long the address was limited.
 	publicPausedSince atomic.Int64
+
+	// publicRelayURL, when set, is where the v3/v2 routes are asked FIRST —
+	// the same keyed forwarder as the app routes, because this box's own
+	// address is what api-public refuses (publicrelay.go). The direct host
+	// is the fallback for a relay that cannot answer for Leetify.
+	publicRelayURL string
+	publicRelayKey string
+	// publicRelayLoggedAt (unix nanos) is when a relay failure was last
+	// logged; publicRelayFailures counts the ones since, for the next line.
+	publicRelayLoggedAt atomic.Int64
+	publicRelayFailures atomic.Int64
 }
 
 // Option customises a Client.
@@ -492,14 +503,8 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	}
 	q := url.Values{}
 	q.Set("steam64_id", strconv.FormatUint(steam64, 10))
-	u := c.baseURL + "/v3/profile?" + q.Encode()
 
-	req, err := c.newReq(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.doWithRetry(req)
+	resp, err := c.publicGet(ctx, "/v3/profile?"+q.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("leetify: request failed: %w", err)
 	}
@@ -886,12 +891,7 @@ func (c *Client) MatchReference(ctx context.Context, steam64 uint64, gameID stri
 	if c.publicPaused() {
 		return MatchReference{}, ErrUnavailable
 	}
-	u := c.baseURL + "/v3/profile/matches?steam64_id=" + fmt.Sprint(steam64)
-	req, err := c.newReq(ctx, u)
-	if err != nil {
-		return MatchReference{}, err
-	}
-	resp, err := c.doWithRetry(req)
+	resp, err := c.publicGet(ctx, "/v3/profile/matches?steam64_id="+fmt.Sprint(steam64))
 	if err != nil {
 		return MatchReference{}, fmt.Errorf("leetify matches: request failed: %w", err)
 	}
