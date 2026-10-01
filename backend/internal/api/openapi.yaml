@@ -52,9 +52,17 @@ paths:
 
   /api/leaderboard:
     get:
-      summary: Top tracked players by rating
+      summary: Top analysed players by HLTV 1.0 rating (from demos CSRun parsed)
+      description: |
+        Defaults (min=1, days=0) are the historical board: everyone ever seen
+        in a demo, which the sitemap uses as its profile inventory. The
+        homepage asks for min=5&days=90 so a single lobby cannot top it.
+        Cached ten minutes per (limit, min, days); rows without a Steam
+        avatar are hydrated with one batch Steam call when a key is set.
       parameters:
-        - { name: limit, in: query, schema: { type: integer, default: 25 } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, minimum: 1, maximum: 100 } }
+        - { name: min, in: query, description: Minimum demos analysed, schema: { type: integer, default: 1, minimum: 1, maximum: 50 } }
+        - { name: days, in: query, description: Only players seen in a demo within this many days (0 = ever), schema: { type: integer, default: 0, minimum: 0, maximum: 3650 } }
       responses:
         "200":
           description: Leaderboard
@@ -66,6 +74,39 @@ paths:
                   players:
                     type: array
                     items: { $ref: "#/components/schemas/LeaderboardEntry" }
+                  minMatches: { type: integer, description: The floor the rows passed }
+                  windowDays: { type: integer, description: The window the rows passed (0 = ever) }
+                  qualified: { type: integer, description: How many players passed in total, not just this page }
+                  asOf: { type: string, format: date-time, nullable: true, description: Newest demo ingest among the qualifying players; null when none }
+
+  /api/faceit/rankings:
+    get:
+      summary: FACEIT's published CS2 leaderboard for one region (homepage strip)
+      description: |
+        Cached an hour fresh and a day stale per region; a FACEIT outage serves
+        the last good board with stale=true and its real fetchedAt. Rows carry
+        steamId64/avatar when FACEIT's player object lists a CS2 account. Never
+        touches Leetify.
+      parameters:
+        - { name: region, in: query, schema: { type: string, enum: [EU, NA, SA, AS, OCE], default: EU } }
+        - { name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 20 } }
+      responses:
+        "200":
+          description: The region's top players (enabled=false with an empty list when no FACEIT key is configured)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  region: { type: string }
+                  players:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceitRankedPlayer" }
+                  fetchedAt: { type: string, format: date-time, description: When FACEIT was asked for this snapshot }
+                  stale: { type: boolean, description: True when served from the day-long stale copy because FACEIT is not answering }
+        "400": { description: Unknown region }
+        "503": { description: FACEIT is unavailable and no stale copy exists (Cache-Control no-store, Retry-After 300) }
 
   /api/search:
     get:
@@ -442,6 +483,18 @@ components:
         kd: { type: number }
         adr: { type: number }
         winRate: { type: number }
+    FaceitRankedPlayer:
+      type: object
+      properties:
+        playerId: { type: string, description: FACEIT player id }
+        nickname: { type: string }
+        country: { type: string, description: lower-case ISO 3166-1 alpha-2 }
+        position: { type: integer }
+        elo: { type: integer }
+        skillLevel: { type: integer }
+        avatar: { type: string }
+        faceitUrl: { type: string }
+        steamId64: { type: string, description: Present when FACEIT lists a CS2 account for the player }
     IngestJob:
       type: object
       properties:

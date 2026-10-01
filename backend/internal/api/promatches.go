@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/cs2tracker/server/internal/cache"
 	"github.com/cs2tracker/server/internal/grid"
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 )
 
 // cachedTTL is a cache-or-fetch with an explicit TTL (cachedExternal uses a
@@ -32,6 +34,67 @@ func cachedTTL[T any](s *Server, ctx context.Context, key string, ttl time.Durat
 		_ = s.cache.SetJSONTTL(ctx, key, out, ttl)
 	}
 	return out, nil
+}
+
+// jsonKV is the two cache methods cachedStale needs. *cache.Cache satisfies
+// it; so does a map in a test, which is the point — stale-on-error is the
+// branch that only ever runs during an outage, so it must be exercised
+// without Redis.
+type jsonKV interface {
+	GetJSON(ctx context.Context, key string, dst any) (bool, error)
+	SetJSONTTL(ctx context.Context, key string, v any, ttl time.Duration) error
+}
+
+// kv returns the server's cache as a jsonKV, or a nil INTERFACE when no cache
+// is configured. A nil *cache.Cache stored in an interface is non-nil and
+// panics on the first call — the classic typed-nil trap.
+func (s *Server) kv() jsonKV {
+	if s.cache == nil {
+		return nil
+	}
+	return s.cache
+}
+
+// cachedStale is cachedTTL with a last-known-good copy: a fresh hit is served
+// as is; a miss runs ONE fetch per key (singleflight) and writes both a fresh
+// copy (fresh) and a stale twin at key+":stale" (stale, much longer); when the
+// fetch fails and a stale twin exists, that twin is served with isStale=true
+// so the caller can say how old its data is; with nothing to serve the fetch
+// error is returned. Unlike cachedExternalCond it has no negative cache and
+// knows nothing about Leetify — it is for a published list, not a per-player
+// lookup. A nil kv means plain singleflight fetching.
+func cachedStale[T any](kv jsonKV, sf *singleflight.Group, ctx context.Context, key string, fresh, stale time.Duration, log *slog.Logger, fetch func() (T, error)) (v T, isStale bool, err error) {
+	var zero T
+	if kv != nil {
+		var cached T
+		if hit, _ := kv.GetJSON(ctx, key, &cached); hit {
+			return cached, false, nil
+		}
+	}
+	res, err, _ := sf.Do(key, func() (any, error) {
+		val, err := fetch()
+		if err != nil {
+			return nil, err
+		}
+		if kv != nil {
+			_ = kv.SetJSONTTL(ctx, key, val, fresh)
+			_ = kv.SetJSONTTL(ctx, key+":stale", val, stale)
+		}
+		return val, nil
+	})
+	if err != nil {
+		if kv != nil {
+			var old T
+			if hit, _ := kv.GetJSON(ctx, key+":stale", &old); hit {
+				if log != nil {
+					log.Info("serving stale copy", "key", key, "err", err)
+				}
+				return old, true, nil
+			}
+		}
+		return zero, false, err
+	}
+	return res.(T), false, nil
 }
 
 // handleProMatches serves the live pro-match board: LIVE first, then UPCOMING;

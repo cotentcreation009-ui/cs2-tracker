@@ -41,6 +41,19 @@ var rankingRegions = map[string]string{
 // largest CS2 region by some distance, so it is the least surprising default.
 const defaultRankingRegion = "EU"
 
+// RegionCode normalises a caller's region ("eu", " NA ", "") to the constant
+// Rankings will put in the URL, or reports false for a region FACEIT has no
+// ranking for — so an HTTP handler can answer 400 before touching a cache.
+// Empty means the default region.
+func RegionCode(region string) (string, bool) {
+	want := strings.ToUpper(strings.TrimSpace(region))
+	if want == "" {
+		want = defaultRankingRegion
+	}
+	code, ok := rankingRegions[want]
+	return code, ok
+}
+
 // maxRankingLimit is FACEIT's page cap for this endpoint; asking for more is an
 // error upstream rather than a bigger page.
 const maxRankingLimit = 100
@@ -55,6 +68,10 @@ type RankedPlayer struct {
 	SkillLevel int    `json:"skillLevel"`
 	Avatar     string `json:"avatar,omitempty"`
 	FaceitURL  string `json:"faceitUrl,omitempty"`
+	// The player's CS2 SteamID64, when a later PlayerByID lookup found one.
+	// The rankings collection itself never carries it. A string, because
+	// JavaScript cannot hold a 17-digit integer exactly.
+	SteamID64 string `json:"steamId64,omitempty"`
 }
 
 // rankingsResp mirrors the documented payload. Each numeric field is listed
@@ -113,11 +130,7 @@ func (c *Client) Rankings(ctx context.Context, region string, limit int) ([]Rank
 	if c.apiKey == "" {
 		return nil, ErrNoAPIKey
 	}
-	want := strings.ToUpper(strings.TrimSpace(region))
-	if want == "" {
-		want = defaultRankingRegion
-	}
-	code, ok := rankingRegions[want]
+	code, ok := RegionCode(region)
 	if !ok {
 		return nil, fmt.Errorf("%w %q (want one of AS, EU, NA, OCE, SA)", ErrBadRegion, region)
 	}

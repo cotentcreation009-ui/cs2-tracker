@@ -33,7 +33,7 @@ type fakeStore struct {
 	matchDet      func(int64) (models.MatchDetail, error)
 	weapons       func(uint64, int) ([]models.WeaponStat, error)
 	maps          func(uint64) ([]models.MapStat, error)
-	top           func(int) ([]models.LeaderboardEntry, error)
+	top           func(db.TopPlayersQuery) (db.TopPlayersResult, error)
 	kills         func(int64) ([]models.Kill, error)
 	job           func(string) (models.IngestJob, error)
 	ping          func() error
@@ -204,11 +204,11 @@ func (f *fakeStore) GetMapStats(_ context.Context, id uint64) ([]models.MapStat,
 	}
 	return nil, nil
 }
-func (f *fakeStore) ListTopPlayers(_ context.Context, l int) ([]models.LeaderboardEntry, error) {
+func (f *fakeStore) TopPlayers(_ context.Context, q db.TopPlayersQuery) (db.TopPlayersResult, error) {
 	if f.top != nil {
-		return f.top(l)
+		return f.top(q)
 	}
-	return nil, nil
+	return db.TopPlayersResult{}, nil
 }
 func (f *fakeStore) SearchPlayers(context.Context, string, int) ([]models.PlayerHit, error) {
 	return nil, nil
@@ -315,21 +315,82 @@ func TestHandleProfileBadID(t *testing.T) {
 }
 
 func TestHandleLeaderboard(t *testing.T) {
-	store := &fakeStore{top: func(int) ([]models.LeaderboardEntry, error) {
-		return []models.LeaderboardEntry{{SteamID64: 76561198000000001, PersonaName: "a", Rating: 1.3}}, nil
+	asOf := time.Date(2026, 9, 23, 3, 52, 0, 0, time.UTC)
+	var got db.TopPlayersQuery
+	store := &fakeStore{top: func(q db.TopPlayersQuery) (db.TopPlayersResult, error) {
+		got = q
+		return db.TopPlayersResult{
+			Rows: []models.LeaderboardEntry{
+				{SteamID64: 76561198000000001, PersonaName: "a", Rating: 1.3, Matches: 9},
+				// A demo-only row: no avatar, and with no Steam key configured
+				// (steam.New("")) hydration is skipped, so it must survive as is.
+				{SteamID64: 76561198000000002, PersonaName: "b", Rating: 1.1, Matches: 7, AvatarURL: ""},
+			},
+			Qualified: 7,
+			AsOf:      &asOf,
+		}, nil
 	}}
-	w := doGET(routerWith(store), "/api/leaderboard")
+	r := routerWith(store)
+
+	// Defaults reproduce the historical board: everyone, ever — the sitemap's
+	// profile inventory depends on it.
+	w := doGET(r, "/api/leaderboard")
 	if w.Code != http.StatusOK {
 		t.Fatalf("code = %d", w.Code)
 	}
+	if got.Limit != 25 || got.MinMatches != 1 || got.WindowDays != 0 {
+		t.Errorf("default query = %+v, want limit 25, min 1, days 0", got)
+	}
 	var resp struct {
-		Players []models.LeaderboardEntry `json:"players"`
+		Players    []models.LeaderboardEntry `json:"players"`
+		MinMatches int                       `json:"minMatches"`
+		WindowDays int                       `json:"windowDays"`
+		Qualified  int                       `json:"qualified"`
+		AsOf       *string                   `json:"asOf"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Players) != 1 || resp.Players[0].PersonaName != "a" {
+	if len(resp.Players) != 2 || resp.Players[0].PersonaName != "a" {
 		t.Errorf("unexpected: %+v", resp.Players)
+	}
+	if resp.Players[1].AvatarURL != "" || resp.Players[1].PersonaName != "b" {
+		t.Errorf("an unhydratable row was altered: %+v", resp.Players[1])
+	}
+	if resp.MinMatches != 1 || resp.WindowDays != 0 || resp.Qualified != 7 {
+		t.Errorf("envelope = min %d days %d qualified %d, want 1/0/7", resp.MinMatches, resp.WindowDays, resp.Qualified)
+	}
+	if resp.AsOf == nil || *resp.AsOf != "2026-09-23T03:52:00Z" {
+		t.Errorf("asOf = %v, want the store's stamp", resp.AsOf)
+	}
+
+	// The homepage's floor and window pass through; the floor is clamped.
+	w = doGET(r, "/api/leaderboard?limit=10&min=5&days=90")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	if got.Limit != 10 || got.MinMatches != 5 || got.WindowDays != 90 {
+		t.Errorf("query = %+v, want limit 10, min 5, days 90", got)
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.MinMatches != 5 || resp.WindowDays != 90 {
+		t.Errorf("envelope echoes min %d days %d, want 5/90", resp.MinMatches, resp.WindowDays)
+	}
+	if w = doGET(r, "/api/leaderboard?min=999"); w.Code != http.StatusOK || got.MinMatches != 50 {
+		t.Errorf("min=999: code %d, min %d, want 200 and the 50 clamp", w.Code, got.MinMatches)
+	}
+}
+
+// An empty board is still a complete envelope: an empty array, a zero count
+// and a null stamp — never a null players list for the page to trip over.
+func TestHandleLeaderboardEmpty(t *testing.T) {
+	w := doGET(routerWith(&fakeStore{}), "/api/leaderboard?min=5&days=90")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"players":[]`) || !strings.Contains(body, `"qualified":0`) || !strings.Contains(body, `"asOf":null`) {
+		t.Errorf("body = %s", body)
 	}
 }
 

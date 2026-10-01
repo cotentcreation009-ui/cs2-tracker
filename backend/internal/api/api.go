@@ -50,7 +50,7 @@ type Store interface {
 	GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDetail, error)
 	GetWeaponStats(ctx context.Context, steamID uint64, limit int) ([]models.WeaponStat, error)
 	GetMapStats(ctx context.Context, steamID uint64) ([]models.MapStat, error)
-	ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error)
+	TopPlayers(ctx context.Context, q db.TopPlayersQuery) (db.TopPlayersResult, error)
 	SearchPlayers(ctx context.Context, query string, limit int) ([]models.PlayerHit, error)
 	ListMatchKills(ctx context.Context, matchID int64) ([]models.Kill, error)
 	InsertJob(ctx context.Context, j models.IngestJob) error
@@ -371,6 +371,9 @@ func (s *Server) Router() http.Handler {
 			r.Get("/health", s.handleHealth)
 			r.Get("/resolve", s.handleResolve)
 			r.Get("/faceit/resolve", s.handleFaceitResolve)
+			// FACEIT's published leaderboard for the homepage strip
+			// (faceitrankings.go) — cached an hour, never touches Leetify.
+			r.Get("/faceit/rankings", s.handleFaceitRankings)
 			r.Get("/leaderboard", s.handleLeaderboard)
 			r.Get("/search", s.handleSearch)
 
@@ -480,18 +483,104 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"steamId64": strconv.FormatUint(id, 10)})
 }
 
+// leaderboardCacheTTL is how long one shape of the board is held in Redis:
+// one query and at most one Steam hydration call per ten minutes, whatever
+// the homepage's regeneration rate is.
+const leaderboardCacheTTL = 10 * time.Minute
+
+// leaderboardBody is the /api/leaderboard envelope. minMatches, windowDays,
+// qualified and asOf are the server's own statement of what the board is, so
+// the page's subline cannot drift from the query that produced the rows.
+type leaderboardBody struct {
+	Players    []models.LeaderboardEntry `json:"players"`
+	MinMatches int                       `json:"minMatches"`
+	WindowDays int                       `json:"windowDays"`
+	Qualified  int                       `json:"qualified"`
+	AsOf       *string                   `json:"asOf"` // RFC 3339, null when nothing qualified
+}
+
+// handleLeaderboard serves the "top analysed players" board. The defaults
+// (min=1, days=0) reproduce the historical behaviour, which the sitemap
+// relies on for its profile inventory; the homepage asks for min=5&days=90.
 func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 	limit := clampInt(queryInt(r, "limit", 25), 1, 100)
-	players, err := s.db.ListTopPlayers(r.Context(), limit)
+	minMatches := clampInt(queryInt(r, "min", 1), 1, 50)
+	days := clampInt(queryInt(r, "days", 0), 0, 3650)
+	ctx := r.Context()
+	body, err := cachedTTL(s, ctx, cache.LeaderboardKey(limit, minMatches, days), leaderboardCacheTTL,
+		func() (leaderboardBody, error) {
+			res, err := s.db.TopPlayers(ctx, db.TopPlayersQuery{Limit: limit, MinMatches: minMatches, WindowDays: days})
+			if err != nil {
+				return leaderboardBody{}, err
+			}
+			rows := res.Rows
+			if rows == nil {
+				rows = []models.LeaderboardEntry{}
+			}
+			s.hydrateBoardIdentities(ctx, rows)
+			out := leaderboardBody{Players: rows, MinMatches: minMatches, WindowDays: days, Qualified: res.Qualified}
+			if res.AsOf != nil {
+				t := res.AsOf.UTC().Format(time.RFC3339)
+				out.AsOf = &t
+			}
+			return out, nil
+		})
 	if err != nil {
 		s.serverError(w, "leaderboard", err)
 		return
 	}
-	if players == nil {
-		players = []models.LeaderboardEntry{}
-	}
 	setEdgeCache(w, s.cfg.CacheTTL)
-	writeJSON(w, http.StatusOK, map[string]any{"players": players})
+	writeJSON(w, http.StatusOK, body)
+}
+
+// hydrateBoardIdentities fills in the Steam name and avatar of board rows
+// that were only ever seen in demos — ensurePlayer stores the demo name and
+// nothing else, so 380 of the 402 career rows in production have no avatar —
+// with ONE GetPlayerSummaries call (Steam takes a hundred ids), writes each
+// identity back so the next read is free, and patches the rows in memory.
+// Best effort: without a key, or when Steam is throttling, the rows are
+// served as they are and the page shows an initial-letter tile.
+func (s *Server) hydrateBoardIdentities(ctx context.Context, rows []models.LeaderboardEntry) {
+	if s.steam == nil || !s.cfg.HasSteamKey() {
+		return
+	}
+	var ids []uint64
+	for _, e := range rows {
+		if e.AvatarURL == "" {
+			ids = append(ids, e.SteamID64)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	summaries, err := s.steam.GetPlayerSummaries(ctx, ids...)
+	if err != nil {
+		s.log.Info("leaderboard: steam hydration skipped", "players", len(ids), "err", err)
+		return
+	}
+	byID := make(map[uint64]models.Player, len(summaries))
+	for _, su := range summaries {
+		p := playerFromSummary(su)
+		if p.SteamID64 == 0 {
+			continue
+		}
+		if err := s.db.UpsertPlayer(ctx, p); err != nil {
+			s.log.Info("leaderboard: upsert hydrated player failed", "steamId", p.SteamID64, "err", err)
+		}
+		byID[p.SteamID64] = p
+	}
+	for i := range rows {
+		p, ok := byID[rows[i].SteamID64]
+		if !ok {
+			continue
+		}
+		if p.AvatarURL != "" {
+			rows[i].AvatarURL = p.AvatarURL
+		}
+		if p.PersonaName != "" {
+			rows[i].PersonaName = p.PersonaName
+		}
+	}
 }
 
 // handleSearch returns known players whose name/vanity matches a query, for
@@ -1267,7 +1356,15 @@ func (s *Server) hydrateFromSteam(ctx context.Context, id uint64) (models.Player
 	if len(summaries) == 0 {
 		return models.PlayerProfile{}, steam.ErrNotFound
 	}
-	su := summaries[0]
+	if err := s.db.UpsertPlayer(ctx, playerFromSummary(summaries[0])); err != nil {
+		return models.PlayerProfile{}, err
+	}
+	return s.db.GetProfile(ctx, id)
+}
+
+// playerFromSummary maps a Steam player summary onto our identity row — the
+// one place that decides which avatar size and which fields we keep.
+func playerFromSummary(su steam.PlayerSummary) models.Player {
 	player := models.Player{
 		SteamID64:   su.SteamID,
 		PersonaName: su.PersonaName,
@@ -1280,10 +1377,7 @@ func (s *Server) hydrateFromSteam(ctx context.Context, id uint64) (models.Player
 		t := su.TimeCreated
 		player.SteamCreatedAt = &t
 	}
-	if err := s.db.UpsertPlayer(ctx, player); err != nil {
-		return models.PlayerProfile{}, err
-	}
-	return s.db.GetProfile(ctx, id)
+	return player
 }
 
 func (s *Server) serverError(w http.ResponseWriter, op string, err error) {

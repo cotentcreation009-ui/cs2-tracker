@@ -136,6 +136,26 @@ func ProFaceitRankingKey(region string) string {
 	return "cs2:pro:faceitrank1:" + strings.ToLower(region)
 }
 
+// FaceitTopKey caches the homepage's FACEIT top-players snapshot per region
+// (faceitrankings.go): one hour fresh, with a ":stale" twin kept a day so a
+// FACEIT outage serves yesterday's board instead of nothing. Separate from
+// ProFaceitRankingKey so the pro board keeps its 30-minute contract.
+func FaceitTopKey(region string) string {
+	return "cs2:faceit:top1:" + strings.ToLower(region)
+}
+
+// FaceitPlayerKey caches a FACEIT player's identity (SteamID64, avatar) by
+// their FACEIT player id — the enrichment that turns a leaderboard row into a
+// CSRun profile link. Identities are held a week; a miss a day.
+func FaceitPlayerKey(playerID string) string { return "cs2:faceit:player1:" + playerID }
+
+// LeaderboardKey caches one shape of the "top analysed players" board. Every
+// parameter is in the key, so the sitemap's floorless inventory and the
+// homepage's floored board never serve each other's rows.
+func LeaderboardKey(limit, minMatches, windowDays int) string {
+	return fmt.Sprintf("cs2:leaderboard:v1:%d:%d:%d", limit, minMatches, windowDays)
+}
+
 // ProSeriesDetailKey caches a full on-demand MatchState for a series that has
 // aged out of the live board (historical results).
 func ProSeriesDetailKey(seriesID string) string { return "cs2:pro:seriesdetail2:" + seriesID }
