@@ -142,6 +142,9 @@ type Server struct {
 	// sf coalesces concurrent upstream fetches for the same key (cache stampede
 	// protection) so a hot profile's TTL expiry triggers one fetch, not N.
 	sf singleflight.Group
+	// kvOverride stands in for cache in tests that need one without Redis
+	// (cachedstale_test.go's mapKV); nil in production. Read through kv().
+	kvOverride jsonKV
 }
 
 // negativeCacheTTL is how long a "no such profile" result is cached so repeated
