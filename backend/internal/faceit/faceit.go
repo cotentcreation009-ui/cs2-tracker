@@ -184,6 +184,10 @@ type playerResp struct {
 	Country   string `json:"country"`
 	Avatar    string `json:"avatar"`
 	FaceitURL string `json:"faceit_url"`
+	// Top-level fallback for games.cs2.game_player_id: FACEIT's player
+	// object has carried a steam_id_64 beside the per-game id on some
+	// collections. Read if present, never required.
+	SteamID64 string `json:"steam_id_64"`
 	Games     struct {
 		CS2 struct {
 			SkillLevel   int    `json:"skill_level"`
@@ -289,6 +293,51 @@ func (c *Client) ResolveNickname(ctx context.Context, nickname string) (uint64, 
 		return 0, ErrNotFound
 	}
 	return sid, nil
+}
+
+// PlayerIdentity is what GET /players/{player_id} says about who a FACEIT
+// player is: enough to link a leaderboard row to a CSRun profile and give it
+// a face. SteamID64 is 0 when FACEIT lists no CS2 account for them, which is
+// not an error — the avatar is still worth having.
+type PlayerIdentity struct {
+	PlayerID  string `json:"playerId"`
+	Nickname  string `json:"nickname"`
+	Country   string `json:"country"`
+	Avatar    string `json:"avatar,omitempty"`
+	SteamID64 uint64 `json:"steamId64,string"`
+}
+
+// PlayerByID fetches a player's identity by FACEIT player id (the id the
+// rankings collection hands out). ErrNoAPIKey without a key; ErrNotFound for
+// an id FACEIT does not know. The SteamID64 comes from games.cs2.game_player_id,
+// else the top-level steam_id_64, else stays 0.
+func (c *Client) PlayerByID(ctx context.Context, playerID string) (*PlayerIdentity, error) {
+	if c.apiKey == "" {
+		return nil, ErrNoAPIKey
+	}
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return nil, ErrNotFound
+	}
+	var pr playerResp
+	if err := c.get(ctx, "/players/"+url.PathEscape(playerID), &pr); err != nil {
+		return nil, err
+	}
+	id := &PlayerIdentity{
+		PlayerID: pr.PlayerID,
+		Nickname: strings.TrimSpace(pr.Nickname),
+		Country:  strings.ToLower(strings.TrimSpace(pr.Country)),
+		Avatar:   strings.TrimSpace(pr.Avatar),
+	}
+	if id.PlayerID == "" {
+		id.PlayerID = playerID
+	}
+	if sid, err := strconv.ParseUint(strings.TrimSpace(pr.Games.CS2.GamePlayerID), 10, 64); err == nil && sid > 0 {
+		id.SteamID64 = sid
+	} else if sid, err := strconv.ParseUint(strings.TrimSpace(pr.SteamID64), 10, 64); err == nil && sid > 0 {
+		id.SteamID64 = sid
+	}
+	return id, nil
 }
 
 // MatchDemoResource returns the demo resource URL for a FACEIT match-room id

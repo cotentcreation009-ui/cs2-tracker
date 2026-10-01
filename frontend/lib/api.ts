@@ -8,6 +8,7 @@
 
 import type {
   FaceitProfile,
+  FaceitRankingsResponse,
   Kill,
   LeaderboardEntry,
   LeetifyProfile,
@@ -17,6 +18,7 @@ import type {
   MatchDetail,
   PlayerMatchSummary,
   PlayerProfile,
+  TopAnalysedResponse,
   WeaponStat,
 } from "./types";
 
@@ -301,6 +303,48 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardEntry[]> {
     `/api/leaderboard?limit=${limit}`,
   );
   return data.players ?? [];
+}
+
+// getTopAnalysed is the homepage's board: the same route with a floor on
+// demos analysed and a recency window, plus the envelope fields the page
+// prints. An older backend that does not echo the fields answers the
+// historical, floorless board — reported as such (min 1, ever) rather than
+// labelled with a floor it did not apply.
+export async function getTopAnalysed(opts: {
+  limit: number;
+  min: number;
+  days: number;
+}): Promise<TopAnalysedResponse> {
+  const data = await getJSON<Partial<TopAnalysedResponse>>(
+    `/api/leaderboard?limit=${opts.limit}&min=${opts.min}&days=${opts.days}`,
+  );
+  const players = data.players ?? [];
+  return {
+    players,
+    minMatches: data.minMatches ?? 1,
+    windowDays: data.windowDays ?? 0,
+    qualified: data.qualified ?? players.length,
+    asOf: data.asOf ?? null,
+  };
+}
+
+// getFaceitRankings is FACEIT's published leaderboard for one region, from
+// the backend's hour-long snapshot (Redis, stale-on-error). Any failure — a
+// 503 while FACEIT is down with nothing stale to serve, an older backend
+// without the route — returns null, and because Next caches only 200s the
+// next regeneration simply asks again. This is the homepage's one source of
+// player rows; it never touches Leetify.
+export async function getFaceitRankings(
+  region: string,
+  limit = 10,
+): Promise<FaceitRankingsResponse | null> {
+  try {
+    return await getJSON<FaceitRankingsResponse>(
+      `/api/faceit/rankings?region=${encodeURIComponent(region)}&limit=${limit}`,
+    );
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveSteamId(query: string): Promise<string> {

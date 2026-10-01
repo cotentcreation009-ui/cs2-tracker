@@ -73,6 +73,21 @@ export function flag(country?: string): string {
   );
 }
 
+/** FACEIT's own skill-level colours (1 grey · 2–4 green · 5–7 yellow · 8–9
+ * orange · 10 red), so a level 10 reads as a level 10. The one table for the
+ * whole site — the pro board's levelHex and the rank row's faceitColor
+ * delegate here, and a server component can import it (a "use client" module
+ * cannot export a function to one). Unknown or zero falls back to the brand
+ * cyan. */
+export function faceitLevelHex(lvl?: number): string {
+  if (!lvl || lvl < 1) return "var(--color-brand)";
+  if (lvl >= 10) return "#e8332e";
+  if (lvl >= 8) return "#ff7a18";
+  if (lvl >= 5) return "#ffc220";
+  if (lvl >= 2) return "#36cf4a";
+  return "#dfe5ec";
+}
+
 /** CS2 Premier rating tier color — the in-game 5k brackets follow the item
  * rarity scale: grey <5k, light blue, blue, purple, pink, red, gold 30k+. */
 export function premierHex(rating: number): string {

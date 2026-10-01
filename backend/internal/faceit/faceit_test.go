@@ -219,3 +219,100 @@ func TestResolveNicknameNoCS2(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// GET /players/{player_id} is how a leaderboard row (a FACEIT id and a nick)
+// becomes a CSRun profile link and a face. The SteamID64 comes from the CS2
+// game entry first, then the top-level steam_id_64; neither is required.
+func TestPlayerByID(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.Path
+		w.Write([]byte(`{"player_id":"e5e8e2a6-1","nickname":"donk666","country":"RU","avatar":"https://cdn.faceit.com/a.png",
+			"games":{"cs2":{"skill_level":10,"faceit_elo":5053,"game_player_id":"76561198294661712"}}}`))
+	}))
+	defer srv.Close()
+	id, err := New(srv.URL, "k").PlayerByID(context.Background(), "e5e8e2a6-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen != "/players/e5e8e2a6-1" {
+		t.Errorf("path = %q, want /players/{id}", seen)
+	}
+	if id.SteamID64 != 76561198294661712 || id.Avatar != "https://cdn.faceit.com/a.png" ||
+		id.Country != "ru" || id.Nickname != "donk666" || id.PlayerID != "e5e8e2a6-1" {
+		t.Errorf("identity = %+v", id)
+	}
+}
+
+func TestPlayerByIDTopLevelSteamIDFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"player_id":"p","nickname":"n","steam_id_64":"76561198000000001","games":{}}`))
+	}))
+	defer srv.Close()
+	id, err := New(srv.URL, "k").PlayerByID(context.Background(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.SteamID64 != 76561198000000001 {
+		t.Errorf("steam64 = %d, want the top-level steam_id_64", id.SteamID64)
+	}
+}
+
+// No CS2 account is not an error: the avatar is still useful, and the row is
+// still a real leaderboard entry.
+func TestPlayerByIDNoSteamIsNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"player_id":"p","nickname":"n","avatar":"https://cdn.faceit.com/b.png","games":{}}`))
+	}))
+	defer srv.Close()
+	id, err := New(srv.URL, "k").PlayerByID(context.Background(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.SteamID64 != 0 || id.Avatar == "" {
+		t.Errorf("identity = %+v, want steam 0 and the avatar", id)
+	}
+}
+
+// Ids are FACEIT UUIDs today, but the path is escaped regardless so a
+// surprising id cannot steer the request.
+func TestPlayerByIDEscapesPath(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.EscapedPath()
+		w.Write([]byte(`{"player_id":"a/b","nickname":"n","games":{}}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "k").PlayerByID(context.Background(), "a/b?x"); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "/players/a%2Fb%3Fx" {
+		t.Errorf("path = %q, want the id escaped as one segment", seen)
+	}
+}
+
+func TestPlayerByIDNotFoundAndNoKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "k").PlayerByID(context.Background(), "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	if _, err := New(srv.URL, "").PlayerByID(context.Background(), "p"); !errors.Is(err, ErrNoAPIKey) {
+		t.Errorf("no key: err = %v, want ErrNoAPIKey", err)
+	}
+}
+
+// RegionCode is the handler's gate: a bad region is refused before any cache
+// or network work, and the value that reaches the URL is always the table's.
+func TestRegionCode(t *testing.T) {
+	for in, want := range map[string]string{"": "EU", "eu": "EU", " na ": "NA", "OCE": "OCE", "sa": "SA", "as": "AS"} {
+		if got, ok := RegionCode(in); !ok || got != want {
+			t.Errorf("RegionCode(%q) = %q, %v; want %q, true", in, got, ok, want)
+		}
+	}
+	if _, ok := RegionCode("XX"); ok {
+		t.Error("RegionCode(XX) accepted an unknown region")
+	}
+}

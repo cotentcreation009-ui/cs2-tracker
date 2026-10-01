@@ -317,6 +317,44 @@ export interface LeaderboardEntry {
   winRate: number;
 }
 
+// /api/leaderboard's envelope: the rows plus the server's own statement of
+// what they are, so the page prints the query's truth rather than copy that
+// could drift from it. asOf is the newest demo ingest among the qualifying
+// players; null when nothing qualified.
+export interface TopAnalysedResponse {
+  players: LeaderboardEntry[];
+  minMatches: number;
+  windowDays: number;
+  qualified: number;
+  asOf: string | null;
+}
+
+// One row of FACEIT's published CS2 leaderboard (/api/faceit/rankings).
+// steamId64 is present when FACEIT lists a CS2 account for the player — the
+// row then links to a CSRun profile instead of out to faceit.com.
+export interface FaceitRankedPlayer {
+  playerId: string;
+  nickname: string;
+  country: string;
+  position: number;
+  elo: number;
+  skillLevel: number;
+  avatar?: string;
+  faceitUrl?: string;
+  steamId64?: string;
+}
+
+export interface FaceitRankingsResponse {
+  enabled: boolean;
+  region: string;
+  players: FaceitRankedPlayer[];
+  // When FACEIT was asked for this snapshot (RFC 3339); absent when disabled.
+  fetchedAt?: string;
+  // True when the backend served its day-long stale copy because FACEIT is
+  // not answering — the strip says so next to the stamp.
+  stale?: boolean;
+}
+
 export interface MapStat {
   map: string;
   matches: number;

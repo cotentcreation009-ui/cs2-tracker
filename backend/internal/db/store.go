@@ -158,30 +158,78 @@ func (d *DB) GetMatchDetail(ctx context.Context, matchID int64) (models.MatchDet
 	return detail, rrows.Err()
 }
 
-// ListTopPlayers returns the highest-rated tracked players for the leaderboard.
-func (d *DB) ListTopPlayers(ctx context.Context, limit int) ([]models.LeaderboardEntry, error) {
+// TopPlayersQuery shapes the "top analysed players" board. MinMatches is the
+// floor on demos analysed (1 = everyone, which is what the sitemap wants for
+// its inventory); WindowDays bounds how recently the player's last demo was
+// ingested (0 = ever). The homepage asks for 5 and 90: 384 of the 402 career
+// rows in production are a single lobby, and a one-match row with a 9.00 K/D
+// over six rounds is not a top player, it is noise.
+type TopPlayersQuery struct {
+	Limit      int
+	MinMatches int
+	WindowDays int
+}
+
+// TopPlayersResult is the page plus what the page cannot say for itself:
+// Qualified is how many players passed the floor and window in total (not
+// just the ones on the page), and AsOf is the newest career recompute among
+// them — the last demo seen — so the UI prints the server's facts rather than
+// hard-coded copy. Both are zero/nil when nothing qualified.
+type TopPlayersResult struct {
+	Rows      []models.LeaderboardEntry
+	Qualified int
+	AsOf      *time.Time
+}
+
+// TopPlayers returns the highest-rated analysed players for the leaderboard.
+// player_careers.updated_at is written by recomputeCareer at demo ingest, so
+// it is exactly "when this player was last seen in a demo". The window
+// functions evaluate before LIMIT, so the count covers every qualifying row.
+func (d *DB) TopPlayers(ctx context.Context, q TopPlayersQuery) (TopPlayersResult, error) {
+	var res TopPlayersResult
+	if q.Limit < 1 {
+		q.Limit = 1
+	}
+	if q.MinMatches < 1 {
+		q.MinMatches = 1
+	}
+	if q.WindowDays < 0 {
+		q.WindowDays = 0
+	}
 	rows, err := d.Pool.Query(ctx, `
-		SELECT p.steam_id64, p.persona_name, p.avatar_url, pc.matches, pc.rating, pc.kd, pc.adr, pc.win_rate
+		SELECT p.steam_id64, p.persona_name, p.avatar_url, pc.matches, pc.rating, pc.kd, pc.adr, pc.win_rate,
+			count(*) OVER () AS qualified,
+			max(pc.updated_at) OVER () AS as_of
 		FROM player_careers pc
 		JOIN players p ON p.steam_id64 = pc.steam_id64
-		WHERE pc.matches >= 1
+		WHERE pc.matches >= $2
+		  AND ($3::int = 0 OR pc.updated_at >= now() - make_interval(days => $3::int))
 		ORDER BY pc.rating DESC, pc.matches DESC, p.steam_id64 ASC
-		LIMIT $1`, limit)
+		LIMIT $1`, q.Limit, q.MinMatches, q.WindowDays)
 	if err != nil {
-		return nil, err
+		return res, err
 	}
 	defer rows.Close()
 
-	var out []models.LeaderboardEntry
+	var asOf time.Time
 	for rows.Next() {
 		var e models.LeaderboardEntry
+		var qualified int64
 		if err := rows.Scan(&e.SteamID64, &e.PersonaName, &e.AvatarURL, &e.Matches,
-			&e.Rating, &e.KD, &e.ADR, &e.WinRate); err != nil {
-			return nil, err
+			&e.Rating, &e.KD, &e.ADR, &e.WinRate, &qualified, &asOf); err != nil {
+			return res, err
 		}
-		out = append(out, e)
+		res.Qualified = int(qualified)
+		res.Rows = append(res.Rows, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return res, err
+	}
+	if len(res.Rows) > 0 {
+		t := asOf.UTC()
+		res.AsOf = &t
+	}
+	return res, nil
 }
 
 // SearchPlayers finds known players whose persona name or vanity contains the
