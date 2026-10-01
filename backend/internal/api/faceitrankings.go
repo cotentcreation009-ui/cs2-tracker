@@ -28,8 +28,20 @@ import (
 // the last good board with stale=true and its real fetchedAt; only a gap with
 // nothing to serve answers 503, and it answers no-store so neither Next nor
 // Cloudflare can pin the absence. A ranking with zero legible rows is an
-// error inside the fetch, never a fresh "empty" copy that would hide the
-// board for an hour over one blip.
+// error inside the fetch, never a fresh hour-long "empty" copy: a board that
+// once existed is served stale over a blip to empty. A region with no board
+// at all (AS, at the time of writing) is instead remembered as empty for ten
+// minutes under the fresh key alone and served as the empty list the strip
+// hides a pill for — six rankings calls an hour rather than one per homepage
+// regeneration, and an Info line per miss rather than a Warn that reads like
+// an outage.
+//
+// The route sits behind a 30 s timeout. The FACEIT client retries a transient
+// failure three times on a 10 s timeout each, so a FACEIT that hangs rather
+// than fails would run past that deadline with the stale twin still unread;
+// the snapshot fetch is therefore budgeted (faceitTopRankingsBudget,
+// faceitTopEnrichBudget) so a hang ends in the stale copy, or the 503, with
+// time to spare.
 
 const (
 	// One FACEIT page per region: the pro board shows twenty, the homepage
@@ -37,9 +49,15 @@ const (
 	faceitTopRows     = 20
 	faceitTopMaxLimit = 20
 	// The leaderboard shifts continuously but nobody needs it to the minute;
-	// an hour keeps five regions at five rankings calls an hour, total.
+	// an hour keeps a region with a board at one rankings call an hour.
 	faceitTopFreshTTL = time.Hour
 	faceitTopStaleTTL = 24 * time.Hour
+	// A region FACEIT answers with no rows is remembered as empty this long,
+	// the way a 404 identity is remembered below: long enough that an empty
+	// region costs six calls an hour, short enough that one filling in shows
+	// within minutes. Never the fresh hour — a blip to empty must not hide a
+	// board for long — and never written to the stale twin.
+	faceitTopEmptyTTL = 10 * time.Minute
 	// A FACEIT id's Steam identity does not change; a week is a compromise
 	// between re-asking and a renamed avatar lagging.
 	faceitPlayerTTL     = 7 * 24 * time.Hour
@@ -47,6 +65,17 @@ const (
 	// How many identity lookups run at once. The FACEIT client paces itself
 	// (4 in flight, 90 ms apart), so this only bounds our own goroutines.
 	faceitEnrichWorkers = 4
+)
+
+// The two halves of the snapshot fetch, each bounded so the whole of it ends
+// well inside the route's 30 s with the stale twin still readable afterwards:
+// left to the client, a hang is three attempts on a 10 s timeout plus backoff,
+// which is longer than the route has. Each budget covers the client's pacing
+// wait as well as the request. Variables so a test can shorten them — proving
+// that a hang ends in the stale copy must not take eight seconds a run.
+var (
+	faceitTopRankingsBudget = 8 * time.Second
+	faceitTopEnrichBudget   = 12 * time.Second
 )
 
 var errEmptyRanking = errors.New("faceit rankings: no legible rows")
@@ -83,21 +112,40 @@ func (s *Server) handleFaceitRankings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	snap, stale, err := cachedStale(s.kv(), &s.sf, ctx, cache.FaceitTopKey(region),
+	key := cache.FaceitTopKey(region)
+	snap, stale, err := cachedStale(s.kv(), &s.sf, ctx, key,
 		faceitTopFreshTTL, faceitTopStaleTTL, s.log,
 		func() (faceitTopSnapshot, error) {
 			asked := time.Now().UTC()
-			rows, err := s.faceit.Rankings(ctx, region, faceitTopRows)
+			rctx, cancelRankings := context.WithTimeout(ctx, faceitTopRankingsBudget)
+			defer cancelRankings()
+			rows, err := s.faceit.Rankings(rctx, region, faceitTopRows)
 			if err != nil {
 				return faceitTopSnapshot{}, err
 			}
 			if len(rows) == 0 {
 				return faceitTopSnapshot{}, errEmptyRanking
 			}
-			s.enrichRanked(ctx, rows)
+			ectx, cancelEnrich := context.WithTimeout(ctx, faceitTopEnrichBudget)
+			defer cancelEnrich()
+			s.enrichRanked(ectx, rows)
 			return faceitTopSnapshot{Region: region, Rows: rows, FetchedAt: asked}, nil
 		})
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, errEmptyRanking):
+		// FACEIT answered and nobody is ranked there, and cachedStale found
+		// no earlier board to serve instead. That is an answer, not an
+		// outage: remember it briefly under the fresh key — the stale twin,
+		// should a real board ever be written, stays that board — and serve
+		// the empty list the strip hides a pill for. Info, once per miss: a
+		// quiet region is not a broken one.
+		snap = faceitTopSnapshot{Region: region, Rows: []faceit.RankedPlayer{}, FetchedAt: time.Now().UTC()}
+		if kv := s.kv(); kv != nil {
+			_ = kv.SetJSONTTL(ctx, key, snap, faceitTopEmptyTTL)
+		}
+		s.log.Info("faceit rankings: empty region", "region", region, "rememberedFor", faceitTopEmptyTTL)
+	default:
 		s.log.Warn("faceit rankings: unavailable", "region", region, "err", err)
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Retry-After", "300")
@@ -113,8 +161,9 @@ func (s *Server) handleFaceitRankings(w http.ResponseWriter, r *http.Request) {
 		rows = []faceit.RankedPlayer{}
 	}
 	// A stale answer is still an answer, but a short edge life so a recovered
-	// FACEIT shows through within the minute rather than five.
-	if stale {
+	// FACEIT shows through within the minute rather than five; the same for
+	// an empty region, so one that fills in is not hidden five minutes longer.
+	if stale || len(rows) == 0 {
 		setEdgeCache(w, time.Minute)
 	} else {
 		setEdgeCache(w, 5*time.Minute)
