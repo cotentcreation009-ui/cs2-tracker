@@ -21,13 +21,39 @@ does the same to it, which is why inventory prices moved to the Steam market —
 `backend/internal/steaminv/steaminv.go`.)
 
 So the fallback can be asked **through a relay on a network Leetify answers**.
-The relay is a keyed forwarder for exactly four routes — a player's pool list,
-one pool's recent-games summary, their display name, and their last 30 games
-(`match-history`). It solves no
-challenge, fakes no header, and hands Leetify's answer back status and all: if
-the relay's network is ever walled too, the backend sees the 511 and pauses
-the fallback exactly as it does today. Leetify's refusals for a player
-(403 on a hidden pool) pass through untouched.
+The relay is a keyed forwarder for exactly the routes the backend calls. It
+solves no challenge, fakes no header, and hands Leetify's answer back status
+and all: if the relay's network is ever walled too, the backend sees the 511
+and pauses the fallback exactly as it does today. Leetify's refusals for a
+player (403 on a hidden pool) pass through untouched.
+
+Since 2026-10-01 the **public API goes through it too** — `api-public` refuses
+the box's address outright (see "Public API 429" below), and the key that sets
+the rate tier is address-independent. The Worker picks the upstream by path:
+
+| Path | Upstream | What it is | Key forwarded |
+|---|---|---|---|
+| `/api/profile/{id}/recent-games/available-data-sources` | `api.cs-prod.leetify.com` | the player's pool list | no |
+| `/api/profile/{id}/recent-games/{pool}` | `api.cs-prod.leetify.com` | one pool's 30-game summary | no |
+| `/api/profile/{id}/meta` | `api.cs-prod.leetify.com` | display name | no |
+| `/api/profile/{id}/match-history` | `api.cs-prod.leetify.com` | the last 30 games | no |
+| `/v3/profile?steam64_id=` | `api-public.cs-prod.leetify.com` | a member's profile (`GetProfile`) | `_leetify_key` as sent |
+| `/v3/profile/matches?steam64_id=` | `api-public.cs-prod.leetify.com` | their match list (`MatchReference`, one-click analysis) | `_leetify_key` as sent |
+| `/v2/matches/{id}` | `api-public.cs-prod.leetify.com` | a match report by Leetify id (`MatchByID`) | `_leetify_key` as sent |
+| `/v2/matches/matchmaking/{share code}` | `api-public.cs-prod.leetify.com` | a match report by share code (the bridge) | `_leetify_key` as sent |
+
+Anything else is a `404` at the Worker, before it becomes a request to
+Leetify. For the public routes the only query forwarded is a 17-digit
+`steam64_id` (a `/v3/profile*` request without one is a `400`). Every
+forwarded answer carries `X-Relay-Upstream: app|public` plus the upstream's
+`Content-Type` and `Retry-After`, so the backend can tell Leetify's answers
+from the Worker's own (`401` key, `404` route, `502`) and from Cloudflare's.
+A `429` from the public host is passed back untouched, never retried.
+
+(`backend/cmd/leetifyrelay`, the Go forwarder for option A below, still
+forwards the four app routes only. Pointed at it, the backend's public calls
+get its `404` and fall back to the direct host — exactly what an un-updated
+Worker produces.)
 
 ## Two ways to run it
 
@@ -66,7 +92,18 @@ measured separately, so test it before relying on it.
 
 Workers & Pages → Create → Hello World → Edit code → paste the file → Deploy →
 Settings → Variables and Secrets → secret `RELAY_KEY` → Deploy. The URL is
-`https://<name>.<account>.workers.dev`. Verify exactly as in A.5.
+`https://<name>.<account>.workers.dev`. Verify exactly as in A.5, and for the
+public routes:
+```
+curl -s -H "X-Relay-Key: <key>" "https://<name>.<account>.workers.dev/v3/profile?steam64_id=76561198200413817"
+```
+must print the profile JSON (add `-H "_leetify_key: <key>"` to test the keyed
+tier). A `429 {"error":"Calm down son"}` here means the Worker's egress is
+limited too and the relay buys nothing for the public routes.
+
+To update a Worker that already exists (a new paste of this file): Edit code →
+replace everything → Deploy. The secret stays. The route test beside the file
+runs with `node --test deploy/leetify-relay.worker.test.mjs`.
 
 ## Point the main box at it
 
@@ -85,10 +122,14 @@ Check:
 ```
 docker compose -f docker-compose.prod.yml -f docker-compose.posters.yml logs --since 2m backend | grep "leetify app fallback"
 ```
-must show `"relay":true`. Then open `csrun.win/profiles/76561197965792900`: the
-Leetify panel appears with the "recent games only" pill. The Steam-page card
-of the browser extension reads the same backend, so it fills in too. Cached
-misses expire within 5 minutes.
+must show `"relay":true` and `"public_relay":true`. Then open
+`csrun.win/profiles/76561197965792900`: the Leetify panel appears with the
+"recent games only" pill. The Steam-page card of the browser extension reads
+the same backend, so it fills in too. Cached misses expire within 5 minutes.
+
+The public routes need nothing more: `LEETIFY_PUBLIC_RELAY_URL` and
+`LEETIFY_PUBLIC_RELAY_KEY` each default to the app relay's value, so one
+Worker with one key serves both. Set them only for a separate relay.
 
 ## Switches
 
@@ -96,6 +137,15 @@ misses expire within 5 minutes.
 - `LEETIFY_APP_FALLBACK=0`: no app routes at all, relay or not.
 - A relay that is down, or refuses the key, is a plain miss on the profile page
   — never an error — and is logged on the backend as `leetify app fallback failed`.
+- `LEETIFY_PUBLIC_RELAY=0`: the public routes (v3/v2) go to `api-public` directly
+  again, the app relay untouched. `LEETIFY_PUBLIC_RELAY_URL` / `_KEY`: a separate
+  relay for the public routes; empty = the app relay's.
+- For the public routes a relay that cannot answer for Leetify (unreachable, a
+  5xx from Cloudflare, the key refused, or an older Worker paste without the
+  routes → `404`) is skipped **for that call**: the direct host is asked instead,
+  and the backend logs `leetify public relay could not answer for Leetify` once
+  per half hour with the count of the failures it did not log. An un-updated
+  Worker therefore leaves things exactly where they were — no better, no worse.
 
 ## When the wall hits the relay (2026-09-28)
 
@@ -169,28 +219,51 @@ length of Leetify's block. Kill switch: `LEETIFY_PUBLIC_BREAKER=0` in the VM `.e
 `up -d backend` (no rebuild) restores the pre-pause behaviour — except that a 429 is still
 not retried, which is deliberate.
 
-### Follow-up: the public routes through the relay (not built)
+### The pause bought time; the block did not lift (2026-10-01)
 
-The key is address-independent, so the direct fix for the block itself is to send the
-keyed public calls through the Worker while the pause lasts. Design, for when it is
-worth a Worker paste:
+From 2026-10-01 07:01 UTC every probe after every pause was refused again: the breaker
+sat at its thirty-minute cap and logged **26 pauses in a row**, one probe per half hour,
+every one answered `429 {"error":"Calm down son"}` (`server: LRL`) — while the same
+request, with the same key, answered `200` from a home connection at the same minute.
+One request per thirty minutes is not a rate anyone limits: the box's address is
+burned, not the key and not the volume.
 
-- **Worker** (`deploy/leetify-relay.worker.js`, mirrored in `cmd/leetifyrelay`): two
-  upstreams (`APP = api.cs-prod.leetify.com`, `PUBLIC = api-public.cs-prod.leetify.com`);
-  keep the app allowlist; add a public one for `/v3/profile`, `/v3/profile/matches`,
-  `/v2/matches/{id}` and `/v2/matches/matchmaking/{share code}`; for public routes
-  forward ONLY a validated `steam64_id` query (today the query string is dropped, which
-  would make `/v3/profile` useless) and the `_leetify_key` header (never for app
-  routes); no retry on a 429 — pass it back untouched with any `Retry-After`.
-- **Backend**: `LEETIFY_PUBLIC_RELAY=1` + `WithPublicRelay`; a `publicReq` helper that
-  builds `baseURL+path` while not paused and `appRelayURL+path` with `X-Relay-Key` while
-  paused (direct first, relay only during the outage, one direct probe when the pause
-  lapses); a 429 through the relay too stays `ErrUnavailable`.
-- **Proof before the flag**: paste the Worker, then from the VPS
-  `curl -H "X-Relay-Key: …" -H "_leetify_key: …" "https://leetify-relay.…workers.dev/v3/profile?steam64_id=76561198200413817"`.
-  A 200 settles that Cloudflare's egress is answered for the keyed public route; a 429
-  means the egress is limited too and the relay buys nothing.
-- Budget: ~10k relayed requests a day at today's volume, 10% of the Worker free tier.
+### The public routes through the relay (built 2026-10-01)
+
+The key is address-independent, so the keyed public calls now take the road the app
+routes already take — the Worker above, with the public routes pasted in.
+
+- **Relay first, direct as the fallback** (`backend/internal/leetify/publicrelay.go`,
+  `WithPublicRelay`). Not "direct first, relay while paused": the direct address is
+  refused on every probe, so trying it first spends a request to learn what is already
+  known and a pause to forget it. Every `GetProfile`, `MatchReference`, `MatchByID` and
+  `MatchByShareCode` goes to the relay with `X-Relay-Key` and the `_leetify_key` header
+  for the Worker to forward.
+- **A 429 through the relay is the same rate limit.** The Worker passes status,
+  `Retry-After` and body through untouched; the backend's pause trips on it with the
+  same five-minute start, the same doubling after a lapse, the same thirty-minute cap and
+  the same `ErrUnavailable` — and while paused nothing is asked of anyone, relay or not.
+  A profile that is `404` through the relay still goes to the app fallback as before.
+- **A relay that cannot answer for Leetify is skipped for that call.** The Worker stamps
+  `X-Relay-Upstream` on everything it forwarded; a non-2xx without the stamp — an old
+  paste's `404 not a relayed route`, Cloudflare's 5xx, `401` on the key, a `429` from the
+  Worker's own free-tier limit — means the relay spoke for itself, and the direct host is
+  asked instead. That path is what the box had before this change, so an un-updated
+  Worker never makes anything worse. Logged once per half hour:
+  `leetify public relay could not answer for Leetify`, with `reason`, `status` and
+  `unlogged_before_this`.
+- **Env**: `LEETIFY_PUBLIC_RELAY_URL` / `LEETIFY_PUBLIC_RELAY_KEY`, each defaulting to
+  the app relay's, so the live box needs no new variables; `LEETIFY_PUBLIC_RELAY=0` is
+  the way back. All three pass through `docker-compose.prod.yml`; the start-up line
+  `leetify app fallback` carries `public_relay` and `public_relay_url`.
+- **Proof**: after the paste, from anywhere,
+  `curl -s -H "X-Relay-Key: <key>" "https://<worker>/v3/profile?steam64_id=76561198200413817"`
+  → `200` and the profile JSON. Then on the box, after the deploy, the pause lines stop
+  and `leetify public API answers this address again` is NOT expected — the direct
+  address is simply no longer asked. A `429` from the curl means Cloudflare's egress is
+  limited too and the relay buys nothing for the public routes.
+- Budget: ~10k relayed public requests a day at today's volume, 10% of the Worker free
+  tier, on top of the app routes.
 - Say it out loud: routing around a per-address block is a change of source address, not
   a challenge bypass, but Leetify could read it as evasion. Their Discord
   (https://discord.gg/UNygC8BAVg) is the only documented channel; a note naming
