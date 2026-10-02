@@ -36,7 +36,8 @@ the rate tier is address-independent. The Worker picks the upstream by path:
 | `/api/profile/{id}/recent-games/available-data-sources` | `api.cs-prod.leetify.com` | the player's pool list | no |
 | `/api/profile/{id}/recent-games/{pool}` | `api.cs-prod.leetify.com` | one pool's 30-game summary | no |
 | `/api/profile/{id}/meta` | `api.cs-prod.leetify.com` | display name | no |
-| `/api/profile/{id}/match-history` | `api.cs-prod.leetify.com` | the last 30 games | no |
+| `/api/profile/{id}/match-history` | `api.cs-prod.leetify.com` | the last 30 games (a non-member's list; a member's kills/deaths) | no |
+| `/api/games/{gameId}` | `api.cs-prod.leetify.com` | one game's full scoreboard (the expanded match row, one-click analysis) | no |
 | `/v3/profile?steam64_id=` | `api-public.cs-prod.leetify.com` | a member's profile (`GetProfile`) | `_leetify_key` as sent |
 | `/v3/profile/matches?steam64_id=` | `api-public.cs-prod.leetify.com` | their match list (`MatchReference`, one-click analysis) | `_leetify_key` as sent |
 | `/v2/matches/{id}` | `api-public.cs-prod.leetify.com` | a match report by Leetify id (`MatchByID`) | `_leetify_key` as sent |
@@ -51,7 +52,7 @@ from the Worker's own (`401` key, `404` route, `502`) and from Cloudflare's.
 A `429` from the public host is passed back untouched, never retried.
 
 (`backend/cmd/leetifyrelay`, the Go forwarder for option A below, still
-forwards the four app routes only. Pointed at it, the backend's public calls
+forwards the five app routes only. Pointed at it, the backend's public calls
 get its `404` and fall back to the direct host — exactly what an un-updated
 Worker produces.)
 

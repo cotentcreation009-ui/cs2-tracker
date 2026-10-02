@@ -102,6 +102,12 @@ type Client struct {
 	// logged; publicRelayFailures counts the ones since, for the next line.
 	publicRelayLoggedAt atomic.Int64
 	publicRelayFailures atomic.Int64
+
+	// memberKDLoggedAt (unix nanos) is when a failed K/D completion of a
+	// member's match list was last logged; memberKDFailures counts the ones
+	// since, for the next line (appkd.go).
+	memberKDLoggedAt atomic.Int64
+	memberKDFailures atomic.Int64
 }
 
 // Option customises a Client.
@@ -203,8 +209,10 @@ type Stats struct {
 
 // RecentMatch is one row of Leetify's recent-match list (most recent first).
 // The per-match aim/mechanics fields back the expandable "inspect" row.
-// Kills/Deaths/Elo come from the LEGACY endpoint (v3 doesn't expose them) and
-// are merged in by game id — 0/absent when the legacy fetch had no data.
+// Kills/Deaths come from the app's /match-history (v3 doesn't expose them):
+// a non-member's rows ARE that list (appprofile.go); a member's v3 rows take
+// them from it by pairing (appkd.go) — 0/absent past its 30 games, or when
+// the pairing could not be made. Elo was the legacy endpoint's and is 0 now.
 type RecentMatch struct {
 	ID            string  `json:"id"`
 	FinishedAt    string  `json:"finished_at"`
@@ -523,6 +531,10 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
 			return nil, fmt.Errorf("leetify: decode: %w", err)
 		}
+		// v3 carries no kills or deaths; the app's match list does, for the
+		// newest 30 (appkd.go). Before the platform lists are cut, so they
+		// carry the numbers too.
+		c.fillMemberKD(ctx, steam64, p.RecentMatches)
 		// Platform lists before capping recent_matches, so v3 surfaces all it has.
 		p.FaceitMatches = faceitOnly(p.RecentMatches)
 		p.PremierMatches = premierOnly(p.RecentMatches)
@@ -642,28 +654,30 @@ type ScoreRow struct {
 	FaceitElo      int    `json:"faceit_elo,omitempty"`
 }
 
+// getGameJSON fetches /api/games/{id} — the app host's per-game payload, the
+// one route that carries a game's full scoreboard — the way the app's profile
+// routes are fetched (getAppJSON): through the keyed relay when one is
+// configured, directly otherwise. The host's bot wall has refused this
+// network's own address for the route since mid-September 2026, which is
+// what emptied every expanded row for a member; the relay is a change of
+// return address, not a bypass, and a 511 arriving through it pauses the app
+// routes here all the same. While they are paused, or when the wall answers,
+// the result is ErrUnavailable: a miss the caller keeps for seconds, not the
+// half hour a real miss earns.
+func (c *Client) getGameJSON(ctx context.Context, gameID string, out any) error {
+	if c.appBlocked() {
+		return ErrUnavailable
+	}
+	err := c.getAppJSON(ctx, "/api/games/"+url.PathEscape(gameID), out)
+	if errors.Is(err, errAppBlocked) {
+		return ErrUnavailable
+	}
+	return err
+}
+
 // GetGameStats fetches one game's scoreboard and returns the row for steam64.
 // Found=false (no error) when the game exists but that player isn't on it.
 func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64) (*GameStats, error) {
-	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
-	req, err := c.newReq(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return nil, fmt.Errorf("leetify game stats: request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound:
-		return nil, ErrNotFound
-	default:
-		return nil, fmt.Errorf("leetify game stats: unexpected status %d", resp.StatusCode)
-	}
-
 	var payload struct {
 		Parties []struct {
 			Party     int    `json:"party"`
@@ -713,8 +727,8 @@ func (c *Client) GetGameStats(ctx context.Context, gameID string, steam64 uint64
 			TRoundsWon  int `json:"tRoundsWon"`
 		} `json:"playerStats"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("leetify game stats: decode: %w", err)
+	if err := c.getGameJSON(ctx, gameID, &payload); err != nil {
+		return nil, err
 	}
 	sid := strconv.FormatUint(steam64, 10)
 
@@ -843,33 +857,15 @@ type GameDetails struct {
 	FaceitMatchID  string `json:"faceitMatchId"`
 }
 
-// GetGameDetails fetches a single match's details from the legacy endpoint by
-// Leetify game id (the id our recent-match rows carry).
+// GetGameDetails fetches a single match's details from the app host's
+// per-game route by Leetify game id (the id our recent-match rows carry),
+// through the relay when one is configured (getGameJSON).
 func (c *Client) GetGameDetails(ctx context.Context, gameID string) (*GameDetails, error) {
-	u := c.legacyURL + "/api/games/" + url.PathEscape(gameID)
-	req, err := c.newReq(ctx, u)
-	if err != nil {
+	var gd GameDetails
+	if err := c.getGameJSON(ctx, gameID, &gd); err != nil {
 		return nil, err
 	}
-
-	resp, err := c.doWithRetry(req)
-	if err != nil {
-		return nil, fmt.Errorf("leetify games: request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var gd GameDetails
-		if err := json.NewDecoder(resp.Body).Decode(&gd); err != nil {
-			return nil, fmt.Errorf("leetify games: decode: %w", err)
-		}
-		return &gd, nil
-	case http.StatusNotFound:
-		return nil, ErrNotFound
-	default:
-		return nil, fmt.Errorf("leetify games: unexpected status %d", resp.StatusCode)
-	}
+	return &gd, nil
 }
 
 // MatchReference is what the v3 match list knows about one game: where it was

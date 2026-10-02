@@ -21,6 +21,8 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 			_, _ = w.Write([]byte(`{"aimRating":72.2}`))
 		case "/api/profile/76561197965792900/match-history":
 			_, _ = w.Write([]byte(`{"games":[]}`))
+		case "/api/games/dc6e67a8-51fc-425e-9938-5bf71e47b254":
+			_, _ = w.Write([]byte(`{"playerStats":[]}`))
 		case "/api/profile/76561197965792900/meta":
 			// The wall, as it answers a refused network: passed through as is.
 			w.WriteHeader(http.StatusNetworkAuthenticationRequired)
@@ -66,12 +68,17 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 	if code, _ := get("/api/profile/76561197965792900/recent-games/5v5", "s3cret", http.MethodPost); code != http.StatusMethodNotAllowed {
 		t.Errorf("POST = %d, want 405", code)
 	}
+	if code, body := get("/api/games/dc6e67a8-51fc-425e-9938-5bf71e47b254", "s3cret", http.MethodGet); code != 200 || body != `{"playerStats":[]}` {
+		t.Errorf("game = %d %q", code, body)
+	}
 	for _, p := range []string{
-		"/api/games/9a469ffd",                          // not a profile route
-		"/api/profile/42/meta",                         // not a SteamID64
-		"/api/profile/76561197965792900/recent-games",  // no pool
-		"/api/profile/76561197965792900/recent-games/", // empty pool
-		"/api/profile/76561197965792900/settings",      // not ours to ask
+		"/api/games/", // no game id
+		"/api/games/dc6e67a8-51fc-425e-9938-5bf71e47b254/extra", // not a game
+		"/api/games/dc6e67a8.51fc",                              // not an id
+		"/api/profile/42/meta",                                  // not a SteamID64
+		"/api/profile/76561197965792900/recent-games",           // no pool
+		"/api/profile/76561197965792900/recent-games/",          // empty pool
+		"/api/profile/76561197965792900/settings",               // not ours to ask
 		"/v3/profile", // the public API is not relayed
 	} {
 		if code, _ := get(p, "s3cret", http.MethodGet); code != http.StatusNotFound {
@@ -81,8 +88,8 @@ func TestRelayForwardsOnlyTheAllowedRoutesWithTheKey(t *testing.T) {
 	if code, body := get("/healthz", "", http.MethodGet); code != 200 || body != "ok" {
 		t.Errorf("healthz = %d %q", code, body)
 	}
-	// Only the three allowed requests ever reached Leetify.
-	if len(seen) != 3 {
-		t.Errorf("upstream saw %v, want exactly the three allowed routes", seen)
+	// Only the four allowed requests ever reached Leetify.
+	if len(seen) != 4 {
+		t.Errorf("upstream saw %v, want exactly the four allowed routes", seen)
 	}
 }
