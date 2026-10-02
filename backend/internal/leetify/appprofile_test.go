@@ -135,8 +135,10 @@ func TestGetProfile_FallsBackToAppAPIAndSkipsRefusedPool(t *testing.T) {
 	}
 	// The match list, in v3's vocabulary: competitive folds into "matchmaking"
 	// with rank_type 12; FACEIT keeps its level as rank; the Premier chain
-	// yields the rating movement between the two Premier games; no ids, no
-	// dates.
+	// yields the rating movement between the two Premier games. This fixture
+	// is the 2026-09-25 shape — no ids, gameFinishedAt a list position — so
+	// the rows carry neither (the id-and-timestamp shape is covered in
+	// appkd_test.go).
 	if len(p.RecentMatches) != 4 {
 		t.Fatalf("recent_matches = %d rows, want 4", len(p.RecentMatches))
 	}
@@ -147,7 +149,7 @@ func TestGetProfile_FallsBackToAppAPIAndSkipsRefusedPool(t *testing.T) {
 		t.Errorf("premier row = %+v", m0)
 	}
 	if m0.ID != "" || m0.FinishedAt != "" {
-		t.Errorf("the app history has no ids or dates; got id %q finished_at %q", m0.ID, m0.FinishedAt)
+		t.Errorf("a history without ids, with position dates, must leave both empty; got id %q finished_at %q", m0.ID, m0.FinishedAt)
 	}
 	if m1.DataSource != "matchmaking" || m1.RankType != 12 || m1.Rank != 11 {
 		t.Errorf("competitive row must fold into matchmaking/rank_type 12, got %+v", m1)

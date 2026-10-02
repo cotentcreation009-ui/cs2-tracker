@@ -66,10 +66,11 @@ import (
 // mapping for those is how a stats page starts lying; the frontend renders
 // what is absent as absent. The match list DOES come along, from
 // /match-history (appMatchHistory below): the last 30 games with map, score,
-// K/D, the game's rating, the pool and the ladder standing — but no game ids
-// and no dates, so those rows carry no "when", no per-game deep stats and no
-// demo button. The rank block is read off that list: the newest Premier
-// game's rating and the newest FACEIT game's level, nothing more.
+// K/D, the game's rating, the pool and the ladder standing — and, since a
+// check on 2026-10-01, Leetify's game id and the finish time too (the list
+// carried neither when this was built), so those rows have a "when" and an
+// expandable scoreboard. The rank block is read off that list: the newest
+// Premier game's rating and the newest FACEIT game's level, nothing more.
 
 // appHost is the app's own API — the host leetify.com calls from the browser.
 // It is the same host as legacyURL, so tests point both at one server.
@@ -123,14 +124,21 @@ type appDataSources struct {
 
 // appMatchHistory is /api/profile/{id}/match-history: the player's last 30
 // games across every pool — the one list the app exposes for a non-member
-// (no paging; every query parameter is ignored). No game ids, no dates
-// (gameFinishedAt is a position, "29" down to "0", newest first) and no
-// per-game aim detail: map, score, K/D, the game's Leetify rating, the pool
-// and the ladder standing after it. Enough for the match list, the form
-// strip, the map chart, the rank-movement chain and the FACEIT-vs-MM gap.
+// (no paging; every query parameter is ignored), newest first. Map, score,
+// K/D, the game's Leetify rating, the pool and the ladder standing after
+// it; no per-game aim detail. Since 2026-10-01 each game also carries
+// Leetify's own game id (the same id v3 lists the game under) and its
+// finish time as an RFC 3339 stamp — when the list was first read
+// (2026-09-25) it carried no id and gameFinishedAt was a POSITION, "29"
+// down to "0", which is why both are taken only when they look like what
+// they claim to be. Enough for the match list, the form strip, the map
+// chart, the rank-movement chain, the FACEIT-vs-MM gap, and (with the id)
+// the expanded row's scoreboard.
 type appMatchHistory struct {
 	Games []struct {
-		DataSource    string  `json:"dataSource"` // matchmaking | matchmaking_competitive | matchmaking_wingman | faceit
+		GameID        string  `json:"gameId"`         // Leetify's game id, a UUID; absent before 2026-10
+		FinishedAt    string  `json:"gameFinishedAt"` // RFC 3339 since 2026-10; a list position before
+		DataSource    string  `json:"dataSource"`     // matchmaking | matchmaking_competitive | matchmaking_wingman | faceit
 		Kills         int     `json:"kills"`
 		Deaths        int     `json:"deaths"`
 		LeetifyRating float64 `json:"leetifyRating"`       // raw fraction, like v3's per-game leetify_rating
@@ -145,11 +153,14 @@ type appMatchHistory struct {
 // recentMatches maps the app's history onto v3's vocabulary, so everything
 // that reads recent_matches works unchanged. v3 says "matchmaking" for both
 // Valve queues and tells them apart by rank_type, so the app's
-// matchmaking_competitive folds into that; the rest already agree.
+// matchmaking_competitive folds into that; the rest already agree. The id
+// rides along as is; the finish time only when it is a real timestamp (the
+// older position form is dropped, not shown as a date).
 func (h *appMatchHistory) recentMatches() []RecentMatch {
 	out := make([]RecentMatch, 0, len(h.Games))
 	for _, g := range h.Games {
 		m := RecentMatch{
+			ID:            g.GameID,
 			DataSource:    g.DataSource,
 			Outcome:       g.MatchResult,
 			MapName:       g.MapName,
@@ -162,6 +173,9 @@ func (h *appMatchHistory) recentMatches() []RecentMatch {
 		}
 		if g.DataSource == "matchmaking_competitive" {
 			m.DataSource = "matchmaking"
+		}
+		if _, err := time.Parse(time.RFC3339, g.FinishedAt); err == nil {
+			m.FinishedAt = g.FinishedAt
 		}
 		out = append(out, m)
 	}

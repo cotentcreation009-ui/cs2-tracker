@@ -15,12 +15,15 @@ package leetify
 // So a member's list is now completed from the same /match-history: one
 // request through the relay, the player's last 30 games newest-first across
 // every pool — map, score, outcome, pool, the game's Leetify rating, kills,
-// deaths — and NO game id and NO date. There is nothing to join on, so the
-// two lists are walked together, both newest-first, and a v3 row takes an
-// app row's kills only when the two describe the same game on every field
-// they share (sameGame) and nothing nearby could be mistaken for either. A
-// doubt stops the walk rather than guessing: a wrong K/D on a row is worse
-// than a dash, because a dash says "not known" and a number says "known".
+// deaths, and (since 2026-10-01; checked live through the relay) Leetify's
+// game id, the same id v3 lists the game under. Where both sides carry an
+// id the join is exact. Where one side lacks it — the list carried no id
+// at all when it was first read on 2026-09-25, and may not again — the two
+// lists are walked together, both newest-first, and a v3 row takes an app
+// row's kills only when the two describe the same game on every field they
+// share (sameGame) and nothing nearby could be mistaken for either. A doubt
+// stops the walk rather than guessing: a wrong K/D on a row is worse than a
+// dash, because a dash says "not known" and a number says "known".
 //
 // The limit is the list's: 30 games. Rows past the thirtieth keep no K/D
 // and the page shows "—" for them, as it did for every row before.
@@ -56,14 +59,19 @@ const memberKDTimeout = 5 * time.Second
 // and reported with the next line.
 const memberKDLogEvery = appBlockMax
 
-// sameGame reports whether a v3 row and an app row describe one game: the
-// same map, the same score pair (both lists put the player's side first —
-// checked live 2026-10-01: a "loss [3,13]" on v3, a "win [13,10]" on the
-// app), the same outcome, the same pool once the app's
+// sameGame reports whether a v3 row and an app row describe one game. When
+// both carry Leetify's game id, the id decides and nothing else is looked
+// at: two rows with different ids are two games however alike they read.
+// Otherwise: the same map, the same score pair (both lists put the player's
+// side first — checked live 2026-10-01: a "loss [3,13]" on v3, a "win
+// [13,10]" on the app), the same outcome, the same pool once the app's
 // matchmaking_competitive is folded into v3's "matchmaking" (which
 // appMatchHistory.recentMatches already does) and the same per-game rating
 // to the last published digit.
 func sameGame(v, a *RecentMatch) bool {
+	if v.ID != "" && a.ID != "" {
+		return v.ID == a.ID
+	}
 	if !strings.EqualFold(v.MapName, a.MapName) || v.Outcome != a.Outcome || v.DataSource != a.DataSource {
 		return false
 	}
@@ -73,30 +81,48 @@ func sameGame(v, a *RecentMatch) bool {
 	return math.Abs(v.LeetifyRating-a.LeetifyRating) <= kdRatingTolerance
 }
 
-// findOne looks for want in ms[from:from+kdPairLookahead] and returns the
-// index of the one row that is the same game, with how many such rows there
-// were — zero (not within reach) and two or more (which one?) both mean the
-// caller cannot resolve the disagreement.
-func findOne(ms []RecentMatch, from int, want *RecentMatch) (idx, n int) {
-	idx = -1
+// takeKD copies an app row's kills and deaths onto a v3 row — unless the row
+// already carries a non-zero K or D, which came from somewhere this file
+// cannot see and is not overwritten.
+func takeKD(v, a *RecentMatch) {
+	if v.Kills == 0 && v.Deaths == 0 {
+		v.Kills, v.Deaths = a.Kills, a.Deaths
+	}
+}
+
+// findOne looks for want among ms at the index-list positions
+// idx[from:from+kdPairLookahead] and returns the position in idx of the one
+// row that is the same game, with how many such rows there were — zero (not
+// within reach) and two or more (which one?) both mean the caller cannot
+// resolve the disagreement.
+func findOne(ms []RecentMatch, idx []int, from int, want *RecentMatch) (pos, n int) {
+	pos = -1
 	end := from + kdPairLookahead
-	if end > len(ms) {
-		end = len(ms)
+	if end > len(idx) {
+		end = len(idx)
 	}
 	for k := from; k < end; k++ {
-		if sameGame(&ms[k], want) {
+		if sameGame(&ms[idx[k]], want) {
 			if n == 0 {
-				idx = k
+				pos = k
 			}
 			n++
 		}
 	}
-	return idx, n
+	return pos, n
 }
 
 // mergeAppKD fills Kills and Deaths on v3 rows from the app's history (both
 // newest-first; app already folded onto v3's vocabulary) and returns how
-// many rows were paired. The walk keeps a cursor on each list:
+// many rows were paired. Two passes:
+//
+// By id first. Every v3 row whose id the app list carries takes that row's
+// K/D — an exact join, in any order, blind to everything else. (An id the
+// app list carries twice pairs nothing: it cannot say which game.)
+//
+// Then the walk, over what is left on each side — in practice the rows
+// without an id, since with ids on both sides the first pass settles
+// everything the lists share. A cursor on each list:
 //
 //   - The two cursors stand on the same game: pair them and advance both —
 //     unless the NEXT row on either side is the same game too (a tie), in
@@ -108,28 +134,54 @@ func findOne(ms []RecentMatch, from int, want *RecentMatch) (idx, n int) {
 //     else — neither within reach, both within reach, or more than one
 //     candidate — stops the walk.
 //
-// A row that already carries a non-zero K or D keeps it: those numbers came
-// from somewhere this function cannot see, and are not overwritten. Rows
-// the walk never reaches keep 0/0, which the page renders as "—".
+// A row that already carries a non-zero K or D keeps it (takeKD). Rows
+// neither pass reaches keep 0/0, which the page renders as "—".
 func mergeAppKD(v3, app []RecentMatch) int {
 	paired := 0
+
+	appByID := make(map[string]int, len(app))
+	for j := range app {
+		if id := app[j].ID; id != "" {
+			if _, dup := appByID[id]; dup {
+				appByID[id] = -1
+			} else {
+				appByID[id] = j
+			}
+		}
+	}
+	v3Left := make([]int, 0, len(v3))
+	appUsed := make([]bool, len(app))
+	for i := range v3 {
+		if j, ok := appByID[v3[i].ID]; ok && j >= 0 && v3[i].ID != "" {
+			takeKD(&v3[i], &app[j])
+			appUsed[j] = true
+			paired++
+			continue
+		}
+		v3Left = append(v3Left, i)
+	}
+	appLeft := make([]int, 0, len(app))
+	for j := range app {
+		if !appUsed[j] {
+			appLeft = append(appLeft, j)
+		}
+	}
+
 	i, j := 0, 0
-	for i < len(v3) && j < len(app) {
-		v, a := &v3[i], &app[j]
+	for i < len(v3Left) && j < len(appLeft) {
+		v, a := &v3[v3Left[i]], &app[appLeft[j]]
 		if sameGame(v, a) {
-			if (i+1 < len(v3) && sameGame(&v3[i+1], a)) || (j+1 < len(app) && sameGame(v, &app[j+1])) {
+			if (i+1 < len(v3Left) && sameGame(&v3[v3Left[i+1]], a)) || (j+1 < len(appLeft) && sameGame(v, &app[appLeft[j+1]])) {
 				return paired
 			}
-			if v.Kills == 0 && v.Deaths == 0 {
-				v.Kills, v.Deaths = a.Kills, a.Deaths
-			}
+			takeKD(v, a)
 			paired++
 			i++
 			j++
 			continue
 		}
-		vi, vn := findOne(v3, i+1, a)
-		aj, an := findOne(app, j+1, v)
+		vi, vn := findOne(v3, v3Left, i+1, a)
+		aj, an := findOne(app, appLeft, j+1, v)
 		switch {
 		case vn == 1 && an == 0:
 			i = vi

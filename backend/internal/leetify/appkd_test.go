@@ -2,6 +2,7 @@ package leetify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,12 @@ func row(src, outcome, mapName string, mine, theirs int, rating float64, kd ...i
 	if len(kd) == 2 {
 		m.Kills, m.Deaths = kd[0], kd[1]
 	}
+	return m
+}
+
+// withID stamps Leetify's game id on a row.
+func withID(m RecentMatch, id string) RecentMatch {
+	m.ID = id
 	return m
 }
 
@@ -179,6 +186,68 @@ func TestMergeAppKD(t *testing.T) {
 			app:  nil,
 			want: "00/00", paired: 0,
 		},
+		// Since 2026-10-01 the app list carries Leetify's game id, the same
+		// one v3 lists the game under: an exact join, in any order.
+		{
+			name: "ids on both sides join exactly, whatever the order",
+			v3: []RecentMatch{
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a"),
+				withID(row("matchmaking", "loss", "de_cache", 2, 13, -0.0562), "b"),
+				withID(row("faceit", "win", "de_mirage", 13, 9, 0.1234), "c"),
+			},
+			app: []RecentMatch{
+				withID(row("faceit", "win", "de_mirage", 13, 9, 0.1234, 25, 12), "c"),
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 9, 17), "a"),
+			},
+			want: "09/17 00/00 25/12", paired: 2,
+		},
+		{
+			name: "the id wins over the fields: alike rows with different ids are two games",
+			v3:   []RecentMatch{withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a")},
+			app:  []RecentMatch{withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 9, 17), "z")},
+			want: "00/00", paired: 0,
+		},
+		{
+			name: "the id wins over the fields: rows the walk would refuse pair when the id agrees",
+			v3:   []RecentMatch{withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a")},
+			app:  []RecentMatch{withID(row("matchmaking", "win", "de_mirage", 13, 3, 0.2, 9, 17), "a")},
+			want: "09/17", paired: 1,
+		},
+		{
+			name: "ids on one side only fall back to the walk",
+			v3: []RecentMatch{
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a"),
+				withID(row("matchmaking", "win", "de_nuke", 13, 11, 0.1042), "b"),
+			},
+			app: []RecentMatch{
+				row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 9, 17),
+				row("matchmaking", "win", "de_nuke", 13, 11, 0.1042, 22, 15),
+			},
+			want: "09/17 22/15", paired: 2,
+		},
+		{
+			name: "rows the id pass settled are out of the walk; rows without an id still walk",
+			v3: []RecentMatch{
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a"),
+				row("matchmaking_wingman", "win", "de_vertigo", 9, 3, 0.2),
+				withID(row("matchmaking", "win", "de_nuke", 13, 11, 0.1042), "c"),
+			},
+			app: []RecentMatch{
+				withID(row("matchmaking", "win", "de_nuke", 13, 11, 0.1042, 22, 15), "c"),
+				row("matchmaking_wingman", "win", "de_vertigo", 9, 3, 0.2, 14, 6),
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 9, 17), "a"),
+			},
+			want: "09/17 14/06 22/15", paired: 3,
+		},
+		{
+			name: "an id the app list carries twice pairs nothing by id, and the walk sees the tie",
+			v3:   []RecentMatch{withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561), "a")},
+			app: []RecentMatch{
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 9, 17), "a"),
+				withID(row("matchmaking", "loss", "de_ancient", 3, 13, 0.0561, 30, 1), "a"),
+			},
+			want: "00/00", paired: 0,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,6 +259,32 @@ func TestMergeAppKD(t *testing.T) {
 				t.Errorf("rows = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// The app list carries Leetify's game id and a real finish time since
+// 2026-10-01 (checked live through the relay); both ride onto the rows a
+// non-member's profile is built from, so their expand row and "when" work.
+// The older shape — no id, gameFinishedAt a list position — leaves both
+// empty rather than showing "29" as a date.
+func TestAppMatchHistory_CarriesGameIDAndFinishTime(t *testing.T) {
+	var h appMatchHistory
+	if err := json.Unmarshal([]byte(`{"games":[
+		{"gameId":"dc6e67a8-51fc-425e-9938-5bf71e47b254","dataSource":"matchmaking_competitive","deaths":4,"gameFinishedAt":"2026-09-29T05:02:23.000Z","kills":27,"leetifyRating":0.3736,"mapName":"de_dust2","matchmakingRankType":12,"matchResult":"win","rank":11,"scores":[13,4]},
+		{"dataSource":"faceit","deaths":18,"gameFinishedAt":"28","kills":20,"leetifyRating":0.0155,"mapName":"de_ancient","matchmakingRankType":null,"matchResult":"loss","rank":10,"scores":[10,13]}
+	]}`), &h); err != nil {
+		t.Fatal(err)
+	}
+	ms := h.recentMatches()
+	if len(ms) != 2 {
+		t.Fatalf("rows = %d, want 2", len(ms))
+	}
+	if ms[0].ID != "dc6e67a8-51fc-425e-9938-5bf71e47b254" || ms[0].FinishedAt != "2026-09-29T05:02:23.000Z" ||
+		ms[0].DataSource != "matchmaking" || ms[0].Kills != 27 {
+		t.Errorf("new-shape row = %+v", ms[0])
+	}
+	if ms[1].ID != "" || ms[1].FinishedAt != "" || ms[1].Kills != 20 {
+		t.Errorf("old-shape row must carry no id and no date: %+v", ms[1])
 	}
 }
 
@@ -231,9 +326,11 @@ func TestGetProfile_MemberRowsTakeKillsFromTheAppHistoryThroughTheRelay(t *testi
 		}
 		w.Header().Set("X-Relay-Upstream", "app")
 		// Newest first; competitive is its own pool here; a wingman game v3
-		// does not list; the fourth v3 game is past this list's end.
+		// does not list; the fourth v3 game is past this list's end. The
+		// first row carries the game id (the live shape since 2026-10-01),
+		// the rest the older position-only shape, so both paths run.
 		_, _ = w.Write([]byte(`{"games":[
-			{"dataSource":"matchmaking","deaths":17,"gameFinishedAt":"29","kills":9,"leetifyRating":0.0561,"mapName":"de_ancient","matchmakingRankType":11,"matchResult":"loss","rank":26616,"scores":[3,13]},
+			{"gameId":"a1","dataSource":"matchmaking","deaths":17,"gameFinishedAt":"2026-09-29T05:02:23.000Z","kills":9,"leetifyRating":0.0561,"mapName":"de_ancient","matchmakingRankType":11,"matchResult":"loss","rank":26616,"scores":[3,13]},
 			{"dataSource":"faceit","deaths":12,"gameFinishedAt":"28","kills":25,"leetifyRating":0.0712,"mapName":"de_cache","matchmakingRankType":null,"matchResult":"win","rank":10,"scores":[13,9]},
 			{"dataSource":"matchmaking_wingman","deaths":6,"gameFinishedAt":"27","kills":14,"leetifyRating":0.2,"mapName":"de_vertigo","matchmakingRankType":null,"matchResult":"win","rank":0,"scores":[9,3]},
 			{"dataSource":"matchmaking_competitive","deaths":18,"gameFinishedAt":"26","kills":16,"leetifyRating":0.0724,"mapName":"de_nuke","matchmakingRankType":12,"matchResult":"tie","rank":8,"scores":[12,12]}
