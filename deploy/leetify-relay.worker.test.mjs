@@ -31,6 +31,9 @@ test("the app routes go to the app host", () => {
     `/api/profile/${ID}/recent-games/available-data-sources`,
     `/api/profile/${ID}/recent-games/5v5`,
     `/api/profile/${ID}/recent-games/matchmaking_competitive`,
+    // one game's scoreboard: a UUID id on current games, hex-and-dash on old
+    "/api/games/dc6e67a8-51fc-425e-9938-5bf71e47b254",
+    "/api/games/0f8e4cbd285ff241-1a539d",
   ]) {
     assert.deepEqual(route(p), { upstream: APP, kind: "app" }, p);
     assert.equal(upstreamURL(route(p), p, new URLSearchParams("steam64_id=1")), APP + p, p);
@@ -71,7 +74,12 @@ test("anything else is not relayed", () => {
     `/api/profile/${ID}`,
     `/api/profile/${ID}/recent-games/`,
     "/api/profile/123/meta",
-    `/api/games/${ID}`,
+    "/api/games",
+    "/api/games/",
+    "/api/games/dc6e67a8-51fc-425e-9938-5bf71e47b254/extra",
+    "/api/games/dc6e67a8.51fc",
+    "/api/games/../profile",
+    `/api/games/${"a".repeat(65)}`,
     "/v1/profile",
   ]) {
     assert.equal(route(p), null, p);

@@ -21,9 +21,13 @@
 // 429 there, and the backend's pause reads it as it would a direct one. Two
 // upstreams, chosen by path:
 //   /api/profile/{id}/…   → api.cs-prod.leetify.com (the app's own routes:
-//                           pool list, one pool's summary, display name, last
-//                           30 games). No key is forwarded: the routes answer a
-//                           plain GET and the public key means nothing here.
+//   /api/games/{gameId}     pool list, one pool's summary, display name, last
+//                           30 games; and one game's full scoreboard, which
+//                           the expanded match row and one-click analysis
+//                           read — the wall has refused the main box that
+//                           route since mid-September 2026). No key is
+//                           forwarded: the routes answer a plain GET and the
+//                           public key means nothing here.
 //   /v3/… and /v2/…       → api-public.cs-prod.leetify.com (the documented
 //                           API: a profile, its match list, a match by id or by
 //                           share code). The backend's _leetify_key header is
@@ -45,8 +49,10 @@
 const APP_UPSTREAM = "https://api.cs-prod.leetify.com";
 const PUBLIC_UPSTREAM = "https://api-public.cs-prod.leetify.com";
 
+// /api/games/{gameId} takes Leetify's own game id, a UUID on current games
+// and a shorter hex-and-dash form on old ones; the backend sends either.
 const APP_ROUTE =
-  /^\/api\/profile\/[0-9]{17}\/(meta|match-history|recent-games\/(available-data-sources|[a-z0-9_]{1,32}))$/;
+  /^\/api\/(profile\/[0-9]{17}\/(meta|match-history|recent-games\/(available-data-sources|[a-z0-9_]{1,32}))|games\/[A-Za-z0-9-]{1,64})$/;
 // /v3/profile and /v3/profile/matches take ?steam64_id=; /v2/matches/{id}
 // (Leetify's own match id, a UUID) and /v2/matches/matchmaking/{share code}
 // (CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx) take none.

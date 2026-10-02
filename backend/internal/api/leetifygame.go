@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -65,11 +66,19 @@ func (s *Server) handleLeetifyGameStats(w http.ResponseWriter, r *http.Request) 
 			return *gs, nil
 		})
 		if err != nil {
-			// includes ErrNotFound — negative-cache briefly either way
-			if s.cache != nil {
-				_ = s.cache.SetJSONTTL(ctx, key, leetify.GameStats{}, 30*time.Minute)
+			// includes ErrNotFound — negative-cache briefly either way. A miss
+			// Leetify could not verify (the app routes paused behind the bot
+			// wall; checked BEFORE ErrNotFound, which it also is) is kept for
+			// seconds, not the half hour, so the row fills on the next expand
+			// once the wall has moved on rather than reading "—" all evening.
+			ttl, cc := 30*time.Minute, "public, max-age=600, s-maxage=1800"
+			if errors.Is(err, leetify.ErrUnavailable) {
+				ttl, cc = unavailableCacheTTL, "public, max-age=30, s-maxage=45"
 			}
-			w.Header().Set("Cache-Control", "public, max-age=600, s-maxage=1800")
+			if s.cache != nil {
+				_ = s.cache.SetJSONTTL(ctx, key, leetify.GameStats{}, ttl)
+			}
+			w.Header().Set("Cache-Control", cc)
 			writeJSON(w, http.StatusOK, leetify.GameStats{})
 			return
 		}
