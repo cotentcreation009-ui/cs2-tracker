@@ -104,6 +104,13 @@ func LeetifyGameKey(gameID string, steamID uint64) string {
 	return fmt.Sprintf("cs2:leetify:game:v7:%s:%d", strings.ToLower(gameID), steamID)
 }
 
+// LeetifyGameDemoKey caches where one game's demo can be downloaded (a Valve
+// replay URL, a FACEIT signed link, or the reason there is none), per the
+// profile it was listed on.
+func LeetifyGameDemoKey(gameID string, steamID uint64) string {
+	return fmt.Sprintf("cs2:leetify:gamedemo:v1:%s:%d", strings.ToLower(gameID), steamID)
+}
+
 // ProTeamRecentKey caches a team's recent past-series list (schedule only).
 func ProTeamRecentKey(teamID string) string { return "cs2:pro:teamrecent2:" + teamID }
 
