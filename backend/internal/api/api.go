@@ -403,6 +403,10 @@ func (s *Server) Router() http.Handler {
 				r.Get("/maps", s.handleMaps)
 				r.Get("/leetify", s.handleLeetify)
 				r.Get("/leetify-game/{gameId}", s.handleLeetifyGameStats)
+				// Where that game's demo can be downloaded (demodownload.go).
+				// A miss asks the gc-bot or FACEIT, hence its own per-IP bucket.
+				r.With(newRateLimiter(demoDLRatePerSec, demoDLRateBurst).middleware).
+					Get("/leetify-game/{gameId}/demo", s.handleLeetifyGameDemo)
 				r.Get("/teammates", s.handleLeetifyTeammates)
 				r.Get("/faceit", s.handleFaceit)
 				r.Get("/steam-stats", s.handleSteamStats)

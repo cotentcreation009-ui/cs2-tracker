@@ -5,6 +5,7 @@ import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, premierHex, timeAgo } from "@/lib/format";
 import { radarImage } from "@/lib/maps/calibration";
 import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
+import { DownloadDemoButton } from "@/components/DownloadDemoButton";
 import { rowKD } from "@/lib/matchKd";
 
 // Queue identity: Premier and Competitive both arrive as data_source
@@ -1172,6 +1173,13 @@ export function LeetifyRecentMatches({
                         dataSource={m.data_source}
                         finishedAt={m.finished_at}
                         mapName={m.map_name}
+                        score={m.score}
+                      />
+                      <DownloadDemoButton
+                        gameId={m.id}
+                        steamId={steamId}
+                        dataSource={m.data_source}
+                        finishedAt={m.finished_at}
                         score={m.score}
                       />
                       <a

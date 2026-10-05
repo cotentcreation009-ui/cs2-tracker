@@ -347,7 +347,7 @@ func (s *Server) enqueueShareCode(w http.ResponseWriter, r *http.Request, id str
 		fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
 		return
 	}
-	if !finished.IsZero() && finished.Year() > 1971 && time.Since(finished) > valveReplayMaxAge {
+	if valveReplayExpired(finished) {
 		fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
 		return
 	}
@@ -429,26 +429,127 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	ref, err := s.lookupDemoRef(r.Context(), gameID, parseSteamID64(strings.TrimSpace(req.SteamID)))
+	switch {
+	case err == nil:
+	case errors.Is(err, errDemoLeetifyPaused):
+		// Leetify is rate-limiting this address and the legacy host is walled
+		// too: say so instead of "internal error". The job row records that
+		// reason like every other refused click — quota is charged up front by
+		// design, and a row left 'queued' with nothing enqueued would be the
+		// lie — and the click works again on its own once the pause lifts.
+		fail(http.StatusServiceUnavailable, "Leetify is rate-limiting this server right now; try again in a few minutes")
+		return
+	case errors.Is(err, errDemoMatchNotFound):
+		fail(http.StatusNotFound, "match not found")
+		return
+	case errors.Is(err, errDemoNoReference):
+		fail(http.StatusBadRequest, "no demo reference is available for that match")
+		return
+	default:
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "match lookup failed")
+		s.serverError(w, "match lookup", err)
+		return
+	}
+
+	if ref.ShareCode != "" {
+		s.enqueueShareCode(w, r, id, fail, ref.ShareCode, ref.Finished)
+		return
+	}
+
+	signed, ferr := s.resolveFaceitDemo(r.Context(), ref.FaceitMatchID)
+	switch {
+	case ferr == nil:
+	case errors.Is(ferr, faceit.ErrNoDemo), errors.Is(ferr, faceit.ErrNotFound):
+		fail(http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old)")
+		return
+	case errors.Is(ferr, faceit.ErrInvalidKey):
+		s.log.Error("FACEIT rejected the configured API key (invalid_token) — replace FACEIT_API_KEY with a current key from developers.faceit.com")
+		fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're fixing our connection to FACEIT")
+		return
+	case errors.Is(ferr, faceit.ErrNoDownloadScope), errors.Is(ferr, faceit.ErrNoAPIKey):
+		// The app is approved but the configured token lacks the Downloads
+		// scope — FACEIT issues that as a SEPARATE access token, so the fix
+		// is setting FACEIT_DOWNLOAD_API_KEY, not waiting for anything.
+		s.log.Error("faceit downloads token missing/unscoped — set FACEIT_DOWNLOAD_API_KEY to the Downloads-scoped access token from the FACEIT developer portal")
+		fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're finishing setup on our side")
+		return
+	default:
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "resolve faceit demo failed")
+		s.serverError(w, "resolve faceit demo", ferr)
+		return
+	}
+
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:      id,
+		Type:    queue.JobParseReplay,
+		Source:  "faceit",
+		DemoURL: signed,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
+		s.serverError(w, "enqueue", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
+// demoRef is where one listed game's demo lives: a FACEIT match id (signed
+// into a download URL by FACEIT's Download API) or a Valve share code (turned
+// into a replay URL by the gc-bot). Exactly one of the two is set.
+type demoRef struct {
+	FaceitMatchID string
+	ShareCode     string
+	// Finished is when the game ended; zero when no source said. It decides
+	// whether Valve can still be hosting the replay.
+	Finished time.Time
+}
+
+// What lookupDemoRef can say besides a reference. Anything else it returns is
+// an unexpected upstream failure.
+var (
+	// errDemoLeetifyPaused: Leetify would not answer right now (rate-limit
+	// pause, or the app routes held behind its bot wall). Temporary.
+	errDemoLeetifyPaused = errors.New("demo reference: leetify is not answering right now")
+	// errDemoMatchNotFound: Leetify does not know the game at all.
+	errDemoMatchNotFound = errors.New("demo reference: match not found")
+	// errDemoNoReference: the game exists but no source carries a share code
+	// or FACEIT id for it — nothing was recorded that a demo could be found by.
+	errDemoNoReference = errors.New("demo reference: no demo reference for that match")
+)
+
+// valveReplayExpired reports whether a game finished long enough ago that
+// Valve has dropped its replay. An unknown finish time is never "expired".
+func valveReplayExpired(finished time.Time) bool {
+	return !finished.IsZero() && finished.Year() > 1971 && time.Since(finished) > valveReplayMaxAge
+}
+
+// lookupDemoRef finds the demo reference for one v3 (UUID) Leetify game. It is
+// the resolve step one-click analysis and the demo-download link share, and it
+// starts nothing: no job, no quota, no gc-bot or FACEIT call.
+//
+// sid is the profile the game was listed on (0 when unknown); the public v3
+// match list is keyed by it.
+func (s *Server) lookupDemoRef(ctx context.Context, gameID string, sid uint64) (demoRef, error) {
 	// Our own store first. A bridged match was fetched BY its share code, so
 	// the reference is already here — and Leetify's legacy endpoint only
 	// sometimes exposes one, which used to turn a perfectly resolvable match
 	// into "no demo reference available".
-	if code, finished, lerr := s.db.ShareCodeForMatch(r.Context(), gameID); lerr == nil && code != "" {
-		s.enqueueShareCode(w, r, id, fail, code, finished)
-		return
+	if code, finished, lerr := s.db.ShareCodeForMatch(ctx, gameID); lerr == nil && code != "" {
+		return demoRef{ShareCode: code, Finished: finished}, nil
 	}
 
 	// The PUBLIC v3 match list first. Leetify's legacy per-game route went
 	// behind a bot check on 2026-09-16 (511 bot_check_required, with or
-	// without the key), and this handler asked it first — so every click on
+	// without the key), and this lookup asked it first — so every click on
 	// a match we had not bridged ourselves died with "internal error" while
 	// the v3 list, which carries the same reference for every source, sat
 	// unasked. It is keyed by the profile the match was listed on, which the
-	// button always sends. Legacy is consulted only when the list cannot
+	// buttons always send. Legacy is consulted only when the list cannot
 	// answer: no steamId, or a transport/unexpected-status failure.
 	var gd *leetify.GameDetails
-	if sid := parseSteamID64(strings.TrimSpace(req.SteamID)); sid != 0 {
-		ref, lerr := s.leetify.MatchReference(r.Context(), sid, gameID)
+	if sid != 0 {
+		ref, lerr := s.leetify.MatchReference(ctx, sid, gameID)
 		switch {
 		case lerr == nil:
 			gd = &leetify.GameDetails{ID: gameID, DataSource: ref.Source, FinishedAt: ref.FinishedAt}
@@ -459,15 +560,9 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 				gd.SteamShareCode = ref.ID
 			}
 		case errors.Is(lerr, leetify.ErrUnavailable):
-			// BEFORE ErrNotFound, which ErrUnavailable also satisfies. Leetify
-			// is rate-limiting this address and the legacy host below is
-			// walled too: say so instead of "internal error". The job row
-			// records that reason like every other refused click — quota is
-			// charged up front by design, and a row left 'queued' with nothing
-			// enqueued would be the lie — and the click works again on its own
-			// once the pause lifts.
-			fail(http.StatusServiceUnavailable, "Leetify is rate-limiting this server right now; try again in a few minutes")
-			return
+			// BEFORE ErrNotFound, which ErrUnavailable also satisfies. The
+			// legacy host below is walled too, so there is nobody left to ask.
+			return demoRef{}, errDemoLeetifyPaused
 		case errors.Is(lerr, leetify.ErrNotFound):
 			// Listed nowhere on this profile: let legacy have its say below.
 		default:
@@ -476,88 +571,32 @@ func (s *Server) handleDemoAnalyzeMatch(w http.ResponseWriter, r *http.Request) 
 	}
 	if gd == nil {
 		var err error
-		gd, err = s.leetify.GetGameDetails(r.Context(), gameID)
+		gd, err = s.leetify.GetGameDetails(ctx, gameID)
 		if err != nil {
 			if errors.Is(err, leetify.ErrNotFound) {
-				fail(http.StatusNotFound, "match not found")
-				return
+				return demoRef{}, errDemoMatchNotFound
 			}
-			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "match lookup failed")
-			s.serverError(w, "match lookup", err)
-			return
+			return demoRef{}, err
 		}
 	}
 
-	var (
-		demoURL   string
-		shareCode string
-		source    string
-	)
+	finished, _ := time.Parse(time.RFC3339, gd.FinishedAt)
 	switch {
 	case gd.FaceitMatchID != "":
-		signed, ferr := s.resolveFaceitDemo(r.Context(), gd.FaceitMatchID)
-		switch {
-		case ferr == nil:
-			demoURL = signed
-			source = "faceit"
-		case errors.Is(ferr, faceit.ErrNoDemo), errors.Is(ferr, faceit.ErrNotFound):
-			fail(http.StatusBadRequest, "that FACEIT match has no demo available (it may be too old)")
-			return
-		case errors.Is(ferr, faceit.ErrInvalidKey):
-			s.log.Error("FACEIT rejected the configured API key (invalid_token) — replace FACEIT_API_KEY with a current key from developers.faceit.com")
-			fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're fixing our connection to FACEIT")
-			return
-		case errors.Is(ferr, faceit.ErrNoDownloadScope), errors.Is(ferr, faceit.ErrNoAPIKey):
-			// The app is approved but the configured token lacks the Downloads
-			// scope — FACEIT issues that as a SEPARATE access token, so the fix
-			// is setting FACEIT_DOWNLOAD_API_KEY, not waiting for anything.
-			s.log.Error("faceit downloads token missing/unscoped — set FACEIT_DOWNLOAD_API_KEY to the Downloads-scoped access token from the FACEIT developer portal")
-			fail(http.StatusServiceUnavailable, "FACEIT demo analysis is temporarily unavailable — we're finishing setup on our side")
-			return
-		default:
-			_ = s.db.SetDemoStatus(r.Context(), id, "failed", "resolve faceit demo failed")
-			s.serverError(w, "resolve faceit demo", ferr)
-			return
-		}
+		return demoRef{FaceitMatchID: gd.FaceitMatchID, Finished: finished}, nil
 	case gd.SteamShareCode != "":
-		if s.cfg.GCBotURL == "" {
-			fail(http.StatusServiceUnavailable, "Premier/MM demo analysis isn't enabled yet — coming soon")
-			return
-		}
-		if t, terr := time.Parse(time.RFC3339, gd.FinishedAt); terr == nil && time.Since(t) > valveReplayMaxAge {
-			fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
-			return
-		}
-		shareCode = gd.SteamShareCode
-		source = "sharecode"
-	default:
-		// The legacy per-game route no longer carries a share code, but the
-		// profile MATCH LIST does. Resolve through it, keyed by the profile the
-		// match was listed on, which the button always sends.
-		if sid := parseSteamID64(strings.TrimSpace(req.SteamID)); sid != 0 {
-			if code, fin, lerr := s.leetify.GameShareCode(r.Context(), sid, gameID); lerr == nil && code != "" {
-				t, _ := time.Parse(time.RFC3339, fin)
-				s.enqueueShareCode(w, r, id, fail, code, t)
-				return
-			}
-		}
-		fail(http.StatusBadRequest, "no demo reference is available for that match")
-		return
+		return demoRef{ShareCode: gd.SteamShareCode, Finished: finished}, nil
 	}
-
-	job, err := s.queue.Enqueue(r.Context(), queue.Job{
-		ID:        id,
-		Type:      queue.JobParseReplay,
-		Source:    source,
-		DemoURL:   demoURL,
-		ShareCode: shareCode,
-	})
-	if err != nil {
-		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
-		s.serverError(w, "enqueue", err)
-		return
+	// The legacy per-game route no longer carries a share code, but the
+	// profile MATCH LIST does. Resolve through it, keyed by the profile the
+	// match was listed on.
+	if sid != 0 {
+		if code, fin, lerr := s.leetify.GameShareCode(ctx, sid, gameID); lerr == nil && code != "" {
+			t, _ := time.Parse(time.RFC3339, fin)
+			return demoRef{ShareCode: code, Finished: t}, nil
+		}
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+	return demoRef{}, errDemoNoReference
 }
 
 // analyzeViaGC resolves a match for a legacy-Leetify account straight from the
@@ -604,6 +643,40 @@ func (s *Server) analyzeViaGC(
 		return
 	}
 
+	best := pickGCMatch(matches, finishedAt, score)
+
+	if best == nil {
+		fail(http.StatusUnprocessableEntity,
+			"Steam couldn't match this game — the Game Coordinator only lists a player's ~8 most recent matches, and their Steam \"Game details\" privacy must be Public. You can still analyze it by uploading the .dem.")
+		return
+	}
+	if best.Time > 0 && time.Since(time.Unix(best.Time, 0)) > valveReplayMaxAge {
+		fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
+		return
+	}
+	if best.DemoURL == "" {
+		fail(http.StatusUnprocessableEntity, "Steam has no downloadable replay for this match.")
+		return
+	}
+
+	job, err := s.queue.Enqueue(r.Context(), queue.Job{
+		ID:      id,
+		Type:    queue.JobParseReplay,
+		Source:  "valve",
+		DemoURL: best.DemoURL,
+	})
+	if err != nil {
+		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
+		s.serverError(w, "enqueue", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+}
+
+// pickGCMatch picks, from a player's Game Coordinator match list, the game a
+// clicked profile row refers to: same score (either way round) and a finish
+// time near the row's. nil when nothing fits.
+func pickGCMatch(matches []gcbot.RecentMatch, finishedAt string, score []int) *gcbot.RecentMatch {
 	var ft time.Time
 	if t, terr := time.Parse(time.RFC3339, finishedAt); terr == nil {
 		ft = t
@@ -644,33 +717,7 @@ func (s *Server) analyzeViaGC(
 			best, bestInDay, bestTime = m, inDay, m.Time
 		}
 	}
-
-	if best == nil {
-		fail(http.StatusUnprocessableEntity,
-			"Steam couldn't match this game — the Game Coordinator only lists a player's ~8 most recent matches, and their Steam \"Game details\" privacy must be Public. You can still analyze it by uploading the .dem.")
-		return
-	}
-	if best.Time > 0 && time.Since(time.Unix(best.Time, 0)) > valveReplayMaxAge {
-		fail(http.StatusGone, "this match's replay has expired on Valve's servers (they keep replays ~30 days)")
-		return
-	}
-	if best.DemoURL == "" {
-		fail(http.StatusUnprocessableEntity, "Steam has no downloadable replay for this match.")
-		return
-	}
-
-	job, err := s.queue.Enqueue(r.Context(), queue.Job{
-		ID:      id,
-		Type:    queue.JobParseReplay,
-		Source:  "valve",
-		DemoURL: best.DemoURL,
-	})
-	if err != nil {
-		_ = s.db.SetDemoStatus(r.Context(), id, "failed", "could not enqueue")
-		s.serverError(w, "enqueue", err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": job.ID, "status": "queued"})
+	return best
 }
 
 // demoObjectKey is the deterministic object-storage key for a demo id. Deriving
