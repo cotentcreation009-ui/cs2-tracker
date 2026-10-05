@@ -5,6 +5,7 @@ import type { LeetifyRecentMatch } from "@/lib/types";
 import { mapLabel, premierHex, timeAgo } from "@/lib/format";
 import { radarImage } from "@/lib/maps/calibration";
 import { AnalyzeDemoButton } from "@/components/AnalyzeDemoButton";
+import { rowKD } from "@/lib/matchKd";
 
 // Queue identity: Premier and Competitive both arrive as data_source
 // "matchmaking" — rank_type is what actually distinguishes them (11 = Premier,
@@ -503,6 +504,8 @@ function playerTooltip(p: ScoreRow): string {
 
 interface GameDeep {
   found?: boolean;
+  kills?: number;
+  deaths?: number;
   adr?: number;
   kast_pct?: number;
   rating?: number;
@@ -761,6 +764,61 @@ function DeepStatTiles({ deep }: { deep: GameDeep | null | undefined }) {
   );
 }
 
+// The row's K / D / +/− cells. The profile feed only carries kills and deaths
+// for the newest games, so older rows arrive blank — but the per-game stats the
+// expanded panel loads do have them. A blank row borrows those: asked for when
+// the row is opened (the same shared fetch the panel makes), read back from the
+// module cache from then on. Rows with their own numbers never look.
+function RowKDCells({
+  m,
+  steamId,
+  open,
+}: {
+  m: LeetifyRecentMatch;
+  steamId: string;
+  open: boolean;
+}) {
+  const own = rowKD(m);
+  const borrow = !own && !!m.id && (open || deepCache.has(m.id));
+  const deep = useGameDeep(steamId, borrow ? m.id : undefined);
+  const kd = own ?? rowKD(m, deep);
+  const diff = kd ? kd.kills - kd.deaths : 0;
+  return (
+    <>
+      <span className={`${COL.k} hidden shrink-0 text-right font-semibold tabular-nums text-ink md:inline`}>
+        {kd ? kd.kills : <span className="font-normal text-faint">—</span>}
+      </span>
+      <span className={`${COL.d} hidden shrink-0 text-right tabular-nums text-muted md:inline`}>
+        {kd ? kd.deaths : <span className="text-faint">—</span>}
+      </span>
+      <span
+        className={`${COL.diff} hidden shrink-0 text-right tabular-nums md:inline ${
+          kd ? (diff > 0 ? "text-good" : diff < 0 ? "text-bad" : "text-faint") : "text-faint"
+        }`}
+      >
+        {kd ? `${diff > 0 ? "+" : diff < 0 ? "−" : ""}${Math.abs(diff)}` : "—"}
+      </span>
+    </>
+  );
+}
+
+// The expanded panel's K-D tile, with the same fallback: the row's own numbers,
+// else the loaded per-game ones, else a dash.
+function KDStat({ m, steamId }: { m: LeetifyRecentMatch; steamId: string }) {
+  const deep = useGameDeep(steamId, m.id);
+  const kd = rowKD(m, deep);
+  return (
+    <Stat
+      label="K-D"
+      value={
+        kd
+          ? `${kd.kills}-${kd.deaths}${kd.deaths > 0 ? ` (${(kd.kills / kd.deaths).toFixed(2)})` : ""}`
+          : "—"
+      }
+    />
+  );
+}
+
 // Mounted only while a row is expanded, so the deep fetch happens exactly when
 // the panel is first opened (then never again, thanks to the module cache).
 function DeepStats({ steamId, gameId }: { steamId: string; gameId?: string }) {
@@ -947,13 +1005,6 @@ export function LeetifyRecentMatches({
           const tie = m.outcome === "tie";
           const isOpen = open === key;
           const src = sourceInfo(m);
-          // Go omits zero values, so a genuine 0-kill game arrives with no
-          // `kills` field — default before formatting or the row renders
-          // "undefined-7".
-          const kills = m.kills ?? 0;
-          const deaths = m.deaths ?? 0;
-          const hasKD = kills + deaths > 0;
-          const kdDiff = kills - deaths;
           const delta = m.rank_delta;
           const after = rankAfter(m);
           const afterHex =
@@ -994,19 +1045,7 @@ export function LeetifyRecentMatches({
                 >
                   {m.score?.length === 2 ? `${m.score[0]}–${m.score[1]}` : "—"}
                 </span>
-                <span className={`${COL.k} hidden shrink-0 text-right font-semibold tabular-nums text-ink md:inline`}>
-                  {hasKD ? kills : <span className="font-normal text-faint">—</span>}
-                </span>
-                <span className={`${COL.d} hidden shrink-0 text-right tabular-nums text-muted md:inline`}>
-                  {hasKD ? deaths : <span className="text-faint">—</span>}
-                </span>
-                <span
-                  className={`${COL.diff} hidden shrink-0 text-right tabular-nums md:inline ${
-                    hasKD ? (kdDiff > 0 ? "text-good" : kdDiff < 0 ? "text-bad" : "text-faint") : "text-faint"
-                  }`}
-                >
-                  {hasKD ? `${kdDiff > 0 ? "+" : kdDiff < 0 ? "−" : ""}${Math.abs(kdDiff)}` : "—"}
-                </span>
+                <RowKDCells m={m} steamId={steamId} open={isOpen} />
                 <span className={`${COL.hs} hidden shrink-0 text-right tabular-nums text-muted lg:inline`}>
                   {m.accuracy_head > 0 ? `${m.accuracy_head.toFixed(0)}%` : <span className="text-faint">—</span>}
                 </span>
@@ -1050,14 +1089,7 @@ export function LeetifyRecentMatches({
                 <div className="border-t border-line/60 bg-linear-to-b from-panel/40 to-transparent px-3 py-3">
                   <DeepScoreboard steamId={steamId} gameId={m.id} won={won} tie={tie} />
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <Stat
-                      label="K-D"
-                      value={
-                        hasKD
-                          ? `${m.kills}-${m.deaths}${(m.deaths ?? 0) > 0 ? ` (${((m.kills ?? 0) / (m.deaths ?? 1)).toFixed(2)})` : ""}`
-                          : "—"
-                      }
-                    />
+                    <KDStat m={m} steamId={steamId} />
                     <DeepStats steamId={steamId} gameId={m.id} />
                     {after ? (
                       <Stat
