@@ -145,6 +145,9 @@ type Server struct {
 	// kvOverride stands in for cache in tests that need one without Redis
 	// (cachedstale_test.go's mapKV); nil in production. Read through kv().
 	kvOverride jsonKV
+	// demoFiles admits demo-file streams (demodownloadfile.go): a few on the
+	// box at once, fewer per visitor, a start budget per visitor per hour.
+	demoFiles *demoStreamGate
 }
 
 // negativeCacheTTL is how long a "no such profile" result is cached so repeated
@@ -171,7 +174,7 @@ func NewServer(cfg *config.Config, store Store, steamClient *steam.Client, leeti
 		Mock:    cfg.GRIDMock,
 		Logger:  log,
 	})
-	srv := &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), valve: valve.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill()}
+	srv := &Server{cfg: cfg, db: store, steam: steamClient, leetify: leetifyClient, faceit: faceitClient, queue: q, cache: c, log: log, metrics: &metrics{}, proMatches: proMatches, lp: liquipedia.NewClient(log), valve: valve.NewClient(log), invHTTP: &http.Client{Timeout: 30 * time.Second}, invBackfill: newBackfill(), demoFiles: newDemoStreamGate(demoFileMaxStreams, demoFileMaxPerIP, demoFileStartsPerHour)}
 	// The bridge depends on Leetify continuing to serve match reports for
 	// players it will not serve profiles for — a deliberate carve-out, but one
 	// they could close without notice. Everything behind this flag must be
@@ -360,6 +363,20 @@ func (s *Server) Router() http.Handler {
 			r.Get("/demos/{id}", s.handleDemoJob)
 			r.Get("/demos/{id}/data", s.handleDemoData)
 			r.Post("/ai/analyze", s.handleAiAnalyze)
+		})
+
+		// The demo FILE itself (demodownloadfile.go): 100–400 MB streamed
+		// through from Valve, so it gets a stream-length timeout rather than
+		// the 30 s below. Still gated, and the lookup it begins with has the
+		// same per-IP bucket as the link route; the streams themselves are
+		// fenced inside the handler.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(demoFileStreamLimit))
+			if gated {
+				r.Use(s.internalAuth)
+			}
+			r.With(newRateLimiter(demoDLRatePerSec, demoDLRateBurst).middleware).
+				Get("/players/{steamid}/leetify-game/{gameId}/demo/file", s.handleLeetifyGameDemoFile)
 		})
 
 		// Everything else: 30s timeout, gated behind the internal token.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   demoArchiveKind,
+  demoFileEndpoint,
   demoLinkEndpoint,
-  isPlainHttp,
   safeDemoUrl,
   valveReplayExpired,
 } from "./demoLink";
@@ -41,6 +41,20 @@ describe("demoLinkEndpoint", () => {
   });
 });
 
+describe("demoFileEndpoint", () => {
+  it("is the lookup's path plus /file, same query", () => {
+    expect(demoFileEndpoint("1", "g")).toBe("/api/profiles/1/leetify-game/g/demo/file");
+    expect(
+      demoFileEndpoint("76561198019780871", "7c9bc801f1a8bb51-6e7cc3", {
+        finishedAt: "2026-10-01T00:00:00Z",
+        score: [13, 7],
+      }),
+    ).toBe(
+      "/api/profiles/76561198019780871/leetify-game/7c9bc801f1a8bb51-6e7cc3/demo/file?finishedAt=2026-10-01T00%3A00%3A00Z&score=13-7",
+    );
+  });
+});
+
 describe("safeDemoUrl", () => {
   it("passes Valve's http replay link and FACEIT's https one untouched", () => {
     const valve = "http://replay129.valve.net/730/003_1.dem.bz2";
@@ -57,10 +71,6 @@ describe("safeDemoUrl", () => {
 });
 
 describe("archive hints", () => {
-  it("knows Valve links are plain http", () => {
-    expect(isPlainHttp("http://replay129.valve.net/730/003_1.dem.bz2")).toBe(true);
-    expect(isPlainHttp("https://cdn.faceit.com/a.dem.zst")).toBe(false);
-  });
   it("names the archive from the file, else from the source", () => {
     expect(demoArchiveKind({ source: "valve", filename: "003_1.dem.bz2" })).toBe(".dem.bz2");
     expect(demoArchiveKind({ source: "faceit", filename: "1-abc-1-1.dem.gz" })).toBe(".dem.gz");

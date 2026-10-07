@@ -1,6 +1,9 @@
-// The demo-download link for a match listed on a profile. The server resolves
+// The demo download for a match listed on a profile. The server resolves
 // WHERE the demo is (a Valve replay URL or a FACEIT signed link); the browser
-// then fetches the file from that host directly.
+// then fetches the file through our own https origin (`/demo/file`), because
+// Valve's replay hosts are plain http and Chrome refuses every download an
+// https page starts towards one. FACEIT's links are https; the file route
+// just redirects to those.
 
 /** What `/api/profiles/{id}/leetify-game/{game}/demo` answers. */
 export interface DemoLink {
@@ -51,6 +54,21 @@ export function demoLinkEndpoint(
   return `/api/profiles/${encodeURIComponent(steamId)}/leetify-game/${encodeURIComponent(gameId)}/demo${qs ? `?${qs}` : ""}`;
 }
 
+/**
+ * The file itself, streamed over this origin (or, for FACEIT, a redirect to
+ * the signed https link). Same identifiers as the lookup, so a legacy row's
+ * finish time and score ride along here too.
+ */
+export function demoFileEndpoint(
+  steamId: string,
+  gameId: string,
+  row: { finishedAt?: string; score?: number[] } = {},
+): string {
+  const base = demoLinkEndpoint(steamId, gameId, row);
+  const [path, qs] = base.split("?", 2);
+  return `${path}/file${qs ? `?${qs}` : ""}`;
+}
+
 /** The link, if it is one a browser should be sent to (http or https only). */
 export function safeDemoUrl(link: DemoLink | null | undefined): string | null {
   if (!link?.available || !link.url) return null;
@@ -60,15 +78,6 @@ export function safeDemoUrl(link: DemoLink | null | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Valve serves replays over plain http only. Browsers may hold back a download
- * an https page starts from an http host, so those links come with a
- * copy-the-link way out.
- */
-export function isPlainHttp(url: string): boolean {
-  return url.startsWith("http://");
 }
 
 /** The archive type a link delivers, for the tooltip and the started note. */

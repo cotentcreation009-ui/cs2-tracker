@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import {
   VALVE_EXPIRED_REASON,
   demoArchiveKind,
+  demoFileEndpoint,
   demoLinkEndpoint,
-  isPlainHttp,
   safeDemoUrl,
   valveReplayExpired,
   type DemoLink,
@@ -14,15 +14,19 @@ import {
 type State =
   | { kind: "idle" }
   | { kind: "finding" }
-  | { kind: "started"; url: string; archive: string }
+  | { kind: "started"; archive: string }
   | { kind: "unavailable"; reason: string; roomUrl?: string };
 
 /**
  * DownloadDemoButton — the demo FILE for a match listed on a profile, next to
  * "Analyze demo". A click asks the server where the demo lives (it finds it the
- * same way analysis does) and then sends the browser straight to that host:
- * Valve's replay servers for Premier/matchmaking, FACEIT's storage for FACEIT.
- * The file never passes through our servers. When there is no demo to hand
+ * same way analysis does) and, once there is one, downloads it through our own
+ * https origin. That hop exists because Valve hosts replays over plain http and
+ * Chrome refuses every download an https page starts towards an http host — a
+ * same-tab link, a tab opened by script, a redirect through our origin; only
+ * an address pasted into a fresh tab escaped, which is no button. Streamed
+ * over https by us, it is an ordinary download. FACEIT demos are https already
+ * and the same route just redirects to them. When there is no demo to hand
  * over, the reason is shown in place.
  */
 export function DownloadDemoButton({
@@ -39,14 +43,12 @@ export function DownloadDemoButton({
   score?: number[];
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
-  const [copied, setCopied] = useState(false);
   const busyRef = useRef(false);
 
   const isFaceit = dataSource === "faceit";
 
   const run = async () => {
     if (busyRef.current) return;
-    setCopied(false);
     // Past Valve's month there is nothing to ask for.
     if (valveReplayExpired(dataSource, finishedAt)) {
       setState({ kind: "unavailable", reason: VALVE_EXPIRED_REASON });
@@ -54,35 +56,20 @@ export function DownloadDemoButton({
     }
     busyRef.current = true;
     setState({ kind: "finding" });
-    // Valve serves demos over plain http. From this https page a same-tab link
-    // click is a mixed-content download, which Chrome blocks outright; the same
-    // address pasted into a new tab downloads fine, because a top-level
-    // navigation is not mixed content. So the file is opened the way a paste
-    // is: in its own tab. The tab is opened NOW, inside the click's user
-    // activation (the lookup below can outlast the ~5 s activation window and a
-    // tab opened after that is a popup to be blocked), and pointed at the file
-    // once the address is known; a tab whose navigation turns into a download
-    // closes itself. If nothing is downloadable it is closed here.
-    const tab = window.open("", "_blank");
-    if (tab) tab.opener = null;
     try {
       const res = await fetch(demoLinkEndpoint(steamId, gameId, { finishedAt, score }), {
         cache: "no-store",
       });
       if (res.status === 429) {
-        tab?.close();
         setState({ kind: "unavailable", reason: "Too many demo requests — try again in a moment." });
         return;
       }
       if (!res.ok) {
-        tab?.close();
         setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
         return;
       }
       const link = (await res.json()) as DemoLink;
-      const url = safeDemoUrl(link);
-      if (!url) {
-        tab?.close();
+      if (!safeDemoUrl(link)) {
         setState({
           kind: "unavailable",
           reason: link.reason || "No demo is available for this game.",
@@ -90,37 +77,23 @@ export function DownloadDemoButton({
         });
         return;
       }
-      // Hand the file's own address to the tab opened on the click. Chrome turns
-      // the navigation into a download and closes the tab; the page stays put.
-      // With no tab (a popup blocker still said no), fall back to the link
-      // element, which some browsers allow, and the copy-the-link fallback
-      // below covers the rest.
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      setState({ kind: "started", url, archive: demoArchiveKind(link) });
+      // The simplest thing: a same-tab link to our own file route, which
+      // answers with the bytes as an attachment. The browser downloads and the
+      // page stays put. `download` names the file for the (same-origin) Valve
+      // stream; a FACEIT redirect is cross-origin, so there the name is the
+      // signed link's own.
+      const a = document.createElement("a");
+      a.href = demoFileEndpoint(steamId, gameId, { finishedAt, score });
+      a.download = link.filename || "";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setState({ kind: "started", archive: demoArchiveKind(link) });
     } catch {
-      tab?.close();
       setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
     } finally {
       busyRef.current = false;
-    }
-  };
-
-  const copy = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-    } catch {
-      window.prompt("Copy the demo link:", url);
     }
   };
 
@@ -134,7 +107,7 @@ export function DownloadDemoButton({
         title={
           isFaceit
             ? "Download this match's demo file straight from FACEIT (a compressed .dem.zst archive — unpack it before opening it in CS2)"
-            : "Download this match's demo file straight from Valve. Valve demos are .dem.bz2 archives — unpack with 7-Zip or similar before opening in CS2. Valve keeps them for about a month."
+            : "Download this match's demo file from Valve. Valve demos are .dem.bz2 archives — unpack with 7-Zip or similar before opening in CS2. Valve keeps them for about a month."
         }
       >
         <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -145,20 +118,6 @@ export function DownloadDemoButton({
       {state.kind === "started" && (
         <span role="status" className="text-xs text-muted">
           Download started ({state.archive}).
-          {isPlainHttp(state.url) ? (
-            <>
-              {" "}
-              Nothing happened? Valve serves demos over plain http —{" "}
-              <button
-                type="button"
-                onClick={() => void copy(state.url)}
-                className="text-brand hover:underline"
-              >
-                {copied ? "link copied" : "copy the link"}
-              </button>{" "}
-              and paste it into a new tab.
-            </>
-          ) : null}
         </span>
       )}
       {state.kind === "unavailable" && (

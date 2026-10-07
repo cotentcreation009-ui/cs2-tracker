@@ -18,9 +18,10 @@ import (
 
 // demoDownload is the answer to "where can this game's demo be downloaded?".
 // Either a direct link to the host that keeps the file (Valve's replay servers
-// or FACEIT's signed storage) or the plain reason there is none. The bytes
-// never pass through this server — a demo is 100–400 MB and the browser can
-// fetch it from the source just as well.
+// or FACEIT's signed storage) or the plain reason there is none. The browser
+// does not fetch a Valve link itself — Valve serves plain http, which an https
+// page cannot start a download from — so the sibling /demo/file route
+// (demodownloadfile.go) streams those bytes through this server instead.
 type demoDownload struct {
 	Available bool   `json:"available"`
 	URL       string `json:"url,omitempty"`
@@ -76,36 +77,50 @@ func demoUnavailable(code, reason string) demoDownload {
 // Leetify only half-tracks) are matched against the player's Game Coordinator
 // match list, which needs the row's finishedAt and score as query parameters.
 func (s *Server) handleLeetifyGameDemo(w http.ResponseWriter, r *http.Request) {
-	sid, ok := steamIDParam(r)
+	sid, gameID, legacy, ok := demoDownloadParams(w, r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid SteamID64")
 		return
 	}
-	gameID := chi.URLParam(r, "gameId")
-	legacy := false
+	// The link is per-game state that changes (and, for FACEIT, expires), so
+	// nothing downstream may keep it; our own cache is the only one.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, s.resolveDemoDownload(r, sid, gameID, legacy))
+}
+
+// demoDownloadParams reads the route's two identifiers, answering 400 itself
+// when either is malformed. legacy says the game id is in Leetify's old
+// format, which only the Game Coordinator's match list can resolve.
+func demoDownloadParams(w http.ResponseWriter, r *http.Request) (sid uint64, gameID string, legacy, ok bool) {
+	sid, ok = steamIDParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid SteamID64")
+		return 0, "", false, false
+	}
+	gameID = chi.URLParam(r, "gameId")
 	switch {
 	case leetifyUUIDRe.MatchString(gameID):
 	case leetifyLegacyIDRe.MatchString(gameID):
 		legacy = true
 	default:
 		writeError(w, http.StatusBadRequest, "invalid game id")
-		return
+		return 0, "", false, false
 	}
+	return sid, gameID, legacy, true
+}
 
+// resolveDemoDownload is the cached, coalesced resolution behind both the
+// link route and the file route (demodownloadfile.go): one answer per game
+// per profile, remembered for as long as that kind of answer stays true.
+func (s *Server) resolveDemoDownload(r *http.Request, sid uint64, gameID string, legacy bool) demoDownload {
 	ctx, cancel := context.WithTimeout(r.Context(), demoDLResolveLimit)
 	defer cancel()
 	key := cache.LeetifyGameDemoKey(gameID, sid)
 	kv := s.kv()
 
-	// The link is per-game state that changes (and, for FACEIT, expires), so
-	// nothing downstream may keep it; our own cache below is the only one.
-	w.Header().Set("Cache-Control", "no-store")
-
 	var v demoDownload
 	if kv != nil {
 		if hit, _ := kv.GetJSON(ctx, key, &v); hit {
-			writeJSON(w, http.StatusOK, v)
-			return
+			return v
 		}
 	}
 	res, _, _ := s.sf.Do(key, func() (any, error) {
@@ -123,7 +138,7 @@ func (s *Server) handleLeetifyGameDemo(w http.ResponseWriter, r *http.Request) {
 		}
 		return out, nil
 	})
-	writeJSON(w, http.StatusOK, res.(demoDownload))
+	return res.(demoDownload)
 }
 
 // demoDownloadForGame resolves a v3 (UUID) Leetify game. It returns the answer
