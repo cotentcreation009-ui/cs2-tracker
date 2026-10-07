@@ -54,21 +54,35 @@ export function DownloadDemoButton({
     }
     busyRef.current = true;
     setState({ kind: "finding" });
+    // Valve serves demos over plain http. From this https page a same-tab link
+    // click is a mixed-content download, which Chrome blocks outright; the same
+    // address pasted into a new tab downloads fine, because a top-level
+    // navigation is not mixed content. So the file is opened the way a paste
+    // is: in its own tab. The tab is opened NOW, inside the click's user
+    // activation (the lookup below can outlast the ~5 s activation window and a
+    // tab opened after that is a popup to be blocked), and pointed at the file
+    // once the address is known; a tab whose navigation turns into a download
+    // closes itself. If nothing is downloadable it is closed here.
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
     try {
       const res = await fetch(demoLinkEndpoint(steamId, gameId, { finishedAt, score }), {
         cache: "no-store",
       });
       if (res.status === 429) {
+        tab?.close();
         setState({ kind: "unavailable", reason: "Too many demo requests — try again in a moment." });
         return;
       }
       if (!res.ok) {
+        tab?.close();
         setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
         return;
       }
       const link = (await res.json()) as DemoLink;
       const url = safeDemoUrl(link);
       if (!url) {
+        tab?.close();
         setState({
           kind: "unavailable",
           reason: link.reason || "No demo is available for this game.",
@@ -76,17 +90,25 @@ export function DownloadDemoButton({
         });
         return;
       }
-      // Hand the browser the file's own address. A demo is served as a
-      // download, so the page stays where it is.
-      const a = document.createElement("a");
-      a.href = url;
-      a.rel = "noreferrer";
-      if (link.filename) a.download = link.filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // Hand the file's own address to the tab opened on the click. Chrome turns
+      // the navigation into a download and closes the tab; the page stays put.
+      // With no tab (a popup blocker still said no), fall back to the link
+      // element, which some browsers allow, and the copy-the-link fallback
+      // below covers the rest.
+      if (tab) {
+        tab.location.href = url;
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
       setState({ kind: "started", url, archive: demoArchiveKind(link) });
     } catch {
+      tab?.close();
       setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
     } finally {
       busyRef.current = false;
@@ -126,7 +148,7 @@ export function DownloadDemoButton({
           {isPlainHttp(state.url) ? (
             <>
               {" "}
-              Blocked by your browser? Valve serves demos over plain http —{" "}
+              Nothing happened? Valve serves demos over plain http —{" "}
               <button
                 type="button"
                 onClick={() => void copy(state.url)}
