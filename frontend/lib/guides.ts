@@ -16,13 +16,13 @@ export type GuideMeta = {
 export const GUIDES: GuideMeta[] = [
   {
     slug: "faceit-levels-and-elo",
-    title: "FACEIT levels & ELO explained",
-    shortTitle: "FACEIT levels & ELO",
+    title: "FACEIT ELO math: the ten level thresholds and how a win or loss is priced",
+    shortTitle: "FACEIT ELO math",
     description:
-      "How FACEIT levels and ELO work in CS2: the full 1–10 level table, how ELO is gained and lost, what counts as a good level, and how to check any player's level and ELO.",
-    updated: "2026-07-10",
+      "FACEIT's ten CS2 level thresholds with the ELO width of each, how a win or a loss is priced against the other team's average with worked examples, calibration on a new account, why level 10 has no ceiling, how levels relate to Premier and Competitive, and FACEIT's inactivity rules.",
+    updated: "2026-10-08",
     tag: "Ranks",
-    read: "5 min read",
+    read: "9 min read",
   },
   {
     slug: "good-leetify-rating",
@@ -46,13 +46,13 @@ export const GUIDES: GuideMeta[] = [
   },
   {
     slug: "premier-cs-rating-explained",
-    title: "CS2 Premier CS Rating explained",
-    shortTitle: "Premier CS Rating",
+    title: "Where does your CS Rating sit? Premier rating percentiles from 935 tracked players",
+    shortTitle: "CS Rating percentiles",
     description:
-      "How Valve's Premier mode and CS Rating work in CS2: the ten calibration wins, how the rating moves, the full color-band table, leaderboards, seasonal resets, and what counts as a good rating.",
-    updated: "2026-08-12",
+      "Premier CS Rating percentiles and color-band shares from 935 players tracked by CSRun, what players in each band do per game (K/D, damage per round, preaim), how many points a win or loss moves you by band, and what that arithmetic means for climbing.",
+    updated: "2026-10-08",
     tag: "Ranks",
-    read: "5 min read",
+    read: "9 min read",
   },
   {
     slug: "cs2-rating-systems-compared",
@@ -86,13 +86,13 @@ export const GUIDES: GuideMeta[] = [
   },
   {
     slug: "cs2-bans-explained",
-    title: "VAC bans, game bans & FACEIT bans: what each one means",
-    shortTitle: "CS2 bans explained",
+    title: "CS2 bans reference: the cooldown ladder, Steam's ban fields, FACEIT ban durations and appeals",
+    shortTitle: "CS2 bans reference",
     description:
-      "The four kinds of CS2 \"ban\" — permanent VAC and game bans, temporary matchmaking cooldowns, and platform-level FACEIT bans — what each shows on a Steam profile, and how to read a lobby-mate's ban fairly.",
-    updated: "2026-08-12",
+      "A working reference for every CS2 ban: Valve's exact competitive cooldown ladder and escalation rules, the GetPlayerBans fields Steam exposes and how CSRun shows them, how ban waves look on a profile over time, FACEIT's ban categories and published durations, trade and economy bans, what can be appealed, and how to read a banned profile fairly.",
+    updated: "2026-10-08",
     tag: "Guides",
-    read: "7 min read",
+    read: "10 min read",
   },
   {
     slug: "crosshair-placement-and-preaim",
@@ -116,13 +116,13 @@ export const GUIDES: GuideMeta[] = [
   },
   {
     slug: "faceit-vs-premier-vs-mm",
-    title: "FACEIT vs Premier vs regular matchmaking: where should you queue?",
-    shortTitle: "FACEIT vs Premier vs MM",
+    title: "Which CS2 queue should you play? Competitive, Premier and FACEIT, with the data",
+    shortTitle: "Which queue to play",
     description:
-      "How CS2's three ladders compare — FACEIT, Premier and regular competitive matchmaking — on anti-cheat, servers, skill level, queue times and prizes, plus a quick decision list for picking where to queue.",
-    updated: "2026-08-12",
+      "The Competitive skill-group distribution across 38,117 players tracked by CSRun and what each group does per game, the Premier rating that Silver, Gold Nova and Global Elite accounts typically hold, the maps each Valve queue actually plays, what FACEIT adds, and a queue recommendation per type of player.",
+    updated: "2026-10-08",
     tag: "Guides",
-    read: "7 min read",
+    read: "10 min read",
   },
   {
     slug: "cs2-demos-and-replays",
