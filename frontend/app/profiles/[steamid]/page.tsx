@@ -28,7 +28,7 @@ export async function generateMetadata({
   try {
     return profileMetadata(await getProfile(steamid));
   } catch {
-    return { title: "Player — CSRun" };
+    return { title: "Player — CSRun", robots: { index: false, follow: true } };
   }
 }
 

@@ -1,11 +1,13 @@
 import type { MetadataRoute } from "next";
-import { API_BASE, getLeaderboard, internalHeaders } from "@/lib/api";
+import { API_BASE, internalHeaders } from "@/lib/api";
 import { GUIDES } from "@/lib/guides";
 
 const siteUrl = process.env.SITE_URL || "http://localhost:3000";
 
-// Re-generate hourly. Seeds search engines with the highest-value profile pages
-// (top tracked players) plus the static routes.
+// Re-generate hourly. The static routes, the guides and finished pro matches.
+// Profile pages are deliberately NOT listed: they are noindex (lib/meta.ts) —
+// thousands of near-identical numeric pages are what Google's "low value
+// content" verdict is about, and the sitemap used to hand it a hundred of them.
 export const revalidate = 3600;
 
 // Finished pro matches are durable result pages (indexable since the detail
@@ -35,11 +37,6 @@ async function finishedProMatches(): Promise<MetadataRoute.Sitemap> {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const players = (await getLeaderboard(100).catch(() => [])).map((p) => ({
-    url: `${siteUrl}/profiles/${p.steamId64}`,
-    changeFrequency: "daily" as const,
-    priority: 0.8,
-  }));
   const proMatches = await finishedProMatches();
 
   return [
@@ -61,7 +58,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${siteUrl}/contact`, changeFrequency: "yearly" as const, priority: 0.3 },
     { url: `${siteUrl}/privacy`, changeFrequency: "yearly" as const, priority: 0.2 },
     { url: `${siteUrl}/terms`, changeFrequency: "yearly" as const, priority: 0.2 },
-    ...players,
     ...proMatches,
   ];
 }
