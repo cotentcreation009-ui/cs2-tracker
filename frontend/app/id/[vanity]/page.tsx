@@ -28,7 +28,7 @@ export async function generateMetadata({
     const id = await resolveSteamId(vanity);
     return profileMetadata(await getProfile(id));
   } catch {
-    return { title: "Player — CSRun" };
+    return { title: "Player — CSRun", robots: { index: false, follow: true } };
   }
 }
 

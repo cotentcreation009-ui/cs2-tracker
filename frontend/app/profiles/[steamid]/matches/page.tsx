@@ -18,10 +18,13 @@ export async function generateMetadata({
     const name = player.personaName || steamid;
     return {
       title: `${name} — recent matches — CSRun`,
+      // noindex like the profile itself (lib/meta.ts): a per-player match list
+      // is the same class of near-identical numeric page.
+      robots: { index: false, follow: true },
       alternates: { canonical: `/profiles/${player.steamId64}/matches` },
     };
   } catch {
-    return { title: "Recent matches — CSRun" };
+    return { title: "Recent matches — CSRun", robots: { index: false, follow: true } };
   }
 }
 
