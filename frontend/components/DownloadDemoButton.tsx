@@ -15,15 +15,17 @@ type State =
   | { kind: "idle" }
   | { kind: "finding" }
   | { kind: "started"; url: string; archive: string }
+  | { kind: "paste"; url: string; archive: string }
   | { kind: "unavailable"; reason: string; roomUrl?: string };
 
 /**
  * DownloadDemoButton — the demo FILE for a match listed on a profile, next to
  * "Analyze demo". A click asks the server where the demo lives (it finds it the
- * same way analysis does) and then sends the browser straight to that host:
- * Valve's replay servers for Premier/matchmaking, FACEIT's storage for FACEIT.
- * The file never passes through our servers. When there is no demo to hand
- * over, the reason is shown in place.
+ * same way analysis does). A FACEIT demo (https) is handed straight to the
+ * browser; a Valve demo (plain http, which Chrome will not let an https page
+ * start) is put on the clipboard with the two keystrokes that fetch it. The
+ * file never passes through our servers. When there is no demo to hand over,
+ * the reason is shown in place.
  */
 export function DownloadDemoButton({
   gameId,
@@ -54,35 +56,21 @@ export function DownloadDemoButton({
     }
     busyRef.current = true;
     setState({ kind: "finding" });
-    // Valve serves demos over plain http. From this https page a same-tab link
-    // click is a mixed-content download, which Chrome blocks outright; the same
-    // address pasted into a new tab downloads fine, because a top-level
-    // navigation is not mixed content. So the file is opened the way a paste
-    // is: in its own tab. The tab is opened NOW, inside the click's user
-    // activation (the lookup below can outlast the ~5 s activation window and a
-    // tab opened after that is a popup to be blocked), and pointed at the file
-    // once the address is known; a tab whose navigation turns into a download
-    // closes itself. If nothing is downloadable it is closed here.
-    const tab = window.open("", "_blank");
-    if (tab) tab.opener = null;
     try {
       const res = await fetch(demoLinkEndpoint(steamId, gameId, { finishedAt, score }), {
         cache: "no-store",
       });
       if (res.status === 429) {
-        tab?.close();
         setState({ kind: "unavailable", reason: "Too many demo requests — try again in a moment." });
         return;
       }
       if (!res.ok) {
-        tab?.close();
         setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
         return;
       }
       const link = (await res.json()) as DemoLink;
       const url = safeDemoUrl(link);
       if (!url) {
-        tab?.close();
         setState({
           kind: "unavailable",
           reason: link.reason || "No demo is available for this game.",
@@ -90,25 +78,38 @@ export function DownloadDemoButton({
         });
         return;
       }
-      // Hand the file's own address to the tab opened on the click. Chrome turns
-      // the navigation into a download and closes the tab; the page stays put.
-      // With no tab (a popup blocker still said no), fall back to the link
-      // element, which some browsers allow, and the copy-the-link fallback
-      // below covers the rest.
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+      const archive = demoArchiveKind(link);
+      if (isPlainHttp(url)) {
+        // Valve serves demos over plain http. Chrome refuses every download an
+        // https page STARTS towards an http address — a same-tab link, a new
+        // tab opened by script, a redirect through our own origin — because it
+        // judges the download by who initiated it. The one thing it allows is
+        // an address the visitor types or pastes themselves, which has no
+        // initiator. So the link is put on the clipboard (still inside the
+        // click's activation window for a lookup this quick) and the visitor
+        // is told the two keystrokes; the file never crosses our servers.
+        let copiedNow = false;
+        try {
+          await navigator.clipboard.writeText(url);
+          copiedNow = true;
+        } catch {
+          copiedNow = false;
+        }
+        setCopied(copiedNow);
+        setState({ kind: "paste", url, archive });
+        return;
       }
-      setState({ kind: "started", url, archive: demoArchiveKind(link) });
+      // An https address (FACEIT's signed download) can be handed straight to
+      // the browser; the page stays where it is.
+      const a = document.createElement("a");
+      a.href = url;
+      a.rel = "noreferrer";
+      if (link.filename) a.download = link.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setState({ kind: "started", url, archive });
     } catch {
-      tab?.close();
       setState({ kind: "unavailable", reason: "Couldn't look this demo up right now — try again shortly." });
     } finally {
       busyRef.current = false;
@@ -145,20 +146,21 @@ export function DownloadDemoButton({
       {state.kind === "started" && (
         <span role="status" className="text-xs text-muted">
           Download started ({state.archive}).
-          {isPlainHttp(state.url) ? (
-            <>
-              {" "}
-              Nothing happened? Valve serves demos over plain http —{" "}
-              <button
-                type="button"
-                onClick={() => void copy(state.url)}
-                className="text-brand hover:underline"
-              >
-                {copied ? "link copied" : "copy the link"}
-              </button>{" "}
-              and paste it into a new tab.
-            </>
-          ) : null}
+        </span>
+      )}
+      {state.kind === "paste" && (
+        <span role="status" className="text-xs text-muted">
+          {copied ? "Link copied." : "Copy the link:"}{" "}
+          <button
+            type="button"
+            onClick={() => void copy(state.url)}
+            className="text-brand hover:underline"
+            title={state.url}
+          >
+            {copied ? "copy again" : "copy the link"}
+          </button>
+          {" "}
+          Open a new tab, paste it and press Enter — Chrome only lets Valve&apos;s plain-http demo ({state.archive}) download from an address you paste yourself.
         </span>
       )}
       {state.kind === "unavailable" && (
