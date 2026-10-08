@@ -15,6 +15,8 @@ import {
   LiveSection,
   UpcomingSection,
   ResultsSection,
+  ResultsLink,
+  BoardViewSwitch,
   NoMatches,
   StateCard,
   type EventGroup,
@@ -23,6 +25,8 @@ import { ProPlayersColumn } from "./ProPlayersColumn";
 import { FaceitColumn } from "./FaceitColumn";
 import { MatchesColumn, type BoardModel } from "./MatchesColumn";
 import { rankEventGroups, type EventOrder } from "./eventRank";
+import { sortFinished } from "./boardView";
+import { useBoardView } from "./useBoardView";
 
 const POLL_MS = 10_000;
 
@@ -34,14 +38,17 @@ const POLL_MS = 10_000;
 const WIDE_QUERY = "(min-width: 80rem)";
 
 export function ProBoard() {
-  // include=finished: recently finished series (kept ~48h server-side) power
-  // the Recent results section — without it results simply vanish off the site
+  // include=finished: recently finished series (kept 48h server-side, see
+  // boardView.ts) power the Results view — the one poll carries both views,
+  // so switching costs no request and results are as fresh as the scores.
   const { data, error, loading } = usePoll<ProMatchesResponse>(
     "/api/pro-matches?include=finished",
     POLL_MS,
   );
   const now = useNow(1000);
   const wide = useMediaQuery(WIDE_QUERY);
+  // "board" (live + upcoming, the default) or "results"; kept in ?view=
+  const [view, setView] = useBoardView();
   // event filter for the upcoming section — the label, not an index, because
   // the feed re-groups every poll
   const [pickedEvent, setPickedEvent] = useState<string | null>(null);
@@ -55,14 +62,9 @@ export function ProBoard() {
   const { live, upcoming, upcomingGroups, finished } = useMemo(() => {
     const matches = data?.matches ?? [];
     const live = matches.filter((m) => m.status === "live");
-    const finished = matches
-      .filter((m) => m.status === "finished" && (m.teams?.length ?? 0) === 2)
-      .sort(
-        (x, y) =>
-          new Date(y.liveUpdatedAt ?? y.startScheduled ?? 0).getTime() -
-          new Date(x.liveUpdatedAt ?? x.startScheduled ?? 0).getTime(),
-      )
-      .slice(0, 12);
+    // every finished series in the feed's window, newest first — the Results
+    // view folds the long tail itself, so nothing is cut here
+    const finished = sortFinished(matches);
     const upcoming = matches
       .filter((m) => m.status === "upcoming")
       .sort(
@@ -113,6 +115,8 @@ export function ProBoard() {
     finished,
     now,
     onPickEvent: (label) => setPickedEvent(label),
+    view,
+    onView: setView,
   };
 
   return (
@@ -145,9 +149,10 @@ export function ProBoard() {
 
 // Below xl: one column. The ranking sits directly under the title — it is the
 // thing that frames everything below it, and it reads as a strip rather than
-// a section — then live, the schedule (with the players and FACEIT rails
-// after its first event, so they are met while scrolling rather than under
-// it), then results.
+// a section — then, on the board, live and the schedule (with the players and
+// FACEIT rails after its first event, so they are met while scrolling rather
+// than under it) and one line to the results; on the Results view, the
+// results with the rails after them.
 function StackedBoard({ board }: { board: BoardModel }) {
   const {
     live,
@@ -161,7 +166,26 @@ function StackedBoard({ board }: { board: BoardModel }) {
     finished,
     now,
     onPickEvent,
+    view,
+    onView,
   } = board;
+  const rails = (
+    <div className="space-y-6 pt-2">
+      <PlayersRail />
+      <FaceitLeaderboardRail />
+    </div>
+  );
+  const switcher = <BoardViewSwitch view={view} onView={onView} results={finished.length} />;
+
+  if (view === "results") {
+    return (
+      <>
+        <ProSpotlight />
+        <ResultsSection finished={finished} now={now} standings={standings} aside={switcher} />
+        {rails}
+      </>
+    );
+  }
 
   return (
     <>
@@ -170,7 +194,11 @@ function StackedBoard({ board }: { board: BoardModel }) {
       {live.length > 0 && (
         // Three across on a wide screen: the cards are half the height they
         // were, so two of them left the row looking empty.
-        <LiveSection live={live} gridClass="grid gap-3 md:grid-cols-2 xl:grid-cols-3" />
+        <LiveSection
+          live={live}
+          gridClass="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
+          aside={switcher}
+        />
       )}
 
       {upcomingGroups.length > 0 && (
@@ -183,18 +211,19 @@ function StackedBoard({ board }: { board: BoardModel }) {
           order={eventOrder}
           onOrder={onOrder}
           standings={standings}
-          afterFirst={
-            <div className="space-y-6 pt-2">
-              <PlayersRail />
-              <FaceitLeaderboardRail />
-            </div>
-          }
+          afterFirst={rails}
+          aside={live.length === 0 ? switcher : undefined}
         />
       )}
 
-      {finished.length > 0 && <ResultsSection finished={finished} now={now} standings={standings} />}
-
-      {live.length === 0 && upcomingGroups.length === 0 && finished.length === 0 && <NoMatches />}
+      {live.length === 0 && upcomingGroups.length === 0 ? (
+        <>
+          <div className="flex justify-end">{switcher}</div>
+          <NoMatches />
+        </>
+      ) : (
+        <ResultsLink count={finished.length} onView={onView} />
+      )}
     </>
   );
 }

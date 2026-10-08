@@ -8,9 +8,12 @@ import {
   LiveSection,
   UpcomingSection,
   ResultsSection,
+  ResultsLink,
+  BoardViewSwitch,
   NoMatches,
 } from "./BoardSections";
 import type { EventOrder, RankedEventGroup } from "./eventRank";
+import type { BoardView } from "./boardView";
 import {
   DetailHint,
   DetailLine,
@@ -34,17 +37,24 @@ export interface BoardModel {
   onOrder: (order: EventOrder) => void;
   /** The top-20 standings the board polled: rank pills and "Standing" lines on both layouts. */
   standings?: SpotlightTeam[];
+  /** Every finished series still on the feed, newest first (the Results view). */
   finished: MatchState[];
   now: number;
   onPickEvent: (label: string | null) => void;
+  /** Which list the column shows: live + upcoming (default) or results. */
+  view: BoardView;
+  onView: (view: BoardView) => void;
 }
 
 // The middle column of the three-column board. Top to bottom: the standings
 // as a one-line strip of crests (the ranking frames everything under it, and
-// at this size it costs ~70px), live series as full cards, the schedule by
-// event, then recent results — most urgent first, each section quieter than
-// the one above. The live grid reads the COLUMN's width (@container), not the
-// viewport's: two cards side by side once the column is 48rem wide.
+// at this size it costs ~70px), then one of two views. The board: live series
+// as full cards, the schedule by event, one line to the results — most urgent
+// first, each section quieter than the one above. Results: every series
+// that finished in the feed's window, newest first. The switch between them
+// sits beside the first heading of either. The live grid reads the COLUMN's
+// width (@container), not the viewport's: two cards side by side once the
+// column is 48rem wide.
 export function MatchesColumn({
   teams,
   teamsLoading,
@@ -66,9 +76,11 @@ export function MatchesColumn({
     finished,
     now,
     onPickEvent,
+    view,
+    onView,
   } = board;
-  const empty =
-    live.length === 0 && upcomingGroups.length === 0 && finished.length === 0;
+  const empty = live.length === 0 && upcomingGroups.length === 0;
+  const switcher = <BoardViewSwitch view={view} onView={onView} results={finished.length} />;
 
   return (
     <div className="min-w-0 space-y-6">
@@ -77,28 +89,38 @@ export function MatchesColumn({
       <TopTeamsStrip teams={teams} loading={teamsLoading} live={live} upcoming={upcoming} />
 
       <div className="@container space-y-6">
-        {live.length > 0 && (
-          <LiveSection live={live} gridClass="grid gap-3 @3xl:grid-cols-2" />
-        )}
+        {view === "results" ? (
+          <ResultsSection finished={finished} now={now} standings={teams} aside={switcher} />
+        ) : (
+          <>
+            {live.length > 0 && (
+              <LiveSection live={live} gridClass="grid gap-3 @3xl:grid-cols-2" aside={switcher} />
+            )}
 
-        {upcomingGroups.length > 0 && (
-          <UpcomingSection
-            groups={upcomingGroups}
-            shown={shownGroups}
-            active={activeEvent}
-            total={upcomingTotal}
-            onPick={onPickEvent}
-            order={eventOrder}
-            onOrder={onOrder}
-            standings={teams}
-          />
-        )}
+            {upcomingGroups.length > 0 && (
+              <UpcomingSection
+                groups={upcomingGroups}
+                shown={shownGroups}
+                active={activeEvent}
+                total={upcomingTotal}
+                onPick={onPickEvent}
+                order={eventOrder}
+                onOrder={onOrder}
+                standings={teams}
+                aside={live.length === 0 ? switcher : undefined}
+              />
+            )}
 
-        {finished.length > 0 && (
-          <ResultsSection finished={finished} now={now} standings={teams} />
+            {empty ? (
+              <>
+                <div className="flex justify-end">{switcher}</div>
+                <NoMatches />
+              </>
+            ) : (
+              <ResultsLink count={finished.length} onView={onView} />
+            )}
+          </>
         )}
-
-        {empty && <NoMatches />}
       </div>
     </div>
   );
