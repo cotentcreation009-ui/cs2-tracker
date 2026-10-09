@@ -19,15 +19,9 @@ export function whenLabel(iso?: string): string {
   return `${dayGroup(date)} ${abs}${rel ? ` · ${rel}` : ""}`;
 }
 
-/** How long ago a finished series ended — the reading ResultRow gives. */
-export function endedAgo(m: MatchState, now: number): string {
-  const t = new Date(m.liveUpdatedAt ?? m.startScheduled ?? 0).getTime();
-  if (!t) return "";
-  const h = Math.max(0, Math.round((now - t) / 3_600_000));
-  if (h < 1) return "just now";
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
+// How long ago a finished series ended lives with the Results view's other
+// readings (boardView.ts); re-exported so the detail panel keeps one import.
+export { endedAgo } from "./boardView";
 
 export function streamHost(url: string): string {
   if (/twitch\.tv/i.test(url)) return "Twitch";

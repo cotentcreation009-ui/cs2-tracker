@@ -10,6 +10,7 @@ import { ranksByGrid, type EventOrder, type RankedEventGroup } from "./eventRank
 import { ResultRow } from "./ResultRow";
 import { DetailHint, DetailLine, DetailPopover, useDetailAnchor } from "./DetailPopover";
 import { endedAgo, prettyFormat, streamHost, whenLabel } from "./boardDetail";
+import { RESULTS_WINDOW_HOURS, seriesResult, type BoardView } from "./boardView";
 
 // The board's sections and their furniture, shared by both arrangements of
 // the page: the single stacked column below xl and the three-column board
@@ -60,19 +61,66 @@ export function SectionHeading({
   );
 }
 
+// "Live & upcoming" or "Results": which list the matches column shows. It
+// sits beside the first section's heading (live, else upcoming) on the
+// board and beside the Results heading on the results list, so the way
+// back is where the way in was. The results count is the whole window,
+// so the reader knows what is behind the tab before opening it.
+export function BoardViewSwitch({
+  view,
+  onView,
+  results,
+}: {
+  view: BoardView;
+  onView: (view: BoardView) => void;
+  results: number;
+}) {
+  const button = (value: BoardView, label: string, count?: number) => (
+    <button
+      type="button"
+      aria-pressed={view === value}
+      onClick={() => onView(value)}
+      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+        view === value ? "bg-brand/15 text-ink" : "text-muted hover:text-ink"
+      }`}
+    >
+      {label}
+      {count != null && count > 0 ? (
+        <span className="rounded-full bg-panel px-1.5 py-px text-[10px] tabular-nums text-muted">{count}</span>
+      ) : null}
+    </button>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="Show live and upcoming matches, or results"
+      className="flex items-center rounded-full border border-line bg-panel/70 p-0.5"
+    >
+      {button("board", "Live & upcoming")}
+      {button("results", "Results", results)}
+    </div>
+  );
+}
+
 // Live series as full cards. `gridClass` is the caller's: the stacked page
 // counts columns by viewport, the three-column board by its own width. The
-// cards announce their own score changes (see LiveMatchCard).
+// cards announce their own score changes (see LiveMatchCard). `aside` is the
+// view switch, when this is the board's first section.
 export function LiveSection({
   live,
   gridClass,
+  aside,
 }: {
   live: MatchState[];
   gridClass: string;
+  aside?: ReactNode;
 }) {
   return (
     <section className="space-y-2">
-      <SectionHeading label="Live now" count={live.length} live />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <SectionHeading label="Live now" count={live.length} live />
+        {aside}
+      </div>
       <ul role="list" className={gridClass}>
         {live.map((m) => (
           <li key={m.seriesId} className="min-w-0">
@@ -141,11 +189,7 @@ function ResultDetail({
   now: number;
   standings?: SpotlightTeam[];
 }) {
-  const a = m.teams?.[0];
-  const b = m.teams?.[1];
-  const sa = m.seriesScore?.[a?.gridId ?? ""] ?? 0;
-  const sb = m.seriesScore?.[b?.gridId ?? ""] ?? 0;
-  const winner = sa > sb ? a : sb > sa ? b : undefined;
+  const { a, b, sa, sb, winner } = seriesResult(m);
   const maps = (m.maps ?? []).filter((x) => x.started || x.finished);
   return (
     <>
@@ -188,6 +232,7 @@ export function UpcomingSection({
   afterFirst,
   standings,
   collapsedAfter = 4,
+  aside,
 }: {
   groups: RankedEventGroup[];
   shown: RankedEventGroup[];
@@ -202,6 +247,8 @@ export function UpcomingSection({
   standings?: SpotlightTeam[];
   /** How many event groups stay open before the rest fold behind one line. */
   collapsedAfter?: number;
+  /** The view switch, when nothing is live and this is the board's first section. */
+  aside?: ReactNode;
 }) {
   const { anchor, bind } = useDetailAnchor();
   const [expanded, setExpanded] = useState(false);
@@ -214,12 +261,17 @@ export function UpcomingSection({
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <SectionHeading label={active ?? "Upcoming"} count={active ? undefined : total} />
-        {groups.length > 1 && (
+        {groups.length > 1 || aside ? (
           <div className="flex flex-wrap items-center gap-2">
-            <OrderToggle order={order} onOrder={onOrder} />
-            <EventPicker groups={groups} total={total} active={active} onPick={onPick} />
+            {groups.length > 1 ? (
+              <>
+                <OrderToggle order={order} onOrder={onOrder} />
+                <EventPicker groups={groups} total={total} active={active} onPick={onPick} />
+              </>
+            ) : null}
+            {aside}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="space-y-5">
         {visible.map((g, gi) => (
@@ -363,35 +415,93 @@ function EventHeader({ group: g }: { group: RankedEventGroup }) {
   );
 }
 
+// The Results view: every series the feed still has, newest first — the
+// backend keeps a finished series for RESULTS_WINDOW_HOURS, and the heading
+// says so, because "recent" would otherwise mean whatever the reader guessed.
+// The first page of rows is open, the rest fold behind one line (a busy
+// weekend is a hundred qualifier series). One row at a time expands its
+// per-map table; the hover panel stays off that row, since the table it would
+// describe is already open under it.
 export function ResultsSection({
   finished,
   now,
   standings,
+  aside,
+  pageSize = 20,
 }: {
   finished: MatchState[];
   now: number;
   standings?: SpotlightTeam[];
+  /** The view switch, so the way back to the board sits where the way in was. */
+  aside?: ReactNode;
+  /** How many rows show before the rest fold behind one line. */
+  pageSize?: number;
 }) {
   const { anchor, bind } = useDetailAnchor();
+  const [showAll, setShowAll] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const visible = showAll ? finished : finished.slice(0, pageSize);
+  const folded = finished.length - visible.length;
+
   return (
     <section className="space-y-3">
-      <SectionHeading label="Recent results" count={finished.length} />
-      <ul role="list" className="space-y-2">
-        {finished.map((m) => {
-          const open = anchor?.key === m.seriesId;
-          return (
-            <li key={m.seriesId} className="relative" {...bind(m.seriesId)}>
-              <ResultRow match={m} now={now} describedBy={open ? RESULT_POP : undefined} />
-              {open && anchor ? (
-                <DetailPopover id={RESULT_POP} anchor={anchor.rect} place="inline" width={320}>
-                  <ResultDetail match={m} now={now} standings={standings} />
-                </DetailPopover>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <SectionHeading label="Results" count={finished.length} />
+          <p className="text-xs text-faint">Last {RESULTS_WINDOW_HOURS} hours · newest first</p>
+        </div>
+        {aside}
+      </div>
+      {finished.length === 0 ? (
+        <StateCard
+          title={`No finished matches in the last ${RESULTS_WINDOW_HOURS} hours`}
+          body="Results land here as series end and stay for two days. The live and upcoming board is one click away."
+        />
+      ) : (
+        <ul role="list" className="space-y-2">
+          {visible.map((m) => {
+            const expanded = expandedId === m.seriesId;
+            const open = !expanded && anchor?.key === m.seriesId;
+            return (
+              <li key={m.seriesId} className="relative" {...bind(m.seriesId)}>
+                <ResultRow
+                  match={m}
+                  now={now}
+                  describedBy={open ? RESULT_POP : undefined}
+                  expanded={expanded}
+                  onToggle={() => setExpandedId(expanded ? null : m.seriesId)}
+                />
+                {open && anchor ? (
+                  <DetailPopover id={RESULT_POP} anchor={anchor.rect} place="inline" width={320}>
+                    <ResultDetail match={m} now={now} standings={standings} />
+                  </DetailPopover>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {folded > 0 ? (
+        <button type="button" onClick={() => setShowAll(true)} className="btn btn-ghost h-9 w-full text-xs">
+          Show {folded} more result{folded === 1 ? "" : "s"}
+        </button>
+      ) : showAll && finished.length > pageSize ? (
+        <button type="button" onClick={() => setShowAll(false)} className="btn btn-ghost h-9 w-full text-xs">
+          Show fewer results
+        </button>
+      ) : null}
     </section>
+  );
+}
+
+// The board's one line about results, at its foot: a reader who scrolled the
+// whole schedule looking for a score finds the way to it here.
+export function ResultsLink({ count, onView }: { count: number; onView: (view: BoardView) => void }) {
+  if (count === 0) return null;
+  return (
+    <button type="button" onClick={() => onView("results")} className="btn btn-ghost h-9 w-full text-xs">
+      See {count} result{count === 1 ? "" : "s"} from the last {RESULTS_WINDOW_HOURS} hours
+    </button>
   );
 }
 

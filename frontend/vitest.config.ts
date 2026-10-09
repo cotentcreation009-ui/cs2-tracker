@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "components/**/*.test.ts", "app/**/*.test.ts"],
+    // .test.tsx: a component rendered to static markup with react-dom/server —
+    // still node, no DOM; it pins what a row SAYS for a fixture, not layout.
+    include: ["lib/**/*.test.ts", "components/**/*.test.{ts,tsx}", "app/**/*.test.ts"],
   },
 });
