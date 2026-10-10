@@ -18,6 +18,18 @@
 
 export const POSTER_STUDIO_URL = "https://posters.csrun.win/store/personalized-skin-art";
 
+/**
+ * The stats poster studio (2026-10-10): the same shop, the player's record
+ * instead of a skin. It takes the SteamID64 and looks the record up itself
+ * (CSRun apps/csrun/lib/statsPoster/lookup.ts), so the hand-over is one
+ * parameter and nothing on this page has to be re-sent.
+ */
+export const STATS_POSTER_STUDIO_URL = "https://posters.csrun.win/store/stats-poster";
+
+export function statsPosterHref(steamId64: string): string {
+  return `${STATS_POSTER_STUDIO_URL}?steam=${encodeURIComponent(steamId64)}&from=csrun-profile`;
+}
+
 const POSTER_WEAPONS = new Set([
   "AK-47", "M4A4", "M4A1-S", "AUG", "SG 553", "FAMAS", "Galil AR",
   "AWP", "SSG 08", "SCAR-20", "G3SG1",

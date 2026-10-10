@@ -113,6 +113,13 @@ services:
       # customer back to, and a route handler behind Caddy cannot be trusted to guess
       # its own public origin.
       CSRUN_PUBLIC_URL: https://posters.csrun.win
+      # STATS POSTERS (2026-10-10). The stats studio reads a player's record from
+      # THIS stack's backend over the shared network, with the same internal token
+      # the frontend uses (apps/csrun/lib/statsPoster/tracker.ts). Without these two
+      # the storefront falls back to csrun.win's public proxies, which cannot resolve
+      # a custom Steam URL and share the public rate limit.
+      CSRUN_TRACKER_API_URL: http://backend:8080
+      CSRUN_TRACKER_API_TOKEN: ${INTERNAL_API_SECRET:-}
       # Optional on purpose (no :? guard): an empty STRIPE_SECRET_KEY is the manual
       # provider and an order panel that says checkout is not live -- the shop closed,
       # not the container refusing to start.
