@@ -244,6 +244,12 @@ export interface FaceitProfile {
   // Set when the recent aggregate failed, as opposed to the player simply
   // having no readable history — the two must not be cached alike.
   recentUnavailable?: boolean;
+  // For the printed stats poster (2026-10-10): the account's activation
+  // timestamp (RFC 3339) and the player's place in FACEIT's CS2 ranking for
+  // their region and country. Absent when FACEIT lists no position.
+  activatedAt?: string;
+  regionRank?: number;
+  countryRank?: number;
 }
 
 // Field names are the Go struct's JSON TAGS, not its field names. They were

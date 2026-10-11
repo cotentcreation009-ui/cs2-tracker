@@ -175,6 +175,16 @@ type Profile struct {
 	// ten-player burst blanked four columns for that player for the whole
 	// cache TTL, which is why the same players stayed empty across reloads.
 	RecentUnavailable bool `json:"recentUnavailable,omitempty"`
+
+	// For the printed stats poster (posters.csrun.win, 2026-10-10): when the
+	// account was activated, and where the player stands in FACEIT's own CS2
+	// rankings for their region and their country. The rankings are two more
+	// paced calls per profile read and are best-effort — zero means "not
+	// known", never "last" — and the activation date is FACEIT's RFC 3339
+	// string passed through untouched.
+	ActivatedAt string `json:"activatedAt,omitempty"`
+	RegionRank  int    `json:"regionRank,omitempty"`
+	CountryRank int    `json:"countryRank,omitempty"`
 }
 
 // players?game=cs2&game_player_id=<steam64> response (subset).
@@ -188,7 +198,9 @@ type playerResp struct {
 	// object has carried a steam_id_64 beside the per-game id on some
 	// collections. Read if present, never required.
 	SteamID64 string `json:"steam_id_64"`
-	Games     struct {
+	// When the FACEIT account was created, RFC 3339. Printed as "member since".
+	ActivatedAt string `json:"activated_at"`
+	Games       struct {
 		CS2 struct {
 			SkillLevel   int    `json:"skill_level"`
 			FaceitElo    int    `json:"faceit_elo"`
@@ -196,6 +208,30 @@ type playerResp struct {
 			GamePlayerID string `json:"game_player_id"` // the player's SteamID64
 		} `json:"cs2"`
 	} `json:"games"`
+}
+
+// rankings/games/cs2/regions/{region}/players/{player_id} response (subset):
+// the player's own position in that ranking, with `country` narrowing it to
+// one country. The surrounding rows are not read.
+type playerRankingResp struct {
+	Position flexInt `json:"position"`
+}
+
+// rankingPosition is the player's 1-based place in FACEIT's CS2 ranking for a
+// region (country empty) or for one country within it. 0 when FACEIT lists
+// no position, which it does for accounts with too few matches.
+func (c *Client) rankingPosition(ctx context.Context, region, playerID, country string) (int, error) {
+	q := url.Values{}
+	q.Set("limit", "1")
+	if country != "" {
+		q.Set("country", strings.ToLower(country))
+	}
+	var rr playerRankingResp
+	path := "/rankings/games/cs2/regions/" + url.PathEscape(strings.ToUpper(region)) + "/players/" + url.PathEscape(playerID) + "?" + q.Encode()
+	if err := c.get(ctx, path, &rr); err != nil {
+		return 0, err
+	}
+	return int(rr.Position), nil
 }
 
 // players/{id}/stats/cs2 response (subset). FACEIT returns lifetime values as
@@ -232,14 +268,15 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 	}
 
 	p := &Profile{
-		PlayerID:   pr.PlayerID,
-		Nickname:   pr.Nickname,
-		Country:    pr.Country,
-		Avatar:     pr.Avatar,
-		FaceitURL:  strings.ReplaceAll(pr.FaceitURL, "{lang}", "en"),
-		Region:     pr.Games.CS2.Region,
-		SkillLevel: pr.Games.CS2.SkillLevel,
-		Elo:        pr.Games.CS2.FaceitElo,
+		PlayerID:    pr.PlayerID,
+		Nickname:    pr.Nickname,
+		Country:     pr.Country,
+		Avatar:      pr.Avatar,
+		FaceitURL:   strings.ReplaceAll(pr.FaceitURL, "{lang}", "en"),
+		Region:      pr.Games.CS2.Region,
+		SkillLevel:  pr.Games.CS2.SkillLevel,
+		Elo:         pr.Games.CS2.FaceitElo,
+		ActivatedAt: pr.ActivatedAt,
 	}
 
 	var sr statsResp
@@ -272,6 +309,24 @@ func (c *Client) GetProfile(ctx context.Context, steam64 uint64) (*Profile, erro
 		p.RecentUnavailable = true
 	}
 	p.Recent = rs
+
+	// The player's standing, for the poster. Only for a player with a region
+	// (no region, no ranking to stand in), and only ever logged on failure:
+	// a missing rank is a blank tile, not a blank profile.
+	if p.Region != "" && p.SkillLevel > 0 {
+		if pos, err := c.rankingPosition(ctx, p.Region, pr.PlayerID, ""); err != nil {
+			slog.Warn("faceit region ranking unavailable", "player", pr.Nickname, "region", p.Region, "err", err)
+		} else {
+			p.RegionRank = pos
+		}
+		if p.Country != "" {
+			if pos, err := c.rankingPosition(ctx, p.Region, pr.PlayerID, p.Country); err != nil {
+				slog.Warn("faceit country ranking unavailable", "player", pr.Nickname, "country", p.Country, "err", err)
+			} else {
+				p.CountryRank = pos
+			}
+		}
+	}
 	return p, nil
 }
 

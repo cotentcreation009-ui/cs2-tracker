@@ -21,6 +21,7 @@ import {
 import { flag, fmt, kdColor, tierColor } from "@/lib/format";
 import Link from "next/link";
 import { ShareButton } from "@/components/ShareButton";
+import { statsPosterHref } from "@/lib/posterStudio";
 import { RatingRing } from "@/components/RatingRing";
 import { type PremierPoint } from "@/components/PremierRank";
 import { RankRow } from "@/components/RankRow";
@@ -580,6 +581,17 @@ export function CheatMeter({
           >
             Compare
           </Link>
+          {/* The poster shop's stats studio, opened on this player: it reads the
+              same record this page shows and freezes it into a printed poster. */}
+          <a
+            href={statsPosterHref(player.steamId64)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-line bg-panel2 px-2.5 py-1 text-[13px] font-medium text-ink transition hover:border-brand/60"
+            title="Print this record as a poster (opens the CSRun poster shop)"
+          >
+            Stats poster <span aria-hidden>↗</span>
+          </a>
         </div>
       </div>
 

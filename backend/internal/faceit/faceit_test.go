@@ -24,8 +24,16 @@ func TestGetProfile(t *testing.T) {
 			w.Write([]byte(`{
 				"player_id":"abc-123","nickname":"Pod","country":"us",
 				"avatar":"https://cdn/av.jpg","faceit_url":"https://www.faceit.com/{lang}/players/Pod",
+				"activated_at":"2016-03-19T10:11:12Z",
 				"games":{"cs2":{"skill_level":10,"faceit_elo":2146,"region":"NA"}}
 			}`))
+		case r.URL.Path == "/rankings/games/cs2/regions/NA/players/abc-123":
+			// The poster's two standings: the region's, and the country's within it.
+			if r.URL.Query().Get("country") == "us" {
+				w.Write([]byte(`{"position":451,"items":[]}`))
+			} else {
+				w.Write([]byte(`{"position":"7000","items":[]}`))
+			}
 		case r.URL.Path == "/players/abc-123/stats/cs2":
 			w.Write([]byte(`{"lifetime":{
 				"Matches":"1234","Win Rate %":"55","Average K/D Ratio":"1.12",
@@ -74,6 +82,12 @@ func TestGetProfile(t *testing.T) {
 	}
 	if p.LongestWinStreak != 12 || len(p.RecentResults) != 5 {
 		t.Errorf("streak/recent not parsed: %+v", p)
+	}
+	if p.ActivatedAt != "2016-03-19T10:11:12Z" {
+		t.Errorf("ActivatedAt = %q, want the activation timestamp", p.ActivatedAt)
+	}
+	if p.RegionRank != 7000 || p.CountryRank != 451 {
+		t.Errorf("rankings not parsed: region %d country %d, want 7000 / 451", p.RegionRank, p.CountryRank)
 	}
 }
 
